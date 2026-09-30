@@ -220,6 +220,8 @@
 					EventKit,
 					"-framework",
 					CoreBluetooth,
+					"-framework",
+					CoreLocation,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = cn.chiproad.QuickShow;
 				PRODUCT_NAME = QuickShow;
@@ -386,6 +388,8 @@
 					EventKit,
 					"-framework",
 					CoreBluetooth,
+					"-framework",
+					CoreLocation,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = cn.chiproad.QuickShow;
 				PRODUCT_NAME = QuickShow;

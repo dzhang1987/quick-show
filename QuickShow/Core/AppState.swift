@@ -242,4 +242,17 @@ final class AppState: ObservableObject {
             completion(granted)
         }
     }
+    
+    var isLocationAuthorized: Bool {
+        SystemStatusProvider.shared.isLocationAuthorized()
+    }
+    
+    func requestLocationAccess(completion: @escaping (Bool) -> Void) {
+        SystemStatusProvider.shared.requestLocationAccess { [weak self] granted in
+            if granted {
+                self?.wifiInfo = SystemStatusProvider.shared.getWiFiInfo()
+            }
+            completion(granted)
+        }
+    }
 }

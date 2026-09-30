@@ -6,6 +6,7 @@ struct SettingsView: View {
     @ObservedObject var appState: AppState
     @State private var launchAtLogin: Bool = false
     @State private var isCalendarAuthorized: Bool = false
+    @State private var isLocationAuthorized: Bool = false
     
     var body: some View {
         Form {
@@ -48,7 +49,30 @@ struct SettingsView: View {
             
             Section("系统微状态栏 (P0)") {
                 Toggle("显示电池状态与充电标识", isOn: $appState.showBattery)
-                Toggle("显示 WiFi 连接与 SSID", isOn: $appState.showWiFi)
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("显示 WiFi 连接与 SSID", isOn: $appState.showWiFi)
+                    
+                    if appState.showWiFi {
+                        HStack {
+                            Text(isLocationAuthorized ? "已获得定位权限（显示真实 Wi-Fi 名称）" : "未授权定位（显示频段如 5G）")
+                                .font(.system(size: 11))
+                                .foregroundColor(isLocationAuthorized ? .green : .secondary)
+                            
+                            Spacer()
+                            
+                            if !isLocationAuthorized {
+                                Button("请求授权") {
+                                    appState.requestLocationAccess { granted in
+                                        isLocationAuthorized = granted
+                                    }
+                                }
+                                .font(.system(size: 11))
+                            }
+                        }
+                    }
+                }
+                
                 Toggle("显示蓝牙外设 (耳机 / 键鼠电量)", isOn: $appState.showBluetooth)
                 Toggle("显示音频输出与音量 / 静音", isOn: $appState.showAudio)
                 Toggle("显示专注 / 勿扰模式徽标", isOn: $appState.showDND)
@@ -120,7 +144,12 @@ struct SettingsView: View {
         .onAppear {
             checkLaunchAtLoginStatus()
             checkCalendarStatus()
+            checkLocationStatus()
         }
+    }
+    
+    private func checkLocationStatus() {
+        isLocationAuthorized = appState.isLocationAuthorized
     }
     
     private func checkCalendarStatus() {

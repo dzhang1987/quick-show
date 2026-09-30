@@ -28,5 +28,11 @@
 	<string>QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。</string>
 	<key>NSCalendarsUsageDescription</key>
 	<string>QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>QuickShow 需要定位权限以读取当前连接的 Wi-Fi 名称 (SSID)。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>QuickShow 需要定位权限以读取当前连接的 Wi-Fi 名称 (SSID)。</string>
+	<key>NSLocationUsageDescription</key>
+	<string>QuickShow 需要定位权限以读取当前连接的 Wi-Fi 名称 (SSID)。</string>
 </dict>
 </plist>

@@ -6,6 +6,7 @@ import IOBluetooth
 import CoreBluetooth
 import EventKit
 import Darwin
+import CoreLocation
 
 // MARK: - 数据模型定义
 
@@ -59,7 +60,7 @@ struct CalendarEventInfo: Equatable {
 
 // MARK: - 系统状态统一提供者
 
-final class SystemStatusProvider {
+final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
     static let shared = SystemStatusProvider()
     
     // CPU 状态缓存
@@ -76,7 +77,49 @@ final class SystemStatusProvider {
     // 日历 EventStore
     private let eventStore = EKEventStore()
     
-    private init() {}
+    // 定位服务 (读取真实 Wi-Fi SSID)
+    private let locationManager = CLLocationManager()
+    private var locationCompletion: ((Bool) -> Void)?
+    
+    override private init() {
+        super.init()
+        locationManager.delegate = self
+    }
+    
+    // MARK: - 定位权限管理 (用于读取真实 Wi-Fi SSID)
+    func isLocationAuthorized() -> Bool {
+        let status = locationManager.authorizationStatus
+        return status == .authorizedAlways || status == .authorized
+    }
+    
+    func requestLocationAccess(completion: @escaping (Bool) -> Void) {
+        if isLocationAuthorized() {
+            completion(true)
+            return
+        }
+        self.locationCompletion = completion
+        if #available(macOS 14.0, *) {
+            locationManager.requestWhenInUseAuthorization()
+        } else {
+            locationManager.requestAlwaysAuthorization()
+        }
+    }
+    
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let granted = isLocationAuthorized()
+        DispatchQueue.main.async { [weak self] in
+            self?.locationCompletion?(granted)
+            self?.locationCompletion = nil
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        let granted = (status == .authorizedAlways || status == .authorized)
+        DispatchQueue.main.async { [weak self] in
+            self?.locationCompletion?(granted)
+            self?.locationCompletion = nil
+        }
+    }
     
     // MARK: - 电池信息 (IOKit)
     func getBatteryInfo() -> BatteryInfo {
@@ -113,9 +156,37 @@ final class SystemStatusProvider {
         }
         
         let powerOn = iface.powerOn()
-        let ssid = iface.ssid()
+        guard powerOn else {
+            return WiFiInfo(isConnected: false, ssid: nil)
+        }
         
-        return WiFiInfo(isConnected: powerOn && ssid != nil, ssid: ssid)
+        // 核心修正：通过底层信道与接口模式判断是否真正与 AP 关联，绝不依赖定位权限
+        let isAssociated = (iface.wlanChannel() != nil) && (iface.interfaceMode() == .station || iface.rssiValue() < 0)
+        guard isAssociated else {
+            return WiFiInfo(isConnected: false, ssid: nil)
+        }
+        
+        // 1. 若系统已授权定位，直接读取真实 Wi-Fi 名字 (SSID)
+        if let realSSID = iface.ssid(), !realSSID.isEmpty {
+            return WiFiInfo(isConnected: true, ssid: realSSID)
+        }
+        
+        // 2. 未授权定位时的优雅降级：读取硬件频段 (如 5G / 2.4G / 6G)
+        var bandSuffix = ""
+        if let channel = iface.wlanChannel() {
+            switch channel.channelBand {
+            case .band5GHz:
+                bandSuffix = " (5G)"
+            case .band2GHz:
+                bandSuffix = " (2.4G)"
+            case .band6GHz:
+                bandSuffix = " (6G)"
+            default:
+                break
+            }
+        }
+        
+        return WiFiInfo(isConnected: true, ssid: "Wi-Fi\(bandSuffix)")
     }
     
     // MARK: - 蓝牙外设与电量 (IOKit HID + IOBluetooth)
