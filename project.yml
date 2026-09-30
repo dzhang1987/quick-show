@@ -39,6 +39,9 @@ targets:
         CFBundleIdentifier: cn.chiproad.QuickShow
         CFBundleName: QuickShow
         CFBundleDisplayName: QuickShow
+        NSBluetoothAlwaysUsageDescription: "QuickShow 需要蓝牙权限以检测已连接耳机与外设的电量状态。"
+        NSCalendarsUsageDescription: "QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。"
+        NSCalendarsFullAccessUsageDescription: "QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。"
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: cn.chiproad.QuickShow
       PRODUCT_NAME: QuickShow
@@ -55,3 +58,11 @@ targets:
         - "IOKit"
         - "-framework"
         - "CoreWLAN"
+        - "-framework"
+        - "CoreAudio"
+        - "-framework"
+        - "IOBluetooth"
+        - "-framework"
+        - "EventKit"
+        - "-framework"
+        - "CoreBluetooth"

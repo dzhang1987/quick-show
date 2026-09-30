@@ -6,10 +6,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var appState: AppState!
     private var statusItem: NSStatusItem?
     private var settingsWindow: NSWindow?
+    private static var shared: AppDelegate?
     
     static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
+        shared = delegate
         app.delegate = delegate
         app.run()
     }
@@ -30,6 +32,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotKeyManager.shared.configure(type: state.triggerType)
         
         setupStatusItem()
+        
+        // 打开应用时，默认在屏幕中央展示一次一瞥面板
+        if state.showOnLaunch {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak state] in
+                state?.show(mode: .glance)
+            }
+        }
+    }
+    
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        appState.show(mode: .glance)
+        return true
     }
     
     private func setupStatusItem() {
@@ -71,7 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 440, height: 320),
+                contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
                 styleMask: [.titled, .closable],
                 backing: .buffered,
                 defer: false

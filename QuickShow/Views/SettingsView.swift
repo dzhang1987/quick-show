@@ -1,9 +1,11 @@
 import SwiftUI
 import ServiceManagement
+import EventKit
 
 struct SettingsView: View {
     @ObservedObject var appState: AppState
     @State private var launchAtLogin: Bool = false
+    @State private var isCalendarAuthorized: Bool = false
     
     var body: some View {
         Form {
@@ -23,6 +25,8 @@ struct SettingsView: View {
             }
             
             Section("通用设置") {
+                Toggle("打开应用时默认展示一次", isOn: $appState.showOnLaunch)
+                
                 Toggle("开机自动启动", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { newValue in
                         updateLaunchAtLogin(enabled: newValue)
@@ -37,13 +41,57 @@ struct SettingsView: View {
                     }
                     Slider(value: $appState.glanceDuration, in: 1.5...10.0, step: 0.5)
                 }
-            }
-            
-            Section("显示内容") {
+                
                 Toggle("使用 24 小时制", isOn: $appState.is24HourFormat)
                 Toggle("显示秒数 (HH:mm:ss)", isOn: $appState.showSeconds)
-                Toggle("显示电池状态", isOn: $appState.showBattery)
-                Toggle("显示 WiFi 状态", isOn: $appState.showWiFi)
+            }
+            
+            Section("系统微状态栏 (P0)") {
+                Toggle("显示电池状态与充电标识", isOn: $appState.showBattery)
+                Toggle("显示 WiFi 连接与 SSID", isOn: $appState.showWiFi)
+                Toggle("显示蓝牙外设 (耳机 / 键鼠电量)", isOn: $appState.showBluetooth)
+                Toggle("显示音频输出与音量 / 静音", isOn: $appState.showAudio)
+                Toggle("显示专注 / 勿扰模式徽标", isOn: $appState.showDND)
+            }
+            
+            Section("扩展监控看板 (P1 · 按 Tab 键展开)") {
+                Text("面板激活时，敲击「Tab 键」可无缝切换极简一瞥 / 详细监控看板。")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                
+                Toggle("显示 CPU & 内存系统负载条", isOn: $appState.showPerformance)
+                Toggle("显示实时网络吞吐速率 (上下行)", isOn: $appState.showNetworkSpeed)
+                Toggle("启用极简专注番茄钟 (25 分钟)", isOn: $appState.enablePomodoro)
+                
+                VStack(alignment: .leading, spacing: 6) {
+                    Toggle("显示下一场日历日程会议", isOn: $appState.showCalendar)
+                        .onChange(of: appState.showCalendar) { enabled in
+                            if enabled && !isCalendarAuthorized {
+                                appState.requestCalendarAccess { granted in
+                                    isCalendarAuthorized = granted
+                                }
+                            }
+                        }
+                    
+                    if appState.showCalendar {
+                        HStack {
+                            Text(isCalendarAuthorized ? "已获得日历访问权限" : "未授权日历访问")
+                                .font(.system(size: 11))
+                                .foregroundColor(isCalendarAuthorized ? .green : .orange)
+                            
+                            Spacer()
+                            
+                            if !isCalendarAuthorized {
+                                Button("请求授权") {
+                                    appState.requestCalendarAccess { granted in
+                                        isCalendarAuthorized = granted
+                                    }
+                                }
+                                .font(.system(size: 11))
+                            }
+                        }
+                    }
+                }
             }
             
             Section("关于") {
@@ -56,7 +104,7 @@ struct SettingsView: View {
                 HStack {
                     Text("应用版本")
                     Spacer()
-                    Text("1.0.0 (Build 1)")
+                    Text("1.1.0 (P0 & P1 Release)")
                         .foregroundColor(.secondary)
                 }
                 HStack {
@@ -68,9 +116,19 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 380, height: 380)
+        .frame(width: 440, height: 520)
         .onAppear {
             checkLaunchAtLoginStatus()
+            checkCalendarStatus()
+        }
+    }
+    
+    private func checkCalendarStatus() {
+        let status = SystemStatusProvider.shared.getCalendarAuthorizationStatus()
+        if #available(macOS 14.0, *) {
+            isCalendarAuthorized = (status == .fullAccess || status == .authorized)
+        } else {
+            isCalendarAuthorized = (status == .authorized)
         }
     }
     

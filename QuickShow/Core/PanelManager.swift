@@ -10,7 +10,9 @@ final class PanelManager {
     private var escGlobalMonitor: Any?
     private var escLocalMonitor: Any?
     private weak var appState: AppState?
-    private let panelSize = NSSize(width: 360, height: 172)
+    
+    private let compactSize = NSSize(width: 380, height: 176)
+    private let expandedSize = NSSize(width: 380, height: 268)
     
     private var previousApp: NSRunningApplication?
     private var isDismissing: Bool = false
@@ -19,24 +21,35 @@ final class PanelManager {
     
     func setup(with appState: AppState) {
         self.appState = appState
-        let frame = ScreenHelper.centeredFrame(for: panelSize)
+        let frame = ScreenHelper.centeredFrame(for: compactSize)
         let panel = FloatingPanel(contentRect: frame)
         
         let contentView = PanelView(appState: appState)
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.wantsLayer = true
+        // 关键核心：在 AppKit 根图层硬件级施加 26pt 连续曲率圆角裁剪，彻底杜绝窗口尺寸变化中途露出直角
+        hostingView.layer?.cornerRadius = 26
+        hostingView.layer?.cornerCurve = .continuous
+        hostingView.layer?.masksToBounds = true
         hostingView.layer?.backgroundColor = NSColor.clear.cgColor
         panel.contentView = hostingView
         panel.invalidateShadow()
         
+        // ESC 快捷退出
         panel.onEscapePressed = { [weak appState] in
             appState?.dismiss()
         }
         
+        // Space 常驻切换
         panel.onSpacePressed = { [weak appState] in
             if appState?.mode == .glance {
                 appState?.pin()
             }
+        }
+        
+        // Tab 极简/展开详细监控切换
+        panel.onTabPressed = { [weak appState] in
+            appState?.toggleExpanded()
         }
         
         panel.onResignKey = { [weak appState] in
@@ -56,13 +69,17 @@ final class PanelManager {
         appState.onDismissPanel = { [weak self] in
             self?.hidePanel()
         }
+        
+        appState.onExpansionChange = { [weak self] isExpanded in
+            self?.handleExpansionChange(isExpanded)
+        }
     }
     
     func showPanel(mode: PanelMode) {
         guard let panel = panel else { return }
         
-        // 每次呼出都重新计算鼠标当前屏幕居中位置，支持多屏动态切换
-        let newFrame = ScreenHelper.centeredFrame(for: panelSize)
+        let size = (appState?.isExpanded == true) ? expandedSize : compactSize
+        let newFrame = ScreenHelper.centeredFrame(for: size)
         panel.setFrame(newFrame, display: true)
         panel.invalidateShadow()
         
@@ -91,6 +108,21 @@ final class PanelManager {
         startEscMonitor()
     }
     
+    func handleExpansionChange(_ isExpanded: Bool) {
+        guard let panel = panel, panel.isVisible else { return }
+        let targetSize = isExpanded ? expandedSize : compactSize
+        let targetFrame = ScreenHelper.centeredFrame(for: targetSize)
+        
+        // 与 SwiftUI 0.18s easeInEaseOut 动画完全同步，并在完成时立即重建精准阴影
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            panel.animator().setFrame(targetFrame, display: true)
+        }, completionHandler: { [weak panel] in
+            panel?.invalidateShadow()
+        })
+    }
+    
     func hidePanel() {
         guard let panel = panel, panel.isVisible, !isDismissing else { return }
         isDismissing = true
@@ -101,24 +133,29 @@ final class PanelManager {
         // 1. 立即停止捕获鼠标事件
         panel.ignoresMouseEvents = true
         
-        // 2. 核心优化：瞬间将焦点归还给呼出前的应用，彻底根除键盘焦点的“粘滞停顿感”！
+        // 2. 瞬间将焦点归还给呼出前的应用
         if let prev = previousApp, prev.bundleIdentifier != Bundle.main.bundleIdentifier {
             prev.activate(options: [.activateIgnoringOtherApps])
         }
         previousApp = nil
         
-        // 3. 极速灵动淡出（0.08 秒 easeOut，第 1 帧即刻衰减，干脆利落不拖泥带水）
+        // 3. 极速灵动淡出
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.08
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 0.0
         } completionHandler: { [weak self] in
+            guard let self = self else { return }
             panel.orderOut(nil)
             panel.alphaValue = 1.0
             panel.ignoresMouseEvents = false
-            self?.isDismissing = false
+            self.isDismissing = false
             
-            // 极致内存优化：在面板隐退后，通知系统释放闲置内存，完全保留预热视图保证下次零延迟唤醒
+            // 重置尺寸回默认紧凑态
+            let resetFrame = ScreenHelper.centeredFrame(for: self.compactSize)
+            panel.setFrame(resetFrame, display: false)
+            
+            // 释放闲置内存
             malloc_zone_pressure_relief(nil, 0)
         }
     }
@@ -136,7 +173,7 @@ final class PanelManager {
             }
         }
         
-        // 本地按键监听（同步立刻响应，不推迟到下一个 runloop）
+        // 本地按键监听（同步立刻响应）
         escLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let panel = self.panel, panel.isVisible else { return event }
             if event.keyCode == 53 { // ESC 键
@@ -161,12 +198,13 @@ final class PanelManager {
     private func startClickOutsideMonitor() {
         stopClickOutsideMonitor()
         clickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self = self, let panel = self.panel, panel.isVisible else { return }
+            guard let self = self, let panel = self.panel, panel.isVisible, let appState = self.appState else { return }
             let clickLocation = NSEvent.mouseLocation
             if !panel.frame.contains(clickLocation) {
-                // 点击了面板外区域，自动淡出
-                DispatchQueue.main.async {
-                    self.appState?.dismiss()
+                if appState.mode == .glance {
+                    DispatchQueue.main.async {
+                        self.appState?.dismiss()
+                    }
                 }
             }
         }

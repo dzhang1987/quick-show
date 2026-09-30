@@ -22,5 +22,11 @@
 	<string>1</string>
 	<key>LSUIElement</key>
 	<true/>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>QuickShow 需要蓝牙权限以检测已连接耳机与外设的电量状态。</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。</string>
 </dict>
 </plist>

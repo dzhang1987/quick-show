@@ -7,10 +7,10 @@ struct PanelView: View {
         VStack(spacing: 0) {
             // 上半部分：核心大字时钟与日期徽章
             TimeDisplayView(appState: appState)
-                .padding(.top, 18)
+                .padding(.top, 16)
                 .padding(.horizontal, 24)
             
-            Spacer(minLength: 10)
+            Spacer(minLength: 8)
             
             // 细若游丝的微光渐隐分割线
             Rectangle()
@@ -28,11 +28,22 @@ struct PanelView: View {
                 .frame(height: 0.5)
                 .padding(.horizontal, 22)
             
-            // 底部微状态栏（电池、WiFi、微图钉）
+            // 底部微状态栏（P0 状态：电池、WiFi、蓝牙、音频、勿扰、图钉、Tab展开键）
             StatusBarView(appState: appState)
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 22)
                 .padding(.top, 10)
-                .padding(.bottom, 16)
+                .padding(.bottom, appState.isExpanded ? 6 : 14)
+            
+            // 展开后的监控面板 (P1 状态：CPU/内存负载、网速、日历日程、番茄钟)
+            if appState.isExpanded {
+                ExpandedMonitoringView(appState: appState)
+                    .transition(
+                        .asymmetric(
+                            insertion: .opacity.animation(.easeInOut(duration: 0.16).delay(0.04)),
+                            removal: .opacity.animation(.easeInOut(duration: 0.10))
+                        )
+                    )
+            }
             
             // 隐形 ESC 键盘快捷键监听兜底
             Button("") {
@@ -42,8 +53,8 @@ struct PanelView: View {
             .opacity(0)
             .frame(width: 0, height: 0)
         }
-        .frame(width: 360, height: 172)
-        // 核心：严格限定在 26pt 连续曲率圆角内，四周零 padding，零多余像素
+        .frame(width: 380, height: appState.isExpanded ? 268 : 176)
+        // 核心：严格限定在 26pt 连续曲率圆角内，四周零多余像素，零外围灰色背景
         .background(
             ZStack {
                 // 1. 原生高斯模糊材质（圆角内）

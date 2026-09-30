@@ -7,6 +7,7 @@ final class FloatingPanel: NSPanel {
     
     var onEscapePressed: (() -> Void)?
     var onSpacePressed: (() -> Void)?
+    var onTabPressed: (() -> Void)?
     var onResignKey: (() -> Void)?
     
     init(contentRect: NSRect) {
@@ -41,6 +42,9 @@ final class FloatingPanel: NSPanel {
             } else if event.keyCode == 49 { // Space 空格键
                 onSpacePressed?()
                 return
+            } else if event.keyCode == 48 { // Tab 键
+                onTabPressed?()
+                return
             }
         }
         super.sendEvent(event)
@@ -56,6 +60,9 @@ final class FloatingPanel: NSPanel {
             return
         } else if event.keyCode == 49 { // Space 空格键
             onSpacePressed?()
+            return
+        } else if event.keyCode == 48 { // Tab 键
+            onTabPressed?()
             return
         }
         super.keyDown(with: event)
