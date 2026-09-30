@@ -4,6 +4,7 @@ struct StatusBarView: View {
     @ObservedObject var appState: AppState
     @State private var isPinHovered: Bool = false
     @State private var isExpandHovered: Bool = false
+    @State private var isAwakeHovered: Bool = false
     
     // 只在极简底栏展示具有电量上报的关键外设 (如 AirPods、带电量鼠键)
     private var peripheralsWithBattery: [BluetoothDeviceInfo] {
@@ -16,55 +17,77 @@ struct StatusBarView: View {
             HStack(spacing: 12) {
                 // 1. 电池状态 (固定宽度，绝不压缩截断)
                 if appState.showBattery && appState.batteryInfo.hasBattery {
-                    HStack(spacing: 4) {
-                        Image(systemName: batteryIconName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(batteryColor)
-                        
-                        Text("\(appState.batteryInfo.percentage)%")
-                            .font(.system(size: 11, weight: .semibold))
-                            .monospacedDigit()
-                            .foregroundColor(.white.opacity(0.85))
+                    Button {
+                        appState.openBatterySettings()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: batteryIconName)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(batteryColor)
+                            
+                            Text("\(appState.batteryInfo.percentage)%")
+                                .font(.system(size: 11, weight: .semibold))
+                                .monospacedDigit()
+                                .foregroundColor(.white.opacity(0.85))
+                        }
                     }
+                    .buttonStyle(.plain)
+                    .help("点击打开系统电池偏好设置")
                     .fixedSize()
                 }
                 
                 // 2. WiFi 状态
                 // 极简模式下仅展示图标，展开模式下展示 SSID
                 if appState.showWiFi {
-                    HStack(spacing: 5) {
-                        Image(systemName: appState.wifiInfo.isConnected ? "wifi" : "wifi.slash")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(appState.wifiInfo.isConnected ? .white.opacity(0.85) : .white.opacity(0.35))
-                        
-                        if appState.isExpanded, let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
-                            Text(ssid)
+                    Button {
+                        if NSEvent.modifierFlags.contains(.option) {
+                            appState.openNetworkSettings()
+                        } else {
+                            appState.copyLocalIP()
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: appState.wifiInfo.isConnected ? "wifi" : "wifi.slash")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.80))
-                                .lineLimit(1)
+                                .foregroundColor(appState.wifiInfo.isConnected ? .white.opacity(0.85) : .white.opacity(0.35))
+                            
+                            if appState.isExpanded, let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
+                                Text(ssid)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundColor(.white.opacity(0.80))
+                                    .lineLimit(1)
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .help("点击一键复制局域网 IP (Option+点击打开网络设置)")
                     .fixedSize()
                 }
                 
                 // 3. 音频输出 / 音量微标
                 if appState.showAudio {
-                    HStack(spacing: 4) {
-                        Image(systemName: audioIconName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(appState.audioInfo.isMuted ? Color.orange : .white.opacity(0.85))
-                        
-                        if appState.audioInfo.isMuted {
-                            Text("静音")
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(Color.orange)
-                        } else {
-                            Text("\(appState.audioInfo.volume)%")
-                                .font(.system(size: 11, weight: .semibold))
-                                .monospacedDigit()
-                                .foregroundColor(.white.opacity(0.85))
+                    Button {
+                        appState.toggleMute()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: audioIconName)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(appState.audioInfo.isMuted ? Color.orange : .white.opacity(0.85))
+                            
+                            if appState.audioInfo.isMuted {
+                                Text("静音")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(Color.orange)
+                            } else {
+                                Text("\(appState.audioInfo.volume)%")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .help("点击切换静音 (按 M 静音，↑/↓ 调音量)")
                     .fixedSize()
                 }
                 
@@ -89,38 +112,50 @@ struct StatusBarView: View {
                 
                 // 5. 勿扰 / 专注模式（仅在生效时点亮优雅微胶囊）
                 if appState.showDND && appState.dndInfo.isEnabled {
-                    HStack(spacing: 3) {
-                        Image(systemName: "moon.fill")
-                            .font(.system(size: 9, weight: .medium))
-                        Text("专注")
-                            .font(.system(size: 10, weight: .medium))
+                    Button {
+                        appState.openFocusSettings()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "moon.fill")
+                                .font(.system(size: 9, weight: .medium))
+                            Text("专注")
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundColor(Color(red: 0.7, green: 0.6, blue: 1.0))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color(red: 0.4, green: 0.3, blue: 0.8).opacity(0.25))
+                        )
                     }
-                    .foregroundColor(Color(red: 0.7, green: 0.6, blue: 1.0))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(Color(red: 0.4, green: 0.3, blue: 0.8).opacity(0.25))
-                    )
+                    .buttonStyle(.plain)
+                    .help("点击打开专注偏好设置 (按 D 切换)")
                     .fixedSize()
                 }
                 
-                // 6. 番茄钟微标（运行中时在极简栏温和提示）
+                // 6. 番茄钟微标（运行中时在极简栏温和提示，支持点击暂停/继续）
                 if appState.enablePomodoro && appState.pomodoroRunning && !appState.isExpanded {
-                    HStack(spacing: 3) {
-                        Image(systemName: "timer")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text(appState.formattedPomodoroTime)
-                            .font(.system(size: 11, weight: .bold))
-                            .monospacedDigit()
+                    Button {
+                        appState.togglePomodoro()
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "timer")
+                                .font(.system(size: 10, weight: .semibold))
+                            Text(appState.formattedPomodoroTime)
+                                .font(.system(size: 11, weight: .bold))
+                                .monospacedDigit()
+                        }
+                        .foregroundColor(Color.orange)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(Color.orange.opacity(0.18))
+                        )
                     }
-                    .foregroundColor(Color.orange)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(Color.orange.opacity(0.18))
-                    )
+                    .buttonStyle(.plain)
+                    .help("点击暂停/继续番茄钟 (按 P 键)")
                     .fixedSize()
                 }
             }
@@ -128,7 +163,25 @@ struct StatusBarView: View {
             Spacer(minLength: 12)
             
             // 右侧微交互功能键区
-            HStack(spacing: 8) {
+            HStack(spacing: 7) {
+                // 咖啡因防休眠微胶囊按钮 (Caffeine / Keep Awake)
+                Button {
+                    appState.toggleKeepAwake()
+                } label: {
+                    Image(systemName: appState.isKeepAwake ? "cup.and.saucer.fill" : "cup.and.saucer")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(appState.isKeepAwake ? Color.orange : .white.opacity(isAwakeHovered ? 0.95 : 0.45))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(appState.isKeepAwake ? Color.orange.opacity(0.20) : Color.white.opacity(isAwakeHovered ? 0.12 : 0.04))
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { isAwakeHovered = $0 }
+                .help(appState.isKeepAwake ? "防休眠已开启 (按 A 关闭)" : "开启防休眠阻止息屏 (按 A)")
+                
                 // Tab 展开 / 收起微胶囊按钮
                 Button {
                     appState.toggleExpanded()

@@ -5,13 +5,13 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 # 检查是否已配置代码签名证书
+SIGN_IDENTITY="QuickShow Development"
 if ! security find-identity -p codesigning -v 2>/dev/null | grep -q "QuickShow Development"; then
-    echo "⚠️ 未检测到 QuickShow Development 证书，正在执行初始化配置..."
-    "$PROJECT_DIR/scripts/setup_codesign.sh"
+    SIGN_IDENTITY="-"
 fi
 
 echo "🔨 正在编译 QuickShow (Release)..."
-xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release build > /dev/null
+xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release CODE_SIGN_IDENTITY="$SIGN_IDENTITY" build > /dev/null
 
 echo "🛑 退出旧版本进程..."
 killall QuickShow 2>/dev/null || true

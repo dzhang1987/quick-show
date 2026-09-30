@@ -52,10 +52,18 @@ struct ExpandedMonitoringView: View {
                             }
                         }
                         .frame(height: 3.5)
+                        
+                        if let topProc = appState.topCPUProcess {
+                            Text(topProc)
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(.orange.opacity(0.85))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
                     }
                     .frame(height: 14)
                     
-                    // 2. RAM 内存微槽
+                    // 2. RAM 内存微槽与一键优化整理
                     HStack(spacing: 5) {
                         Image(systemName: "memorychip")
                             .font(.system(size: 10, weight: .medium))
@@ -82,33 +90,52 @@ struct ExpandedMonitoringView: View {
                             }
                         }
                         .frame(height: 3.5)
+                        
+                        // 一键内存优化清理微按钮
+                        Button {
+                            appState.optimizeMemory()
+                        } label: {
+                            Image(systemName: "sparkles")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.mint.opacity(0.85))
+                                .frame(width: 14, height: 14)
+                                .background(Circle().fill(Color.white.opacity(0.08)))
+                        }
+                        .buttonStyle(.plain)
+                        .help("一键优化清理系统内存 (按 C)")
                     }
                     .frame(height: 14)
                     
                     Spacer(minLength: 0)
                     
-                    // 3. 实时网络吞吐
-                    HStack(spacing: 8) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.down")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.green.opacity(0.9))
-                            Text(appState.trafficInfo.downloadSpeed)
-                                .font(.system(size: 10, weight: .medium))
-                                .monospacedDigit()
-                                .foregroundColor(.white.opacity(0.85))
-                        }
-                        
-                        HStack(spacing: 3) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.cyan.opacity(0.9))
-                            Text(appState.trafficInfo.uploadSpeed)
-                                .font(.system(size: 10, weight: .medium))
-                                .monospacedDigit()
-                                .foregroundColor(.white.opacity(0.85))
+                    // 3. 实时网络吞吐 (点击一键复制局域网 IP)
+                    Button {
+                        appState.copyLocalIP()
+                    } label: {
+                        HStack(spacing: 8) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.down")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.green.opacity(0.9))
+                                Text(appState.trafficInfo.downloadSpeed)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .monospacedDigit()
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
+                            
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.up")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.cyan.opacity(0.9))
+                                Text(appState.trafficInfo.uploadSpeed)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .monospacedDigit()
+                                    .foregroundColor(.white.opacity(0.85))
+                            }
                         }
                     }
+                    .buttonStyle(.plain)
+                    .help("点击复制局域网 IP")
                     .frame(height: 14)
                 }
                 .padding(.horizontal, 11)
@@ -122,10 +149,13 @@ struct ExpandedMonitoringView: View {
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
                 )
+                .onTapGesture(count: 2) {
+                    appState.openActivityMonitor()
+                }
                 
-                // 右卡片：🎯 效率工具与已连接外设
+                // 右卡片：🎯 效率工具、日程与外设
                 VStack(alignment: .leading, spacing: 7) {
-                    // 1. 专注番茄钟微控件
+                    // 1. 专注番茄钟微控件 (支持点击时间轮换 25m/45m/5m)
                     HStack(spacing: 5) {
                         Image(systemName: "timer")
                             .font(.system(size: 10, weight: .semibold))
@@ -135,10 +165,16 @@ struct ExpandedMonitoringView: View {
                             .font(.system(size: 10, weight: .medium))
                             .foregroundColor(.white.opacity(0.65))
                         
-                        Text(appState.formattedPomodoroTime)
-                            .font(.system(size: 11, weight: .bold))
-                            .monospacedDigit()
-                            .foregroundColor(appState.pomodoroRunning ? .orange : .white.opacity(0.85))
+                        Button {
+                            appState.cyclePomodoroDuration()
+                        } label: {
+                            Text(appState.formattedPomodoroTime)
+                                .font(.system(size: 11, weight: .bold))
+                                .monospacedDigit()
+                                .foregroundColor(appState.pomodoroRunning ? .orange : .white.opacity(0.85))
+                        }
+                        .buttonStyle(.plain)
+                        .help("点击切换预设时长 (25m / 45m / 5m)")
                         
                         Spacer()
                         
@@ -153,6 +189,7 @@ struct ExpandedMonitoringView: View {
                                 .background(Circle().fill(Color.white.opacity(0.08)))
                         }
                         .buttonStyle(.plain)
+                        .help("播放/暂停番茄钟 (按 P)")
                         
                         // 重置
                         Button {
@@ -164,10 +201,11 @@ struct ExpandedMonitoringView: View {
                                 .frame(width: 16, height: 16)
                         }
                         .buttonStyle(.plain)
+                        .help("重置番茄钟")
                     }
                     .frame(height: 14)
                     
-                    // 2. 日历日程微胶囊
+                    // 2. 日历日程微胶囊 (支持识别腾讯会议/Zoom/Teams一键入会)
                     HStack(spacing: 4) {
                         Image(systemName: "calendar")
                             .font(.system(size: 10, weight: .medium))
@@ -175,15 +213,40 @@ struct ExpandedMonitoringView: View {
                         
                         if appState.calendarInfo.isAuthorized {
                             if appState.calendarInfo.hasEvent {
-                                Text(appState.calendarInfo.title)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.90))
-                                    .lineLimit(1)
+                                Button {
+                                    appState.openCalendarApp()
+                                } label: {
+                                    Text(appState.calendarInfo.title)
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.white.opacity(0.90))
+                                        .lineLimit(1)
+                                }
+                                .buttonStyle(.plain)
+                                .help("点击在系统日历中查看")
                                 
                                 Text(appState.calendarInfo.timeDescription)
                                     .font(.system(size: 9, weight: .medium))
                                     .foregroundColor(.pink.opacity(0.85))
                                     .lineLimit(1)
+                                
+                                if let meetingURL = appState.calendarInfo.meetingURL {
+                                    Button {
+                                        appState.joinMeeting(url: meetingURL)
+                                    } label: {
+                                        HStack(spacing: 2) {
+                                            Image(systemName: "video.fill")
+                                                .font(.system(size: 7))
+                                            Text("入会")
+                                                .font(.system(size: 8, weight: .bold))
+                                        }
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 2)
+                                        .background(Capsule().fill(Color.pink.opacity(0.70)))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("一键呼出会议客户端入会")
+                                }
                             } else {
                                 Text("今日暂无紧邻日程")
                                     .font(.system(size: 10, weight: .medium))
@@ -205,17 +268,17 @@ struct ExpandedMonitoringView: View {
                     
                     Spacer(minLength: 0)
                     
-                    // 3. 已连接外设清单 (Keychron、蓝牙鼠标等)
-                    if !appState.bluetoothDevices.isEmpty {
-                        HStack(spacing: 5) {
-                            ForEach(appState.bluetoothDevices.prefix(2), id: \.name) { dev in
+                    // 3. 已连接外设清单 & 磁盘/下载目录直达
+                    HStack(spacing: 6) {
+                        if !appState.bluetoothDevices.isEmpty {
+                            ForEach(appState.bluetoothDevices.prefix(1), id: \.name) { dev in
                                 HStack(spacing: 3) {
                                     Image(systemName: dev.iconName)
-                                        .font(.system(size: 9, weight: .medium))
+                                        .font(.system(size: 8, weight: .medium))
                                         .foregroundColor(Color.cyan.opacity(0.85))
                                     
                                     Text(compactDeviceName(dev.name))
-                                        .font(.system(size: 9, weight: .medium))
+                                        .font(.system(size: 8, weight: .medium))
                                         .foregroundColor(.white.opacity(0.75))
                                         .lineLimit(1)
                                 }
@@ -226,14 +289,42 @@ struct ExpandedMonitoringView: View {
                                         .fill(Color.white.opacity(0.06))
                                 )
                             }
+                        } else {
+                            Text("无外设")
+                                .font(.system(size: 8))
+                                .foregroundColor(.white.opacity(0.35))
                         }
-                        .frame(height: 14)
-                    } else {
-                        Text("未连接蓝牙外设")
-                            .font(.system(size: 9))
-                            .foregroundColor(.white.opacity(0.35))
-                            .frame(height: 14)
+                        
+                        Spacer(minLength: 2)
+                        
+                        // 磁盘容量与秒开下载目录
+                        if appState.diskInfo.freeGB > 0 {
+                            Button {
+                                appState.openDownloadsFolder()
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "internaldrive")
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.white.opacity(0.55))
+                                    Text("\(Int(appState.diskInfo.freeGB))G 可用")
+                                        .font(.system(size: 8, weight: .medium))
+                                        .foregroundColor(.white.opacity(0.70))
+                                    Image(systemName: "arrow.down.circle")
+                                        .font(.system(size: 8))
+                                        .foregroundColor(.cyan.opacity(0.75))
+                                }
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(
+                                    Capsule()
+                                        .fill(Color.white.opacity(0.05))
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .help("点击在访达中打开下载目录 (按 O)")
+                        }
                     }
+                    .frame(height: 14)
                 }
                 .padding(.horizontal, 11)
                 .padding(.vertical, 9)
@@ -251,11 +342,11 @@ struct ExpandedMonitoringView: View {
             .padding(.horizontal, 18)
             .padding(.top, 2)
             
-            // 底部轻巧按键提示
+            // 底部轻巧按键提示 (极度克制微字)
             HStack {
                 Spacer()
-                Text("Tab 极简模式 · Space 常驻 · ESC 退出")
-                    .font(.system(size: 9, weight: .regular))
+                Text("按键: M 静音 · ↑/↓ 音量 · A 咖啡因 · C 内存 · P 番茄 · O 下载 · X 剪贴 · L 锁屏 · ESC 退出")
+                    .font(.system(size: 8.5, weight: .regular))
                     .foregroundColor(.white.opacity(0.30))
                 Spacer()
             }

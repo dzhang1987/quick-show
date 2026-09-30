@@ -53,6 +53,9 @@ struct PanelView: View {
             .opacity(0)
             .frame(width: 0, height: 0)
         }
+        .onHover { isHovering in
+            appState.setHovered(isHovering)
+        }
         .frame(
             width: appState.isExpanded ? 430 : 380,
             height: appState.isExpanded ? 286 : 168
@@ -80,21 +83,81 @@ struct PanelView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
         .overlay(
-            // 晶体边缘双重微光高光描边
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        stops: [
-                            .init(color: Color.white.opacity(0.38), location: 0.0),
-                            .init(color: Color.white.opacity(0.12), location: 0.35),
-                            .init(color: Color.white.opacity(0.03), location: 0.70),
-                            .init(color: Color.white.opacity(0.20), location: 1.0)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.75
-                )
+            ZStack {
+                // 1. 基础晶体边缘高光描边 (全周连续曲率)
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            stops: [
+                                .init(color: Color.white.opacity(0.38), location: 0.0),
+                                .init(color: Color.white.opacity(0.12), location: 0.35),
+                                .init(color: Color.white.opacity(0.03), location: 0.70),
+                                .init(color: Color.white.opacity(0.20), location: 1.0)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 0.75
+                    )
+                
+                // 2. 方案 1：黑曜石底边框「晶体折射光消散动效」（仅一瞥模式且未展开时呈现）
+                if appState.mode == .glance && !appState.isExpanded {
+                    GeometryReader { geo in
+                        let activeWidth = geo.size.width * appState.glanceProgress
+                        
+                        // 沿 26pt 连续曲率圆角的纯白折射微光
+                        RoundedRectangle(cornerRadius: 26, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        Color.white.opacity(appState.isHovered ? 0.95 : 0.75),
+                                        Color.white.opacity(appState.isHovered ? 0.85 : 0.60)
+                                    ],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                ),
+                                lineWidth: appState.isHovered ? 1.25 : 0.90
+                            )
+                            // 仅保留底部 32pt 区域（涵盖底部水平切边与圆角切弧）
+                            .mask(
+                                VStack(spacing: 0) {
+                                    Spacer()
+                                    Rectangle()
+                                        .frame(height: 32)
+                                }
+                            )
+                            // 水平居中对称收缩 mask（两端柔和羽化）
+                            .mask(
+                                HStack {
+                                    Spacer()
+                                    Rectangle()
+                                        .fill(
+                                            LinearGradient(
+                                                stops: [
+                                                    .init(color: .clear, location: 0.0),
+                                                    .init(color: .white, location: 0.12),
+                                                    .init(color: .white, location: 0.88),
+                                                    .init(color: .clear, location: 1.0)
+                                                ],
+                                                startPoint: .leading,
+                                                endPoint: .trailing
+                                            )
+                                        )
+                                        .frame(width: max(0, activeWidth))
+                                    Spacer()
+                                }
+                            )
+                            .shadow(
+                                color: Color.white.opacity(appState.isHovered ? 0.45 : 0.20),
+                                radius: appState.isHovered ? 3.0 : 1.2,
+                                x: 0,
+                                y: 1
+                            )
+                            .animation(.linear(duration: 0.04), value: appState.glanceProgress)
+                    }
+                    .transition(.opacity)
+                }
+            }
         )
     }
 }

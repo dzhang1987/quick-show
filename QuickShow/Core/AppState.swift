@@ -24,6 +24,20 @@ final class AppState: ObservableObject {
     @Published var performanceInfo: SystemPerformanceInfo = SystemPerformanceInfo(cpuUsage: 0, memoryUsagePercent: 0, memoryUsedGB: 0, memoryTotalGB: 16)
     @Published var trafficInfo: NetworkTrafficInfo = NetworkTrafficInfo(downloadSpeed: "0 KB/s", uploadSpeed: "0 KB/s")
     @Published var calendarInfo: CalendarEventInfo = CalendarEventInfo(hasEvent: false, title: "", timeDescription: "", isAuthorized: false)
+    @Published var diskInfo: DiskInfo = DiskInfo(freeGB: 0, totalGB: 0)
+    @Published var topCPUProcess: String? = nil
+    
+    // 便捷操作与瞬态 Toast 微徽章
+    @Published var toastMessage: String? = nil
+    @Published var isKeepAwake: Bool = false
+    private var toastTimer: Timer?
+    
+    // 鼠标悬停态与液态微光一瞥进度 (1.0 -> 0.0)
+    @Published var isHovered: Bool = false
+    @Published var glanceProgress: CGFloat = 1.0
+    private var glanceTotalDuration: Double = 3.0
+    private var glanceRemainingSeconds: Double = 3.0
+    private let glanceTickInterval: Double = 0.04
     
     // 番茄钟状态
     @Published var pomodoroRunning: Bool = false
@@ -86,6 +100,7 @@ final class AppState: ObservableObject {
     /// 显示指定模式
     func show(mode: PanelMode) {
         self.mode = mode
+        self.isHovered = false
         refreshAllSystemStatus()
         currentTime = Date()
         startClock()
@@ -151,12 +166,143 @@ final class AppState: ObservableObject {
         stopClock()
         mode = .hidden
         isExpanded = false
+        isHovered = false
+        glanceProgress = 1.0
         onDismissPanel?()
+    }
+    
+    // MARK: - 便捷操作微服务
+    func showToast(_ message: String) {
+        resetGlanceTimer()
+        toastTimer?.invalidate()
+        withAnimation(.easeInOut(duration: 0.16)) {
+            toastMessage = message
+        }
+        toastTimer = Timer.scheduledTimer(withTimeInterval: 1.6, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async {
+                withAnimation(.easeInOut(duration: 0.20)) {
+                    self?.toastMessage = nil
+                }
+                // Toast 播完后，若处于一瞥模式且未展开，重新给 3 秒倒计时平滑退场
+                if self?.mode == .glance && self?.isExpanded == false {
+                    self?.resetGlanceTimer()
+                }
+            }
+        }
+    }
+    
+    func toggleMute() {
+        resetGlanceTimer()
+        let isMuted = SystemStatusProvider.shared.toggleMute()
+        audioInfo.isMuted = isMuted
+        showToast(isMuted ? "已静音" : "已恢复音量 (\(audioInfo.volume)%)")
+    }
+    
+    func adjustVolume(by step: Int) {
+        resetGlanceTimer()
+        let newVol = SystemStatusProvider.shared.adjustVolume(by: step)
+        audioInfo.volume = newVol
+        audioInfo.isMuted = false
+        showToast("音量: \(newVol)%")
+    }
+    
+    func toggleKeepAwake() {
+        resetGlanceTimer()
+        let active = SystemStatusProvider.shared.toggleKeepAwake()
+        isKeepAwake = active
+        showToast(active ? "已开启防休眠 ☕️" : "已恢复系统节能")
+    }
+    
+    func copyLocalIP() {
+        resetGlanceTimer()
+        if let ip = SystemStatusProvider.shared.getLocalIPAddress() {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(ip, forType: .string)
+            showToast("已复制局域网 IP: \(ip)")
+        } else {
+            showToast("未检测到有效局域网 IP")
+        }
+    }
+    
+    func cleanClipboard() {
+        resetGlanceTimer()
+        let pb = NSPasteboard.general
+        if let str = pb.string(forType: .string), !str.isEmpty {
+            pb.clearContents()
+            pb.setString(str, forType: .string)
+            let preview = str.trimmingCharacters(in: .whitespacesAndNewlines).prefix(14)
+            showToast("已纯文本化: \"\(preview)...\"")
+        } else {
+            showToast("剪贴板为空")
+        }
+    }
+    
+    func lockScreen() {
+        dismiss()
+        SystemStatusProvider.shared.lockScreen()
+    }
+    
+    func optimizeMemory() {
+        resetGlanceTimer()
+        let released = SystemStatusProvider.shared.optimizeMemory()
+        performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
+        showToast(String(format: "已优化释放 %.0f MB 内存", released))
+    }
+    
+    func cyclePomodoroDuration() {
+        resetGlanceTimer()
+        if pomodoroRemainingSeconds > 25 * 60 {
+            resetPomodoro(durationMinutes: 5)
+            showToast("番茄钟: 5 分钟短休息")
+        } else if pomodoroRemainingSeconds > 5 * 60 {
+            resetPomodoro(durationMinutes: 45)
+            showToast("番茄钟: 45 分钟深度专注")
+        } else {
+            resetPomodoro(durationMinutes: 25)
+            showToast("番茄钟: 25 分钟标准专注")
+        }
+    }
+    
+    func openActivityMonitor() {
+        SystemStatusProvider.shared.openActivityMonitor()
+        dismiss()
+    }
+    
+    func openDownloadsFolder() {
+        SystemStatusProvider.shared.openDownloadsFolder()
+        dismiss()
+    }
+    
+    func openCalendarApp() {
+        SystemStatusProvider.shared.openCalendarApp()
+        dismiss()
+    }
+    
+    func openNetworkSettings() {
+        SystemStatusProvider.shared.openNetworkSettings()
+        dismiss()
+    }
+    
+    func openBatterySettings() {
+        SystemStatusProvider.shared.openBatterySettings()
+        dismiss()
+    }
+    
+    func openFocusSettings() {
+        SystemStatusProvider.shared.openFocusSettings()
+        dismiss()
+    }
+    
+    func joinMeeting(url: URL) {
+        NSWorkspace.shared.open(url)
+        dismiss()
     }
     
     // MARK: - 番茄钟控制
     func togglePomodoro() {
+        resetGlanceTimer()
         pomodoroRunning.toggle()
+        showToast(pomodoroRunning ? "番茄钟已启动" : "番茄钟已暂停")
     }
     
     func resetPomodoro(durationMinutes: Int = 25) {
@@ -170,12 +316,46 @@ final class AppState: ObservableObject {
         return String(format: "%02d:%02d", m, s)
     }
     
-    // MARK: - 定时调度器
+    // MARK: - 定时调度器与液态流体动效
+    func setHovered(_ hovering: Bool) {
+        isHovered = hovering
+        // 鼠标移入自动冻结倒计时；移出时从当前剩余时间自然继续流逝（不重置）
+    }
+    
+    func resetGlanceTimer(duration: Double? = nil) {
+        let d = duration ?? max(glanceDuration, 1.0)
+        glanceTotalDuration = d
+        glanceRemainingSeconds = d
+        withAnimation(.linear(duration: 0.08)) {
+            glanceProgress = 1.0
+        }
+        if glanceTimer == nil && mode == .glance && !isExpanded {
+            startGlanceTimer()
+        }
+    }
+    
     private func startGlanceTimer() {
-        let duration = max(glanceDuration, 1.0)
-        glanceTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+        cancelGlanceTimer()
+        glanceRemainingSeconds = max(glanceDuration, 1.0)
+        glanceTotalDuration = glanceRemainingSeconds
+        glanceProgress = 1.0
+        
+        glanceTimer = Timer.scheduledTimer(withTimeInterval: glanceTickInterval, repeats: true) { [weak self] _ in
             DispatchQueue.main.async {
-                self?.dismiss()
+                guard let self = self else { return }
+                // 若处于非一瞥模式、展开看板、鼠标悬浮、或正在播放 Toast，冻结倒计时并维持微光
+                if self.mode != .glance || self.isExpanded || self.isHovered || self.toastMessage != nil {
+                    return
+                }
+                
+                self.glanceRemainingSeconds -= self.glanceTickInterval
+                let progress = max(0.0, self.glanceRemainingSeconds / self.glanceTotalDuration)
+                self.glanceProgress = progress
+                
+                if self.glanceRemainingSeconds <= 0 {
+                    self.cancelGlanceTimer()
+                    self.dismiss()
+                }
             }
         }
     }
@@ -183,6 +363,7 @@ final class AppState: ObservableObject {
     private func cancelGlanceTimer() {
         glanceTimer?.invalidate()
         glanceTimer = nil
+        glanceProgress = 1.0
     }
     
     private func startClock() {
@@ -200,6 +381,7 @@ final class AppState: ObservableObject {
                     self.pomodoroRemainingSeconds -= 1
                     if self.pomodoroRemainingSeconds == 0 {
                         self.pomodoroRunning = false
+                        self.showToast("🎉 番茄专注时段已完成！")
                     }
                 }
                 
@@ -211,6 +393,7 @@ final class AppState: ObservableObject {
                 // 性能负载 (CPU & RAM)：展开时每 2 秒刷新一次，降低开销
                 if self.isExpanded && self.showPerformance && (self.tickCounter % 2 == 0) {
                     self.performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
+                    self.topCPUProcess = SystemStatusProvider.shared.getTopCPUProcess()
                 }
                 
                 // 状态栏每 5 秒做一次静默微更新
@@ -228,8 +411,11 @@ final class AppState: ObservableObject {
     // MARK: - 系统状态刷新
     func refreshAllSystemStatus() {
         refreshStatusBadges()
+        isKeepAwake = SystemStatusProvider.shared.isKeepAwakeActive()
+        diskInfo = SystemStatusProvider.shared.getDiskInfo()
         if showPerformance || isExpanded {
             performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
+            topCPUProcess = SystemStatusProvider.shared.getTopCPUProcess()
         }
         if showNetworkSpeed || isExpanded {
             trafficInfo = SystemStatusProvider.shared.getNetworkTrafficInfo()

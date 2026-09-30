@@ -50,6 +50,46 @@ final class PanelManager {
             appState?.toggleExpanded()
         }
         
+        // 全键盘盲操快捷键
+        panel.onKeyDownAction = { [weak appState] keyCode in
+            guard let appState = appState else { return false }
+            appState.resetGlanceTimer()
+            switch keyCode {
+            case 46: // M: 静音 / 取消静音
+                appState.toggleMute()
+                return true
+            case 126: // Up Arrow: 音量 +5%
+                appState.adjustVolume(by: 5)
+                return true
+            case 125: // Down Arrow: 音量 -5%
+                appState.adjustVolume(by: -5)
+                return true
+            case 0: // A: 咖啡因防休眠开关
+                appState.toggleKeepAwake()
+                return true
+            case 8: // C: 一键优化清理系统内存
+                appState.optimizeMemory()
+                return true
+            case 35: // P: 番茄钟播放 / 暂停
+                appState.togglePomodoro()
+                return true
+            case 31: // O: 打开下载目录
+                appState.openDownloadsFolder()
+                return true
+            case 7: // X: 剪贴板纯文本化
+                appState.cleanClipboard()
+                return true
+            case 37: // L: 全屏立即锁屏离座
+                appState.lockScreen()
+                return true
+            case 2: // D: 专注模式设置
+                appState.openFocusSettings()
+                return true
+            default:
+                return false
+            }
+        }
+        
         panel.onResignKey = { [weak appState] in
             guard let appState = appState else { return }
             // 仅在一瞥模式且未固定时，失焦才自动淡出

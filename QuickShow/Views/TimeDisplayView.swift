@@ -58,21 +58,55 @@ struct TimeDisplayView: View {
     
     var body: some View {
         VStack(spacing: 8) {
-            // 顶部日期徽章：精美磨砂微胶囊，层次分明
-            Text(dateFormatted)
-                .font(.system(size: 12, weight: .semibold, design: .default))
-                .tracking(1.2)
-                .foregroundColor(.white.opacity(0.85))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 3)
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(0.08))
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
-                        )
-                )
+            // 顶部日期徽章与灵动微反馈系统 (Zero-UI Toast)
+            Group {
+                if let toast = appState.toastMessage {
+                    HStack(spacing: 4) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color.green.opacity(0.95))
+                        
+                        Text(toast)
+                            .font(.system(size: 11, weight: .semibold, design: .default))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(Color.white.opacity(0.15))
+                            .overlay(
+                                Capsule()
+                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+                            )
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                } else {
+                    Button {
+                        appState.openCalendarApp()
+                    } label: {
+                        Text(dateFormatted)
+                            .font(.system(size: 12, weight: .semibold, design: .default))
+                            .tracking(1.2)
+                            .foregroundColor(.white.opacity(0.85))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(0.08))
+                                    .overlay(
+                                        Capsule()
+                                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .help("点击打开系统日历")
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.16), value: appState.toastMessage)
             
             // 核心大字时钟：具有力量感与张力的 SF Pro 饱满排版（绝非干瘪细线）
             HStack(alignment: .lastTextBaseline, spacing: 4) {
