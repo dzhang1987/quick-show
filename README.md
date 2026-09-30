@@ -104,7 +104,7 @@ quick-show/
 ├── QuickShow.xcodeproj                  # 自动生成的 Xcode 项目
 ├── assets/                              # README 展示素材（超清图标、预览图）
 │   ├── icon.png                         # 原生透明 Squircle 图标
-│   └── preview.png                      # 产品展示预览图
+│   └── preview.png                      # 双模式（一瞥 / 展开）左右对照产品展示图
 ├── scripts/
 │   ├── restart.sh                       # 自动重新编译并重启 QuickShow 实例的轻量脚本
 │   └── setup_codesign.sh                # 本地自签名代码签名证书初始化脚本（保证权限持久化）
