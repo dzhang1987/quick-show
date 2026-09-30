@@ -341,15 +341,6 @@ struct ExpandedMonitoringView: View {
             .frame(height: 78)
             .padding(.horizontal, 18)
             .padding(.top, 2)
-            
-            // 底部轻巧按键提示 (极度克制微字)
-            HStack {
-                Spacer()
-                Text("按键: M 静音 · ↑/↓ 音量 · A 咖啡因 · C 内存 · P 番茄 · O 下载 · X 剪贴 · L 锁屏 · ESC 退出")
-                    .font(.system(size: 8.5, weight: .regular))
-                    .foregroundColor(.white.opacity(0.30))
-                Spacer()
-            }
             .padding(.bottom, 6)
         }
     }

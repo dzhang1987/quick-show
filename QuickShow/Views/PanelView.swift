@@ -73,8 +73,8 @@ struct PanelView: View {
             appState.setHovered(isHovering)
         }
         .frame(
-            width: appState.isExpanded ? 430 : 380,
-            height: appState.isExpanded ? 286 : 168
+            width: (appState.isExpanded || appState.showCheatSheet) ? 430 : 380,
+            height: (appState.isExpanded || appState.showCheatSheet) ? 286 : 168
         )
         .background(
             ZStack {
@@ -174,6 +174,147 @@ struct PanelView: View {
                     .transition(.opacity)
                 }
             }
+        )
+        .overlay {
+            if appState.showCheatSheet {
+                CheatSheetView(appState: appState)
+                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+            }
+        }
+    }
+}
+
+// MARK: - 全键盘盲操速查微卡片 (CheatSheet)
+struct CheatSheetView: View {
+    @ObservedObject var appState: AppState
+    
+    var body: some View {
+        VStack(spacing: 10) {
+            // 顶部小标题栏
+            HStack {
+                HStack(spacing: 6) {
+                    Image(systemName: "command")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.orange)
+                    Text("全键盘盲操速查")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.92))
+                    Text("(按住 ⌘ 提示 · 松开自动收起)")
+                        .font(.system(size: 9.5, weight: .regular))
+                        .foregroundColor(.white.opacity(0.45))
+                }
+                
+                Spacer()
+                
+                Button {
+                    appState.setCheatSheetVisible(false)
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.35))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 12)
+            
+            // 三列结构化快捷键分组
+            HStack(alignment: .top, spacing: 8) {
+                // 列 1：基础交互
+                ShortcutGroupCard(title: "基础控制", shortcuts: [
+                    ("Tab", "展开 / 收起看板"),
+                    ("Space", "常驻图钉切换"),
+                    ("ESC", "退出 / 关闭面板"),
+                    ("⌘ ,", "偏好设置"),
+                    ("⌘ Q", "退出应用")
+                ])
+                
+                // 列 2：效率工具
+                ShortcutGroupCard(title: "效率加速", shortcuts: [
+                    ("A", "防休眠阻止息屏"),
+                    ("C", "清理释放内存"),
+                    ("X", "剪贴板纯文本化"),
+                    ("O", "秒开下载目录"),
+                    ("L", "全屏锁屏离座")
+                ])
+                
+                // 列 3：系统控制
+                ShortcutGroupCard(title: "系统控制", shortcuts: [
+                    ("M", "一键静音/恢复"),
+                    ("↑ / ↓", "微调主音量 (±5%)"),
+                    ("P", "番茄钟播放/暂停"),
+                    ("D", "专注模式设置"),
+                    ("?", "速查卡片开关")
+                ])
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .environment(\.colorScheme, .dark)
+                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.10, green: 0.10, blue: 0.12).opacity(0.96),
+                                Color(red: 0.05, green: 0.05, blue: 0.07).opacity(0.98)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
+        )
+        .padding(5)
+    }
+}
+
+struct ShortcutGroupCard: View {
+    let title: String
+    let shortcuts: [(String, String)]
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.system(size: 9.5, weight: .bold))
+                .foregroundColor(.white.opacity(0.50))
+                .padding(.bottom, 2)
+            
+            ForEach(shortcuts, id: \.0) { key, desc in
+                HStack(spacing: 5) {
+                    Text(key)
+                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(.orange.opacity(0.95))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.white.opacity(0.08))
+                        )
+                    
+                    Text(desc)
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundColor(.white.opacity(0.78))
+                        .lineLimit(1)
+                    
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(Color.white.opacity(0.03))
         )
     }
 }

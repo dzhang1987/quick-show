@@ -35,9 +35,14 @@ final class PanelManager {
         panel.contentView = hostingView
         panel.invalidateShadow()
         
-        // ESC 快捷退出
+        // ESC 快捷退出（若正在展示 CheatSheet 则优先关闭 CheatSheet）
         panel.onEscapePressed = { [weak appState] in
-            appState?.dismiss()
+            guard let appState = appState else { return }
+            if appState.showCheatSheet {
+                appState.setCheatSheetVisible(false)
+            } else {
+                appState.dismiss()
+            }
         }
         
         // Space 常驻切换 (Toggle Pin / Unpin)
@@ -58,6 +63,21 @@ final class PanelManager {
         // ⌘ + Q 彻底退出
         panel.onQuitPressed = { [weak appState] in
             appState?.quitApp()
+        }
+        
+        // 长按 Command (⌘) 展示按键速查表
+        panel.onCommandLongPressed = { [weak appState] in
+            appState?.setCheatSheetVisible(true)
+        }
+        
+        // 松开 Command (⌘) 自动淡出速查表
+        panel.onCommandReleased = { [weak appState] in
+            appState?.setCheatSheetVisible(false)
+        }
+        
+        // 敲击 ? 键切换速查表
+        panel.onQuestionMarkPressed = { [weak appState] in
+            appState?.toggleCheatSheet()
         }
         
         // 全键盘盲操快捷键
@@ -118,15 +138,26 @@ final class PanelManager {
             self?.hidePanel()
         }
         
-        appState.onExpansionChange = { [weak self] isExpanded in
-            self?.handleExpansionChange(isExpanded)
+        appState.onExpansionChange = { [weak self] _ in
+            self?.updatePanelFrameAnimated()
         }
+        
+        appState.onCheatSheetChange = { [weak self] _ in
+            self?.updatePanelFrameAnimated()
+        }
+    }
+    
+    private func targetSize() -> NSSize {
+        if appState?.isExpanded == true || appState?.showCheatSheet == true {
+            return expandedSize
+        }
+        return compactSize
     }
     
     func showPanel(mode: PanelMode) {
         guard let panel = panel else { return }
         
-        let size = (appState?.isExpanded == true) ? expandedSize : compactSize
+        let size = targetSize()
         let newFrame = ScreenHelper.centeredFrame(for: size)
         panel.setFrame(newFrame, display: true)
         panel.invalidateShadow()
@@ -156,10 +187,9 @@ final class PanelManager {
         startEscMonitor()
     }
     
-    func handleExpansionChange(_ isExpanded: Bool) {
+    func updatePanelFrameAnimated() {
         guard let panel = panel, panel.isVisible else { return }
-        let targetSize = isExpanded ? expandedSize : compactSize
-        let targetFrame = ScreenHelper.centeredFrame(for: targetSize)
+        let targetFrame = ScreenHelper.centeredFrame(for: targetSize())
         
         // 与 SwiftUI 0.18s easeInEaseOut 动画完全同步，并在完成时立即重建精准阴影
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -169,6 +199,10 @@ final class PanelManager {
         }, completionHandler: { [weak panel] in
             panel?.invalidateShadow()
         })
+    }
+    
+    func handleExpansionChange(_ isExpanded: Bool) {
+        updatePanelFrameAnimated()
     }
     
     func hidePanel() {

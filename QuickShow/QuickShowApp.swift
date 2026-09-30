@@ -27,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettings()
         }
         
+        state.onMenuBarIconVisibilityChange = { [weak self] isVisible in
+            self?.statusItem?.isVisible = isVisible
+        }
+        
         // 预热悬浮面板，确保快捷键唤醒零延迟
         PanelManager.shared.setup(with: state)
         
@@ -35,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         HotKeyManager.shared.configure(type: state.triggerType)
         
+        setupMainMenu()
         setupStatusItem()
         
         // 打开应用时，默认在屏幕中央展示一次一瞥面板
@@ -79,7 +84,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(quitItem)
         
         item.menu = menu
+        item.isVisible = appState.showMenuBarIcon
         self.statusItem = item
+    }
+    
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+        let appMenuItem = NSMenuItem()
+        mainMenu.addItem(appMenuItem)
+        
+        let appMenu = NSMenu()
+        let settingsItem = NSMenuItem(title: "偏好设置...", action: #selector(openSettings), keyEquivalent: ",")
+        settingsItem.keyEquivalentModifierMask = [.command]
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        
+        appMenu.addItem(NSMenuItem.separator())
+        
+        let quitItem = NSMenuItem(title: "退出 QuickShow", action: #selector(quitApp), keyEquivalent: "q")
+        quitItem.keyEquivalentModifierMask = [.command]
+        quitItem.target = self
+        appMenu.addItem(quitItem)
+        
+        appMenuItem.submenu = appMenu
+        NSApp.mainMenu = mainMenu
     }
     
     @objc private func togglePanel() {
@@ -89,12 +117,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
-                styleMask: [.titled, .closable],
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
+                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            window.title = "QuickShow 偏好设置"
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.toolbar = nil
+            window.isMovableByWindowBackground = true
+            window.title = "QuickShow 设置"
             window.center()
             window.contentView = NSHostingView(rootView: SettingsView(appState: appState))
             window.isReleasedWhenClosed = false

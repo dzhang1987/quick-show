@@ -12,7 +12,7 @@ final class AppState: ObservableObject {
     @Published var isExpanded: Bool = false
     @Published var currentTime: Date = Date()
     
-    // P0 系统状态
+    // 核心微状态（一瞥底栏）
     @Published var batteryInfo: BatteryInfo = BatteryInfo(percentage: 100, isCharging: false, hasBattery: false)
     @Published var wifiInfo: WiFiInfo = WiFiInfo(isConnected: false, ssid: nil)
     @Published var bluetoothDevices: [BluetoothDeviceInfo] = []
@@ -20,7 +20,7 @@ final class AppState: ObservableObject {
     @Published var audioInfo: AudioInfo = AudioInfo(deviceName: "系统音频", volume: 50, isMuted: false, isHeadphones: false)
     @Published var dndInfo: DNDInfo = DNDInfo(isEnabled: false)
     
-    // P1 扩展监控状态
+    // 扩展监控状态（Tab 展开看板）
     @Published var performanceInfo: SystemPerformanceInfo = SystemPerformanceInfo(cpuUsage: 0, memoryUsagePercent: 0, memoryUsedGB: 0, memoryTotalGB: 16)
     @Published var trafficInfo: NetworkTrafficInfo = NetworkTrafficInfo(downloadSpeed: "0 KB/s", uploadSpeed: "0 KB/s")
     @Published var calendarInfo: CalendarEventInfo = CalendarEventInfo(hasEvent: false, title: "", timeDescription: "", isAuthorized: false)
@@ -43,20 +43,33 @@ final class AppState: ObservableObject {
     @Published var pomodoroRunning: Bool = false
     @Published var pomodoroRemainingSeconds: Int = 25 * 60
     
+    // 快捷键速查卡片 (CheatSheet) 浮层状态
+    @Published var showCheatSheet: Bool = false
+    
     // 用户偏好设置
     @AppStorage("showOnLaunch") var showOnLaunch: Bool = true
     @AppStorage("glanceDuration") var glanceDuration: Double = 3.0
     @AppStorage("showSeconds") var showSeconds: Bool = true
     @AppStorage("is24HourFormat") var is24HourFormat: Bool = true
+    @AppStorage("showMenuBarIcon") private var storedShowMenuBarIcon: Bool = true
     
-    // P0 微标展示开关
+    var showMenuBarIcon: Bool {
+        get { storedShowMenuBarIcon }
+        set {
+            storedShowMenuBarIcon = newValue
+            objectWillChange.send()
+            onMenuBarIconVisibilityChange?(newValue)
+        }
+    }
+    
+    // 一瞥底栏微标展示开关
     @AppStorage("showBattery") var showBattery: Bool = true
     @AppStorage("showWiFi") var showWiFi: Bool = true
     @AppStorage("showBluetooth") var showBluetooth: Bool = true
     @AppStorage("showAudio") var showAudio: Bool = true
     @AppStorage("showDND") var showDND: Bool = true
     
-    // P1 扩展监控展示开关
+    // 扩展监控展示开关
     @AppStorage("showPerformance") var showPerformance: Bool = true
     @AppStorage("showNetworkSpeed") var showNetworkSpeed: Bool = true
     @AppStorage("showCalendar") var showCalendar: Bool = false
@@ -83,6 +96,8 @@ final class AppState: ObservableObject {
     var onDismissPanel: (() -> Void)?
     var onExpansionChange: ((Bool) -> Void)?
     var onOpenSettings: (() -> Void)?
+    var onMenuBarIconVisibilityChange: ((Bool) -> Void)?
+    var onCheatSheetChange: ((Bool) -> Void)?
     
     init() {
         refreshAllSystemStatus()
@@ -168,8 +183,36 @@ final class AppState: ObservableObject {
         mode = .hidden
         isExpanded = false
         isHovered = false
+        showCheatSheet = false
         glanceProgress = 1.0
         onDismissPanel?()
+    }
+    
+    /// 切换快捷键速查表浮层
+    func toggleCheatSheet() {
+        withAnimation(.easeInOut(duration: 0.16)) {
+            showCheatSheet.toggle()
+        }
+        onCheatSheetChange?(showCheatSheet)
+        if showCheatSheet {
+            cancelGlanceTimer()
+        } else if mode == .glance && !isExpanded {
+            startGlanceTimer()
+        }
+    }
+    
+    /// 明确设置快捷键速查表显示状态（用于长按 ⌘ 弹出 / 松开淡出）
+    func setCheatSheetVisible(_ visible: Bool) {
+        guard showCheatSheet != visible else { return }
+        withAnimation(.easeInOut(duration: 0.16)) {
+            showCheatSheet = visible
+        }
+        onCheatSheetChange?(visible)
+        if visible {
+            cancelGlanceTimer()
+        } else if mode == .glance && !isExpanded {
+            startGlanceTimer()
+        }
     }
     
     // MARK: - 便捷操作微服务

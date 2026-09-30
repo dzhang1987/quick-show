@@ -10,8 +10,13 @@ final class FloatingPanel: NSPanel {
     var onTabPressed: (() -> Void)?
     var onSettingsPressed: (() -> Void)?
     var onQuitPressed: (() -> Void)?
+    var onCommandLongPressed: (() -> Void)?
+    var onCommandReleased: (() -> Void)?
+    var onQuestionMarkPressed: (() -> Void)?
     var onKeyDownAction: ((UInt16) -> Bool)?
     var onResignKey: (() -> Void)?
+    
+    private var cmdLongPressTimer: Timer?
     
     init(contentRect: NSRect) {
         super.init(
@@ -38,7 +43,30 @@ final class FloatingPanel: NSPanel {
     }
     
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .keyDown {
+        if event.type == .flagsChanged {
+            let isCmd = event.modifierFlags.contains(.command)
+            if isCmd {
+                if cmdLongPressTimer == nil {
+                    cmdLongPressTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
+                        self?.cmdLongPressTimer = nil
+                        self?.onCommandLongPressed?()
+                    }
+                }
+            } else {
+                cmdLongPressTimer?.invalidate()
+                cmdLongPressTimer = nil
+                onCommandReleased?()
+            }
+        } else if event.type == .keyDown {
+            cmdLongPressTimer?.invalidate()
+            cmdLongPressTimer = nil
+            
+            // ? 键速查表切换 (Shift + / 或 characters == "?")
+            if event.characters == "?" || (event.keyCode == 44 && event.modifierFlags.contains(.shift)) {
+                onQuestionMarkPressed?()
+                return
+            }
+            
             let isCmd = event.modifierFlags.contains(.command)
             if isCmd && event.keyCode == 43 { // ⌘ + , 打开偏好设置
                 onSettingsPressed?()
@@ -62,6 +90,12 @@ final class FloatingPanel: NSPanel {
             }
         }
         super.sendEvent(event)
+    }
+    
+    override func orderOut(_ sender: Any?) {
+        cmdLongPressTimer?.invalidate()
+        cmdLongPressTimer = nil
+        super.orderOut(sender)
     }
     
     override func cancelOperation(_ sender: Any?) {

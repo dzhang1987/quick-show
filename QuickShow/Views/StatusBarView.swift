@@ -5,6 +5,8 @@ struct StatusBarView: View {
     @State private var isPinHovered: Bool = false
     @State private var isExpandHovered: Bool = false
     @State private var isAwakeHovered: Bool = false
+    @State private var isHelpHovered: Bool = false
+    @State private var isSettingsHovered: Bool = false
     
     // 只在极简底栏展示具有电量上报的关键外设 (如 AirPods、带电量鼠键)
     private var peripheralsWithBattery: [BluetoothDeviceInfo] {
@@ -229,6 +231,44 @@ struct StatusBarView: View {
                 .buttonStyle(.plain)
                 .onHover { isPinHovered = $0 }
                 .help(appState.mode == .pinned ? "点击解除常驻 (按 Space)" : "点击常驻显示 (按 Space)")
+                
+                // 快捷键速查按钮（点击切换，长按 ⌘ 也能弹出）
+                Button {
+                    appState.toggleCheatSheet()
+                } label: {
+                    Image(systemName: "questionmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(appState.showCheatSheet ? Color.orange : .white.opacity(isHelpHovered ? 0.95 : 0.45))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(
+                            Capsule()
+                                .fill(appState.showCheatSheet ? Color.orange.opacity(0.20) : Color.white.opacity(isHelpHovered ? 0.12 : 0.04))
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { isHelpHovered = $0 }
+                .help("快捷键速查 (按 ? 或长按 ⌘)")
+                
+                // 偏好设置按钮（展开监控或固定常驻时呈现）
+                if appState.isExpanded || appState.mode == .pinned {
+                    Button {
+                        appState.openSettings()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.white.opacity(isSettingsHovered ? 0.95 : 0.50))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(
+                                Capsule()
+                                    .fill(Color.white.opacity(isSettingsHovered ? 0.12 : 0.04))
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .onHover { isSettingsHovered = $0 }
+                    .help("偏好设置 (按 ⌘,)")
+                }
             }
             .fixedSize()
         }
