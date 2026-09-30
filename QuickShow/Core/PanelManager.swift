@@ -40,11 +40,9 @@ final class PanelManager {
             appState?.dismiss()
         }
         
-        // Space 常驻切换
+        // Space 常驻切换 (Toggle Pin / Unpin)
         panel.onSpacePressed = { [weak appState] in
-            if appState?.mode == .glance {
-                appState?.pin()
-            }
+            appState?.togglePin()
         }
         
         // Tab 极简/展开详细监控切换

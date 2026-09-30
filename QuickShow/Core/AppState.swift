@@ -73,14 +73,12 @@ final class AppState: ObservableObject {
         refreshAllSystemStatus()
     }
     
-    /// 响应快捷键触发
+    /// 响应快捷键触发（纯粹的显示/隐藏全局开关）
     func toggleFromHotKey() {
         switch mode {
         case .hidden:
             show(mode: .glance)
-        case .glance:
-            pin()
-        case .pinned:
+        case .glance, .pinned:
             dismiss()
         }
     }
@@ -93,7 +91,7 @@ final class AppState: ObservableObject {
         startClock()
         
         cancelGlanceTimer()
-        if mode == .glance {
+        if mode == .glance && !isExpanded {
             startGlanceTimer()
         }
         
@@ -105,19 +103,46 @@ final class AppState: ObservableObject {
         withAnimation(.easeInOut(duration: 0.18)) {
             isExpanded.toggle()
         }
-        if isExpanded && mode == .glance {
-            // 用户展开了详细视图，自动转为固定常驻或延长一瞥，避免看着看着突然关闭
-            cancelGlanceTimer()
+        if isExpanded {
+            // 用户展开了详细视图，若处于一瞥模式则暂停倒计时，避免看着看着突然关闭
+            if mode == .glance {
+                cancelGlanceTimer()
+            }
+        } else {
+            // 用户收起了详细视图，若处于一瞥模式，重新启动倒计时平滑退场
+            if mode == .glance {
+                startGlanceTimer()
+            }
         }
         onExpansionChange?(isExpanded)
     }
     
-    /// 固定面板
+    /// 切换常驻状态 (Space 键 / 图钉按钮)
+    func togglePin() {
+        if mode == .pinned {
+            unpin()
+        } else {
+            pin()
+        }
+    }
+    
+    /// 固定面板常驻
     func pin() {
         guard mode != .pinned else { return }
         cancelGlanceTimer()
         mode = .pinned
         onTogglePanel?(.pinned)
+    }
+    
+    /// 解除常驻，变回一瞥模式（若未展开则恢复倒计时自动淡出）
+    func unpin() {
+        guard mode == .pinned else { return }
+        mode = .glance
+        // 若当前未展开详细视图，恢复一瞥倒计时自动淡出
+        if !isExpanded {
+            startGlanceTimer()
+        }
+        onTogglePanel?(.glance)
     }
     
     /// 关闭/隐藏面板

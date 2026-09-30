@@ -152,13 +152,9 @@ struct StatusBarView: View {
                 .onHover { isExpandHovered = $0 }
                 .help(appState.isExpanded ? "收起监控看板 (按 Tab)" : "展开性能与效率看板 (按 Tab)")
                 
-                // 图钉常驻切换按钮
+                // 图钉常驻切换按钮 (Toggle Pin / Unpin)
                 Button {
-                    if appState.mode == .glance {
-                        appState.pin()
-                    } else {
-                        appState.dismiss()
-                    }
+                    appState.togglePin()
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: appState.mode == .pinned ? "pin.fill" : "pin")
@@ -179,7 +175,7 @@ struct StatusBarView: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { isPinHovered = $0 }
-                .help(appState.mode == .pinned ? "点击取消常驻 (或按 ESC)" : "点击常驻显示 (或按 Space)")
+                .help(appState.mode == .pinned ? "点击解除常驻 (按 Space)" : "点击常驻显示 (按 Space)")
             }
             .fixedSize()
         }
