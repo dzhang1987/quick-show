@@ -23,6 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let state = AppState()
         self.appState = state
         
+        state.onOpenSettings = { [weak self] in
+            self?.openSettings()
+        }
+        
         // 预热悬浮面板，确保快捷键唤醒零延迟
         PanelManager.shared.setup(with: state)
         
@@ -82,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.toggleFromHotKey()
     }
     
-    @objc private func openSettings() {
+    @objc func openSettings() {
         if settingsWindow == nil {
             let window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 480, height: 560),
@@ -97,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsWindow = window
         }
         settingsWindow?.makeKeyAndOrderFront(nil)
+        settingsWindow?.orderFrontRegardless()
         NSApp.activate(ignoringOtherApps: true)
     }
     

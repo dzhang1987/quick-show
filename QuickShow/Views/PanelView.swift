@@ -52,6 +52,22 @@ struct PanelView: View {
             .keyboardShortcut(.cancelAction)
             .opacity(0)
             .frame(width: 0, height: 0)
+            
+            // 隐形 ⌘ + , 快捷打开偏好设置兜底
+            Button("") {
+                appState.openSettings()
+            }
+            .keyboardShortcut(",", modifiers: .command)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            
+            // 隐形 ⌘ + Q 快捷退出兜底
+            Button("") {
+                appState.quitApp()
+            }
+            .keyboardShortcut("q", modifiers: .command)
+            .opacity(0)
+            .frame(width: 0, height: 0)
         }
         .onHover { isHovering in
             appState.setHovered(isHovering)

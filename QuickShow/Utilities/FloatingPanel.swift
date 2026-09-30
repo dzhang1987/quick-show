@@ -8,6 +8,8 @@ final class FloatingPanel: NSPanel {
     var onEscapePressed: (() -> Void)?
     var onSpacePressed: (() -> Void)?
     var onTabPressed: (() -> Void)?
+    var onSettingsPressed: (() -> Void)?
+    var onQuitPressed: (() -> Void)?
     var onKeyDownAction: ((UInt16) -> Bool)?
     var onResignKey: (() -> Void)?
     
@@ -37,6 +39,15 @@ final class FloatingPanel: NSPanel {
     
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
+            let isCmd = event.modifierFlags.contains(.command)
+            if isCmd && event.keyCode == 43 { // ⌘ + , 打开偏好设置
+                onSettingsPressed?()
+                return
+            } else if isCmd && event.keyCode == 12 { // ⌘ + Q 退出
+                onQuitPressed?()
+                return
+            }
+            
             if event.keyCode == 53 { // ESC 键
                 onEscapePressed?()
                 return
@@ -58,6 +69,15 @@ final class FloatingPanel: NSPanel {
     }
     
     override func keyDown(with event: NSEvent) {
+        let isCmd = event.modifierFlags.contains(.command)
+        if isCmd && event.keyCode == 43 { // ⌘ + ,
+            onSettingsPressed?()
+            return
+        } else if isCmd && event.keyCode == 12 { // ⌘ + Q
+            onQuitPressed?()
+            return
+        }
+        
         if event.keyCode == 53 { // ESC 键
             onEscapePressed?()
             return

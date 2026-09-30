@@ -82,6 +82,7 @@ final class AppState: ObservableObject {
     var onTogglePanel: ((PanelMode) -> Void)?
     var onDismissPanel: (() -> Void)?
     var onExpansionChange: ((Bool) -> Void)?
+    var onOpenSettings: (() -> Void)?
     
     init() {
         refreshAllSystemStatus()
@@ -291,6 +292,15 @@ final class AppState: ObservableObject {
     func openFocusSettings() {
         SystemStatusProvider.shared.openFocusSettings()
         dismiss()
+    }
+    
+    func openSettings() {
+        dismiss()
+        onOpenSettings?()
+    }
+    
+    func quitApp() {
+        NSApp.terminate(nil)
     }
     
     func joinMeeting(url: URL) {

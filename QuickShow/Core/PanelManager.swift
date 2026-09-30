@@ -50,6 +50,16 @@ final class PanelManager {
             appState?.toggleExpanded()
         }
         
+        // ⌘ + , 快捷打开偏好设置
+        panel.onSettingsPressed = { [weak appState] in
+            appState?.openSettings()
+        }
+        
+        // ⌘ + Q 彻底退出
+        panel.onQuitPressed = { [weak appState] in
+            appState?.quitApp()
+        }
+        
         // 全键盘盲操快捷键
         panel.onKeyDownAction = { [weak appState] keyCode in
             guard let appState = appState else { return false }
