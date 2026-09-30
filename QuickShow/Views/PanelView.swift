@@ -53,8 +53,10 @@ struct PanelView: View {
             .opacity(0)
             .frame(width: 0, height: 0)
         }
-        .frame(width: 380, height: appState.isExpanded ? 268 : 176)
-        // 核心：严格限定在 26pt 连续曲率圆角内，四周零多余像素，零外围灰色背景
+        .frame(
+            width: appState.isExpanded ? 430 : 380,
+            height: appState.isExpanded ? 286 : 168
+        )
         .background(
             ZStack {
                 // 1. 原生高斯模糊材质（圆角内）

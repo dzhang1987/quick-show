@@ -5,11 +5,16 @@ struct StatusBarView: View {
     @State private var isPinHovered: Bool = false
     @State private var isExpandHovered: Bool = false
     
+    // 只在极简底栏展示具有电量上报的关键外设 (如 AirPods、带电量鼠键)
+    private var peripheralsWithBattery: [BluetoothDeviceInfo] {
+        appState.bluetoothDevices.filter { $0.batteryLevel != nil }
+    }
+    
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            // 左侧状态微标群（自适应弹性流式排列）
-            HStack(spacing: 10) {
-                // 1. 电池状态
+        HStack(alignment: .center, spacing: 14) {
+            // 左侧状态微标群（严格控量，彻底杜绝任何省略号）
+            HStack(spacing: 12) {
+                // 1. 电池状态 (固定宽度，绝不压缩截断)
                 if appState.showBattery && appState.batteryInfo.hasBattery {
                     HStack(spacing: 4) {
                         Image(systemName: batteryIconName)
@@ -21,59 +26,38 @@ struct StatusBarView: View {
                             .monospacedDigit()
                             .foregroundColor(.white.opacity(0.85))
                     }
+                    .fixedSize()
                 }
                 
                 // 2. WiFi 状态
+                // 极简模式下仅展示图标，展开模式下展示 SSID
                 if appState.showWiFi {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 5) {
                         Image(systemName: appState.wifiInfo.isConnected ? "wifi" : "wifi.slash")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(appState.wifiInfo.isConnected ? .white.opacity(0.85) : .white.opacity(0.35))
                         
-                        if let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
+                        if appState.isExpanded, let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
                             Text(ssid)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(.white.opacity(0.80))
                                 .lineLimit(1)
                         }
                     }
+                    .fixedSize()
                 }
                 
-                // 3. 蓝牙外设与电量（支持已连接的耳机、键盘、鼠标等）
-                if appState.showBluetooth && !appState.bluetoothDevices.isEmpty {
-                    ForEach(appState.bluetoothDevices.prefix(2), id: \.name) { bt in
-                        HStack(spacing: 4) {
-                            Image(systemName: bt.iconName)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color.cyan.opacity(0.85))
-                            
-                            if let level = bt.batteryLevel {
-                                Text("\(level)%")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .monospacedDigit()
-                                    .foregroundColor(.white.opacity(0.85))
-                            } else {
-                                Text(bt.name)
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.85))
-                                    .lineLimit(1)
-                                    .frame(maxWidth: 85, alignment: .leading)
-                            }
-                        }
-                    }
-                }
-                
-                // 4. 音频输出设备与音量
+                // 3. 音频输出 / 音量微标
                 if appState.showAudio {
                     HStack(spacing: 4) {
                         Image(systemName: audioIconName)
                             .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(appState.audioInfo.isMuted ? Color.orange.opacity(0.9) : .white.opacity(0.85))
+                            .foregroundColor(appState.audioInfo.isMuted ? Color.orange : .white.opacity(0.85))
                         
                         if appState.audioInfo.isMuted {
                             Text("静音")
                                 .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(Color.orange.opacity(0.9))
+                                .foregroundColor(Color.orange)
                         } else {
                             Text("\(appState.audioInfo.volume)%")
                                 .font(.system(size: 11, weight: .semibold))
@@ -81,52 +65,71 @@ struct StatusBarView: View {
                                 .foregroundColor(.white.opacity(0.85))
                         }
                     }
+                    .fixedSize()
                 }
                 
-                // 5. 勿扰 / 专注模式（仅在启用勿扰时高亮提示）
+                // 4. 关键外设电量（仅当存在电量上报时展示，如 AirPods 85%，无电量外设收纳至展开面板）
+                if appState.showBluetooth && !peripheralsWithBattery.isEmpty {
+                    ForEach(peripheralsWithBattery.prefix(2), id: \.name) { bt in
+                        HStack(spacing: 4) {
+                            Image(systemName: bt.iconName)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color.cyan.opacity(0.9))
+                            
+                            if let level = bt.batteryLevel {
+                                Text("\(level)%")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(level <= 20 ? Color.red.opacity(0.9) : .white.opacity(0.85))
+                            }
+                        }
+                        .fixedSize()
+                    }
+                }
+                
+                // 5. 勿扰 / 专注模式（仅在生效时点亮优雅微胶囊）
                 if appState.showDND && appState.dndInfo.isEnabled {
                     HStack(spacing: 3) {
                         Image(systemName: "moon.fill")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(Color.indigo.opacity(0.9))
+                            .font(.system(size: 9, weight: .medium))
                         Text("专注")
                             .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(Color.indigo.opacity(0.9))
                     }
+                    .foregroundColor(Color(red: 0.7, green: 0.6, blue: 1.0))
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(
                         Capsule()
-                            .fill(Color.indigo.opacity(0.20))
+                            .fill(Color(red: 0.4, green: 0.3, blue: 0.8).opacity(0.25))
                     )
+                    .fixedSize()
                 }
                 
-                // 6. 番茄钟微标（运行中时常驻展示）
-                if appState.enablePomodoro && appState.pomodoroRunning {
+                // 6. 番茄钟微标（运行中时在极简栏温和提示）
+                if appState.enablePomodoro && appState.pomodoroRunning && !appState.isExpanded {
                     HStack(spacing: 3) {
                         Image(systemName: "timer")
                             .font(.system(size: 10, weight: .semibold))
-                            .foregroundColor(Color.orange)
                         Text(appState.formattedPomodoroTime)
                             .font(.system(size: 11, weight: .bold))
                             .monospacedDigit()
-                            .foregroundColor(Color.orange)
                     }
+                    .foregroundColor(Color.orange)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(
                         Capsule()
                             .fill(Color.orange.opacity(0.18))
                     )
+                    .fixedSize()
                 }
             }
-            .lineLimit(1)
             
-            Spacer(minLength: 6)
+            Spacer(minLength: 12)
             
             // 右侧微交互功能键区
-            HStack(spacing: 6) {
-                // 详细性能与监控展开按钮 (Tab 键联动)
+            HStack(spacing: 8) {
+                // Tab 展开 / 收起微胶囊按钮
                 Button {
                     appState.toggleExpanded()
                 } label: {
@@ -137,19 +140,19 @@ struct StatusBarView: View {
                         Text(appState.isExpanded ? "收起" : "Tab")
                             .font(.system(size: 10, weight: .medium))
                     }
-                    .foregroundColor(appState.isExpanded ? Color.cyan : .white.opacity(isExpandHovered ? 0.9 : 0.45))
-                    .padding(.horizontal, 6)
+                    .foregroundColor(appState.isExpanded ? Color.cyan : .white.opacity(isExpandHovered ? 0.95 : 0.50))
+                    .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(
                         Capsule()
-                            .fill(appState.isExpanded ? Color.cyan.opacity(0.20) : Color.white.opacity(isExpandHovered ? 0.12 : 0.0))
+                            .fill(appState.isExpanded ? Color.cyan.opacity(0.20) : Color.white.opacity(isExpandHovered ? 0.12 : 0.04))
                     )
                 }
                 .buttonStyle(.plain)
                 .onHover { isExpandHovered = $0 }
-                .help(appState.isExpanded ? "收起监控面板 (按 Tab)" : "展开详细性能与效率面板 (按 Tab)")
+                .help(appState.isExpanded ? "收起监控看板 (按 Tab)" : "展开性能与效率看板 (按 Tab)")
                 
-                // 图钉固定按钮 (Space 键联动)
+                // 图钉常驻切换按钮
                 Button {
                     if appState.mode == .glance {
                         appState.pin()
@@ -166,18 +169,19 @@ struct StatusBarView: View {
                                 .font(.system(size: 10, weight: .medium))
                         }
                     }
-                    .foregroundColor(appState.mode == .pinned ? Color.cyan : .white.opacity(isPinHovered ? 0.9 : 0.45))
-                    .padding(.horizontal, 6)
+                    .foregroundColor(appState.mode == .pinned ? Color.cyan : .white.opacity(isPinHovered ? 0.95 : 0.50))
+                    .padding(.horizontal, 7)
                     .padding(.vertical, 3)
                     .background(
                         Capsule()
-                            .fill(appState.mode == .pinned ? Color.cyan.opacity(0.20) : Color.white.opacity(isPinHovered ? 0.12 : 0.0))
+                            .fill(appState.mode == .pinned ? Color.cyan.opacity(0.20) : Color.white.opacity(isPinHovered ? 0.12 : 0.04))
                     )
                 }
                 .buttonStyle(.plain)
                 .onHover { isPinHovered = $0 }
                 .help(appState.mode == .pinned ? "点击取消常驻 (或按 ESC)" : "点击常驻显示 (或按 Space)")
             }
+            .fixedSize()
         }
     }
     

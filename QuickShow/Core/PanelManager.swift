@@ -11,8 +11,8 @@ final class PanelManager {
     private var escLocalMonitor: Any?
     private weak var appState: AppState?
     
-    private let compactSize = NSSize(width: 380, height: 176)
-    private let expandedSize = NSSize(width: 380, height: 268)
+    private let compactSize = NSSize(width: 380, height: 168)
+    private let expandedSize = NSSize(width: 430, height: 286)
     
     private var previousApp: NSRunningApplication?
     private var isDismissing: Bool = false
