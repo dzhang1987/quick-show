@@ -14,21 +14,21 @@ struct StatusBarView: View {
     }
     
     var body: some View {
-        HStack(alignment: .center, spacing: 14) {
+        HStack(alignment: .center, spacing: 18) {
             // 左侧状态微标群（严格控量，彻底杜绝任何省略号）
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 // 1. 电池状态 (固定宽度，绝不压缩截断)
                 if appState.showBattery && appState.batteryInfo.hasBattery {
                     Button {
                         appState.openBatterySettings()
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 4.5) {
                             Image(systemName: batteryIconName)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(batteryColor)
                             
                             Text("\(appState.batteryInfo.percentage)%")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 11.5, weight: .semibold))
                                 .monospacedDigit()
                                 .foregroundColor(.white.opacity(0.85))
                         }
@@ -53,9 +53,9 @@ struct StatusBarView: View {
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(appState.wifiInfo.isConnected ? .white.opacity(0.85) : .white.opacity(0.35))
                             
-                            if appState.isExpanded, let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
+                            if let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
                                 Text(ssid)
-                                    .font(.system(size: 11, weight: .medium))
+                                    .font(.system(size: 11.5, weight: .medium))
                                     .foregroundColor(.white.opacity(0.80))
                                     .lineLimit(1)
                             }
@@ -136,7 +136,21 @@ struct StatusBarView: View {
                     .fixedSize()
                 }
                 
-                // 6. 番茄钟微标（运行中时在极简栏温和提示，支持点击暂停/继续）
+                // 6. 咖啡因防休眠（仅在真正开启激活时，温和亮起微型咖啡图标，未激活时彻底隐形）
+                if appState.isKeepAwake {
+                    Button {
+                        appState.toggleKeepAwake()
+                    } label: {
+                        Image(systemName: "cup.and.saucer.fill")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .help("防休眠运行中 (点击或按 A 关闭)")
+                    .fixedSize()
+                }
+                
+                // 7. 番茄钟微标（运行中时在极简栏温和提示，支持点击暂停/继续）
                 if appState.enablePomodoro && appState.pomodoroRunning && !appState.isExpanded {
                     Button {
                         appState.togglePomodoro()
@@ -164,111 +178,43 @@ struct StatusBarView: View {
             
             Spacer(minLength: 12)
             
-            // 右侧微交互功能键区
-            HStack(spacing: 7) {
-                // 咖啡因防休眠微胶囊按钮 (Caffeine / Keep Awake)
-                Button {
-                    appState.toggleKeepAwake()
-                } label: {
-                    Image(systemName: appState.isKeepAwake ? "cup.and.saucer.fill" : "cup.and.saucer")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(appState.isKeepAwake ? Color.orange : .white.opacity(isAwakeHovered ? 0.95 : 0.45))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(appState.isKeepAwake ? Color.orange.opacity(0.20) : Color.white.opacity(isAwakeHovered ? 0.12 : 0.04))
-                        )
-                }
-                .buttonStyle(.plain)
-                .onHover { isAwakeHovered = $0 }
-                .help(appState.isKeepAwake ? "防休眠已开启 (按 A 关闭)" : "开启防休眠阻止息屏 (按 A)")
-                
-                // Tab 展开 / 收起微胶囊按钮
-                Button {
-                    appState.toggleExpanded()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: appState.isExpanded ? "chevron.up" : "gauge.with.needle")
-                            .font(.system(size: 10, weight: .medium))
-                        
-                        Text(appState.isExpanded ? "收起" : "Tab")
-                            .font(.system(size: 10, weight: .medium))
-                    }
-                    .foregroundColor(appState.isExpanded ? Color.cyan : .white.opacity(isExpandHovered ? 0.95 : 0.50))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(appState.isExpanded ? Color.cyan.opacity(0.20) : Color.white.opacity(isExpandHovered ? 0.12 : 0.04))
-                    )
-                }
-                .buttonStyle(.plain)
-                .onHover { isExpandHovered = $0 }
-                .help(appState.isExpanded ? "收起监控看板 (按 Tab)" : "展开性能与效率看板 (按 Tab)")
-                
-                // 图钉常驻切换按钮 (Toggle Pin / Unpin)
-                Button {
-                    appState.togglePin()
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: appState.mode == .pinned ? "pin.fill" : "pin")
-                            .font(.system(size: 10, weight: .medium))
-                        
-                        if appState.mode == .pinned {
-                            Text("常驻")
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                    }
-                    .foregroundColor(appState.mode == .pinned ? Color.cyan : .white.opacity(isPinHovered ? 0.95 : 0.50))
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(appState.mode == .pinned ? Color.cyan.opacity(0.20) : Color.white.opacity(isPinHovered ? 0.12 : 0.04))
-                    )
-                }
-                .buttonStyle(.plain)
-                .onHover { isPinHovered = $0 }
-                .help(appState.mode == .pinned ? "点击解除常驻 (按 Space)" : "点击常驻显示 (按 Space)")
-                
-                // 快捷键速查按钮（点击切换，长按 ⌘ 也能弹出）
-                Button {
-                    appState.toggleCheatSheet()
-                } label: {
-                    Image(systemName: "questionmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(appState.showCheatSheet ? Color.orange : .white.opacity(isHelpHovered ? 0.95 : 0.45))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(appState.showCheatSheet ? Color.orange.opacity(0.20) : Color.white.opacity(isHelpHovered ? 0.12 : 0.04))
-                        )
-                }
-                .buttonStyle(.plain)
-                .onHover { isHelpHovered = $0 }
-                .help("快捷键速查 (按 ? 或长按 ⌘)")
-                
-                // 偏好设置按钮（展开监控或固定常驻时呈现）
-                if appState.isExpanded || appState.mode == .pinned {
+            // 右侧微交互功能键区：仅保留纯净、无文字的微型图钉图标（彻底干掉多余胶囊、问号与设置）
+            HStack(spacing: 6) {
+                // 如果处于展开态，展示精致的折叠向上箭头
+                if appState.isExpanded {
                     Button {
-                        appState.openSettings()
+                        appState.toggleExpanded()
                     } label: {
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.white.opacity(isSettingsHovered ? 0.95 : 0.50))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(isExpandHovered ? 0.95 : 0.45))
+                            .frame(width: 24, height: 24)
                             .background(
-                                Capsule()
-                                    .fill(Color.white.opacity(isSettingsHovered ? 0.12 : 0.04))
+                                Circle()
+                                    .fill(Color.white.opacity(isExpandHovered ? 0.08 : 0.0))
                             )
                     }
                     .buttonStyle(.plain)
-                    .onHover { isSettingsHovered = $0 }
-                    .help("偏好设置 (按 ⌘,)")
+                    .onHover { isExpandHovered = $0 }
+                    .help("收起看板 (按 Tab)")
                 }
+                
+                // 图钉常驻切换按钮 (Toggle Pin / Unpin) - 零文字纯粹图标
+                Button {
+                    appState.togglePin()
+                } label: {
+                    Image(systemName: appState.mode == .pinned ? "pin.fill" : "pin")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundColor(appState.mode == .pinned ? Color.cyan : .white.opacity(isPinHovered ? 0.90 : 0.40))
+                        .frame(width: 24, height: 24)
+                        .background(
+                            Circle()
+                                .fill(appState.mode == .pinned ? Color.cyan.opacity(0.18) : Color.white.opacity(isPinHovered ? 0.08 : 0.0))
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { isPinHovered = $0 }
+                .help(appState.mode == .pinned ? "已常驻显示 (点击或按 Space 解除)" : "点击常驻固定 (快捷键 Space)")
             }
             .fixedSize()
         }

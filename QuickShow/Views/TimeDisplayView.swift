@@ -2,6 +2,20 @@ import SwiftUI
 
 struct TimeDisplayView: View {
     @ObservedObject var appState: AppState
+    var panelWidth: CGFloat = 680
+    
+    private var clockFontSize: CGFloat {
+        // 系统聚焦级大字排版：440宽为84pt，540宽为98pt，680宽为124pt，顶天立地主角气场
+        min(max(panelWidth * 0.183, 84.0), 126.0)
+    }
+    
+    private var secondsFontSize: CGFloat {
+        clockFontSize * 0.42
+    }
+    
+    private var periodFontSize: CGFloat {
+        clockFontSize * 0.22
+    }
     
     // 静态缓存 DateFormatter，避免每秒重复分配 ICU 字典与本地化对象
     private static let hourMinute24: DateFormatter = {
@@ -63,16 +77,16 @@ struct TimeDisplayView: View {
                 if let toast = appState.toastMessage {
                     HStack(spacing: 4) {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(.system(size: 11, weight: .semibold))
                             .foregroundColor(Color.green.opacity(0.95))
                         
                         Text(toast)
-                            .font(.system(size: 11, weight: .semibold, design: .default))
+                            .font(.system(size: 12.5, weight: .semibold, design: .default))
                             .foregroundColor(.white)
                             .lineLimit(1)
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 4.5)
                     .background(
                         Capsule()
                             .fill(Color.white.opacity(0.15))
@@ -87,11 +101,11 @@ struct TimeDisplayView: View {
                         appState.openCalendarApp()
                     } label: {
                         Text(dateFormatted)
-                            .font(.system(size: 12, weight: .semibold, design: .default))
+                            .font(.system(size: 13, weight: .semibold, design: .default))
                             .tracking(1.2)
                             .foregroundColor(.white.opacity(0.85))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 3)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 4.5)
                             .background(
                                 Capsule()
                                     .fill(Color.white.opacity(0.08))
@@ -108,18 +122,18 @@ struct TimeDisplayView: View {
             }
             .animation(.easeInOut(duration: 0.16), value: appState.toastMessage)
             
-            // 核心大字时钟：具有力量感与张力的 SF Pro 饱满排版（绝非干瘪细线）
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
+            // 核心大字时钟：原生超大字重、纯正黑曜石光感
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
                 if let period = period {
                     Text(period)
-                        .font(.system(size: 18, weight: .bold, design: .default))
+                        .font(.system(size: periodFontSize, weight: .bold, design: .default))
                         .foregroundColor(.white.opacity(0.70))
                         .padding(.trailing, 2)
                 }
                 
-                // 时与分：68pt Medium 字重，结实有力，纯白高对比
+                // 时与分：原生 104pt 大字号 Medium 字重，结实有力，纯白高对比
                 Text(hourMinute)
-                    .font(.system(size: 68, weight: .medium, design: .default))
+                    .font(.system(size: clockFontSize, weight: .medium, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(
                         LinearGradient(
@@ -128,18 +142,18 @@ struct TimeDisplayView: View {
                             endPoint: .bottom
                         )
                     )
-                    .shadow(color: Color.black.opacity(0.35), radius: 4, x: 0, y: 2)
+                    .shadow(color: Color.black.opacity(0.40), radius: 6, x: 0, y: 3)
                 
-                // 秒数：32pt 紧凑清晰副排版
+                // 秒数：紧凑清晰副排版
                 if appState.showSeconds {
                     HStack(spacing: 2) {
                         Text(":")
-                            .font(.system(size: 32, weight: .light, design: .default))
+                            .font(.system(size: secondsFontSize, weight: .light, design: .default))
                             .foregroundColor(.white.opacity(0.40))
                             .offset(y: -2)
                         
                         Text(seconds)
-                            .font(.system(size: 32, weight: .semibold, design: .default))
+                            .font(.system(size: secondsFontSize, weight: .semibold, design: .default))
                             .monospacedDigit()
                             .foregroundStyle(
                                 LinearGradient(
@@ -148,7 +162,7 @@ struct TimeDisplayView: View {
                                     endPoint: .bottom
                                 )
                             )
-                            .shadow(color: Color.black.opacity(0.30), radius: 3, x: 0, y: 1)
+                            .shadow(color: Color.black.opacity(0.35), radius: 4, x: 0, y: 2)
                     }
                     .padding(.leading, 2)
                 }

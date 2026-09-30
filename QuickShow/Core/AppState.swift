@@ -7,6 +7,24 @@ enum PanelMode: Equatable {
     case pinned   // 固定模式：常驻显示，直到用户按 ESC 或快捷键
 }
 
+enum PanelScaleOption: String, CaseIterable, Identifiable {
+    case auto = "auto"
+    case standard = "standard"
+    case compact = "compact"
+    case legacy = "legacy"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .auto: return "自动（跟随当前屏幕智能自适应，推荐）"
+        case .standard: return "系统聚焦大号（宽 680 pt，红框聚焦标杆）"
+        case .compact: return "适中舒适（宽 540 pt）"
+        case .legacy: return "极简小巧（宽 440 pt）"
+        }
+    }
+}
+
 final class AppState: ObservableObject {
     @Published var mode: PanelMode = .hidden
     @Published var isExpanded: Bool = false
@@ -88,6 +106,24 @@ final class AppState: ObservableObject {
         }
     }
     
+    // 界面尺寸与屏幕自适应
+    @AppStorage("panelScaleOption") var panelScaleOptionRaw: String = PanelScaleOption.auto.rawValue
+    
+    var panelScaleOption: PanelScaleOption {
+        get {
+            PanelScaleOption(rawValue: panelScaleOptionRaw) ?? .auto
+        }
+        set {
+            panelScaleOptionRaw = newValue.rawValue
+            objectWillChange.send()
+            onLayoutChange?()
+        }
+    }
+    
+    func currentMetrics(for screen: NSScreen = ScreenHelper.activeScreen) -> PanelLayoutMetrics {
+        ScreenHelper.metrics(for: screen, option: panelScaleOption)
+    }
+    
     private var glanceTimer: Timer?
     private var clockTimer: AnyCancellable?
     private var tickCounter: Int = 0
@@ -98,6 +134,7 @@ final class AppState: ObservableObject {
     var onOpenSettings: (() -> Void)?
     var onMenuBarIconVisibilityChange: ((Bool) -> Void)?
     var onCheatSheetChange: ((Bool) -> Void)?
+    var onLayoutChange: (() -> Void)?
     
     init() {
         refreshAllSystemStatus()

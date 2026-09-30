@@ -11,9 +11,6 @@ final class PanelManager {
     private var escLocalMonitor: Any?
     private weak var appState: AppState?
     
-    private let compactSize = NSSize(width: 380, height: 168)
-    private let expandedSize = NSSize(width: 430, height: 286)
-    
     private var previousApp: NSRunningApplication?
     private var isDismissing: Bool = false
     
@@ -21,13 +18,15 @@ final class PanelManager {
     
     func setup(with appState: AppState) {
         self.appState = appState
-        let frame = ScreenHelper.centeredFrame(for: compactSize)
+        let screen = ScreenHelper.activeScreen
+        let initialSize = targetSize(on: screen)
+        let frame = ScreenHelper.centeredFrame(for: initialSize, on: screen)
         let panel = FloatingPanel(contentRect: frame)
         
         let contentView = PanelView(appState: appState)
         let hostingView = NSHostingView(rootView: contentView)
         hostingView.wantsLayer = true
-        // 关键核心：在 AppKit 根图层硬件级施加 26pt 连续曲率圆角裁剪，彻底杜绝窗口尺寸变化中途露出直角
+        // 关键核心：在 AppKit 根图层硬件级施加 26pt 连续曲率圆角裁剪，沉稳克制，杜绝直角
         hostingView.layer?.cornerRadius = 26
         hostingView.layer?.cornerCurve = .continuous
         hostingView.layer?.masksToBounds = true
@@ -145,20 +144,29 @@ final class PanelManager {
         appState.onCheatSheetChange = { [weak self] _ in
             self?.updatePanelFrameAnimated()
         }
+        
+        appState.onCheatSheetChange = { [weak self] _ in
+            self?.updatePanelFrameAnimated()
+        }
+        
+        appState.onLayoutChange = { [weak self] in
+            self?.updatePanelFrameAnimated()
+        }
     }
     
-    private func targetSize() -> NSSize {
-        if appState?.isExpanded == true || appState?.showCheatSheet == true {
-            return expandedSize
-        }
-        return compactSize
+    private func targetSize(on screen: NSScreen = ScreenHelper.activeScreen) -> NSSize {
+        let metrics = appState?.currentMetrics(for: screen) ?? ScreenHelper.metrics(for: screen, option: .auto)
+        let isExpandedOrCheat = (appState?.isExpanded == true || appState?.showCheatSheet == true)
+        return isExpandedOrCheat ? metrics.expandedSize : metrics.compactSize
     }
     
     func showPanel(mode: PanelMode) {
         guard let panel = panel else { return }
         
-        let size = targetSize()
-        let newFrame = ScreenHelper.centeredFrame(for: size)
+        let screen = ScreenHelper.activeScreen
+        let size = targetSize(on: screen)
+        let newFrame = ScreenHelper.centeredFrame(for: size, on: screen)
+        
         panel.setFrame(newFrame, display: true)
         panel.invalidateShadow()
         
@@ -189,7 +197,8 @@ final class PanelManager {
     
     func updatePanelFrameAnimated() {
         guard let panel = panel, panel.isVisible else { return }
-        let targetFrame = ScreenHelper.centeredFrame(for: targetSize())
+        let screen = ScreenHelper.activeScreen
+        let targetFrame = ScreenHelper.centeredFrame(for: targetSize(on: screen), on: screen)
         
         // 与 SwiftUI 0.18s easeInEaseOut 动画完全同步，并在完成时立即重建精准阴影
         NSAnimationContext.runAnimationGroup({ ctx in
@@ -234,7 +243,9 @@ final class PanelManager {
             self.isDismissing = false
             
             // 重置尺寸回默认紧凑态
-            let resetFrame = ScreenHelper.centeredFrame(for: self.compactSize)
+            let screen = ScreenHelper.activeScreen
+            let metrics = self.appState?.currentMetrics(for: screen) ?? ScreenHelper.metrics(for: screen, option: .auto)
+            let resetFrame = ScreenHelper.centeredFrame(for: metrics.compactSize, on: screen)
             panel.setFrame(resetFrame, display: false)
             
             // 释放闲置内存

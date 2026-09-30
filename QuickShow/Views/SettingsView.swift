@@ -152,6 +152,21 @@ struct GeneralSettingsForm: View {
             }
             
             Section {
+                Picker("卡片显示尺寸", selection: Binding(
+                    get: { appState.panelScaleOption },
+                    set: { appState.panelScaleOption = $0 }
+                )) {
+                    ForEach(PanelScaleOption.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+            } header: {
+                Text("界面尺寸与自适应")
+            } footer: {
+                Text("默认「自动」将根据当前显示器分辨率精密自适应，内容自然包裹，保持高信息密度与无黑洞紧凑排版；亦可手动选择标准、紧凑或大号尺寸。")
+            }
+            
+            Section {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
                         Text("一瞥模式显示时长")

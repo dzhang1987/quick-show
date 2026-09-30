@@ -4,15 +4,21 @@ struct PanelView: View {
     @ObservedObject var appState: AppState
     
     var body: some View {
+        let metrics = appState.currentMetrics()
+        let isExpandedOrCheat = (appState.isExpanded || appState.showCheatSheet)
+        let panelWidth = isExpandedOrCheat ? metrics.expandedSize.width : metrics.compactSize.width
+        let panelHeight = isExpandedOrCheat ? metrics.expandedSize.height : metrics.compactSize.height
+        
         VStack(spacing: 0) {
             // 上半部分：核心大字时钟与日期徽章
-            TimeDisplayView(appState: appState)
-                .padding(.top, 16)
+            TimeDisplayView(appState: appState, panelWidth: panelWidth)
+                .padding(.top, isExpandedOrCheat ? 16 : 30)
                 .padding(.horizontal, 24)
             
-            Spacer(minLength: 8)
+            // 严格受限的自然呼吸微间距，彻底杜绝拉裂虚空
+            Spacer(minLength: 8).frame(maxHeight: isExpandedOrCheat ? 12 : 36)
             
-            // 细若游丝的微光渐隐分割线
+            // 细若游丝的微光渐隐分割线（严格保持 0.5pt 高度）
             Rectangle()
                 .fill(
                     LinearGradient(
@@ -26,17 +32,19 @@ struct PanelView: View {
                     )
                 )
                 .frame(height: 0.5)
-                .padding(.horizontal, 22)
+                .padding(.horizontal, 24)
             
-            // 底部微状态栏（P0 状态：电池、WiFi、蓝牙、音频、勿扰、图钉、Tab展开键）
+            // 底部微状态栏（P0 状态：电池、WiFi、音频、常驻图钉）
             StatusBarView(appState: appState)
-                .padding(.horizontal, 22)
-                .padding(.top, 10)
-                .padding(.bottom, appState.isExpanded ? 6 : 14)
+                .padding(.horizontal, 24)
+                .padding(.top, isExpandedOrCheat ? 10 : 16)
+                .padding(.bottom, appState.isExpanded ? 8 : 24)
             
             // 展开后的监控面板 (P1 状态：CPU/内存负载、网速、日历日程、番茄钟)
             if appState.isExpanded {
                 ExpandedMonitoringView(appState: appState)
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 10)
                     .transition(
                         .asymmetric(
                             insertion: .opacity.animation(.easeInOut(duration: 0.16).delay(0.04)),
@@ -72,10 +80,7 @@ struct PanelView: View {
         .onHover { isHovering in
             appState.setHovered(isHovering)
         }
-        .frame(
-            width: (appState.isExpanded || appState.showCheatSheet) ? 430 : 380,
-            height: (appState.isExpanded || appState.showCheatSheet) ? 286 : 168
-        )
+        .frame(width: panelWidth, height: panelHeight)
         .background(
             ZStack {
                 // 1. 原生高斯模糊材质（圆角内）
@@ -189,18 +194,18 @@ struct CheatSheetView: View {
     @ObservedObject var appState: AppState
     
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 12) {
             // 顶部小标题栏
             HStack {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: "command")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 13, weight: .bold))
                         .foregroundColor(.orange)
-                    Text("全键盘盲操速查")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.white.opacity(0.92))
+                    Text("全键盘盲操速查表")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white.opacity(0.95))
                     Text("(按住 ⌘ 提示 · 松开自动收起)")
-                        .font(.system(size: 9.5, weight: .regular))
+                        .font(.system(size: 11, weight: .regular))
                         .foregroundColor(.white.opacity(0.45))
                 }
                 
@@ -210,16 +215,16 @@ struct CheatSheetView: View {
                     appState.setCheatSheetVisible(false)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.35))
+                        .font(.system(size: 15))
+                        .foregroundColor(.white.opacity(0.40))
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
+            .padding(.horizontal, 18)
+            .padding(.top, 14)
             
-            // 三列结构化快捷键分组
-            HStack(alignment: .top, spacing: 8) {
+            // 三列结构化快捷键分组 (满铺卡片网格)
+            HStack(alignment: .top, spacing: 10) {
                 // 列 1：基础交互
                 ShortcutGroupCard(title: "基础控制", shortcuts: [
                     ("Tab", "展开 / 收起看板"),
@@ -232,23 +237,24 @@ struct CheatSheetView: View {
                 // 列 2：效率工具
                 ShortcutGroupCard(title: "效率加速", shortcuts: [
                     ("A", "防休眠阻止息屏"),
-                    ("C", "清理释放内存"),
+                    ("C", "清理释放系统内存"),
                     ("X", "剪贴板纯文本化"),
-                    ("O", "秒开下载目录"),
+                    ("O", "秒开系统下载目录"),
                     ("L", "全屏锁屏离座")
                 ])
                 
                 // 列 3：系统控制
                 ShortcutGroupCard(title: "系统控制", shortcuts: [
-                    ("M", "一键静音/恢复"),
+                    ("M", "一键静音 / 恢复"),
                     ("↑ / ↓", "微调主音量 (±5%)"),
-                    ("P", "番茄钟播放/暂停"),
+                    ("P", "番茄钟播放 / 暂停"),
                     ("D", "专注模式设置"),
-                    ("?", "速查卡片开关")
+                    ("?", "速查卡片常驻开关")
                 ])
             }
-            .padding(.horizontal, 12)
-            .padding(.bottom, 12)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 14)
+            .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -274,7 +280,7 @@ struct CheatSheetView: View {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
         )
-        .padding(5)
+        .padding(6)
     }
 }
 
@@ -283,38 +289,45 @@ struct ShortcutGroupCard: View {
     let shortcuts: [(String, String)]
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 9.5, weight: .bold))
-                .foregroundColor(.white.opacity(0.50))
+                .font(.system(size: 11.5, weight: .bold))
+                .foregroundColor(.white.opacity(0.70))
+                .padding(.horizontal, 4)
                 .padding(.bottom, 2)
             
             ForEach(shortcuts, id: \.0) { key, desc in
-                HStack(spacing: 5) {
+                HStack(spacing: 8) {
                     Text(key)
-                        .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                         .foregroundColor(.orange.opacity(0.95))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1.5)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
                         .background(
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(Color.white.opacity(0.08))
                         )
                     
                     Text(desc)
-                        .font(.system(size: 8.5, weight: .medium))
-                        .foregroundColor(.white.opacity(0.78))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.85))
                         .lineLimit(1)
                     
                     Spacer(minLength: 0)
                 }
             }
+            
+            Spacer(minLength: 0)
         }
-        .padding(7)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(Color.white.opacity(0.03))
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.white.opacity(0.04))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
         )
     }
 }
