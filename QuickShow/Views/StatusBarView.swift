@@ -30,7 +30,7 @@ struct StatusBarView: View {
                             Text("\(appState.batteryInfo.percentage)%")
                                 .font(.system(size: 11.5, weight: .semibold))
                                 .monospacedDigit()
-                                .foregroundColor(.white.opacity(0.85))
+                                .foregroundColor(.primary)
                         }
                     }
                     .buttonStyle(.plain)
@@ -51,12 +51,13 @@ struct StatusBarView: View {
                         HStack(spacing: 5) {
                             Image(systemName: appState.wifiInfo.isConnected ? "wifi" : "wifi.slash")
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(appState.wifiInfo.isConnected ? .white.opacity(0.85) : .white.opacity(0.35))
+                                // 断连弱化态也需保证可读：0.50 是亮玻璃下的可读下限
+                                .foregroundColor(appState.wifiInfo.isConnected ? .primary : Color.primary.opacity(0.50))
                             
                             if let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
                                 Text(ssid)
                                     .font(.system(size: 11.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.80))
+                                    .foregroundColor(.secondary)
                                     .lineLimit(1)
                             }
                         }
@@ -74,7 +75,7 @@ struct StatusBarView: View {
                         HStack(spacing: 4) {
                             Image(systemName: audioIconName)
                                 .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(appState.audioInfo.isMuted ? Color.orange : .white.opacity(0.85))
+                                .foregroundColor(appState.audioInfo.isMuted ? Color.orange : .primary)
                             
                             if appState.audioInfo.isMuted {
                                 Text("静音")
@@ -84,7 +85,7 @@ struct StatusBarView: View {
                                 Text("\(appState.audioInfo.volume)%")
                                     .font(.system(size: 11, weight: .semibold))
                                     .monospacedDigit()
-                                    .foregroundColor(.white.opacity(0.85))
+                                    .foregroundColor(.primary)
                             }
                         }
                     }
@@ -105,7 +106,7 @@ struct StatusBarView: View {
                                 Text("\(level)%")
                                     .font(.system(size: 11, weight: .semibold))
                                     .monospacedDigit()
-                                    .foregroundColor(level <= 20 ? Color.red.opacity(0.9) : .white.opacity(0.85))
+                                    .foregroundColor(level <= 20 ? Color.red.opacity(0.9) : .primary)
                             }
                         }
                         .fixedSize()
@@ -123,12 +124,13 @@ struct StatusBarView: View {
                             Text("专注")
                                 .font(.system(size: 10, weight: .medium))
                         }
-                        .foregroundColor(Color(red: 0.7, green: 0.6, blue: 1.0))
+                        // 语义紫色：系统 .purple 自带双模式变体，亮色下自动加深保持可读
+                        .foregroundColor(Color.purple)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(
                             Capsule()
-                                .fill(Color(red: 0.4, green: 0.3, blue: 0.8).opacity(0.25))
+                                .fill(Color.purple.opacity(0.18))
                         )
                     }
                     .buttonStyle(.plain)
@@ -187,11 +189,12 @@ struct StatusBarView: View {
                     } label: {
                         Image(systemName: "chevron.up")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white.opacity(isExpandHovered ? 0.95 : 0.45))
+                            // 交互元素对比度下限：静止态 0.60 明确可见，hover 0.95 增强反馈
+                            .foregroundColor(Color.primary.opacity(isExpandHovered ? 0.95 : 0.60))
                             .frame(width: 24, height: 24)
                             .background(
                                 Circle()
-                                    .fill(Color.white.opacity(isExpandHovered ? 0.08 : 0.0))
+                                    .fill(Color.primary.opacity(isExpandHovered ? 0.10 : 0.0))
                             )
                     }
                     .buttonStyle(.plain)
@@ -205,11 +208,12 @@ struct StatusBarView: View {
                 } label: {
                     Image(systemName: appState.mode == .pinned ? "pin.fill" : "pin")
                         .font(.system(size: 11.5, weight: .medium))
-                        .foregroundColor(appState.mode == .pinned ? Color.cyan : .white.opacity(isPinHovered ? 0.90 : 0.40))
+                        // 交互元素对比度下限：静止态 0.60 明确可见，hover 0.95 增强反馈（pinned 态青色保留）
+                        .foregroundColor(appState.mode == .pinned ? Color.cyan : Color.primary.opacity(isPinHovered ? 0.95 : 0.60))
                         .frame(width: 24, height: 24)
                         .background(
                             Circle()
-                                .fill(appState.mode == .pinned ? Color.cyan.opacity(0.18) : Color.white.opacity(isPinHovered ? 0.08 : 0.0))
+                                .fill(appState.mode == .pinned ? Color.cyan.opacity(0.18) : Color.primary.opacity(isPinHovered ? 0.10 : 0.0))
                         )
                 }
                 .buttonStyle(.plain)
@@ -239,7 +243,7 @@ struct StatusBarView: View {
         if appState.batteryInfo.percentage <= 20 {
             return Color(red: 1.0, green: 0.35, blue: 0.35)
         }
-        return .white.opacity(0.85)
+        return .primary
     }
     
     private var audioIconName: String {

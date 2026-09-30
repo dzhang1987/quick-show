@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TimeDisplayView: View {
     @ObservedObject var appState: AppState
+    // 面板实际渲染宽度（随窗口动画逐帧连续变化），驱动下方字号连续缩放，主角时钟永不跳档；
+    // 首帧布局尚未测得实际宽度时，由调用方传入目标尺寸作兜底
     var panelWidth: CGFloat = 680
     
     private var clockFontSize: CGFloat {
@@ -82,17 +84,19 @@ struct TimeDisplayView: View {
                         
                         Text(toast)
                             .font(.system(size: 12.5, weight: .semibold, design: .default))
-                            .foregroundColor(.white)
+                            .foregroundColor(.primary)
                             .lineLimit(1)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 4.5)
                     .background(
+                        // 语义色：primary 随玻璃明暗自动翻转；
+                        // toast 是强提示，胶囊底/描边需明显高于普通徽章，亮玻璃下依然可感知
                         Capsule()
-                            .fill(Color.white.opacity(0.15))
+                            .fill(Color.primary.opacity(0.13))
                             .overlay(
                                 Capsule()
-                                    .stroke(Color.white.opacity(0.25), lineWidth: 0.5)
+                                    .stroke(Color.primary.opacity(0.25), lineWidth: 0.5)
                             )
                     )
                     .transition(.opacity.combined(with: .scale(scale: 0.95)))
@@ -103,15 +107,16 @@ struct TimeDisplayView: View {
                         Text(dateFormatted)
                             .font(.system(size: 13, weight: .semibold, design: .default))
                             .tracking(1.2)
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundColor(.secondary)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 4.5)
                             .background(
+                                // 日期徽章底/描边上调对比度下限：黑色低 alpha 在亮玻璃下会"洗白"消失
                                 Capsule()
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(Color.primary.opacity(0.08))
                                     .overlay(
                                         Capsule()
-                                            .stroke(Color.white.opacity(0.12), lineWidth: 0.5)
+                                            .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
                                     )
                             )
                     }
@@ -127,42 +132,41 @@ struct TimeDisplayView: View {
                 if let period = period {
                     Text(period)
                         .font(.system(size: periodFontSize, weight: .bold, design: .default))
-                        .foregroundColor(.white.opacity(0.70))
+                        .foregroundColor(.secondary)
                         .padding(.trailing, 2)
                 }
                 
-                // 时与分：原生 104pt 大字号 Medium 字重，结实有力，纯白高对比
+                // 时与分：原生 104pt 大字号 Medium 字重，结实有力，高对比主角（primary 随玻璃明暗自动翻转）
                 Text(hourMinute)
                     .font(.system(size: clockFontSize, weight: .medium, design: .default))
                     .monospacedDigit()
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [Color.white, Color(white: 0.94)],
+                            colors: [Color.primary, Color.primary.opacity(0.9)],
                             startPoint: .top,
                             endPoint: .bottom
                         )
                     )
-                    .shadow(color: Color.black.opacity(0.40), radius: 6, x: 0, y: 3)
                 
                 // 秒数：紧凑清晰副排版
                 if appState.showSeconds {
                     HStack(spacing: 2) {
                         Text(":")
                             .font(.system(size: secondsFontSize, weight: .light, design: .default))
-                            .foregroundColor(.white.opacity(0.40))
+                            .foregroundStyle(.tertiary)
                             .offset(y: -2)
                         
                         Text(seconds)
                             .font(.system(size: secondsFontSize, weight: .semibold, design: .default))
                             .monospacedDigit()
                             .foregroundStyle(
+                                // 三级副排版：primary 低透明度渐变，保留细腻质感且随玻璃翻转
                                 LinearGradient(
-                                    colors: [Color.white.opacity(0.95), Color.white.opacity(0.75)],
+                                    colors: [Color.primary.opacity(0.85), Color.primary.opacity(0.65)],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
-                            .shadow(color: Color.black.opacity(0.35), radius: 4, x: 0, y: 2)
                     }
                     .padding(.leading, 2)
                 }

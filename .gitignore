@@ -10,3 +10,7 @@ xcuserdata/
 
 # OS
 .DS_Store
+
+# 调试与录屏产物（本地诊断用，不入库）
+.opencode/
+*.mov

@@ -3,6 +3,10 @@ import SwiftUI
 struct ExpandedMonitoringView: View {
     @ObservedObject var appState: AppState
     
+    // 监控区理想总高：分割线 0.5 + 间距 8 + 卡片 225 + 卡片上下 padding 2+6
+    // PanelView 展开/收起时以此值为占位高度目标做 0.18s 连续插值（Hero 生长/收拢）
+    static let contentHeight: CGFloat = 241.5
+    
     // 适配展开态 (520pt 高度) 的 Bento 卡片黄金高度：225 pt
     private let cardHeight: CGFloat = 225
     
@@ -13,9 +17,9 @@ struct ExpandedMonitoringView: View {
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.14),
-                            Color.white.opacity(0.0)
+                            Color.primary.opacity(0.0),
+                            Color.primary.opacity(0.25),
+                            Color.primary.opacity(0.0)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -36,7 +40,7 @@ struct ExpandedMonitoringView: View {
                                 .foregroundColor(.cyan.opacity(0.95))
                             Text("系统性能与网络")
                                 .font(.system(size: 11.5, weight: .bold))
-                                .foregroundColor(.white.opacity(0.92))
+                                .foregroundColor(.primary)
                         }
                         
                         Spacer()
@@ -50,12 +54,12 @@ struct ExpandedMonitoringView: View {
                                 Image(systemName: "arrow.up.forward.app")
                                     .font(.system(size: 8.5))
                             }
-                            .foregroundColor(.white.opacity(0.45))
+                            .foregroundStyle(.tertiary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2.5)
                             .background(
                                 Capsule()
-                                    .fill(Color.white.opacity(0.06))
+                                    .fill(Color.primary.opacity(0.05))
                             )
                         }
                         .buttonStyle(.plain)
@@ -67,7 +71,7 @@ struct ExpandedMonitoringView: View {
                         HStack(spacing: 6) {
                             Text("CPU 负载")
                                 .font(.system(size: 10.5, weight: .medium))
-                                .foregroundColor(.white.opacity(0.65))
+                                .foregroundColor(.secondary)
                             
                             Spacer()
                             
@@ -82,7 +86,7 @@ struct ExpandedMonitoringView: View {
                             } else {
                                 Text("平稳运行")
                                     .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.35))
+                                    .foregroundStyle(.tertiary)
                             }
                             
                             Text(String(format: "%2.0f%%", appState.performanceInfo.cpuUsage))
@@ -95,7 +99,7 @@ struct ExpandedMonitoringView: View {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(Color.primary.opacity(0.06))
                                 Capsule()
                                     .fill(
                                         LinearGradient(
@@ -115,13 +119,13 @@ struct ExpandedMonitoringView: View {
                         HStack(spacing: 6) {
                             Text("内存占用")
                                 .font(.system(size: 10.5, weight: .medium))
-                                .foregroundColor(.white.opacity(0.65))
+                                .foregroundColor(.secondary)
                             
                             Spacer()
                             
                             Text("\(String(format: "%.1f", appState.performanceInfo.memoryUsedGB))G / \(Int(appState.performanceInfo.memoryTotalGB))G")
                                 .font(.system(size: 9.5, weight: .medium))
-                                .foregroundColor(.white.opacity(0.55))
+                                .foregroundStyle(.tertiary)
                                 .monospacedDigit()
                             
                             // 一键内存优化清理微按钮
@@ -152,7 +156,7 @@ struct ExpandedMonitoringView: View {
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(Color.primary.opacity(0.06))
                                 Capsule()
                                     .fill(
                                         LinearGradient(
@@ -173,10 +177,10 @@ struct ExpandedMonitoringView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "internaldrive")
                                     .font(.system(size: 9.5))
-                                    .foregroundColor(.white.opacity(0.55))
+                                    .foregroundStyle(.tertiary)
                                 Text("系统磁盘")
                                     .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.65))
+                                    .foregroundColor(.secondary)
                             }
                             
                             Spacer()
@@ -184,7 +188,7 @@ struct ExpandedMonitoringView: View {
                             if appState.diskInfo.totalGB > 0 {
                                 Text("\(Int(appState.diskInfo.freeGB))G 可用 / \(Int(appState.diskInfo.totalGB))G")
                                     .font(.system(size: 9.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.65))
+                                    .foregroundColor(.secondary)
                                     .monospacedDigit()
                             }
                             
@@ -210,7 +214,7 @@ struct ExpandedMonitoringView: View {
                             let usedRatio: CGFloat = appState.diskInfo.totalGB > 0 ? CGFloat((appState.diskInfo.totalGB - appState.diskInfo.freeGB) / appState.diskInfo.totalGB) : 0.5
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.white.opacity(0.08))
+                                    .fill(Color.primary.opacity(0.06))
                                 Capsule()
                                     .fill(
                                         LinearGradient(
@@ -238,7 +242,7 @@ struct ExpandedMonitoringView: View {
                                 Text(appState.trafficInfo.downloadSpeed)
                                     .font(.system(size: 11, weight: .semibold))
                                     .monospacedDigit()
-                                    .foregroundColor(.white.opacity(0.92))
+                                    .foregroundColor(.primary)
                             }
                             
                             HStack(spacing: 4) {
@@ -248,7 +252,7 @@ struct ExpandedMonitoringView: View {
                                 Text(appState.trafficInfo.uploadSpeed)
                                     .font(.system(size: 11, weight: .semibold))
                                     .monospacedDigit()
-                                    .foregroundColor(.white.opacity(0.92))
+                                    .foregroundColor(.primary)
                             }
                         }
                         
@@ -261,16 +265,16 @@ struct ExpandedMonitoringView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "doc.on.doc")
                                     .font(.system(size: 8.5))
-                                    .foregroundColor(.white.opacity(0.50))
+                                    .foregroundStyle(.tertiary)
                                 Text("复制内网 IP")
                                     .font(.system(size: 9.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.70))
+                                    .foregroundColor(.secondary)
                             }
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
                             .background(
                                 Capsule()
-                                    .fill(Color.white.opacity(0.06))
+                                    .fill(Color.primary.opacity(0.05))
                             )
                         }
                         .buttonStyle(.plain)
@@ -282,11 +286,11 @@ struct ExpandedMonitoringView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.white.opacity(0.04))
+                        .fill(Color.primary.opacity(0.03))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 0.75)
+                        .stroke(Color.primary.opacity(0.09), lineWidth: 0.75)
                 )
                 .onTapGesture(count: 2) {
                     appState.openActivityMonitor()
@@ -302,19 +306,19 @@ struct ExpandedMonitoringView: View {
                                 .foregroundColor(.orange.opacity(0.95))
                             Text("专注与日常工作流")
                                 .font(.system(size: 11.5, weight: .bold))
-                                .foregroundColor(.white.opacity(0.92))
+                                .foregroundColor(.primary)
                         }
                         
                         Spacer()
                         
                         Text(appState.pomodoroRunning ? "专注中" : "就绪")
                             .font(.system(size: 9.5, weight: .bold))
-                            .foregroundColor(appState.pomodoroRunning ? .orange : .white.opacity(0.35))
+                            .foregroundColor(appState.pomodoroRunning ? .orange : Color.primary.opacity(0.35))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(
                                 Capsule()
-                                    .fill(appState.pomodoroRunning ? Color.orange.opacity(0.18) : Color.white.opacity(0.05))
+                                    .fill(appState.pomodoroRunning ? Color.orange.opacity(0.18) : Color.primary.opacity(0.04))
                             )
                     }
                     
@@ -323,7 +327,7 @@ struct ExpandedMonitoringView: View {
                         // 倒计时大字
                         Text(appState.formattedPomodoroTime)
                             .font(.system(size: 20, weight: .bold, design: .monospaced))
-                            .foregroundColor(appState.pomodoroRunning ? .orange : .white.opacity(0.92))
+                            .foregroundColor(appState.pomodoroRunning ? .orange : .primary)
                             .shadow(color: appState.pomodoroRunning ? Color.orange.opacity(0.3) : .clear, radius: 4)
                         
                         // 预设时长快捷切换胶囊 (25m / 45m / 5m)
@@ -345,12 +349,14 @@ struct ExpandedMonitoringView: View {
                                 Text(appState.pomodoroRunning ? "暂停" : "开始")
                                     .font(.system(size: 10, weight: .semibold))
                             }
-                            .foregroundColor(appState.pomodoroRunning ? .white : .black)
+                            // 实心高亮按钮：底用 primary（暗色=白/亮色=黑自动翻转），
+                            // 文字用 windowBackground 反色保证双模式对比；运行中橙底白字保留
+                            .foregroundColor(appState.pomodoroRunning ? .white : Color(.windowBackgroundColor))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(
                                 Capsule()
-                                    .fill(appState.pomodoroRunning ? Color.orange : Color.white.opacity(0.92))
+                                    .fill(appState.pomodoroRunning ? Color.orange : Color.primary.opacity(0.92))
                             )
                         }
                         .buttonStyle(.plain)
@@ -362,9 +368,9 @@ struct ExpandedMonitoringView: View {
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
                                 .font(.system(size: 9))
-                                .foregroundColor(.white.opacity(0.45))
+                                .foregroundStyle(.tertiary)
                                 .frame(width: 20, height: 20)
-                                .background(Circle().fill(Color.white.opacity(0.06)))
+                                .background(Circle().fill(Color.primary.opacity(0.05)))
                         }
                         .buttonStyle(.plain)
                         .help("重置番茄钟")
@@ -373,7 +379,7 @@ struct ExpandedMonitoringView: View {
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.03))
+                            .fill(Color.primary.opacity(0.02))
                     )
                     
                     // 3. 紧邻日历日程微卡片
@@ -385,7 +391,7 @@ struct ExpandedMonitoringView: View {
                             
                             Text("紧邻日程")
                                 .font(.system(size: 10.5, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.65))
+                                .foregroundColor(.secondary)
                             
                             Spacer()
                             
@@ -405,7 +411,7 @@ struct ExpandedMonitoringView: View {
                                     } label: {
                                         Text(appState.calendarInfo.title)
                                             .font(.system(size: 11, weight: .medium))
-                                            .foregroundColor(.white.opacity(0.92))
+                                            .foregroundColor(.primary)
                                             .lineLimit(1)
                                     }
                                     .buttonStyle(.plain)
@@ -435,13 +441,13 @@ struct ExpandedMonitoringView: View {
                             } else {
                                 Text("今日暂无紧邻日程 · 保持专注")
                                     .font(.system(size: 10.5, weight: .medium))
-                                    .foregroundColor(.white.opacity(0.40))
+                                    .foregroundStyle(.tertiary)
                             }
                         } else {
                             HStack {
                                 Text("未授权访问日历")
                                     .font(.system(size: 10.5))
-                                    .foregroundColor(.white.opacity(0.40))
+                                    .foregroundStyle(.tertiary)
                                 Spacer()
                                 Button("点击授权") {
                                     appState.requestCalendarAccess { _ in }
@@ -456,7 +462,7 @@ struct ExpandedMonitoringView: View {
                     .padding(.vertical, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.white.opacity(0.03))
+                            .fill(Color.primary.opacity(0.02))
                     )
                     
                     Spacer(minLength: 2)
@@ -473,10 +479,10 @@ struct ExpandedMonitoringView: View {
                                 Text("锁屏 (L)")
                                     .font(.system(size: 9, weight: .medium))
                             }
-                            .foregroundColor(.white.opacity(0.65))
+                            .foregroundColor(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .background(Capsule().fill(Color.primary.opacity(0.05)))
                         }
                         .buttonStyle(.plain)
                         .help("一键锁屏离座 (按 L)")
@@ -491,10 +497,10 @@ struct ExpandedMonitoringView: View {
                                 Text("洗文本 (X)")
                                     .font(.system(size: 9, weight: .medium))
                             }
-                            .foregroundColor(.white.opacity(0.65))
+                            .foregroundColor(.secondary)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.white.opacity(0.06)))
+                            .background(Capsule().fill(Color.primary.opacity(0.05)))
                         }
                         .buttonStyle(.plain)
                         .help("一键将剪贴板清洗为纯文本 (按 X)")
@@ -510,12 +516,12 @@ struct ExpandedMonitoringView: View {
                                         .foregroundColor(Color.cyan.opacity(0.90))
                                     Text(compactDeviceName(dev.name))
                                         .font(.system(size: 9, weight: .medium))
-                                        .foregroundColor(.white.opacity(0.75))
+                                        .foregroundColor(.secondary)
                                         .lineLimit(1)
                                     if let b = dev.batteryLevel {
                                         Text("\(b)%")
                                             .font(.system(size: 9, weight: .bold))
-                                            .foregroundColor(.white.opacity(0.65))
+                                            .foregroundColor(.secondary)
                                     }
                                 }
                                 .padding(.horizontal, 6)
@@ -530,11 +536,11 @@ struct ExpandedMonitoringView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.white.opacity(0.04))
+                        .fill(Color.primary.opacity(0.03))
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 0.75)
+                        .stroke(Color.primary.opacity(0.09), lineWidth: 0.75)
                 )
             }
             .frame(height: cardHeight)
@@ -584,12 +590,12 @@ struct PomodoroPresetButton: View {
         } label: {
             Text(title)
                 .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
-                .foregroundColor(isSelected ? .orange : .white.opacity(0.55))
+                .foregroundColor(isSelected ? .orange : Color.primary.opacity(0.55))
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
                 .background(
                     Capsule()
-                        .fill(isSelected ? Color.orange.opacity(0.20) : Color.white.opacity(0.05))
+                        .fill(isSelected ? Color.orange.opacity(0.20) : Color.primary.opacity(0.04))
                 )
         }
         .buttonStyle(.plain)

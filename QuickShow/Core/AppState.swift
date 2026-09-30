@@ -30,6 +30,17 @@ final class AppState: ObservableObject {
     @Published var isExpanded: Bool = false
     @Published var currentTime: Date = Date()
     
+    // 面板实时尺寸：由 PanelManager 在窗口动画期间逐帧推送（窗口 frame 是唯一尺寸时钟）。
+    // 背景：SwiftUI PreferenceKey 测量链在 NSGlassEffectView + Button 组合下会被卡死
+    //（最小复现实验坐实：占位 Text 测量正常，加入任意 Button 即死锁恒 0x0），
+    // 因此布局进度/字号缩放改由 AppKit 侧直接驱动，数据源是窗口 frame 本身，绝对可靠
+    @Published var livePanelSize: CGSize = .zero
+    
+    /// PanelManager 在窗口动画每帧调用（SwiftUI 主线程）
+    func updateLivePanelSize(_ size: CGSize) {
+        livePanelSize = size
+    }
+    
     // 核心微状态（一瞥底栏）
     @Published var batteryInfo: BatteryInfo = BatteryInfo(percentage: 100, isCharging: false, hasBattery: false)
     @Published var wifiInfo: WiFiInfo = WiFiInfo(isConnected: false, ssid: nil)
@@ -168,9 +179,10 @@ final class AppState: ObservableObject {
     
     /// 切换详细展开监控视图
     func toggleExpanded() {
-        withAnimation(.easeInOut(duration: 0.18)) {
-            isExpanded.toggle()
-        }
+        // 状态瞬时切换：面板尺寸动画的唯一时钟是 PanelManager 的窗口 setFrame 动画，
+        // SwiftUI 内容立即进入最终布局并弹性填充 hosting view，空间由窗口逐帧供给自然 reflow，
+        // 此处绝不能再包 withAnimation，否则内容与窗口两套插值时钟打架导致布局抖动
+        isExpanded.toggle()
         if isExpanded {
             // 用户展开了详细视图，若处于一瞥模式则暂停倒计时，避免看着看着突然关闭
             if mode == .glance {

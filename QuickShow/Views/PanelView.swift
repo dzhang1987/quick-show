@@ -2,30 +2,52 @@ import SwiftUI
 
 struct PanelView: View {
     @ObservedObject var appState: AppState
+    // 面板实时尺寸：由 PanelManager 在窗口动画期间逐帧推送（livePanelSize）。
+    // 宽度驱动大字时钟字号连续缩放（Hero 缩放通道），高度驱动展开进度。
+    // 注意：SwiftUI PreferenceKey/GeometryReader 测量链在本应用不可用——
+    // NSGlassEffectView 承载的 NSHostingView 中只要内容含 Button，测量就会死锁在 0x0
+    // （最小复现实验 V6 坐实：占位 Text 测量正常，加一个普通 Button 即死锁），
+    // 因此布局进度的数据源是 AppKit 侧窗口 frame，绝对可靠
+    private var renderedSize: CGSize {
+        appState.livePanelSize
+    }
     
     var body: some View {
         let metrics = appState.currentMetrics()
         let isExpandedOrCheat = (appState.isExpanded || appState.showCheatSheet)
+        // 兜底目标宽度：仅供首帧布局（尚未测得实际宽度时）推算字号
         let panelWidth = isExpandedOrCheat ? metrics.expandedSize.width : metrics.compactSize.width
-        let panelHeight = isExpandedOrCheat ? metrics.expandedSize.height : metrics.compactSize.height
+        
+        // 展开进度 0→1：由面板实际渲染高度逐帧推导（窗口动画是唯一时钟），
+        // 下方所有布局量都是它的线性函数，内容总需求恒小于窗口实际高度，时钟永不被裁
+        let compactH = metrics.compactSize.height
+        let expandedH = metrics.expandedSize.height
+        let expandProgress: CGFloat = expandedH > compactH
+            ? min(max((renderedSize.height - compactH) / (expandedH - compactH), 0), 1)
+            : 0
         
         VStack(spacing: 0) {
             // 上半部分：核心大字时钟与日期徽章
-            TimeDisplayView(appState: appState, panelWidth: panelWidth)
-                .padding(.top, isExpandedOrCheat ? 16 : 30)
+            // 字号随实际渲染宽度逐帧连续缩放；锚点 padding 随展开进度逐帧连续滑动
+            // （端点 30↔8：展开态时钟贴近顶部，释放的空间让给状态栏与监控区呼吸）
+            TimeDisplayView(appState: appState, panelWidth: renderedSize.width > 0 ? renderedSize.width : panelWidth)
+                .padding(.top, 30 - 22 * expandProgress)
                 .padding(.horizontal, 24)
             
-            // 严格受限的自然呼吸微间距，彻底杜绝拉裂虚空
-            Spacer(minLength: 8).frame(maxHeight: isExpandedOrCheat ? 12 : 36)
+            // 严格受限的自然呼吸微间距，彻底杜绝拉裂虚空（端点 36↔12 不变，随进度连续收缩）
+            Spacer(minLength: 8)
+                .frame(maxHeight: 36 - 24 * expandProgress)
             
             // 细若游丝的微光渐隐分割线（严格保持 0.5pt 高度）
+            // 0.25 是对比度下限：黑色低 alpha 在亮玻璃上是"阴影"型弱对比，
+            // 需显著高于暗色白线的等效发光感，双模式均清晰但不抢戏
             Rectangle()
                 .fill(
                     LinearGradient(
                         colors: [
-                            Color.white.opacity(0.0),
-                            Color.white.opacity(0.15),
-                            Color.white.opacity(0.0)
+                            Color.primary.opacity(0.0),
+                            Color.primary.opacity(0.25),
+                            Color.primary.opacity(0.0)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
@@ -35,151 +57,49 @@ struct PanelView: View {
                 .padding(.horizontal, 24)
             
             // 底部微状态栏（P0 状态：电池、WiFi、音频、常驻图钉）
+            // padding 端点 16↔10 / 24↔12，随进度连续滑动（展开态底部呼吸加大）
             StatusBarView(appState: appState)
                 .padding(.horizontal, 24)
-                .padding(.top, isExpandedOrCheat ? 10 : 16)
-                .padding(.bottom, appState.isExpanded ? 8 : 24)
+                .padding(.top, 16 - 6 * expandProgress)
+                .padding(.bottom, 24 - 12 * expandProgress)
             
             // 展开后的监控面板 (P1 状态：CPU/内存负载、网速、日历日程、番茄钟)
-            if appState.isExpanded {
-                ExpandedMonitoringView(appState: appState)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
-                    .transition(
-                        .asymmetric(
-                            insertion: .opacity.animation(.easeInOut(duration: 0.16).delay(0.04)),
-                            removal: .opacity.animation(.easeInOut(duration: 0.10))
-                        )
-                    )
-            }
+            // 占位高度 = 完整高度 × 展开进度：窗口长多少它吃多少，逐帧由实际高度挤出，
+            // 全程内容需求恒 ≤ 窗口实际高度（数学保证零溢出）；顶对齐 + clipped：
+            // 即便极端账目误差也只裁监控区底部，时钟绝不被裁；
+            // 占位与 isExpanded 解耦（收起时随窗口收缩自然归零，无瞬跳），isExpanded 只管淡入淡出；
+            // p=1 端点 = 内容 241.5 + 底部呼吸 14（时钟上移释放的空间转移至此）
+            ExpandedMonitoringView(appState: appState)
+                .padding(.horizontal, 14)
+                .frame(height: (ExpandedMonitoringView.contentHeight + 14) * expandProgress, alignment: .top)
+                .clipped()
+                .opacity(appState.isExpanded ? 1 : 0)
+                .animation(.easeInOut(duration: 0.18), value: appState.isExpanded)
             
-            // 隐形 ESC 键盘快捷键监听兜底
-            Button("") {
-                appState.dismiss()
-            }
-            .keyboardShortcut(.cancelAction)
-            .opacity(0)
-            .frame(width: 0, height: 0)
-            
-            // 隐形 ⌘ + , 快捷打开偏好设置兜底
-            Button("") {
-                appState.openSettings()
-            }
-            .keyboardShortcut(",", modifiers: .command)
-            .opacity(0)
-            .frame(width: 0, height: 0)
-            
-            // 隐形 ⌘ + Q 快捷退出兜底
-            Button("") {
-                appState.quitApp()
-            }
-            .keyboardShortcut("q", modifiers: .command)
-            .opacity(0)
-            .frame(width: 0, height: 0)
+            // 注意：此处曾有 ESC/⌘,/⌘Q 三个隐形 keyboardShortcut Button 兜底，已删除。
+            // 根因（最小复现实验铁证）：keyboardShortcut 在 NSGlassEffectView 承载的
+            // NSHostingView 中会卡死 SwiftUI 布局链——首帧布局停在 0x0 后，窗口 resize
+            // 不再触发测量上报（renderedSize 恒 0 → expandProgress 恒 0 → 监控卡片零高消失）。
+            // 快捷键由 FloatingPanel.sendEvent/keyDown/cancelOperation 完整拦截，无功能损失。
         }
         .onHover { isHovering in
             appState.setHovered(isHovering)
         }
-        .frame(width: panelWidth, height: panelHeight)
-        .background(
-            ZStack {
-                // 1. 原生高斯模糊材质（圆角内）
+        // 弹性填充：面板尺寸的唯一时钟是 AppKit 窗口 setFrame 动画，
+        // hosting view 随窗口逐帧变大/变小，SwiftUI 内容跟随可用空间自然 reflow（live resize 质感），
+        // 严禁恢复固定 .frame(width:height:) 尺寸插值，否则与窗口动画双时钟打架抖动
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+            if #available(macOS 26.0, *) {
+                // 26+：材质由窗口层 NSGlassEffectView 统一提供，内容背景保持透明
+                Color.clear
+            } else {
+                // 13~25 降级：原生超薄材质，跟随系统明暗翻转（内容语义色同步适配）
                 RoundedRectangle(cornerRadius: 26, style: .continuous)
                     .fill(.ultraThinMaterial)
-                    .environment(\.colorScheme, .dark)
-                
-                // 2. 深邃黑曜石微光渐变，提供绝对对比度与通透感
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.12, green: 0.12, blue: 0.14).opacity(0.88),
-                                Color(red: 0.05, green: 0.05, blue: 0.07).opacity(0.94)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
             }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-        .overlay(
-            ZStack {
-                // 1. 基础晶体边缘高光描边 (全周连续曲率)
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
-                    .strokeBorder(
-                        LinearGradient(
-                            stops: [
-                                .init(color: Color.white.opacity(0.38), location: 0.0),
-                                .init(color: Color.white.opacity(0.12), location: 0.35),
-                                .init(color: Color.white.opacity(0.03), location: 0.70),
-                                .init(color: Color.white.opacity(0.20), location: 1.0)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 0.75
-                    )
-                
-                // 2. 方案 1：黑曜石底边框「晶体折射光消散动效」（仅一瞥模式且未展开时呈现）
-                if appState.mode == .glance && !appState.isExpanded {
-                    GeometryReader { geo in
-                        let activeWidth = geo.size.width * appState.glanceProgress
-                        
-                        // 沿 26pt 连续曲率圆角的纯白折射微光
-                        RoundedRectangle(cornerRadius: 26, style: .continuous)
-                            .strokeBorder(
-                                LinearGradient(
-                                    colors: [
-                                        Color.white.opacity(appState.isHovered ? 0.95 : 0.75),
-                                        Color.white.opacity(appState.isHovered ? 0.85 : 0.60)
-                                    ],
-                                    startPoint: .leading,
-                                    endPoint: .trailing
-                                ),
-                                lineWidth: appState.isHovered ? 1.25 : 0.90
-                            )
-                            // 仅保留底部 32pt 区域（涵盖底部水平切边与圆角切弧）
-                            .mask(
-                                VStack(spacing: 0) {
-                                    Spacer()
-                                    Rectangle()
-                                        .frame(height: 32)
-                                }
-                            )
-                            // 水平居中对称收缩 mask（两端柔和羽化）
-                            .mask(
-                                HStack {
-                                    Spacer()
-                                    Rectangle()
-                                        .fill(
-                                            LinearGradient(
-                                                stops: [
-                                                    .init(color: .clear, location: 0.0),
-                                                    .init(color: .white, location: 0.12),
-                                                    .init(color: .white, location: 0.88),
-                                                    .init(color: .clear, location: 1.0)
-                                                ],
-                                                startPoint: .leading,
-                                                endPoint: .trailing
-                                            )
-                                        )
-                                        .frame(width: max(0, activeWidth))
-                                    Spacer()
-                                }
-                            )
-                            .shadow(
-                                color: Color.white.opacity(appState.isHovered ? 0.45 : 0.20),
-                                radius: appState.isHovered ? 3.0 : 1.2,
-                                x: 0,
-                                y: 1
-                            )
-                            .animation(.linear(duration: 0.04), value: appState.glanceProgress)
-                    }
-                    .transition(.opacity)
-                }
-            }
-        )
+        }
+        .modifier(PanelRoundedClip())
         .overlay {
             if appState.showCheatSheet {
                 CheatSheetView(appState: appState)
@@ -203,10 +123,10 @@ struct CheatSheetView: View {
                         .foregroundColor(.orange)
                     Text("全键盘盲操速查表")
                         .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white.opacity(0.95))
+                        .foregroundColor(.primary)
                     Text("(按住 ⌘ 提示 · 松开自动收起)")
                         .font(.system(size: 11, weight: .regular))
-                        .foregroundColor(.white.opacity(0.45))
+                        .foregroundStyle(.tertiary)
                 }
                 
                 Spacer()
@@ -216,7 +136,7 @@ struct CheatSheetView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.system(size: 15))
-                        .foregroundColor(.white.opacity(0.40))
+                        .foregroundColor(Color.primary.opacity(0.55))
                 }
                 .buttonStyle(.plain)
             }
@@ -258,28 +178,11 @@ struct CheatSheetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(.ultraThinMaterial)
-                    .environment(\.colorScheme, .dark)
-                RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.10, green: 0.10, blue: 0.12).opacity(0.96),
-                                Color(red: 0.05, green: 0.05, blue: 0.07).opacity(0.98)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
+            // 原生超薄材质，跟随系统明暗翻转（与窗口玻璃同哲学）
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
         )
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.75)
-        )
         .padding(6)
     }
 }
@@ -292,7 +195,7 @@ struct ShortcutGroupCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
                 .font(.system(size: 11.5, weight: .bold))
-                .foregroundColor(.white.opacity(0.70))
+                .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
                 .padding(.bottom, 2)
             
@@ -305,12 +208,12 @@ struct ShortcutGroupCard: View {
                         .padding(.vertical, 3)
                         .background(
                             RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Color.white.opacity(0.08))
+                                .fill(Color.primary.opacity(0.06))
                         )
                     
                     Text(desc)
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(.primary)
                         .lineLimit(1)
                     
                     Spacer(minLength: 0)
@@ -323,11 +226,23 @@ struct ShortcutGroupCard: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.white.opacity(0.04))
+                .fill(Color.primary.opacity(0.03))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.07), lineWidth: 0.5)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
         )
+    }
+}
+
+// MARK: - 面板圆角裁剪（仅降级路径生效）
+// macOS 26+ 的圆角由窗口层 NSGlassEffectView 统一处理，无需在此重复裁剪
+private struct PanelRoundedClip: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 26.0, *) {
+            content
+        } else {
+            content.clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+        }
     }
 }
