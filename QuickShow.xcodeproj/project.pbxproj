@@ -1,0 +1,400 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 54;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B0B0357916235B809E566B /* FloatingPanel.swift */; };
+		1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */; };
+		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
+		5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */; };
+		5360B59610663733C63D835C /* VisualEffectBlur.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2402C6DE222CDB800A43432B /* VisualEffectBlur.swift */; };
+		5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */; };
+		7325565C24EBC2891BB84D17 /* PanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB3F9819E7541B279D9C3FB /* PanelManager.swift */; };
+		753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */; };
+		873EB16C0D9C58155D24B3B8 /* SystemStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13486C36433281599CC36C34 /* SystemStatusProvider.swift */; };
+		9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63AE6828207BF9FDF55E3684 /* StatusBarView.swift */; };
+		AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80187D648ECC52984FCD6D2C /* QuickShowApp.swift */; };
+		C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02C56336313E564A9C58442B /* AppState.swift */; };
+		F4BE6BFAA94DEC22AE533146 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B7BF9C965803CBAE72E3577B /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		02C56336313E564A9C58442B /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
+		03B0B0357916235B809E566B /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
+		13486C36433281599CC36C34 /* SystemStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusProvider.swift; sourceTree = "<group>"; };
+		17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeDisplayView.swift; sourceTree = "<group>"; };
+		2402C6DE222CDB800A43432B /* VisualEffectBlur.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VisualEffectBlur.swift; sourceTree = "<group>"; };
+		2708792B4D8EF72329E95098 /* QuickShow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuickShow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4CB3F9819E7541B279D9C3FB /* PanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelManager.swift; sourceTree = "<group>"; };
+		63AE6828207BF9FDF55E3684 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
+		6EC8BA98E9C478A6D25D3962 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		80187D648ECC52984FCD6D2C /* QuickShowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickShowApp.swift; sourceTree = "<group>"; };
+		8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelView.swift; sourceTree = "<group>"; };
+		A717A5076D26657EA117861F /* HotKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
+		B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		B7BF9C965803CBAE72E3577B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenHelper.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		1735B580DC3B51B3B6946295 /* Utilities */ = {
+			isa = PBXGroup;
+			children = (
+				03B0B0357916235B809E566B /* FloatingPanel.swift */,
+				FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */,
+				13486C36433281599CC36C34 /* SystemStatusProvider.swift */,
+			);
+			path = Utilities;
+			sourceTree = "<group>";
+		};
+		208989162C61EB5089E7CF98 /* Core */ = {
+			isa = PBXGroup;
+			children = (
+				02C56336313E564A9C58442B /* AppState.swift */,
+				A717A5076D26657EA117861F /* HotKeyManager.swift */,
+				4CB3F9819E7541B279D9C3FB /* PanelManager.swift */,
+			);
+			path = Core;
+			sourceTree = "<group>";
+		};
+		51140C791DB8B1B86DE4B6FC /* Views */ = {
+			isa = PBXGroup;
+			children = (
+				8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */,
+				B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */,
+				63AE6828207BF9FDF55E3684 /* StatusBarView.swift */,
+				17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */,
+				2402C6DE222CDB800A43432B /* VisualEffectBlur.swift */,
+			);
+			path = Views;
+			sourceTree = "<group>";
+		};
+		5213C295391011042FC7DFE5 = {
+			isa = PBXGroup;
+			children = (
+				CF516E079863CEF8EC5C397C /* QuickShow */,
+				9B0F05138AE231E7D18DDCA2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9B0F05138AE231E7D18DDCA2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				2708792B4D8EF72329E95098 /* QuickShow.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		CF516E079863CEF8EC5C397C /* QuickShow */ = {
+			isa = PBXGroup;
+			children = (
+				B7BF9C965803CBAE72E3577B /* Assets.xcassets */,
+				6EC8BA98E9C478A6D25D3962 /* Info.plist */,
+				80187D648ECC52984FCD6D2C /* QuickShowApp.swift */,
+				208989162C61EB5089E7CF98 /* Core */,
+				1735B580DC3B51B3B6946295 /* Utilities */,
+				51140C791DB8B1B86DE4B6FC /* Views */,
+			);
+			path = QuickShow;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		993125575F008F2721CCD60C /* QuickShow */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 89EA4D8ACA55B6ECB2E24892 /* Build configuration list for PBXNativeTarget "QuickShow" */;
+			buildPhases = (
+				6E85668974090CE620EF86E7 /* Sources */,
+				4DFC12B0ABCB3EFE106243C1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = QuickShow;
+			productName = QuickShow;
+			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		90D56D6065E97DA3300D9C84 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					993125575F008F2721CCD60C = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 5213C295391011042FC7DFE5;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				993125575F008F2721CCD60C /* QuickShow */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		4DFC12B0ABCB3EFE106243C1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F4BE6BFAA94DEC22AE533146 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6E85668974090CE620EF86E7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */,
+				066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */,
+				396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */,
+				7325565C24EBC2891BB84D17 /* PanelManager.swift in Sources */,
+				753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */,
+				AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */,
+				5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */,
+				1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */,
+				9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */,
+				873EB16C0D9C58155D24B3B8 /* SystemStatusProvider.swift in Sources */,
+				5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */,
+				5360B59610663733C63D835C /* VisualEffectBlur.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1843F27081A09D2585EBD32C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QuickShow/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"-framework",
+					Carbon,
+					"-framework",
+					IOKit,
+					"-framework",
+					CoreWLAN,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = cn.chiproad.QuickShow;
+				PRODUCT_NAME = QuickShow;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		221D01680830CA6744BE88E0 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_MODULE_DEBUGGING = NO;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEPLOYMENT_POSTPROCESSING = YES;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = s;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LLVM_LTO = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = QuickShow;
+				SDKROOT = macosx;
+				STRIP_INSTALLED_PRODUCT = YES;
+				STRIP_STYLE = all;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Release;
+		};
+		928AFF7A10F788E6618D1535 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 13.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = QuickShow;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.9;
+			};
+			name = Debug;
+		};
+		C85EB82269F25858FCF86DB4 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = QuickShow/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				OTHER_LDFLAGS = (
+					"-framework",
+					Carbon,
+					"-framework",
+					IOKit,
+					"-framework",
+					CoreWLAN,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = cn.chiproad.QuickShow;
+				PRODUCT_NAME = QuickShow;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		89EA4D8ACA55B6ECB2E24892 /* Build configuration list for PBXNativeTarget "QuickShow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1843F27081A09D2585EBD32C /* Debug */,
+				C85EB82269F25858FCF86DB4 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				928AFF7A10F788E6618D1535 /* Debug */,
+				221D01680830CA6744BE88E0 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 90D56D6065E97DA3300D9C84 /* Project object */;
+}

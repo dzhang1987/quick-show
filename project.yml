@@ -1,0 +1,57 @@
+name: QuickShow
+options:
+  bundleIdPrefix: cn.chiproad
+  deploymentTarget:
+    macOS: "13.0"
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    PRODUCT_NAME: QuickShow
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_IDENTITY: "-"
+  configs:
+    Debug:
+      SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+    Release:
+      SWIFT_OPTIMIZATION_LEVEL: "-O"
+      SWIFT_COMPILATION_MODE: "wholemodule"
+      DEAD_CODE_STRIPPING: YES
+      DEPLOYMENT_POSTPROCESSING: YES
+      STRIP_INSTALLED_PRODUCT: YES
+      STRIP_STYLE: "all"
+      LLVM_LTO: "YES"
+      GCC_OPTIMIZATION_LEVEL: "s"
+      CLANG_ENABLE_MODULE_DEBUGGING: NO
+
+targets:
+  QuickShow:
+    type: application
+    platform: macOS
+    sources:
+      - path: QuickShow
+    info:
+      path: QuickShow/Info.plist
+      properties:
+        LSUIElement: true
+        CFBundleIdentifier: cn.chiproad.QuickShow
+        CFBundleName: QuickShow
+        CFBundleDisplayName: QuickShow
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: cn.chiproad.QuickShow
+      PRODUCT_NAME: QuickShow
+      GENERATE_INFOPLIST_FILE: NO
+      INFOPLIST_FILE: QuickShow/Info.plist
+      ENABLE_HARDENED_RUNTIME: NO
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGN_IDENTITY: "-"
+      ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      OTHER_LDFLAGS:
+        - "-framework"
+        - "Carbon"
+        - "-framework"
+        - "IOKit"
+        - "-framework"
+        - "CoreWLAN"
