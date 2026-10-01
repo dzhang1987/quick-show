@@ -111,6 +111,11 @@ enum Theme {
         
         // 结构性元素（亮玻璃对比度下限保护：黑色低 alpha 是"阴影"型弱对比，需高于暗色白线的发光感）
         static let dividerOpacity: Double = 0.25          // 分割线中段峰值
+        // 一瞥倒计时微光进度条（贴面板底边、水平居中，随倒计时从左右两侧向中间对称收拢：
+        // 峰值强于分割线 0.25 保证剩余时间可读，又显著弱于内容色，克制不抢戏；
+        // featherEdge = 光带单侧羽化带宽度比例，两端渐隐至透明，与分割线的对称渐隐语言一致）
+        static let glanceProgressOpacity: Double = 0.45
+        static let glanceProgressFeatherEdge: CGFloat = 0.12
         static let cardStroke = Color.primary.opacity(0.09)      // Bento 卡片描边
         static let groupCardStroke = Color.primary.opacity(0.08) // 速查组卡描边（0.5pt 细线）
         
@@ -240,6 +245,7 @@ enum Theme {
         static let miniButtonSize: CGFloat = 20      // 重置钮
         static let iconButtonSize: CGFloat = 24      // 图钉/箭头按钮
         static let dividerHeight: CGFloat = 0.5      // 微光分割线（严格 0.5pt）
+        static let glanceProgressHeight: CGFloat = 2.5  // 一瞥倒计时微光进度条高（细若光丝，2x 屏 5px 清晰可辨）
     }
     
     // MARK: - 动画时长（窗口尺寸动画是唯一尺寸时钟，其余为显隐/淡入淡出节奏）

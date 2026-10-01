@@ -99,6 +99,20 @@ struct PanelView: View {
                     .fill(.ultraThinMaterial)
             }
         }
+        // 一瞥倒计时微光进度条：bottom overlay 贴面板底边，与 VStack 内容排布完全解耦——
+        // 展开/收起窗口动画期间 hosting view 逐帧变形，overlay 底边自动跟随，绝无悬空错位；
+        // 置于 PanelRoundedClip 之前：13~25 降级路径随内容被圆角统一裁剪（底角弧形贴边正确），
+        // 26+ 圆角由窗口层 NSGlassEffectView 处理，内容层无需重复裁剪
+        .overlay(alignment: .bottom) {
+            // 显示条件与旧黑曜石晶体消散动效一致：仅一瞥模式、未展开看板、无速查表时呈现；
+            // hover/Toast 期间 glanceProgress 在状态侧自然冻结，进度条随之停住，视图层零额外逻辑
+            if appState.mode == .glance && !appState.isExpanded && !appState.showCheatSheet {
+                GlanceProgressBar(
+                    progress: appState.glanceProgress,
+                    panelWidth: renderedSize.width > 0 ? renderedSize.width : panelWidth
+                )
+            }
+        }
         .modifier(PanelRoundedClip())
         .overlay {
             if appState.showCheatSheet {
@@ -233,6 +247,35 @@ struct ShortcutGroupCard: View {
             RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
                 .stroke(Theme.Colors.groupCardStroke, lineWidth: 0.5)
         )
+    }
+}
+
+// MARK: - 一瞥倒计时微光进度条
+// 贴面板底边、水平居中的细光带：宽度 = 面板宽 × glanceProgress，
+// 随倒计时从满宽由左右两侧向中间对称收拢（消散终点收敛于面板中心）。
+// 宽度数据源与 Hero 时钟缩放同源（AppKit 窗口 frame 逐帧推送的 livePanelSize + 首帧 metrics 兜底），
+// 规避 NSGlassEffectView 内 GeometryReader/PreferenceKey 测量死锁；
+// tick 0.04s 足够密（每步约 1/75 宽度）天然连续，无需视图侧 .animation；
+// 重置回满由状态侧 withAnimation(Theme.Motion.progressReset) 事务动画天然驱动
+private struct GlanceProgressBar: View {
+    let progress: CGFloat   // 1.0 → 0.0（满 → 空）
+    let panelWidth: CGFloat
+    
+    var body: some View {
+        // 微光质感：中段实色，两端各 featherEdge 宽度羽化渐隐至透明（对称发光晶体），
+        // 与底部分割线的对称渐隐语言一致；Color.primary 语义色随玻璃明暗自动翻转，
+        // 双模式清晰克制；overlay .bottom 对齐保证光带恒水平居中，收拢全程零偏移
+        LinearGradient(
+            stops: [
+                .init(color: Color.primary.opacity(0), location: 0),
+                .init(color: Color.primary.opacity(Theme.Colors.glanceProgressOpacity), location: Theme.Colors.glanceProgressFeatherEdge),
+                .init(color: Color.primary.opacity(Theme.Colors.glanceProgressOpacity), location: 1 - Theme.Colors.glanceProgressFeatherEdge),
+                .init(color: Color.primary.opacity(0), location: 1)
+            ],
+            startPoint: .leading,
+            endPoint: .trailing
+        )
+        .frame(width: panelWidth * progress, height: Theme.Layout.glanceProgressHeight)
     }
 }
 
