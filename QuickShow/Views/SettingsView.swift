@@ -46,10 +46,10 @@ struct SettingsView: View {
                 NavigationLink(value: tab) {
                     Label {
                         Text(tab.rawValue)
-                            .font(.system(size: 13, weight: .medium))
+                            .font(.system(size: Theme.Typography.badge, weight: .medium))
                     } icon: {
                         Image(systemName: tab.iconName)
-                            .font(.system(size: 11, weight: .bold))
+                            .font(.system(size: Theme.Typography.body, weight: .bold))
                             .foregroundColor(.white)
                             .frame(width: 22, height: 22)
                             .background(
@@ -242,7 +242,7 @@ struct StatusBarSettingsForm: View {
                     if appState.showWiFi {
                         HStack {
                             Text(isLocationAuthorized ? "已获得定位权限（可读取并显示真实 Wi-Fi 名称）" : "未授权定位（根据系统限制将优雅降级显示频段如 5G）")
-                                .font(.system(size: 11))
+                                .font(.system(size: Theme.Typography.body))
                                 .foregroundColor(isLocationAuthorized ? .green : .secondary)
                             
                             Spacer()
@@ -253,7 +253,7 @@ struct StatusBarSettingsForm: View {
                                         isLocationAuthorized = granted
                                     }
                                 }
-                                .font(.system(size: 11))
+                                .font(.system(size: Theme.Typography.body))
                             }
                         }
                     }
@@ -304,7 +304,7 @@ struct DashboardSettingsForm: View {
                     if appState.showCalendar {
                         HStack {
                             Text(isCalendarAuthorized ? "已获得日历访问权限（自动识别腾讯会议/Zoom/Meet等链接）" : "未授权日历访问（需授权方可识别日程）")
-                                .font(.system(size: 11))
+                                .font(.system(size: Theme.Typography.body))
                                 .foregroundColor(isCalendarAuthorized ? .green : .orange)
                             
                             Spacer()
@@ -315,7 +315,7 @@ struct DashboardSettingsForm: View {
                                         isCalendarAuthorized = granted
                                     }
                                 }
-                                .font(.system(size: 11))
+                                .font(.system(size: Theme.Typography.body))
                             }
                         }
                     }
@@ -366,14 +366,14 @@ struct ShortcutsSettingsForm: View {
             Section {
                 HStack(spacing: 12) {
                     Image(systemName: "sparkles")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: Theme.Typography.title, weight: .bold))
                         .foregroundColor(.orange)
                     
                     VStack(alignment: .leading, spacing: 3) {
                         Text("长按 Command (⌘) 速查特性")
-                            .font(.system(size: 13, weight: .semibold))
+                            .font(.system(size: Theme.Typography.badge, weight: .semibold))
                         Text("在悬浮面板激活时，只需按住 ⌘ 键约 0.35 秒或敲击「?」键，屏幕将浮现半透明速查表；手指松开 ⌘ 自动收起。")
-                            .font(.system(size: 11.5))
+                            .font(.system(size: Theme.Typography.callout))
                             .foregroundColor(.secondary)
                     }
                 }
@@ -423,6 +423,28 @@ struct ShortcutsSettingsForm: View {
                 }
             } header: {
                 Text("基础交互控制")
+            }
+            
+            Section {
+                HStack {
+                    Text("切换日历视图 (任意状态直达)")
+                    Spacer()
+                    KeyBadge(key: "G")
+                }
+                HStack {
+                    Text("日历 月 / 周 / 日 视图切换")
+                    Spacer()
+                    KeyBadge(key: "1 / 2 / 3")
+                }
+                HStack {
+                    Text("日历翻页 (日历视图内优先于媒体切歌)")
+                    Spacer()
+                    KeyBadge(key: "← / →")
+                }
+            } header: {
+                Text("日历视图")
+            } footer: {
+                Text("任意状态按 G 直达日历视图（含农历、节气、当日日程）；再按 G 或 Tab 回到进入前状态（一瞥进入回一瞥，看板进入回看板）。")
             }
             
             Section {
@@ -527,19 +549,19 @@ struct AboutSettingsForm: View {
                             .shadow(color: Color.black.opacity(0.18), radius: 4, x: 0, y: 2)
                         
                         Image(systemName: "sparkles")
-                            .font(.system(size: 26, weight: .bold))
+                            .font(.system(size: Theme.Typography.settingsIcon, weight: .bold))
                             .foregroundColor(.cyan)
                     }
                     
                     VStack(alignment: .leading, spacing: 3) {
                         Text("QuickShow")
-                            .font(.system(size: 18, weight: .bold))
+                            .font(.system(size: Theme.Typography.title, weight: .bold))
                         // 版本号读取自 Info.plist，避免文档与实际版本漂移
                         Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0")")
-                            .font(.system(size: 12))
+                            .font(.system(size: Theme.Typography.callout))
                             .foregroundColor(.secondary)
                         Text("专为全屏沉浸与极简工作流打造的 macOS 原生极速信息悬浮窗。")
-                            .font(.system(size: 11.5))
+                            .font(.system(size: Theme.Typography.callout))
                             .foregroundColor(.secondary)
                     }
                 }
@@ -555,7 +577,7 @@ struct AboutSettingsForm: View {
                 Text("软件信息")
             } footer: {
                 Text("Now Playing 数据能力由 mediaremote-adapter（BSD-3-Clause）提供。")
-                    .font(.system(size: 10.5))
+                    .font(.system(size: Theme.Typography.label))
                     .foregroundColor(.secondary)
             }
         }
@@ -568,7 +590,7 @@ struct KeyBadge: View {
     
     var body: some View {
         Text(key)
-            .font(.system(size: 11, weight: .bold, design: .monospaced))
+            .font(.system(size: Theme.Typography.keyCap, weight: .bold, design: .monospaced))
             .foregroundColor(.primary.opacity(0.88))
             .padding(.horizontal, 7)
             .padding(.vertical, 3)

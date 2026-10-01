@@ -10,8 +10,24 @@ if ! security find-identity -p codesigning -v 2>/dev/null | grep -q "QuickShow D
     SIGN_IDENTITY="-"
 fi
 
+# 新增/删除源文件后必须重新生成 Xcode 工程（XcodeGen）
+if command -v xcodegen > /dev/null 2>&1; then
+    echo "⚙️  重新生成 Xcode 工程 (xcodegen)..."
+    xcodegen generate > /dev/null
+else
+    echo "⚠️  未检测到 xcodegen，跳过工程生成（新增源文件将不会参与编译）"
+fi
+
 echo "🔨 正在编译 QuickShow (Release)..."
-xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release CODE_SIGN_IDENTITY="$SIGN_IDENTITY" build > /dev/null
+# 编译输出落盘到临时日志：成功即删；失败打印错误摘要与完整日志路径，不再静默吞错
+BUILD_LOG="$(mktemp -t quickshow_build)"
+if ! xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release CODE_SIGN_IDENTITY="$SIGN_IDENTITY" build > "$BUILD_LOG" 2>&1; then
+    echo "❌ 编译失败，错误摘要："
+    grep -E "error: " "$BUILD_LOG" | head -20 || echo "（日志中无 error: 行，请查看完整日志）"
+    echo "💡 完整日志：$BUILD_LOG"
+    exit 1
+fi
+rm -f "$BUILD_LOG"
 
 echo "🛑 退出旧版本进程..."
 killall QuickShow 2>/dev/null || true
@@ -21,7 +37,7 @@ sleep 0.2
 
 echo "🚀 启动最新 QuickShow..."
 open ./build_release/Build/Products/Release/QuickShow.app 2>/dev/null || {
-    echo "💡 如果处于沙箱环境，请在主机终端直接执行：pnpm restart 或 open ./build_release/Build/Products/Release/QuickShow.app"
+    echo "💡 启动失败，请在主机终端直接执行：./scripts/restart.sh"
 }
 
 echo "✅ 重启脚本执行完毕！"

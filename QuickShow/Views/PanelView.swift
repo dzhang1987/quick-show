@@ -27,61 +27,73 @@ struct PanelView: View {
             : 0
         
         VStack(spacing: 0) {
-            // 上半部分：核心大字时钟与日期徽章
-            // 字号随实际渲染宽度逐帧连续缩放；锚点 padding 随展开进度逐帧连续滑动
-            // （端点 30↔8：展开态时钟贴近顶部，释放的空间让给状态栏与监控区呼吸）
-            TimeDisplayView(appState: appState, panelWidth: renderedSize.width > 0 ? renderedSize.width : panelWidth)
-                .padding(.top, Theme.Layout.heroTopCompact - (Theme.Layout.heroTopCompact - Theme.Layout.heroTopExpanded) * expandProgress)
-                .padding(.horizontal, Theme.Spacing.panel)
-            
-            // 严格受限的自然呼吸微间距，彻底杜绝拉裂虚空（端点 36↔12 不变，随进度连续收缩）
-            Spacer(minLength: 8)
-                .frame(maxHeight: Theme.Layout.breathCompact - (Theme.Layout.breathCompact - Theme.Layout.breathExpanded) * expandProgress)
-            
-            // 细若游丝的微光渐隐分割线（严格保持 0.5pt 高度）
-            // 0.25 是对比度下限：黑色低 alpha 在亮玻璃上是"阴影"型弱对比，
-            // 需显著高于暗色白线的等效发光感，双模式均清晰但不抢戏
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.primary.opacity(0.0),
-                            Color.primary.opacity(Theme.Colors.dividerOpacity),
-                            Color.primary.opacity(0.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
+            // 按面板上下文整体切换渲染（独立功能 = 独立全面板视图，上下文间完全互斥零残留）
+            switch appState.currentContext {
+            case .calendar:
+                // 日历态：整面板 100% 归日历——无时钟、无底栏微标、无倒计时微光条
+                CalendarPanelView(appState: appState)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            case .glance, .dashboard:
+                // 常规态：大字时钟 + 底栏微状态 + 中部监控区
+                // 上半部分：核心大字时钟与日期徽章
+                // 字号随实际渲染宽度逐帧连续缩放；锚点 padding 随展开进度逐帧连续滑动
+                // （端点 30↔8：展开态时钟贴近顶部，释放的空间让给状态栏与监控区呼吸）
+                TimeDisplayView(appState: appState, panelWidth: renderedSize.width > 0 ? renderedSize.width : panelWidth)
+                    .padding(.top, Theme.Layout.heroTopCompact - (Theme.Layout.heroTopCompact - Theme.Layout.heroTopExpanded) * expandProgress)
+                    .padding(.horizontal, Theme.Spacing.panel)
+                
+                // 严格受限的自然呼吸微间距，彻底杜绝拉裂虚空（端点 36↔12 不变，随进度连续收缩）
+                Spacer(minLength: 8)
+                    .frame(maxHeight: Theme.Layout.breathCompact - (Theme.Layout.breathCompact - Theme.Layout.breathExpanded) * expandProgress)
+                
+                // 细若游丝的微光渐隐分割线（严格保持 0.5pt 高度）
+                // 0.25 是对比度下限：黑色低 alpha 在亮玻璃上是"阴影"型弱对比，
+                // 需显著高于暗色白线的等效发光感，双模式均清晰但不抢戏
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color.primary.opacity(0.0),
+                                Color.primary.opacity(Theme.Colors.dividerOpacity),
+                                Color.primary.opacity(0.0)
+                            ],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
                     )
-                )
-                .frame(height: Theme.Layout.dividerHeight)
-                .padding(.horizontal, Theme.Spacing.panel)
-            
-            // 底部微状态栏（P0 状态：电池、WiFi、音频、常驻图钉）
-            // padding 端点 16↔10 / 24↔12，随进度连续滑动（展开态底部呼吸加大）
-            StatusBarView(appState: appState)
-                .padding(.horizontal, Theme.Spacing.panel)
-                .padding(.top, Theme.Layout.statusTopCompact - (Theme.Layout.statusTopCompact - Theme.Layout.statusTopExpanded) * expandProgress)
-                .padding(.bottom, Theme.Layout.statusBottomCompact - (Theme.Layout.statusBottomCompact - Theme.Layout.statusBottomExpanded) * expandProgress)
-            
-            // 展开后的监控面板 (P1 状态：CPU/内存负载、网速、日历日程、番茄钟)
-            // 占位高度 = 完整高度 × 展开进度：窗口长多少它吃多少，逐帧由实际高度挤出，
-            // 全程内容需求恒 ≤ 窗口实际高度（数学保证零溢出）；顶对齐 + clipped：
-            // 即便极端账目误差也只裁监控区底部，时钟绝不被裁；
-            // 占位与 isExpanded 解耦（收起时随窗口收缩自然归零，无瞬跳），isExpanded 只管淡入淡出；
-            // p=1 端点 = 内容 241.5 + 底部呼吸 14（时钟上移释放的空间转移至此）
-            ExpandedMonitoringView(appState: appState)
-                .padding(.horizontal, Theme.Spacing.xxxl)
-                .frame(height: (Theme.Layout.monitorContentHeight + Theme.Layout.monitorBreath) * expandProgress, alignment: .top)
-                .clipped()
-                .opacity(appState.isExpanded ? 1 : 0)
-                .animation(.easeInOut(duration: Theme.Motion.windowResize), value: appState.isExpanded)
-            
-            // 注意：此处曾有 ESC/⌘,/⌘Q 三个隐形 keyboardShortcut Button 兜底，已删除。
-            // 根因（最小复现实验铁证）：keyboardShortcut 在 NSGlassEffectView 承载的
-            // NSHostingView 中会卡死 SwiftUI 布局链——首帧布局停在 0x0 后，窗口 resize
-            // 不再触发测量上报（renderedSize 恒 0 → expandProgress 恒 0 → 监控卡片零高消失）。
-            // 快捷键由 FloatingPanel.sendEvent/keyDown/cancelOperation 完整拦截，无功能损失。
+                    .frame(height: Theme.Layout.dividerHeight)
+                    .padding(.horizontal, Theme.Spacing.panel)
+                
+                // 底部微状态栏（P0 状态：电池、WiFi、音频、常驻图钉）
+                // padding 端点 16↔10 / 24↔12，随进度连续滑动（展开态底部呼吸加大）
+                StatusBarView(appState: appState)
+                    .padding(.horizontal, Theme.Spacing.panel)
+                    .padding(.top, Theme.Layout.statusTopCompact - (Theme.Layout.statusTopCompact - Theme.Layout.statusTopExpanded) * expandProgress)
+                    .padding(.bottom, Theme.Layout.statusBottomCompact - (Theme.Layout.statusBottomCompact - Theme.Layout.statusBottomExpanded) * expandProgress)
+                
+                // 展开后的监控面板 (P1 状态：CPU/内存负载、网速、日历日程、番茄钟)
+                // 占位高度 = 完整高度 × 展开进度：窗口长多少它吃多少，逐帧由实际高度挤出，
+                // 全程内容需求恒 ≤ 窗口实际高度（数学保证零溢出）；顶对齐 + clipped：
+                // 即便极端账目误差也只裁监控区底部，时钟绝不被裁；
+                // 占位与 isExpanded 解耦（收起时随窗口收缩自然归零，无瞬跳），isExpanded 只管淡入淡出；
+                // p=1 端点 = 内容 241.5 + 底部呼吸 14（时钟上移释放的空间转移至此）
+                ExpandedMonitoringView(appState: appState)
+                    .padding(.horizontal, Theme.Spacing.xxxl)
+                    .frame(height: (Theme.Layout.monitorContentHeight + Theme.Layout.monitorBreath) * expandProgress, alignment: .top)
+                    .clipped()
+                    .opacity(appState.isExpanded ? 1 : 0)
+                    .animation(.easeInOut(duration: Theme.Motion.windowResize), value: appState.isExpanded)
+                
+                // 注意：此处曾有 ESC/⌘,/⌘Q 三个隐形 keyboardShortcut Button 兜底，已删除。
+                // 根因（最小复现实验铁证）：keyboardShortcut 在 NSGlassEffectView 承载的
+                // NSHostingView 中会卡死 SwiftUI 布局链——首帧布局停在 0x0 后，窗口 resize
+                // 不再触发测量上报（renderedSize 恒 0 → expandProgress 恒 0 → 监控卡片零高消失）。
+                // 快捷键由 FloatingPanel.sendEvent/keyDown/cancelOperation 完整拦截，无功能损失。
+            }
         }
+        // 日历态 ↔ 常规态整体切换：交叉淡化与窗口尺寸动画同节奏（0.16s ≈ 0.18s），无跳变闪烁
+        .animation(.easeInOut(duration: Theme.Motion.contentFade), value: appState.currentContext)
         .onHover { isHovering in
             appState.setHovered(isHovering)
         }
@@ -140,7 +152,7 @@ struct CheatSheetView: View {
                         .foregroundColor(.primary)
                     Text("(按住 ⌘ 提示 · 松开自动收起)")
                         .font(.system(size: Theme.Typography.body, weight: .regular))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.Colors.contentTertiary)
                 }
                 
                 Spacer()
@@ -165,7 +177,10 @@ struct CheatSheetView: View {
                     ("Space", "常驻图钉切换"),
                     ("ESC", "退出 / 关闭面板"),
                     ("⌘ ,", "偏好设置"),
-                    ("⌘ Q", "退出应用")
+                    ("⌘ Q", "退出应用"),
+                    ("G", "切换日历视图"),
+                    ("1 / 2 / 3", "日历 月/周/日"),
+                    ("← / →", "日历翻页 / 媒体切歌")
                 ])
                 
                 // 列 2：效率工具
@@ -213,7 +228,7 @@ struct ShortcutGroupCard: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             Text(title)
                 .font(.system(size: Theme.Typography.callout, weight: .bold))
-                .foregroundColor(.secondary)
+                .foregroundColor(Theme.Colors.contentSecondaryStrong)
                 .padding(.horizontal, Theme.Spacing.sm)
                 .padding(.bottom, Theme.Spacing.xxs)
             

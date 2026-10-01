@@ -17,6 +17,28 @@ struct StatusBarView: View {
         HStack(alignment: .center, spacing: Theme.Spacing.section) {
             // 左侧状态微标群（严格控量，彻底杜绝任何省略号）
             HStack(spacing: Theme.Spacing.card) {
+                // 0. 临近会议倒计时胶囊（<5 分钟高亮；一瞥态专属，展开态有完整日历卡）
+                if !appState.isExpanded, let upcoming = appState.upcomingMeeting {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: Theme.Typography.mini, weight: .medium))
+                        Text("还有 \(upcoming.minutes) 分钟 · \(upcoming.title)")
+                            .font(.system(size: Theme.Typography.footnote, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .foregroundColor(Color.pink)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.xxs)
+                    .background(
+                        Capsule()
+                            .fill(Color.pink.opacity(0.18))
+                    )
+                    .fixedSize()
+                    // 会议名限宽截断：底栏空间宝贵
+                    .frame(maxWidth: 200, alignment: .leading)
+                }
+                
                 // 1. 电池状态 (固定宽度，绝不压缩截断)
                 if appState.showBattery && appState.batteryInfo.hasBattery {
                     Button {
@@ -57,7 +79,7 @@ struct StatusBarView: View {
                             if let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
                                 Text(ssid)
                                     .font(.system(size: Theme.Typography.callout, weight: .medium))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                     .lineLimit(1)
                             }
                         }
@@ -127,14 +149,14 @@ struct StatusBarView: View {
                             
                             Text(nowPlaying.title)
                                 .font(.system(size: Theme.Typography.callout, weight: .medium))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                             
                             if appState.isExpanded && !nowPlaying.appName.isEmpty {
                                 Text("· \(nowPlaying.appName)")
                                     .font(.system(size: Theme.Typography.caption, weight: .medium))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                     .lineLimit(1)
                             }
                         }

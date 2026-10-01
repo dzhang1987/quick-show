@@ -113,9 +113,16 @@ final class PanelManager {
         }
         
         // 全键盘盲操快捷键
-        panel.onKeyDownAction = { [weak appState] keyCode in
+        panel.onKeyDownAction = { [weak appState] event in
             guard let appState = appState else { return false }
             appState.resetGlanceTimer()
+            let keyCode = event.keyCode
+            // 独立上下文直达键（注册表查表分发；要求无 ⌘/⌥/⇧/⌃ 修饰，避免 ⌘G 等组合键误触）
+            if let context = AppState.contextHotkeys[keyCode],
+               event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty {
+                appState.toggleContext(context)
+                return true
+            }
             switch keyCode {
             case 46: // M: 静音 / 取消静音
                 appState.toggleMute()
@@ -147,14 +154,26 @@ final class PanelManager {
             case 2: // D: 专注模式设置
                 appState.openFocusSettings()
                 return true
+            case 18, 19, 20: // 1/2/3: 日历 月/周/日 视图切换（仅日历视图内）
+                guard appState.currentContext == .calendar else { return false }
+                appState.setCalendarViewMode(keyCode == 18 ? .month : (keyCode == 19 ? .week : .day))
+                return true
             // 媒体控制盲操：仅存在媒体会话时消费按键（无会话时返回 false 不拦截事件）
             case 36: // ⏎ 回车: 播放 / 暂停切换
                 appState.mediaTogglePlayPause()
                 return appState.hasNowPlayingSession
-            case 123: // ← 左方向键: 上一首
+            case 123: // ← 左方向键: 日历视图激活时优先翻页（覆盖媒体语义），否则媒体上一首
+                if appState.currentContext == .calendar {
+                    appState.calendarPageBackward()
+                    return true
+                }
                 appState.mediaPreviousTrack()
                 return appState.hasNowPlayingSession
-            case 124: // → 右方向键: 下一首
+            case 124: // → 右方向键: 日历视图激活时优先翻页（覆盖媒体语义），否则媒体下一首
+                if appState.currentContext == .calendar {
+                    appState.calendarPageForward()
+                    return true
+                }
                 appState.mediaNextTrack()
                 return appState.hasNowPlayingSession
             case 43: // , 逗号: 后退 15 秒（无修饰键；⌘, 已在上游拦截为偏好设置）
@@ -194,10 +213,6 @@ final class PanelManager {
             self?.updatePanelFrameAnimated()
         }
         
-        appState.onCheatSheetChange = { [weak self] _ in
-            self?.updatePanelFrameAnimated()
-        }
-        
         appState.onLayoutChange = { [weak self] in
             self?.updatePanelFrameAnimated()
         }
@@ -205,8 +220,13 @@ final class PanelManager {
     
     private func targetSize(on screen: NSScreen = ScreenHelper.activeScreen) -> NSSize {
         let metrics = appState?.currentMetrics(for: screen) ?? ScreenHelper.metrics(for: screen, option: .auto)
-        let isExpandedOrCheat = (appState?.isExpanded == true || appState?.showCheatSheet == true)
-        return isExpandedOrCheat ? metrics.expandedSize : metrics.compactSize
+        let context = appState?.currentContext ?? .glance
+        // 上下文 → 目标尺寸映射（枚举内）；速查表 overlay 策略：日历上下文保持日历尺寸不缩窗，
+        // 其余上下文弹出速查表时提升到展开档尺寸（overlay 按展开档布局设计）
+        if appState?.showCheatSheet == true && context != .calendar {
+            return metrics.expandedSize
+        }
+        return context.targetSize(in: metrics)
     }
     
     func showPanel(mode: PanelMode) {
@@ -362,6 +382,8 @@ final class PanelManager {
         escLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let panel = self.panel, panel.isVisible else { return event }
             if event.keyCode == 53 { // ESC 键
+                // 文本编辑聚焦时放行：ESC 归还 field editor 结束编辑（不退出面板）
+                if panel.firstResponder is NSTextView { return event }
                 self.appState?.dismiss()
                 return nil
             }

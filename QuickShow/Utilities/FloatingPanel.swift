@@ -13,7 +13,7 @@ final class FloatingPanel: NSPanel {
     var onCommandLongPressed: (() -> Void)?
     var onCommandReleased: (() -> Void)?
     var onQuestionMarkPressed: (() -> Void)?
-    var onKeyDownAction: ((UInt16) -> Bool)?
+    var onKeyDownAction: ((NSEvent) -> Bool)?
     var onResignKey: (() -> Void)?
     
     private var cmdLongPressTimer: Timer?
@@ -67,6 +67,14 @@ final class FloatingPanel: NSPanel {
             cmdLongPressTimer?.invalidate()
             cmdLongPressTimer = nil
             
+            // 文本编辑聚焦时全部按键放行给第一响应者（编辑表单 TextField/DatePicker 的 field editor
+            // 即 NSTextView）——窗口级拦截先于第一响应者，会吞掉 G/Tab/⏎/←→ 导致无法输入并误触
+            // 全局动作；ESC 此时走标准 AppKit cancelOperation 结束编辑（不退出面板）
+            if firstResponder is NSTextView {
+                super.sendEvent(event)
+                return
+            }
+            
             // ? 键速查表切换 (Shift + / 或 characters == "?")
             if event.characters == "?" || (event.keyCode == 44 && event.modifierFlags.contains(.shift)) {
                 onQuestionMarkPressed?()
@@ -91,7 +99,7 @@ final class FloatingPanel: NSPanel {
             } else if event.keyCode == 48 { // Tab 键
                 onTabPressed?()
                 return
-            } else if let handled = onKeyDownAction?(event.keyCode), handled {
+            } else if let handled = onKeyDownAction?(event), handled {
                 return
             }
         }
@@ -109,6 +117,12 @@ final class FloatingPanel: NSPanel {
     }
     
     override func keyDown(with event: NSEvent) {
+        // 文本编辑聚焦时放行给第一响应者（与 sendEvent 分支同理，兜住 keyDown 直投路径）
+        if firstResponder is NSTextView {
+            super.keyDown(with: event)
+            return
+        }
+        
         let isCmd = event.modifierFlags.contains(.command)
         if isCmd && event.keyCode == 43 { // ⌘ + ,
             onSettingsPressed?()
@@ -127,7 +141,7 @@ final class FloatingPanel: NSPanel {
         } else if event.keyCode == 48 { // Tab 键
             onTabPressed?()
             return
-        } else if let handled = onKeyDownAction?(event.keyCode), handled {
+        } else if let handled = onKeyDownAction?(event), handled {
             return
         }
         super.keyDown(with: event)

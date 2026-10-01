@@ -3,6 +3,8 @@ import AppKit
 struct PanelLayoutMetrics: Equatable {
     let compactSize: NSSize
     let expandedSize: NSSize
+    let calendarSize: NSSize          // 日历视图尺寸（按 G 任意状态直达日历档）
+    let calendarCellHeight: CGFloat   // 日历格子行高（月视图，按档）
 }
 
 enum ScreenHelper {
@@ -19,20 +21,26 @@ enum ScreenHelper {
     /// 尺寸值统一引用 Theme.Layout 令牌（单一来源），此处仅保留档位选择逻辑
     static func metrics(for screen: NSScreen, option: PanelScaleOption) -> PanelLayoutMetrics {
         switch option {
-        case .standard: // 系统聚焦大号（宽 680 / 高 340，展开 740 / 高 520）
+        case .standard: // 系统聚焦大号（宽 680 / 高 340，展开 740 / 高 520，日历 740 / 高 640）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.standardCompact,
-                expandedSize: Theme.Layout.standardExpanded
+                expandedSize: Theme.Layout.standardExpanded,
+                calendarSize: Theme.Layout.standardCalendar,
+                calendarCellHeight: Theme.Layout.calendarCellStandard
             )
-        case .compact: // 适中舒适（宽 540 / 高 280，展开 620 / 高 460）
+        case .compact: // 适中舒适（宽 540 / 高 280，展开 620 / 高 460，日历 620 / 高 560）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.comfortCompact,
-                expandedSize: Theme.Layout.comfortExpanded
+                expandedSize: Theme.Layout.comfortExpanded,
+                calendarSize: Theme.Layout.comfortCalendar,
+                calendarCellHeight: Theme.Layout.calendarCellComfort
             )
-        case .legacy: // 极简小巧（宽 440 / 高 230，展开 520 / 高 400）
+        case .legacy: // 极简小巧（宽 440 / 高 230，展开 520 / 高 400，日历 520 / 高 500）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.legacyCompact,
-                expandedSize: Theme.Layout.legacyExpanded
+                expandedSize: Theme.Layout.legacyExpanded,
+                calendarSize: Theme.Layout.legacyCalendar,
+                calendarCellHeight: Theme.Layout.calendarCellLegacy
             )
         case .auto:
             // 依据当前活跃屏幕有效宽高智能匹配最佳自然贴合档位
@@ -44,13 +52,17 @@ enum ScreenHelper {
                 // 14/16寸高分屏与外接大屏：680 x 340 黄金高宽比，时间绝对主角
                 return PanelLayoutMetrics(
                     compactSize: Theme.Layout.standardCompact,
-                    expandedSize: Theme.Layout.standardExpanded
+                    expandedSize: Theme.Layout.standardExpanded,
+                    calendarSize: Theme.Layout.standardCalendar,
+                    calendarCellHeight: Theme.Layout.calendarCellStandard
                 )
             } else {
                 // 标准分辨率屏（<= 1512 宽且 < 1000 高）
                 return PanelLayoutMetrics(
                     compactSize: Theme.Layout.comfortCompact,
-                    expandedSize: Theme.Layout.comfortExpanded
+                    expandedSize: Theme.Layout.comfortExpanded,
+                    calendarSize: Theme.Layout.comfortCalendar,
+                    calendarCellHeight: Theme.Layout.calendarCellComfort
                 )
             }
         }

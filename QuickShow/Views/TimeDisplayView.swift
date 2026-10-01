@@ -107,7 +107,7 @@ struct TimeDisplayView: View {
                         Text(dateFormatted)
                             .font(.system(size: Theme.Typography.badge, weight: .semibold, design: .default))
                             .tracking(Theme.Typography.badgeTracking)
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             .padding(.horizontal, Theme.Spacing.xxxl)
                             .padding(.vertical, Theme.Spacing.smd)
                             .background(
@@ -132,7 +132,7 @@ struct TimeDisplayView: View {
                 if let period = period {
                     Text(period)
                         .font(.system(size: periodFontSize, weight: .bold, design: .default))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
                         .padding(.trailing, Theme.Spacing.xxs)
                 }
                 
@@ -153,7 +153,7 @@ struct TimeDisplayView: View {
                     HStack(spacing: Theme.Spacing.xxs) {
                         Text(":")
                             .font(.system(size: secondsFontSize, weight: .light, design: .default))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.Colors.contentTertiary)
                             .offset(y: -2)
                         
                         Text(seconds)

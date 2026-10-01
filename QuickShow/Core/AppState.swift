@@ -1,10 +1,52 @@
 import SwiftUI
 import Combine
+import EventKit
 
 enum PanelMode: Equatable {
     case hidden
     case glance   // 一瞥模式：3 秒后自动淡出
     case pinned   // 固定模式：常驻显示，直到用户按 ESC 或快捷键
+}
+
+// MARK: - 面板上下文（独立功能 = 独立全面板视图，快捷键任意状态直达）
+// 新组件接入清单：① 此处加 case ② contextHotkeys 注册直达键 ③ targetSize 尺寸映射 ④ PanelView 渲染分支
+enum PanelContext: Equatable {
+    case glance     // 一瞥态（大字时钟 + 底栏微标，3 秒自动淡出）
+    case dashboard  // 监控看板展开态
+    case calendar   // 日历视图
+    // 预留未来独立组件：case aiChat / case media ...
+    
+    /// 上下文 → 目标面板尺寸（速查表 overlay 的尺寸策略由 PanelManager.targetSize 统一叠加）
+    func targetSize(in metrics: PanelLayoutMetrics) -> NSSize {
+        switch self {
+        case .glance: return metrics.compactSize
+        case .dashboard: return metrics.expandedSize
+        case .calendar: return metrics.calendarSize
+        }
+    }
+}
+
+// MARK: - 日历视图模式（1/2/3 键切换）
+enum CalendarViewMode: Int, CaseIterable, Identifiable {
+    case month = 1
+    case week = 2
+    case day = 3
+    
+    var id: Int { rawValue }
+    
+    var shortName: String {
+        switch self {
+        case .month: return "月"
+        case .week: return "周"
+        case .day: return "日"
+        }
+    }
+}
+
+// 临近会议提醒（<5 分钟时一瞥底栏高亮倒计时胶囊）
+struct UpcomingMeetingInfo: Equatable {
+    var title: String
+    var minutes: Int
 }
 
 enum PanelScaleOption: String, CaseIterable, Identifiable {
@@ -112,6 +154,36 @@ final class AppState: ObservableObject {
     
     // 快捷键速查卡片 (CheatSheet) 浮层状态
     @Published var showCheatSheet: Bool = false
+    
+    // MARK: - 面板上下文路由（独立功能 = 独立全面板视图）
+    // showCalendarView 是「当前上下文 == .calendar」的存储载体（视图绑定直接读它）；
+    // 未来新组件接入时按需新增同类存储属性
+    @Published var showCalendarView: Bool = false
+    // 进入独立上下文前的来源快照（exitContext 退出时恢复；dismiss 时清零防脏状态）
+    private var contextReturnPoint: PanelContext? = nil
+    
+    /// 当前面板上下文（派生语义：日历 > 看板 > 一瞥）
+    var currentContext: PanelContext {
+        if showCalendarView { return .calendar }
+        return isExpanded ? .dashboard : .glance
+    }
+    
+    /// 组件直达键注册表：keyCode → 上下文（新组件在此注册一行即接入「任意状态直达」）
+    static let contextHotkeys: [UInt16: PanelContext] = [
+        5: .calendar,   // G: 日历视图
+    ]
+    @Published var calendarViewMode: CalendarViewMode = .month
+    @Published var calendarAnchorDate: Date = Date()       // 翻页锚点（月视图=当月，周=当周，日=当天）
+    @Published var selectedDate: Date = Date()             // 选中日期（日程列表展示日）
+    @Published var calendarGridCells: [CalendarDayCell] = []  // 网格缓存模型（月 42 格 / 周 7 格）
+    @Published var dayEvents: [EKEvent] = []               // 选中日全部日程缓存
+    @Published var selectedEvent: EKEvent? = nil           // 详情展示中的日程（点击条目进入）
+    // 日程编辑草稿（内联编辑表单状态；nil = 未在编辑）
+    @Published var calendarEditing: CalendarEditDraft? = nil
+    // 临近会议提醒（<5 分钟高亮；主时钟秒级 tick 基于缓存开始时刻本地计算，零新增轮询）
+    @Published var upcomingMeeting: UpcomingMeetingInfo? = nil
+    // 跨天检测锚点（日历视图数据按天缓存，跨天自动刷新）
+    private var lastTickDay: Date? = nil
     
     // 用户偏好设置
     @AppStorage("showOnLaunch") var showOnLaunch: Bool = true
@@ -271,6 +343,11 @@ final class AppState: ObservableObject {
     
     /// 切换详细展开监控视图
     func toggleExpanded() {
+        // 日历视图内按 Tab：切回进入前上下文（一瞥进入回一瞥，看板进入回看板）
+        if showCalendarView {
+            exitContext()
+            return
+        }
         // 状态瞬时切换：面板尺寸动画的唯一时钟是 PanelManager 的窗口 setFrame 动画，
         // SwiftUI 内容立即进入最终布局并弹性填充 hosting view，空间由窗口逐帧供给自然 reflow，
         // 此处绝不能再包 withAnimation，否则内容与窗口两套插值时钟打架导致布局抖动
@@ -325,6 +402,15 @@ final class AppState: ObservableObject {
         isExpanded = false
         isHovered = false
         showCheatSheet = false
+        // 日历视图状态归位：下次呼出回到默认看板语义，上下文来源快照清零防脏状态；
+        // 网格/日程缓存一并清空（避免上次翻到的月份在下次 G 首帧残留闪烁）
+        showCalendarView = false
+        selectedEvent = nil
+        calendarEditing = nil
+        calendarGridCells = []
+        dayEvents = []
+        contextReturnPoint = nil
+        upcomingMeeting = nil
         glanceProgress = 1.0
         onDismissPanel?()
     }
@@ -570,6 +656,240 @@ final class AppState: ObservableObject {
         dismiss()
     }
     
+    // MARK: - 上下文统一进入/退出管线（G 等组件直达键与 Tab 的日历退出均汇聚于此）
+    
+    /// 直达键统一入口：已在该上下文则退出回来源态，否则进入
+    func toggleContext(_ context: PanelContext) {
+        if currentContext == context {
+            exitContext()
+        } else {
+            enterContext(context)
+        }
+    }
+    
+    /// 进入独立上下文：记录来源快照 → 激活目标上下文（尺寸动画由 PanelManager 窗口驱动）
+    func enterContext(_ context: PanelContext) {
+        guard currentContext != context else { return }
+        contextReturnPoint = currentContext
+        activateContext(context)
+    }
+    
+    /// 退出独立上下文：恢复来源上下文（来源为一瞥且处于一瞥模式时重启 3 秒淡出倒计时；
+    /// 看板保持展开无倒计时；pinned 态因 mode != .glance 天然不启动倒计时）
+    func exitContext() {
+        // 兜底：来源快照缺失时按一瞥语义退出（当前不变式下不可达，防御面板卡死在独立上下文）
+        let returnPoint = contextReturnPoint ?? .glance
+        contextReturnPoint = nil
+        activateContext(returnPoint)
+        if returnPoint == .glance && mode == .glance {
+            startGlanceTimer()
+        }
+    }
+    
+    /// 激活目标上下文（各上下文的瞬态清理与初始化集中于此；状态瞬时切换，严禁包 withAnimation——
+    /// 面板尺寸动画的唯一时钟是 PanelManager 的窗口 setFrame 动画，双插值时钟会打架抖动）
+    private func activateContext(_ context: PanelContext) {
+        // 日历态瞬态：离开即清理（详情/编辑表单不跨上下文残留）
+        selectedEvent = nil
+        calendarEditing = nil
+        switch context {
+        case .glance:
+            showCalendarView = false
+            isExpanded = false
+        case .dashboard:
+            // 看板展开：暂停一瞥自动淡出倒计时（与 toggleExpanded 同语义）
+            showCalendarView = false
+            isExpanded = true
+            cancelGlanceTimer()
+        case .calendar:
+            // 进入日历默认：当前月 + 今日日程；日历态隐含展开语义（整面板切换，无看板残留）；
+            // 暂停一瞥自动淡出倒计时（一瞥态直达进入时原 3 秒倒计时必须取消）
+            showCalendarView = true
+            isExpanded = true
+            calendarAnchorDate = Date()
+            selectedDate = Date()
+            refreshCalendarData()
+            cancelGlanceTimer()
+        }
+        // 上下文切换触发窗口尺寸动画（目标尺寸 = 上下文映射）
+        onLayoutChange?()
+    }
+    
+    func setCalendarViewMode(_ mode: CalendarViewMode) {
+        guard showCalendarView, calendarViewMode != mode else { return }
+        calendarViewMode = mode
+        selectedEvent = nil
+        refreshCalendarData()
+    }
+    
+    /// 翻页：月历 ±月、周历 ±周、日历 ±天（语义随当前视图）
+    func calendarPageForward() { calendarPage(by: 1) }
+    func calendarPageBackward() { calendarPage(by: -1) }
+    
+    private func calendarPage(by offset: Int) {
+        let cal = Calendar.current
+        let component: Calendar.Component
+        switch calendarViewMode {
+        case .month: component = .month
+        case .week: component = .weekOfYear
+        case .day: component = .day
+        }
+        guard let newAnchor = cal.date(byAdding: component, value: offset, to: calendarAnchorDate) else { return }
+        calendarAnchorDate = newAnchor
+        // 选中日期跟随翻页语义：月视图选中新月首日，周视图选中新周首日，日视图即当日
+        switch calendarViewMode {
+        case .month:
+            selectedDate = cal.date(from: cal.dateComponents([.year, .month], from: newAnchor)) ?? newAnchor
+        case .week:
+            selectedDate = Self.gridStartDate(anchor: newAnchor, mode: .week) ?? newAnchor
+        case .day:
+            selectedDate = newAnchor
+        }
+        selectedEvent = nil
+        refreshCalendarData()
+    }
+    
+    /// 回到今天（顶栏「今天」按钮）
+    func calendarJumpToToday() {
+        calendarAnchorDate = Date()
+        selectedDate = Date()
+        selectedEvent = nil
+        refreshCalendarData()
+    }
+    
+    /// 选中某日（点击网格格子）
+    func selectCalendarDate(_ date: Date) {
+        selectedDate = date
+        selectedEvent = nil
+        refreshCalendarData()
+    }
+    
+    /// 打开日程编辑（内联表单；nil = 新建，默认选中日下一个整点起 1 小时）
+    /// 注：macOS 无 EKEventEditViewController（EventKitUI 仅 iOS/Catalyst），
+    /// 故采用自建轻量表单（SwiftUI 内联于日历视图），EKEventStore 保存
+    func openEventEditor(for event: EKEvent?) {
+        if let event = event {
+            calendarEditing = CalendarEditDraft(event: event)
+        } else {
+            calendarEditing = CalendarEditDraft(newOn: selectedDate)
+        }
+    }
+    
+    func cancelEventEditing() {
+        calendarEditing = nil
+    }
+    
+    /// 保存编辑草稿：新建或回写既有日程（EventKit 写操作放后台串行队列，完成回主线程刷新）
+    func saveEventEditing() {
+        guard let draft = calendarEditing, !draft.title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        calendarEditing = nil
+        selectedEvent = nil
+        Self.statusRefreshQueue.async { [weak self] in
+            SystemStatusProvider.shared.saveEventDraft(draft)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                // 选中日期跟随保存结果；若当前网格范围不含该日（跨月/周编辑），锚点一并跳转
+                let range = Self.gridDateRange(anchor: self.calendarAnchorDate, mode: self.calendarViewMode)
+                if !(draft.startDate >= range.lowerBound && draft.startDate < range.upperBound) {
+                    self.calendarAnchorDate = draft.startDate
+                }
+                self.selectedDate = draft.startDate
+                self.refreshCalendarData()
+            }
+        }
+    }
+    
+    /// 删除正在编辑的日程（仅编辑态可用）
+    func deleteEditingEvent() {
+        guard let eventID = calendarEditing?.eventID else { return }
+        calendarEditing = nil
+        selectedEvent = nil
+        Self.statusRefreshQueue.async { [weak self] in
+            SystemStatusProvider.shared.deleteEvent(withIdentifier: eventID)
+            DispatchQueue.main.async {
+                self?.refreshCalendarData()
+            }
+        }
+    }
+    
+    /// 日历视图数据刷新：网格缓存模型 + 选中日日程，后台串行队列查询，结果回主线程。
+    /// 仅在进入视图/翻页/视图切换/选中变更/编辑保存/跨天时调用，避免每秒 tick 全量查询；
+    /// 未授权时日程与事件点为空（视图层显示授权引导），农历/节气不依赖权限照常可用。
+    func refreshCalendarData() {
+        guard showCalendarView else { return }
+        let mode = calendarViewMode
+        let anchor = calendarAnchorDate
+        let selected = selectedDate
+        let authorized = SystemStatusProvider.shared.isCalendarAuthorized
+        Self.statusRefreshQueue.async { [weak self] in
+            guard let self = self else { return }
+            let provider = SystemStatusProvider.shared
+            let range = Self.gridDateRange(anchor: anchor, mode: mode)
+            let eventDays = authorized ? provider.getEventDaySet(from: range.lowerBound, to: range.upperBound) : []
+            let cells = Self.buildGridCells(anchor: anchor, mode: mode, eventDays: eventDays)
+            let events = authorized ? provider.getEvents(on: selected) : []
+            DispatchQueue.main.async {
+                self.calendarGridCells = cells
+                self.dayEvents = events
+            }
+        }
+    }
+    
+    /// 网格起始日（周一为首列，贴合中文习惯）：月视图 = 当月 1 号所在周的周一，周视图 = 锚点所在周周一
+    static func gridStartDate(anchor: Date, mode: CalendarViewMode) -> Date? {
+        gridDateRange(anchor: anchor, mode: mode).lowerBound
+    }
+    
+    /// 网格覆盖的日期范围（月视图 42 格 / 周视图 7 格 / 日视图当天）
+    static func gridDateRange(anchor: Date, mode: CalendarViewMode) -> (lowerBound: Date, upperBound: Date) {
+        let cal = Calendar.current
+        switch mode {
+        case .month:
+            let comps = cal.dateComponents([.year, .month], from: anchor)
+            let firstOfMonth = cal.date(from: comps) ?? anchor
+            let weekday = cal.component(.weekday, from: firstOfMonth)   // 1 = 周日
+            let offset = (weekday + 5) % 7                              // 距周一的天数
+            let start = cal.date(byAdding: .day, value: -offset, to: firstOfMonth) ?? firstOfMonth
+            let end = cal.date(byAdding: .day, value: 42, to: start) ?? start
+            return (start, end)
+        case .week:
+            let weekday = cal.component(.weekday, from: anchor)
+            let offset = (weekday + 5) % 7
+            let start = cal.date(byAdding: .day, value: -offset, to: cal.startOfDay(for: anchor)) ?? anchor
+            let end = cal.date(byAdding: .day, value: 7, to: start) ?? start
+            return (start, end)
+        case .day:
+            let start = cal.startOfDay(for: anchor)
+            let end = cal.date(byAdding: .day, value: 1, to: start) ?? start
+            return (start, end)
+        }
+    }
+    
+    /// 生成日历网格缓存模型（月视图 42 格 / 周视图 7 格；农历/节气本地计算，事件点来自 EventKit）
+    private static func buildGridCells(anchor: Date, mode: CalendarViewMode, eventDays: Set<String>) -> [CalendarDayCell] {
+        guard mode != .day else { return [] }
+        let cal = Calendar.current
+        let range = gridDateRange(anchor: anchor, mode: mode)
+        let count = (mode == .month) ? 42 : 7
+        var cells: [CalendarDayCell] = []
+        for i in 0..<count {
+            guard let date = cal.date(byAdding: .day, value: i, to: range.lowerBound) else { continue }
+            let festival = LunarCalendar.festival(for: date)
+            let term = LunarCalendar.solarTerm(for: date)
+            cells.append(CalendarDayCell(
+                date: date,
+                day: cal.component(.day, from: date),
+                isToday: cal.isDateInToday(date),
+                isInCurrentScope: mode == .month ? cal.isDate(date, equalTo: anchor, toGranularity: .month) : true,
+                lunarText: LunarCalendar.dayText(for: date),
+                festival: festival,
+                solarTerm: term,
+                hasEvents: eventDays.contains(SystemStatusProvider.dayKey(date))
+            ))
+        }
+        return cells
+    }
+    
     // MARK: - 媒体控制盲操（⏎ 播放暂停 / ←→ 切歌 / ,. ±15s）
     // 仅存在媒体会话时生效，无会话按键无副作用（键位分发处据此决定是否消费事件）
     var hasNowPlayingSession: Bool { nowPlayingInfo != nil }
@@ -698,6 +1018,39 @@ final class AppState: ObservableObject {
                 if self.tickCounter % 5 == 0 {
                     self.refreshStatusBadges()
                 }
+                
+                // 临近会议倒计时：<5 分钟时一瞥底栏高亮胶囊
+                //（基于缓存的下一场开始时刻本地计算，零新增 EventKit 轮询）
+                if let start = self.calendarInfo.nextEventStartDate, self.calendarInfo.hasEvent {
+                    let remain = start.timeIntervalSince(newDate)
+                    if remain > 0 && remain < 300 {
+                        let minutes = Int(ceil(remain / 60.0))
+                        let next = UpcomingMeetingInfo(title: self.calendarInfo.title, minutes: minutes)
+                        if self.upcomingMeeting != next {
+                            self.upcomingMeeting = next
+                        }
+                    } else if self.upcomingMeeting != nil {
+                        self.upcomingMeeting = nil
+                    }
+                } else if self.upcomingMeeting != nil {
+                    self.upcomingMeeting = nil
+                }
+                
+                // 日历信息低频保鲜：每分钟静默刷新一次（pinned 常驻时临近提醒数据不陈旧）
+                if self.showCalendar && self.tickCounter % 60 == 10 {
+                    Self.statusRefreshQueue.async { [weak self] in
+                        let info = SystemStatusProvider.shared.getNextCalendarEvent()
+                        DispatchQueue.main.async { self?.calendarInfo = info }
+                    }
+                }
+                
+                // 跨天检测：日历视图数据（网格农历/事件点/当日日程）按天缓存，跨天自动刷新
+                if let lastDay = self.lastTickDay, !Calendar.current.isDate(newDate, inSameDayAs: lastDay) {
+                    if self.showCalendarView {
+                        self.refreshCalendarData()
+                    }
+                }
+                self.lastTickDay = newDate
             }
     }
     

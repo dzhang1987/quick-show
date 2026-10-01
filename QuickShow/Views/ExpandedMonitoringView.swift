@@ -47,7 +47,7 @@ struct ExpandedMonitoringView: View {
                                 Image(systemName: "arrow.up.forward.app")
                                     .font(.system(size: Theme.Typography.tiny))
                             }
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Theme.Colors.contentTertiary)
                             .padding(.horizontal, Theme.Spacing.md)
                             .padding(.vertical, Theme.Spacing.xxs)
                             .background(
@@ -64,7 +64,7 @@ struct ExpandedMonitoringView: View {
                         HStack(spacing: Theme.Spacing.md) {
                             Text("CPU 负载")
                                 .font(.system(size: Theme.Typography.label, weight: .semibold))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             
                             Spacer()
                             
@@ -79,7 +79,7 @@ struct ExpandedMonitoringView: View {
                             } else {
                                 Text("平稳运行")
                                     .font(.system(size: Theme.Typography.mini, weight: .medium))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                             }
                             
                             Text(String(format: "%2.0f%%", appState.performanceInfo.cpuUsage))
@@ -112,13 +112,13 @@ struct ExpandedMonitoringView: View {
                         HStack(spacing: Theme.Spacing.md) {
                             Text("内存占用")
                                 .font(.system(size: Theme.Typography.label, weight: .semibold))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             
                             Spacer()
                             
                             Text("\(String(format: "%.1f", appState.performanceInfo.memoryUsedGB))G / \(Int(appState.performanceInfo.memoryTotalGB))G")
                                 .font(.system(size: Theme.Typography.caption, weight: .medium))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(Theme.Colors.contentTertiary)
                                 .monospacedDigit()
                             
                             // 一键内存优化清理微按钮
@@ -170,10 +170,10 @@ struct ExpandedMonitoringView: View {
                             HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "internaldrive")
                                     .font(.system(size: Theme.Typography.caption))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                 Text("系统磁盘")
                                     .font(.system(size: Theme.Typography.label, weight: .semibold))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             }
                             
                             Spacer()
@@ -181,7 +181,7 @@ struct ExpandedMonitoringView: View {
                             if appState.diskInfo.totalGB > 0 {
                                 Text("\(Int(appState.diskInfo.freeGB))G 可用 / \(Int(appState.diskInfo.totalGB))G")
                                     .font(.system(size: Theme.Typography.caption, weight: .medium))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                     .monospacedDigit()
                             }
                             
@@ -258,11 +258,11 @@ struct ExpandedMonitoringView: View {
                             HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "network")
                                     .font(.system(size: Theme.Typography.caption, weight: .bold))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                 Text(appState.networkLatency.map { "\($0) ms" } ?? "—")
                                     .font(.system(size: Theme.Typography.callout, weight: .semibold))
                                     .monospacedDigit()
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             }
                             .help("到 1.1.1.1:443 的 TCP 连接延迟，每 5 秒测量一次")
                         }
@@ -276,10 +276,10 @@ struct ExpandedMonitoringView: View {
                             HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "doc.on.doc")
                                     .font(.system(size: Theme.Typography.tiny))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                 Text("复制内网 IP")
                                     .font(.system(size: Theme.Typography.caption, weight: .medium))
-                                    .foregroundColor(.secondary)
+                                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             }
                             .padding(.horizontal, Theme.Spacing.mdlg)
                             .padding(.vertical, Theme.Spacing.xs)
@@ -346,7 +346,7 @@ struct ExpandedMonitoringView: View {
                             if appState.pomodoroTodayCount > 0 || appState.pomodoroStreakDays > 0 {
                                 Text("今日 \(appState.pomodoroTodayCount) 个 · 连续 \(appState.pomodoroStreakDays) 天")
                                     .font(.system(size: Theme.Typography.mini, weight: .medium))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                     .monospacedDigit()
                             }
                         }
@@ -389,7 +389,7 @@ struct ExpandedMonitoringView: View {
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
                                 .font(.system(size: Theme.Typography.mini))
-                                .foregroundStyle(.tertiary)
+                                .foregroundStyle(Theme.Colors.contentTertiary)
                                 .frame(width: Theme.Layout.miniButtonSize, height: Theme.Layout.miniButtonSize)
                                 .background(Circle().fill(Theme.Colors.surfaceButton))
                         }
@@ -412,7 +412,7 @@ struct ExpandedMonitoringView: View {
                             
                             Text("紧邻日程")
                                 .font(.system(size: Theme.Typography.label, weight: .semibold))
-                                .foregroundColor(.secondary)
+                                .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             
                             Spacer()
                             
@@ -463,13 +463,13 @@ struct ExpandedMonitoringView: View {
                             } else {
                                 Text("今日暂无紧邻日程 · 保持专注")
                                     .font(.system(size: Theme.Typography.label, weight: .medium))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                             }
                         } else {
                             HStack {
                                 Text("未授权访问日历")
                                     .font(.system(size: Theme.Typography.label))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                 Spacer()
                                 Button("点击授权") {
                                     appState.requestCalendarAccess { _ in }
@@ -485,16 +485,16 @@ struct ExpandedMonitoringView: View {
                             HStack(spacing: Theme.Spacing.lg) {
                                 Image(systemName: "globe")
                                     .font(.system(size: Theme.Typography.mini))
-                                    .foregroundStyle(.tertiary)
+                                    .foregroundStyle(Theme.Colors.contentTertiary)
                                 ForEach(appState.worldClockCities) { city in
                                     HStack(spacing: Theme.Spacing.xs) {
                                         Text(city.displayName)
                                             .font(.system(size: Theme.Typography.mini, weight: .medium))
-                                            .foregroundStyle(.tertiary)
+                                            .foregroundStyle(Theme.Colors.contentTertiary)
                                         Text(appState.worldClockTimeString(for: city))
                                             .font(.system(size: Theme.Typography.caption, weight: .bold))
                                             .monospacedDigit()
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                     }
                                 }
                                 Spacer(minLength: 0)
@@ -523,7 +523,7 @@ struct ExpandedMonitoringView: View {
                                 Text("锁屏 (L)")
                                     .font(.system(size: Theme.Typography.caption, weight: .medium))
                             }
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             .padding(.horizontal, Theme.Spacing.md)
                             .padding(.vertical, Theme.Spacing.xs)
                             .background(Capsule().fill(Theme.Colors.surfaceButton))
@@ -541,7 +541,7 @@ struct ExpandedMonitoringView: View {
                                 Text("洗文本 (X)")
                                     .font(.system(size: Theme.Typography.caption, weight: .medium))
                             }
-                            .foregroundColor(.secondary)
+                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
                             .padding(.horizontal, Theme.Spacing.md)
                             .padding(.vertical, Theme.Spacing.xs)
                             .background(Capsule().fill(Theme.Colors.surfaceButton))
@@ -560,12 +560,12 @@ struct ExpandedMonitoringView: View {
                                         .foregroundColor(Theme.Colors.accent.opacity(0.90))
                                     Text(compactDeviceName(dev.name))
                                         .font(.system(size: Theme.Typography.mini, weight: .medium))
-                                        .foregroundColor(.secondary)
+                                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                         .lineLimit(1)
                                     if let b = dev.batteryLevel {
                                         Text("\(b)%")
                                             .font(.system(size: Theme.Typography.mini, weight: .bold))
-                                            .foregroundColor(.secondary)
+                                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                     }
                                 }
                                 .padding(.horizontal, Theme.Spacing.md)
@@ -645,10 +645,10 @@ struct NowPlayingCardRow: View {
                 } else {
                     Image(systemName: "music.note")
                         .font(.system(size: Theme.Typography.callout, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.Colors.contentTertiary)
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 30, height: 30)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                     .fill(Theme.Colors.surfaceBadge)
@@ -670,14 +670,14 @@ struct NowPlayingCardRow: View {
                     Text(timeText)
                         .font(.system(size: Theme.Typography.mini, weight: .medium))
                         .monospacedDigit()
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.Colors.contentTertiary)
                 }
                 
                 // 艺术家 · 来源应用（双空时整行隐藏）
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: Theme.Typography.mini, weight: .medium))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(Theme.Colors.contentTertiary)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }

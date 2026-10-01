@@ -88,7 +88,7 @@ struct ThemePalette {
 // 原则：
 // 1. 令牌值 = 现状值的纯收敛（外观零变化），未来主题变体只需改本文件
 // 2. 语义色直接转发系统语义色（primary/secondary），明暗翻转由 effectiveAppearance 驱动，不钉死
-// 3. 注意：tertiary 是 ShapeStyle 层级样式（Color 无此成员），调用点直书 .foregroundStyle(.tertiary)
+// 3. 注意：系统 tertiary 亮色实测 ≈2.3:1 不达标已弃用，说明小字统一走 contentTertiary（≈4.7:1）
 enum Theme {
     
     /// 当前主题变体（轻量读取通道：由 AppState 启动与切换时写入，避免 Theme 反向依赖 AppState；
@@ -108,6 +108,10 @@ enum Theme {
         // 内容层级（直接转发系统语义色，随玻璃/材质明暗自动翻转；全主题固定，不被主题洗掉）
         static let contentPrimary = Color.primary
         static let contentSecondary = Color.secondary
+        // 面板玻璃专用二级文本：系统 secondary 在亮玻璃上实测 ≈3.9:1 不达 WCAG AA 4.5:1，
+        // 面板承载的是「一瞥即读」的关键数值（SSID/曲名/卡片副标），自建 0.65 下限（亮 ≈7:1 / 暗 ≈8.8:1）；
+        // 设置窗口（非玻璃、系统表单材质）仍用系统 secondary，此处不动
+        static let contentSecondaryStrong = Color.primary.opacity(0.65)
         
         // 结构性元素（亮玻璃对比度下限保护：黑色低 alpha 是"阴影"型弱对比，需高于暗色白线的发光感）
         static let dividerOpacity: Double = 0.25          // 分割线中段峰值
@@ -138,9 +142,12 @@ enum Theme {
         static let iconHover = Color.primary.opacity(0.95)       // hover 增强
         static let iconHoverBg = Color.primary.opacity(0.10)     // hover 圆底
         static let closeIcon = Color.primary.opacity(0.55)       // CheatSheet 关闭钮
-        static let wifiOff = Color.primary.opacity(0.50)         // WiFi 断连弱化可读下限
-        static let idleText = Color.primary.opacity(0.35)        // "就绪"等极弱化文字
+        static let wifiOff = Color.primary.opacity(0.55)         // WiFi 断连弱化（亮色对比度下限 0.55）
+        static let idleText = Color.primary.opacity(0.45)        // "就绪"等弱化文字（亮色 ≈3.5:1 装饰下限）
         static let presetText = Color.primary.opacity(0.55)      // 番茄预设未选中
+        // 三级说明文本（替代系统 .tertiary：亮色模式系统三级 ≈2.3:1 远低于 WCAG AA 4.5:1，
+        // 0.55 不透明度双模式实测 ≈4.7:1 达标；用于农历小字/说明/时间戳等辅助文本）
+        static let contentTertiary = Color.primary.opacity(0.55)
         
         // 实心翻转按钮（播放钮：底随明暗翻转，文字取窗口背景反色保证双模式对比）
         static let solidButtonFill = Color.primary.opacity(0.92)
@@ -159,7 +166,17 @@ enum Theme {
     }
     
     // MARK: - 字体角色（按语义角色命名，同值角色各自独立以便未来分调）
+    // 字体族策略：正文一律 SF Pro（系统 .system），纯数字/时钟/键帽走 SF Mono（.monospaced）。
+    // 字号阶梯 2026-10 系统性上调一档（微字号保底 9pt）：信息密度不能以「看不清」为代价。
     enum Typography {
+        // 字体族入口（统一构造点，消灭散落的裸 .system 调用）
+        static func text(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+            .system(size: size, weight: weight)                                  // SF Pro 正文
+        }
+        static func mono(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+            .system(size: size, weight: weight, design: .monospaced)             // SF Mono 数字
+        }
+        
         // 主时钟（随面板实际渲染宽度连续缩放：min(max(宽×scale, min), max)）
         static let clockScale: CGFloat = 0.183
         static let clockMin: CGFloat = 84
@@ -167,21 +184,29 @@ enum Theme {
         static let secondsRatio: CGFloat = 0.42   // 秒数 = 主时钟 × 0.42
         static let periodRatio: CGFloat = 0.22    // 上午/下午 = 主时钟 × 0.22
         
-        static let micro: CGFloat = 8        // 微型图标/文字
-        static let tiny: CGFloat = 8.5       // 微按钮文字
-        static let mini: CGFloat = 9         // 微型徽章文字
-        static let caption: CGFloat = 9.5    // 说明/辅助文字
-        static let footnote: CGFloat = 10    // 静音/授权等小字
-        static let label: CGFloat = 10.5     // 标签（CPU 负载/系统磁盘）
-        static let body: CGFloat = 11        // 正文/状态栏图标/描述
-        static let callout: CGFloat = 11.5   // 卡片标题/状态数值
-        static let iconLarge: CGFloat = 12   // 电池图标（视觉偏小需加大一档）
-        static let toast: CGFloat = 12.5     // toast 文字
-        static let badge: CGFloat = 13       // 日期徽章/CheatSheet 标题
+        static let micro: CGFloat = 9        // 微型图标/文字（农历小字下限）
+        static let tiny: CGFloat = 9.5       // 微按钮文字
+        static let mini: CGFloat = 10        // 微型徽章文字
+        static let caption: CGFloat = 10.5   // 说明/辅助文字
+        static let footnote: CGFloat = 11    // 静音/授权等小字
+        static let label: CGFloat = 11.5     // 标签（CPU 负载/系统磁盘）
+        static let body: CGFloat = 12        // 正文/状态栏图标/描述
+        static let callout: CGFloat = 12.5   // 卡片标题/状态数值
+        static let iconLarge: CGFloat = 13   // 电池图标（视觉偏小需加大一档）
+        static let toast: CGFloat = 13.5     // toast 文字
+        static let badge: CGFloat = 14       // 日期徽章/CheatSheet 标题
         static let badgeTracking: CGFloat = 1.2
-        static let closeButton: CGFloat = 15 // CheatSheet 关闭钮
-        static let keyCap: CGFloat = 10.5    // 快捷键键帽（mono bold，与 label 同值）
-        static let pomodoro: CGFloat = 20    // 番茄钟倒计时大字
+        static let closeButton: CGFloat = 16 // CheatSheet 关闭钮
+        static let keyCap: CGFloat = 11.5    // 快捷键键帽（mono bold，与 label 同值）
+        static let pomodoro: CGFloat = 21    // 番茄钟倒计时大字
+        static let title: CGFloat = 18       // 设置页大标题（关于/速查页眉）
+        static let settingsIcon: CGFloat = 26 // 设置页装饰大图标（关于页）
+        
+        // 日历专用档位（2026-10 可读性修复：格子主内容用足 48pt 格子空间，与顶栏标题拉开层级）
+        static let calendarDay: CGFloat = 13.5   // 格子日期数字（格子主内容，semibold）
+        static let calendarLunar: CGFloat = 10   // 农历/节气/节日小字（medium 字重起步）
+        static let calendarWeekday: CGFloat = 11 // 周标题表头
+        static let calendarTitle: CGFloat = 15   // 日历面板主标题（年月/日期范围，全面板视觉锚点）
     }
     
     // MARK: - 间距档位
@@ -223,6 +248,13 @@ enum Theme {
         static let comfortExpanded = NSSize(width: 620, height: 460)
         static let legacyCompact = NSSize(width: 440, height: 230)
         static let legacyExpanded = NSSize(width: 520, height: 400)
+        // 日历视图尺寸（按 G 任意状态直达日历档；与三档尺寸偏好同语义联动）
+        static let standardCalendar = NSSize(width: 740, height: 640)
+        static let comfortCalendar = NSSize(width: 620, height: 560)
+        static let legacyCalendar = NSSize(width: 520, height: 500)
+        // 日历视图整面板内边距（日历态无时钟/底栏，日历贴面板主边距排布）
+        static let calendarTop: CGFloat = 18       // 日历卡片顶部呼吸
+        static let calendarBottom: CGFloat = 14    // 日历卡片底部呼吸
         static let centerLift: CGFloat = 26  // 面板中心上移量（黄金分割视线位）
         
         // 展开进度公式端点（expandProgress 线性插值的值源；公式结构在 PanelView，此处仅供值）
@@ -237,9 +269,13 @@ enum Theme {
         static let monitorBreath: CGFloat = 14       // 监控区底部呼吸（占位端点 = 内容高 + 此值）
         
         // 监控区
-        static let monitorCardHeight: CGFloat = 225  // Bento 卡片黄金高度
-        // 监控区理想内容总高 = 分割线 0.5 + 间距 8 + 卡片 225 + 卡片上下 padding 2+6
-        static let monitorContentHeight: CGFloat = 241.5
+        static let monitorCardHeight: CGFloat = 229  // Bento 卡片黄金高度（字号上调后 +4 补偿）
+        // 监控区理想内容总高 = 分割线 0.5 + 间距 8 + 卡片 229 + 卡片上下 padding 2+6
+        static let monitorContentHeight: CGFloat = 245.5
+        // 日历格子行高（月视图，按档；日历态整面板填充，垂直空间充裕）
+        static let calendarCellStandard: CGFloat = 48
+        static let calendarCellComfort: CGFloat = 40
+        static let calendarCellLegacy: CGFloat = 32
         static let meterHeight: CGFloat = 5          // 进度槽高
         static let metricValueWidth: CGFloat = 36    // 百分比数值右对齐宽度
         static let miniButtonSize: CGFloat = 20      // 重置钮
