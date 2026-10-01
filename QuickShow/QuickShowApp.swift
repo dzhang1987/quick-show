@@ -23,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let state = AppState()
         self.appState = state
         
+        // 启动时应用持久化的明暗模式（须在面板/设置窗口创建前，确保首帧外观正确）
+        state.appearanceMode.apply()
+        
         state.onOpenSettings = { [weak self] in
             self?.openSettings()
         }

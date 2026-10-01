@@ -45,8 +45,8 @@ final class PanelManager {
             glass.layer?.masksToBounds = true
             glass.layer?.cornerCurve = .continuous
             // 双写圆角：glass.cornerRadius 管玻璃光效形状，layer.cornerRadius 管裁剪路径
-            glass.cornerRadius = 26
-            glass.layer?.cornerRadius = 26
+            glass.cornerRadius = Theme.Radius.panel
+            glass.layer?.cornerRadius = Theme.Radius.panel
             // 注：玻璃会正常拉伸 contentView；但 SwiftUI 的 PreferenceKey 测量链
             // 在含 Button 的内容下会被卡死（V6 实验坐实），布局进度改由
             // PanelManager 逐帧推送窗口 frame 驱动（见 updatePanelFrameAnimated）
@@ -54,8 +54,8 @@ final class PanelManager {
             panel.contentView = glass
         } else {
             hostingView.wantsLayer = true
-            // 降级路径：在 AppKit 根图层硬件级施加 26pt 连续曲率圆角裁剪，沉稳克制，杜绝直角
-            hostingView.layer?.cornerRadius = 26
+            // 降级路径：在 AppKit 根图层硬件级施加连续曲率圆角裁剪，沉稳克制，杜绝直角
+            hostingView.layer?.cornerRadius = Theme.Radius.panel
             hostingView.layer?.cornerCurve = .continuous
             hostingView.layer?.masksToBounds = true
             hostingView.layer?.backgroundColor = NSColor.clear.cgColor
@@ -214,7 +214,7 @@ final class PanelManager {
             NSApp.activate(ignoringOtherApps: true)
             
             NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.15
+                ctx.duration = Theme.Motion.panelFadeIn
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 1.0
             }
@@ -239,13 +239,13 @@ final class PanelManager {
         // 驱动布局进度/字号缩放连续变化；完成后推送终值并停表、重建精准阴影
         appState?.updateLivePanelSize(panel.frame.size)
         stopFramePolling()
-        framePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60.0, repeats: true) { [weak self, weak panel] _ in
+        framePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / Theme.Motion.framePollHz, repeats: true) { [weak self, weak panel] _ in
             guard let self = self, let panel = panel else { return }
             self.appState?.updateLivePanelSize(panel.frame.size)
         }
         
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.18
+            ctx.duration = Theme.Motion.windowResize
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             panel.animator().setFrame(targetFrame, display: true)
         }, completionHandler: { [weak self, weak panel] in
@@ -284,7 +284,7 @@ final class PanelManager {
         
         // 3. 极速灵动淡出
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.08
+            ctx.duration = Theme.Motion.panelFadeOut
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().alphaValue = 0.0
         } completionHandler: { [weak self] in

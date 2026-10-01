@@ -152,6 +152,30 @@ struct GeneralSettingsForm: View {
             }
             
             Section {
+                Picker("外观主题", selection: Binding(
+                    get: { appState.themeVariant },
+                    set: { appState.themeVariant = $0 }
+                )) {
+                    ForEach(ThemeVariant.allCases) { variant in
+                        Text(variant.displayName).tag(variant)
+                    }
+                }
+                
+                Picker("明暗模式", selection: Binding(
+                    get: { appState.appearanceMode },
+                    set: { appState.appearanceMode = $0 }
+                )) {
+                    ForEach(AppearanceMode.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
+            } header: {
+                Text("外观")
+            } footer: {
+                Text("「琥珀暖色」将主角时钟与高亮点缀切换为暖金琥珀调；明暗模式作用于整个 App（面板/玻璃/设置窗口），「自动」跟随系统外观。")
+            }
+            
+            Section {
                 Picker("卡片显示尺寸", selection: Binding(
                     get: { appState.panelScaleOption },
                     set: { appState.panelScaleOption = $0 }

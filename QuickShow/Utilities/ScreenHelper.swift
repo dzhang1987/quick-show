@@ -16,22 +16,23 @@ enum ScreenHelper {
     }
     
     /// 计算指定屏幕和档位下的内容自然包裹物理尺寸（精密系统性排版，彻底杜绝任何黑洞）
+    /// 尺寸值统一引用 Theme.Layout 令牌（单一来源），此处仅保留档位选择逻辑
     static func metrics(for screen: NSScreen, option: PanelScaleOption) -> PanelLayoutMetrics {
         switch option {
         case .standard: // 系统聚焦大号（宽 680 / 高 340，展开 740 / 高 520）
             return PanelLayoutMetrics(
-                compactSize: NSSize(width: 680, height: 340),
-                expandedSize: NSSize(width: 740, height: 520)
+                compactSize: Theme.Layout.standardCompact,
+                expandedSize: Theme.Layout.standardExpanded
             )
         case .compact: // 适中舒适（宽 540 / 高 280，展开 620 / 高 460）
             return PanelLayoutMetrics(
-                compactSize: NSSize(width: 540, height: 280),
-                expandedSize: NSSize(width: 620, height: 460)
+                compactSize: Theme.Layout.comfortCompact,
+                expandedSize: Theme.Layout.comfortExpanded
             )
         case .legacy: // 极简小巧（宽 440 / 高 230，展开 520 / 高 400）
             return PanelLayoutMetrics(
-                compactSize: NSSize(width: 440, height: 230),
-                expandedSize: NSSize(width: 520, height: 400)
+                compactSize: Theme.Layout.legacyCompact,
+                expandedSize: Theme.Layout.legacyExpanded
             )
         case .auto:
             // 依据当前活跃屏幕有效宽高智能匹配最佳自然贴合档位
@@ -42,14 +43,14 @@ enum ScreenHelper {
             if width >= 1600 || height >= 1000 {
                 // 14/16寸高分屏与外接大屏：680 x 340 黄金高宽比，时间绝对主角
                 return PanelLayoutMetrics(
-                    compactSize: NSSize(width: 680, height: 340),
-                    expandedSize: NSSize(width: 740, height: 520)
+                    compactSize: Theme.Layout.standardCompact,
+                    expandedSize: Theme.Layout.standardExpanded
                 )
             } else {
                 // 标准分辨率屏（<= 1512 宽且 < 1000 高）
                 return PanelLayoutMetrics(
-                    compactSize: NSSize(width: 540, height: 280),
-                    expandedSize: NSSize(width: 620, height: 460)
+                    compactSize: Theme.Layout.comfortCompact,
+                    expandedSize: Theme.Layout.comfortExpanded
                 )
             }
         }
@@ -60,7 +61,7 @@ enum ScreenHelper {
         let screenFrame = screen.frame
         let x = screenFrame.origin.x + (screenFrame.width - size.width) / 2.0
         // 稍微往上偏一点点（黄金分割位置，视线更舒适）
-        let y = screenFrame.origin.y + (screenFrame.height - size.height) / 2.0 + 26.0
+        let y = screenFrame.origin.y + (screenFrame.height - size.height) / 2.0 + Theme.Layout.centerLift
         
         return NSRect(x: x, y: y, width: size.width, height: size.height)
     }

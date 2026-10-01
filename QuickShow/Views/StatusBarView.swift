@@ -14,21 +14,21 @@ struct StatusBarView: View {
     }
     
     var body: some View {
-        HStack(alignment: .center, spacing: 18) {
+        HStack(alignment: .center, spacing: Theme.Spacing.section) {
             // 左侧状态微标群（严格控量，彻底杜绝任何省略号）
-            HStack(spacing: 16) {
+            HStack(spacing: Theme.Spacing.card) {
                 // 1. 电池状态 (固定宽度，绝不压缩截断)
                 if appState.showBattery && appState.batteryInfo.hasBattery {
                     Button {
                         appState.openBatterySettings()
                     } label: {
-                        HStack(spacing: 4.5) {
+                        HStack(spacing: Theme.Spacing.smd) {
                             Image(systemName: batteryIconName)
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: Theme.Typography.iconLarge, weight: .medium))
                                 .foregroundColor(batteryColor)
                             
                             Text("\(appState.batteryInfo.percentage)%")
-                                .font(.system(size: 11.5, weight: .semibold))
+                                .font(.system(size: Theme.Typography.callout, weight: .semibold))
                                 .monospacedDigit()
                                 .foregroundColor(.primary)
                         }
@@ -48,15 +48,15 @@ struct StatusBarView: View {
                             appState.copyLocalIP()
                         }
                     } label: {
-                        HStack(spacing: 5) {
+                        HStack(spacing: Theme.Spacing.chip) {
                             Image(systemName: appState.wifiInfo.isConnected ? "wifi" : "wifi.slash")
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: Theme.Typography.body, weight: .medium))
                                 // 断连弱化态也需保证可读：0.50 是亮玻璃下的可读下限
-                                .foregroundColor(appState.wifiInfo.isConnected ? .primary : Color.primary.opacity(0.50))
+                                .foregroundColor(appState.wifiInfo.isConnected ? .primary : Theme.Colors.wifiOff)
                             
                             if let ssid = appState.wifiInfo.ssid, appState.wifiInfo.isConnected {
                                 Text(ssid)
-                                    .font(.system(size: 11.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.callout, weight: .medium))
                                     .foregroundColor(.secondary)
                                     .lineLimit(1)
                             }
@@ -72,18 +72,18 @@ struct StatusBarView: View {
                     Button {
                         appState.toggleMute()
                     } label: {
-                        HStack(spacing: 4) {
+                        HStack(spacing: Theme.Spacing.sm) {
                             Image(systemName: audioIconName)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(.system(size: Theme.Typography.body, weight: .medium))
                                 .foregroundColor(appState.audioInfo.isMuted ? Color.orange : .primary)
                             
                             if appState.audioInfo.isMuted {
                                 Text("静音")
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .font(.system(size: Theme.Typography.footnote, weight: .semibold))
                                     .foregroundColor(Color.orange)
                             } else {
                                 Text("\(appState.audioInfo.volume)%")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: Theme.Typography.body, weight: .semibold))
                                     .monospacedDigit()
                                     .foregroundColor(.primary)
                             }
@@ -97,14 +97,14 @@ struct StatusBarView: View {
                 // 4. 关键外设电量（仅当存在电量上报时展示，如 AirPods 85%，无电量外设收纳至展开面板）
                 if appState.showBluetooth && !peripheralsWithBattery.isEmpty {
                     ForEach(peripheralsWithBattery.prefix(2), id: \.name) { bt in
-                        HStack(spacing: 4) {
+                        HStack(spacing: Theme.Spacing.sm) {
                             Image(systemName: bt.iconName)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(Color.cyan.opacity(0.9))
+                                .font(.system(size: Theme.Typography.body, weight: .medium))
+                                .foregroundColor(Theme.Colors.accent.opacity(0.9))
                             
                             if let level = bt.batteryLevel {
                                 Text("\(level)%")
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: Theme.Typography.body, weight: .semibold))
                                     .monospacedDigit()
                                     .foregroundColor(level <= 20 ? Color.red.opacity(0.9) : .primary)
                             }
@@ -118,16 +118,16 @@ struct StatusBarView: View {
                     Button {
                         appState.openFocusSettings()
                     } label: {
-                        HStack(spacing: 3) {
+                        HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: "moon.fill")
-                                .font(.system(size: 9, weight: .medium))
+                                .font(.system(size: Theme.Typography.mini, weight: .medium))
                             Text("专注")
-                                .font(.system(size: 10, weight: .medium))
+                                .font(.system(size: Theme.Typography.footnote, weight: .medium))
                         }
                         // 语义紫色：系统 .purple 自带双模式变体，亮色下自动加深保持可读
                         .foregroundColor(Color.purple)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xxs)
                         .background(
                             Capsule()
                                 .fill(Color.purple.opacity(0.18))
@@ -144,7 +144,7 @@ struct StatusBarView: View {
                         appState.toggleKeepAwake()
                     } label: {
                         Image(systemName: "cup.and.saucer.fill")
-                            .font(.system(size: 11, weight: .medium))
+                            .font(.system(size: Theme.Typography.body, weight: .medium))
                             .foregroundColor(.orange)
                     }
                     .buttonStyle(.plain)
@@ -157,16 +157,16 @@ struct StatusBarView: View {
                     Button {
                         appState.togglePomodoro()
                     } label: {
-                        HStack(spacing: 3) {
+                        HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: "timer")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(.system(size: Theme.Typography.body, weight: .semibold))
                             Text(appState.formattedPomodoroTime)
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: Theme.Typography.body, weight: .bold))
                                 .monospacedDigit()
                         }
                         .foregroundColor(Color.orange)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xxs)
                         .background(
                             Capsule()
                                 .fill(Color.orange.opacity(0.18))
@@ -178,23 +178,23 @@ struct StatusBarView: View {
                 }
             }
             
-            Spacer(minLength: 12)
+            Spacer(minLength: Theme.Spacing.xxl)
             
             // 右侧微交互功能键区：仅保留纯净、无文字的微型图钉图标（彻底干掉多余胶囊、问号与设置）
-            HStack(spacing: 6) {
+            HStack(spacing: Theme.Spacing.md) {
                 // 如果处于展开态，展示精致的折叠向上箭头
                 if appState.isExpanded {
                     Button {
                         appState.toggleExpanded()
                     } label: {
                         Image(systemName: "chevron.up")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: Theme.Typography.body, weight: .semibold))
                             // 交互元素对比度下限：静止态 0.60 明确可见，hover 0.95 增强反馈
-                            .foregroundColor(Color.primary.opacity(isExpandHovered ? 0.95 : 0.60))
-                            .frame(width: 24, height: 24)
+                            .foregroundColor(isExpandHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
+                            .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
                             .background(
                                 Circle()
-                                    .fill(Color.primary.opacity(isExpandHovered ? 0.10 : 0.0))
+                                    .fill(isExpandHovered ? Theme.Colors.iconHoverBg : Color.clear)
                             )
                     }
                     .buttonStyle(.plain)
@@ -207,13 +207,13 @@ struct StatusBarView: View {
                     appState.togglePin()
                 } label: {
                     Image(systemName: appState.mode == .pinned ? "pin.fill" : "pin")
-                        .font(.system(size: 11.5, weight: .medium))
-                        // 交互元素对比度下限：静止态 0.60 明确可见，hover 0.95 增强反馈（pinned 态青色保留）
-                        .foregroundColor(appState.mode == .pinned ? Color.cyan : Color.primary.opacity(isPinHovered ? 0.95 : 0.60))
-                        .frame(width: 24, height: 24)
+                        .font(.system(size: Theme.Typography.callout, weight: .medium))
+                        // 交互元素对比度下限：静止态 0.60 明确可见，hover 0.95 增强反馈（pinned 态主题强调色）
+                        .foregroundColor(appState.mode == .pinned ? Theme.Colors.accent : (isPinHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest))
+                        .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
                         .background(
                             Circle()
-                                .fill(appState.mode == .pinned ? Color.cyan.opacity(0.18) : Color.primary.opacity(isPinHovered ? 0.10 : 0.0))
+                                .fill(appState.mode == .pinned ? Theme.Colors.accent.opacity(0.18) : (isPinHovered ? Theme.Colors.iconHoverBg : Color.clear))
                         )
                 }
                 .buttonStyle(.plain)

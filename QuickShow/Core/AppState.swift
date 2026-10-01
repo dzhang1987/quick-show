@@ -120,6 +120,36 @@ final class AppState: ObservableObject {
     // 界面尺寸与屏幕自适应
     @AppStorage("panelScaleOption") var panelScaleOptionRaw: String = PanelScaleOption.auto.rawValue
     
+    // 外观主题变体（默认黑曜石 / 琥珀暖色）
+    @AppStorage("themeVariant") var themeVariantRaw: String = ThemeVariant.standard.rawValue
+    
+    // 明暗模式（自动 / 浅色 / 深色，全 App 范围）
+    @AppStorage("appearanceMode") var appearanceModeRaw: String = AppearanceMode.auto.rawValue
+    
+    var appearanceMode: AppearanceMode {
+        get {
+            AppearanceMode(rawValue: appearanceModeRaw) ?? .auto
+        }
+        set {
+            appearanceModeRaw = newValue.rawValue
+            // 即时应用到全 App：NSApp.appearance 联动所有窗口的玻璃与语义色翻转，内容层零改动
+            newValue.apply()
+            objectWillChange.send()
+        }
+    }
+    
+    var themeVariant: ThemeVariant {
+        get {
+            ThemeVariant(rawValue: themeVariantRaw) ?? .standard
+        }
+        set {
+            themeVariantRaw = newValue.rawValue
+            // 写入 Theme 读取通道并触发全视图树 re-render（Theme.Colors 变体通道重新求值，即时生效）
+            Theme.variant = newValue
+            objectWillChange.send()
+        }
+    }
+    
     var panelScaleOption: PanelScaleOption {
         get {
             PanelScaleOption(rawValue: panelScaleOptionRaw) ?? .auto
@@ -148,6 +178,8 @@ final class AppState: ObservableObject {
     var onLayoutChange: (() -> Void)?
     
     init() {
+        // 启动时同步主题变体到 Theme 读取通道（确保首帧渲染即使用持久化的主题）
+        Theme.variant = themeVariant
         refreshAllSystemStatus()
     }
     
@@ -239,7 +271,7 @@ final class AppState: ObservableObject {
     
     /// 切换快捷键速查表浮层
     func toggleCheatSheet() {
-        withAnimation(.easeInOut(duration: 0.16)) {
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
             showCheatSheet.toggle()
         }
         onCheatSheetChange?(showCheatSheet)
@@ -253,7 +285,7 @@ final class AppState: ObservableObject {
     /// 明确设置快捷键速查表显示状态（用于长按 ⌘ 弹出 / 松开淡出）
     func setCheatSheetVisible(_ visible: Bool) {
         guard showCheatSheet != visible else { return }
-        withAnimation(.easeInOut(duration: 0.16)) {
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
             showCheatSheet = visible
         }
         onCheatSheetChange?(visible)
@@ -268,12 +300,12 @@ final class AppState: ObservableObject {
     func showToast(_ message: String) {
         resetGlanceTimer()
         toastTimer?.invalidate()
-        withAnimation(.easeInOut(duration: 0.16)) {
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
             toastMessage = message
         }
-        toastTimer = Timer.scheduledTimer(withTimeInterval: 1.6, repeats: false) { [weak self] _ in
+        toastTimer = Timer.scheduledTimer(withTimeInterval: Theme.Motion.toastDuration, repeats: false) { [weak self] _ in
             DispatchQueue.main.async {
-                withAnimation(.easeInOut(duration: 0.20)) {
+                withAnimation(.easeInOut(duration: Theme.Motion.toastOut)) {
                     self?.toastMessage = nil
                 }
                 // Toast 播完后，若处于一瞥模式且未展开，重新给 3 秒倒计时平滑退场
@@ -428,7 +460,7 @@ final class AppState: ObservableObject {
         let d = duration ?? max(glanceDuration, 1.0)
         glanceTotalDuration = d
         glanceRemainingSeconds = d
-        withAnimation(.linear(duration: 0.08)) {
+        withAnimation(.linear(duration: Theme.Motion.progressReset)) {
             glanceProgress = 1.0
         }
         if glanceTimer == nil && mode == .glance && !isExpanded {

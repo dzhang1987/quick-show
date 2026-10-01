@@ -3,43 +3,36 @@ import SwiftUI
 struct ExpandedMonitoringView: View {
     @ObservedObject var appState: AppState
     
-    // 监控区理想总高：分割线 0.5 + 间距 8 + 卡片 225 + 卡片上下 padding 2+6
-    // PanelView 展开/收起时以此值为占位高度目标做 0.18s 连续插值（Hero 生长/收拢）
-    static let contentHeight: CGFloat = 241.5
-    
-    // 适配展开态 (520pt 高度) 的 Bento 卡片黄金高度：225 pt
-    private let cardHeight: CGFloat = 225
-    
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Theme.Spacing.lg) {
             // 细若游丝的微光渐隐分割线
             Rectangle()
                 .fill(
                     LinearGradient(
                         colors: [
                             Color.primary.opacity(0.0),
-                            Color.primary.opacity(0.25),
+                            Color.primary.opacity(Theme.Colors.dividerOpacity),
                             Color.primary.opacity(0.0)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
-                .frame(height: 0.5)
-                .padding(.horizontal, 20)
+                .frame(height: Theme.Layout.dividerHeight)
+                .padding(.horizontal, Theme.Spacing.divider)
             
-            // 核心双列卡片 Bento Grid (左右对称卡片网格，卡片高度 205pt)
-            HStack(spacing: 12) {
+            // 核心双列卡片 Bento Grid (左右对称卡片网格，卡片高度 225pt)
+            HStack(spacing: Theme.Spacing.xxl) {
                 // MARK: - 左卡片：⚡️ 系统性能与网络吞吐
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     // 1. 顶部微标头
                     HStack {
-                        HStack(spacing: 5) {
+                        HStack(spacing: Theme.Spacing.chip) {
                             Image(systemName: "cpu.fill")
-                                .font(.system(size: 11, weight: .bold))
-                                .foregroundColor(.cyan.opacity(0.95))
+                                .font(.system(size: Theme.Typography.body, weight: .bold))
+                                .foregroundColor(Theme.Colors.accent.opacity(0.95))
                             Text("系统性能与网络")
-                                .font(.system(size: 11.5, weight: .bold))
+                                .font(.system(size: Theme.Typography.callout, weight: .bold))
                                 .foregroundColor(.primary)
                         }
                         
@@ -48,18 +41,18 @@ struct ExpandedMonitoringView: View {
                         Button {
                             appState.openActivityMonitor()
                         } label: {
-                            HStack(spacing: 3) {
+                            HStack(spacing: Theme.Spacing.xs) {
                                 Text("活动监视器")
-                                    .font(.system(size: 9.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
                                 Image(systemName: "arrow.up.forward.app")
-                                    .font(.system(size: 8.5))
+                                    .font(.system(size: Theme.Typography.tiny))
                             }
                             .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2.5)
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.xxs)
                             .background(
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.05))
+                                    .fill(Theme.Colors.surfaceButton)
                             )
                         }
                         .buttonStyle(.plain)
@@ -67,39 +60,39 @@ struct ExpandedMonitoringView: View {
                     }
                     
                     // 2. CPU 负载槽
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        HStack(spacing: Theme.Spacing.md) {
                             Text("CPU 负载")
-                                .font(.system(size: 10.5, weight: .medium))
+                                .font(.system(size: Theme.Typography.label, weight: .semibold))
                                 .foregroundColor(.secondary)
                             
                             Spacer()
                             
                             if let topProc = appState.topCPUProcess {
                                 Text(topProc)
-                                    .font(.system(size: 9, weight: .bold))
+                                    .font(.system(size: Theme.Typography.mini, weight: .bold))
                                     .foregroundColor(.orange.opacity(0.95))
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1.5)
+                                    .padding(.horizontal, Theme.Spacing.chip)
+                                    .padding(.vertical, Theme.Spacing.xxxs)
                                     .background(Capsule().fill(Color.orange.opacity(0.18)))
                                     .lineLimit(1)
                             } else {
                                 Text("平稳运行")
-                                    .font(.system(size: 9, weight: .medium))
+                                    .font(.system(size: Theme.Typography.mini, weight: .medium))
                                     .foregroundStyle(.tertiary)
                             }
                             
                             Text(String(format: "%2.0f%%", appState.performanceInfo.cpuUsage))
-                                .font(.system(size: 11.5, weight: .bold))
+                                .font(.system(size: Theme.Typography.callout, weight: .bold))
                                 .monospacedDigit()
                                 .foregroundColor(cpuColor)
-                                .frame(width: 36, alignment: .trailing)
+                                .frame(width: Theme.Layout.metricValueWidth, alignment: .trailing)
                         }
                         
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.06))
+                                    .fill(Theme.Colors.surfaceTrack)
                                 Capsule()
                                     .fill(
                                         LinearGradient(
@@ -111,20 +104,20 @@ struct ExpandedMonitoringView: View {
                                     .frame(width: max(0, min(geo.size.width * CGFloat(appState.performanceInfo.cpuUsage / 100.0), geo.size.width)))
                             }
                         }
-                        .frame(height: 5)
+                        .frame(height: Theme.Layout.meterHeight)
                     }
                     
                     // 3. RAM 内存槽
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        HStack(spacing: Theme.Spacing.md) {
                             Text("内存占用")
-                                .font(.system(size: 10.5, weight: .medium))
+                                .font(.system(size: Theme.Typography.label, weight: .semibold))
                                 .foregroundColor(.secondary)
                             
                             Spacer()
                             
                             Text("\(String(format: "%.1f", appState.performanceInfo.memoryUsedGB))G / \(Int(appState.performanceInfo.memoryTotalGB))G")
-                                .font(.system(size: 9.5, weight: .medium))
+                                .font(.system(size: Theme.Typography.caption, weight: .medium))
                                 .foregroundStyle(.tertiary)
                                 .monospacedDigit()
                             
@@ -132,31 +125,31 @@ struct ExpandedMonitoringView: View {
                             Button {
                                 appState.optimizeMemory()
                             } label: {
-                                HStack(spacing: 2) {
+                                HStack(spacing: Theme.Spacing.xxs) {
                                     Image(systemName: "sparkles")
-                                        .font(.system(size: 8, weight: .bold))
+                                        .font(.system(size: Theme.Typography.tiny, weight: .bold))
                                     Text("清理")
-                                        .font(.system(size: 8.5, weight: .semibold))
+                                        .font(.system(size: Theme.Typography.caption, weight: .semibold))
                                 }
-                                .foregroundColor(.mint.opacity(0.95))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1.5)
-                                .background(Capsule().fill(Color.mint.opacity(0.16)))
+                                .foregroundColor(Theme.Colors.accent.opacity(0.95))
+                                .padding(.horizontal, Theme.Spacing.chip)
+                                .padding(.vertical, Theme.Spacing.xxxs)
+                                .background(Capsule().fill(Theme.Colors.accent.opacity(0.16)))
                             }
                             .buttonStyle(.plain)
                             .help("一键优化清理系统内存 (按 C)")
                             
                             Text(String(format: "%2.0f%%", appState.performanceInfo.memoryUsagePercent))
-                                .font(.system(size: 11.5, weight: .bold))
+                                .font(.system(size: Theme.Typography.callout, weight: .bold))
                                 .monospacedDigit()
                                 .foregroundColor(ramColor)
-                                .frame(width: 36, alignment: .trailing)
+                                .frame(width: Theme.Layout.metricValueWidth, alignment: .trailing)
                         }
                         
                         GeometryReader { geo in
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.06))
+                                    .fill(Theme.Colors.surfaceTrack)
                                 Capsule()
                                     .fill(
                                         LinearGradient(
@@ -168,18 +161,18 @@ struct ExpandedMonitoringView: View {
                                     .frame(width: max(0, min(geo.size.width * CGFloat(appState.performanceInfo.memoryUsagePercent / 100.0), geo.size.width)))
                             }
                         }
-                        .frame(height: 5)
+                        .frame(height: Theme.Layout.meterHeight)
                     }
                     
                     // 4. 本地磁盘存储空间 (Disk)
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 6) {
-                            HStack(spacing: 4) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        HStack(spacing: Theme.Spacing.md) {
+                            HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "internaldrive")
-                                    .font(.system(size: 9.5))
+                                    .font(.system(size: Theme.Typography.caption))
                                     .foregroundStyle(.tertiary)
                                 Text("系统磁盘")
-                                    .font(.system(size: 10.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.label, weight: .semibold))
                                     .foregroundColor(.secondary)
                             }
                             
@@ -187,7 +180,7 @@ struct ExpandedMonitoringView: View {
                             
                             if appState.diskInfo.totalGB > 0 {
                                 Text("\(Int(appState.diskInfo.freeGB))G 可用 / \(Int(appState.diskInfo.totalGB))G")
-                                    .font(.system(size: 9.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
                                     .foregroundColor(.secondary)
                                     .monospacedDigit()
                             }
@@ -195,16 +188,16 @@ struct ExpandedMonitoringView: View {
                             Button {
                                 appState.openDownloadsFolder()
                             } label: {
-                                HStack(spacing: 2) {
+                                HStack(spacing: Theme.Spacing.xxs) {
                                     Image(systemName: "arrow.down.circle")
-                                        .font(.system(size: 8))
+                                        .font(.system(size: Theme.Typography.tiny))
                                     Text("下载")
-                                        .font(.system(size: 8.5, weight: .medium))
+                                        .font(.system(size: Theme.Typography.caption, weight: .medium))
                                 }
-                                .foregroundColor(.cyan.opacity(0.85))
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 1.5)
-                                .background(Capsule().fill(Color.cyan.opacity(0.12)))
+                                .foregroundColor(Theme.Colors.accent.opacity(0.85))
+                                .padding(.horizontal, Theme.Spacing.chip)
+                                .padding(.vertical, Theme.Spacing.xxxs)
+                                .background(Capsule().fill(Theme.Colors.accent.opacity(0.12)))
                             }
                             .buttonStyle(.plain)
                             .help("秒开 Downloads 下载目录 (按 O)")
@@ -214,7 +207,7 @@ struct ExpandedMonitoringView: View {
                             let usedRatio: CGFloat = appState.diskInfo.totalGB > 0 ? CGFloat((appState.diskInfo.totalGB - appState.diskInfo.freeGB) / appState.diskInfo.totalGB) : 0.5
                             ZStack(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.06))
+                                    .fill(Theme.Colors.surfaceTrack)
                                 Capsule()
                                     .fill(
                                         LinearGradient(
@@ -226,31 +219,31 @@ struct ExpandedMonitoringView: View {
                                     .frame(width: max(0, min(geo.size.width * usedRatio, geo.size.width)))
                             }
                         }
-                        .frame(height: 5)
+                        .frame(height: Theme.Layout.meterHeight)
                     }
                     
-                    Spacer(minLength: 2)
+                    Spacer(minLength: Theme.Spacing.xxs)
                     
                     // 5. 实时网络吞吐与本机 IP
                     HStack {
                         // 吞吐速率
-                        HStack(spacing: 12) {
-                            HStack(spacing: 4) {
+                        HStack(spacing: Theme.Spacing.xxl) {
+                            HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "arrow.down")
-                                    .font(.system(size: 9.5, weight: .bold))
+                                    .font(.system(size: Theme.Typography.caption, weight: .bold))
                                     .foregroundColor(.green.opacity(0.95))
                                 Text(appState.trafficInfo.downloadSpeed)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: Theme.Typography.callout, weight: .semibold))
                                     .monospacedDigit()
                                     .foregroundColor(.primary)
                             }
                             
-                            HStack(spacing: 4) {
+                            HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "arrow.up")
-                                    .font(.system(size: 9.5, weight: .bold))
-                                    .foregroundColor(.cyan.opacity(0.95))
+                                    .font(.system(size: Theme.Typography.caption, weight: .bold))
+                                    .foregroundColor(Theme.Colors.accent.opacity(0.95))
                                 Text(appState.trafficInfo.uploadSpeed)
-                                    .font(.system(size: 11, weight: .semibold))
+                                    .font(.system(size: Theme.Typography.callout, weight: .semibold))
                                     .monospacedDigit()
                                     .foregroundColor(.primary)
                             }
@@ -262,76 +255,76 @@ struct ExpandedMonitoringView: View {
                         Button {
                             appState.copyLocalIP()
                         } label: {
-                            HStack(spacing: 4) {
+                            HStack(spacing: Theme.Spacing.sm) {
                                 Image(systemName: "doc.on.doc")
-                                    .font(.system(size: 8.5))
+                                    .font(.system(size: Theme.Typography.tiny))
                                     .foregroundStyle(.tertiary)
                                 Text("复制内网 IP")
-                                    .font(.system(size: 9.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
                                     .foregroundColor(.secondary)
                             }
-                            .padding(.horizontal, 7)
-                            .padding(.vertical, 3)
+                            .padding(.horizontal, Theme.Spacing.mdlg)
+                            .padding(.vertical, Theme.Spacing.xs)
                             .background(
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.05))
+                                    .fill(Theme.Colors.surfaceButton)
                             )
                         }
                         .buttonStyle(.plain)
                         .help("点击一键复制局域网 IP")
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.horizontal, Theme.Spacing.card)
+                .padding(.vertical, Theme.Spacing.xxxl)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.primary.opacity(0.03))
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .fill(Theme.Colors.surfaceCard)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.primary.opacity(0.09), lineWidth: 0.75)
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .stroke(Theme.Colors.cardStroke, lineWidth: 0.75)
                 )
                 .onTapGesture(count: 2) {
                     appState.openActivityMonitor()
                 }
                 
                 // MARK: - 右卡片：🎯 专注工坊与效率日程
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     // 1. 顶部微标头
                     HStack {
-                        HStack(spacing: 5) {
+                        HStack(spacing: Theme.Spacing.chip) {
                             Image(systemName: "timer")
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.system(size: Theme.Typography.body, weight: .bold))
                                 .foregroundColor(.orange.opacity(0.95))
                             Text("专注与日常工作流")
-                                .font(.system(size: 11.5, weight: .bold))
+                                .font(.system(size: Theme.Typography.callout, weight: .bold))
                                 .foregroundColor(.primary)
                         }
                         
                         Spacer()
                         
                         Text(appState.pomodoroRunning ? "专注中" : "就绪")
-                            .font(.system(size: 9.5, weight: .bold))
-                            .foregroundColor(appState.pomodoroRunning ? .orange : Color.primary.opacity(0.35))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
+                            .font(.system(size: Theme.Typography.caption, weight: .bold))
+                            .foregroundColor(appState.pomodoroRunning ? .orange : Theme.Colors.idleText)
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.xxs)
                             .background(
                                 Capsule()
-                                    .fill(appState.pomodoroRunning ? Color.orange.opacity(0.18) : Color.primary.opacity(0.04))
+                                    .fill(appState.pomodoroRunning ? Color.orange.opacity(0.18) : Theme.Colors.surfaceBadge)
                             )
                     }
                     
                     // 2. 番茄钟工作台
-                    HStack(spacing: 10) {
+                    HStack(spacing: Theme.Spacing.xl) {
                         // 倒计时大字
                         Text(appState.formattedPomodoroTime)
-                            .font(.system(size: 20, weight: .bold, design: .monospaced))
+                            .font(.system(size: Theme.Typography.pomodoro, weight: .bold, design: .monospaced))
                             .foregroundColor(appState.pomodoroRunning ? .orange : .primary)
                             .shadow(color: appState.pomodoroRunning ? Color.orange.opacity(0.3) : .clear, radius: 4)
                         
                         // 预设时长快捷切换胶囊 (25m / 45m / 5m)
-                        HStack(spacing: 4) {
+                        HStack(spacing: Theme.Spacing.sm) {
                             PomodoroPresetButton(title: "25m", minutes: 25, appState: appState)
                             PomodoroPresetButton(title: "45m", minutes: 45, appState: appState)
                             PomodoroPresetButton(title: "5m", minutes: 5, appState: appState)
@@ -343,20 +336,20 @@ struct ExpandedMonitoringView: View {
                         Button {
                             appState.togglePomodoro()
                         } label: {
-                            HStack(spacing: 3) {
+                            HStack(spacing: Theme.Spacing.xs) {
                                 Image(systemName: appState.pomodoroRunning ? "pause.fill" : "play.fill")
-                                    .font(.system(size: 9))
+                                    .font(.system(size: Theme.Typography.mini))
                                 Text(appState.pomodoroRunning ? "暂停" : "开始")
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .font(.system(size: Theme.Typography.footnote, weight: .semibold))
                             }
                             // 实心高亮按钮：底用 primary（暗色=白/亮色=黑自动翻转），
                             // 文字用 windowBackground 反色保证双模式对比；运行中橙底白字保留
-                            .foregroundColor(appState.pomodoroRunning ? .white : Color(.windowBackgroundColor))
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
+                            .foregroundColor(appState.pomodoroRunning ? .white : Theme.Colors.solidButtonText)
+                            .padding(.horizontal, Theme.Spacing.lg)
+                            .padding(.vertical, Theme.Spacing.sm)
                             .background(
                                 Capsule()
-                                    .fill(appState.pomodoroRunning ? Color.orange : Color.primary.opacity(0.92))
+                                    .fill(appState.pomodoroRunning ? Color.orange : Theme.Colors.solidButtonFill)
                             )
                         }
                         .buttonStyle(.plain)
@@ -367,37 +360,37 @@ struct ExpandedMonitoringView: View {
                             appState.resetPomodoro()
                         } label: {
                             Image(systemName: "arrow.counterclockwise")
-                                .font(.system(size: 9))
+                                .font(.system(size: Theme.Typography.mini))
                                 .foregroundStyle(.tertiary)
-                                .frame(width: 20, height: 20)
-                                .background(Circle().fill(Color.primary.opacity(0.05)))
+                                .frame(width: Theme.Layout.miniButtonSize, height: Theme.Layout.miniButtonSize)
+                                .background(Circle().fill(Theme.Colors.surfaceButton))
                         }
                         .buttonStyle(.plain)
                         .help("重置番茄钟")
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.vertical, Theme.Spacing.md)
                     .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.primary.opacity(0.02))
+                        RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                            .fill(Theme.Colors.surfaceInset)
                     )
                     
                     // 3. 紧邻日历日程微卡片
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack(spacing: 5) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.chip) {
+                        HStack(spacing: Theme.Spacing.chip) {
                             Image(systemName: "calendar")
-                                .font(.system(size: 10.5, weight: .medium))
+                                .font(.system(size: Theme.Typography.body, weight: .bold))
                                 .foregroundColor(.pink.opacity(0.85))
                             
                             Text("紧邻日程")
-                                .font(.system(size: 10.5, weight: .semibold))
+                                .font(.system(size: Theme.Typography.label, weight: .semibold))
                                 .foregroundColor(.secondary)
                             
                             Spacer()
                             
                             if appState.calendarInfo.isAuthorized && appState.calendarInfo.hasEvent {
                                 Text(appState.calendarInfo.timeDescription)
-                                    .font(.system(size: 9.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
                                     .foregroundColor(.pink.opacity(0.90))
                                     .lineLimit(1)
                             }
@@ -410,7 +403,7 @@ struct ExpandedMonitoringView: View {
                                         appState.openCalendarApp()
                                     } label: {
                                         Text(appState.calendarInfo.title)
-                                            .font(.system(size: 11, weight: .medium))
+                                            .font(.system(size: Theme.Typography.body, weight: .medium))
                                             .foregroundColor(.primary)
                                             .lineLimit(1)
                                     }
@@ -423,15 +416,16 @@ struct ExpandedMonitoringView: View {
                                         Button {
                                             appState.joinMeeting(url: meetingURL)
                                         } label: {
-                                            HStack(spacing: 3) {
+                                            HStack(spacing: Theme.Spacing.xs) {
                                                 Image(systemName: "video.fill")
-                                                    .font(.system(size: 8))
+                                                    .font(.system(size: Theme.Typography.tiny))
                                                 Text("一键入会")
-                                                    .font(.system(size: 9, weight: .bold))
+                                                    .font(.system(size: Theme.Typography.caption, weight: .bold))
                                             }
+                                            // 粉底白字：彩色底上白色双模式均清晰，保留
                                             .foregroundColor(.white)
-                                            .padding(.horizontal, 7)
-                                            .padding(.vertical, 2.5)
+                                            .padding(.horizontal, Theme.Spacing.mdlg)
+                                            .padding(.vertical, Theme.Spacing.xxs)
                                             .background(Capsule().fill(Color.pink.opacity(0.85)))
                                         }
                                         .buttonStyle(.plain)
@@ -440,49 +434,49 @@ struct ExpandedMonitoringView: View {
                                 }
                             } else {
                                 Text("今日暂无紧邻日程 · 保持专注")
-                                    .font(.system(size: 10.5, weight: .medium))
+                                    .font(.system(size: Theme.Typography.label, weight: .medium))
                                     .foregroundStyle(.tertiary)
                             }
                         } else {
                             HStack {
                                 Text("未授权访问日历")
-                                    .font(.system(size: 10.5))
+                                    .font(.system(size: Theme.Typography.label))
                                     .foregroundStyle(.tertiary)
                                 Spacer()
                                 Button("点击授权") {
                                     appState.requestCalendarAccess { _ in }
                                 }
-                                .font(.system(size: 10, weight: .semibold))
-                                .foregroundColor(.cyan)
+                                .font(.system(size: Theme.Typography.footnote, weight: .semibold))
+                                .foregroundColor(Theme.Colors.accent)
                                 .buttonStyle(.plain)
                             }
                         }
                     }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.vertical, Theme.Spacing.md)
                     .background(
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.primary.opacity(0.02))
+                        RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                            .fill(Theme.Colors.surfaceInset)
                     )
                     
-                    Spacer(minLength: 2)
+                    Spacer(minLength: Theme.Spacing.xxs)
                     
                     // 4. 快捷效率小工具条
-                    HStack(spacing: 8) {
+                    HStack(spacing: Theme.Spacing.lg) {
                         // 锁屏微工具 (按 L)
                         Button {
                             appState.lockScreen()
                         } label: {
-                            HStack(spacing: 3) {
+                            HStack(spacing: Theme.Spacing.xs) {
                                 Image(systemName: "lock.fill")
-                                    .font(.system(size: 8.5))
+                                    .font(.system(size: Theme.Typography.tiny))
                                 Text("锁屏 (L)")
-                                    .font(.system(size: 9, weight: .medium))
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
                             }
                             .foregroundColor(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.primary.opacity(0.05)))
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.xs)
+                            .background(Capsule().fill(Theme.Colors.surfaceButton))
                         }
                         .buttonStyle(.plain)
                         .help("一键锁屏离座 (按 L)")
@@ -491,16 +485,16 @@ struct ExpandedMonitoringView: View {
                         Button {
                             appState.cleanClipboard()
                         } label: {
-                            HStack(spacing: 3) {
+                            HStack(spacing: Theme.Spacing.xs) {
                                 Image(systemName: "doc.text")
-                                    .font(.system(size: 8.5))
+                                    .font(.system(size: Theme.Typography.tiny))
                                 Text("洗文本 (X)")
-                                    .font(.system(size: 9, weight: .medium))
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
                             }
                             .foregroundColor(.secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Capsule().fill(Color.primary.opacity(0.05)))
+                            .padding(.horizontal, Theme.Spacing.md)
+                            .padding(.vertical, Theme.Spacing.xs)
+                            .background(Capsule().fill(Theme.Colors.surfaceButton))
                         }
                         .buttonStyle(.plain)
                         .help("一键将剪贴板清洗为纯文本 (按 X)")
@@ -510,43 +504,43 @@ struct ExpandedMonitoringView: View {
                         // 已连接外设清单
                         if !appState.bluetoothDevices.isEmpty {
                             ForEach(appState.bluetoothDevices.prefix(1), id: \.name) { dev in
-                                HStack(spacing: 3) {
+                                HStack(spacing: Theme.Spacing.xs) {
                                     Image(systemName: dev.iconName)
-                                        .font(.system(size: 9))
-                                        .foregroundColor(Color.cyan.opacity(0.90))
+                                        .font(.system(size: Theme.Typography.mini))
+                                        .foregroundColor(Theme.Colors.accent.opacity(0.90))
                                     Text(compactDeviceName(dev.name))
-                                        .font(.system(size: 9, weight: .medium))
+                                        .font(.system(size: Theme.Typography.mini, weight: .medium))
                                         .foregroundColor(.secondary)
                                         .lineLimit(1)
                                     if let b = dev.batteryLevel {
                                         Text("\(b)%")
-                                            .font(.system(size: 9, weight: .bold))
+                                            .font(.system(size: Theme.Typography.mini, weight: .bold))
                                             .foregroundColor(.secondary)
                                     }
                                 }
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.cyan.opacity(0.08)))
+                                .padding(.horizontal, Theme.Spacing.md)
+                                .padding(.vertical, Theme.Spacing.xs)
+                                .background(Capsule().fill(Theme.Colors.accent.opacity(0.08)))
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 14)
+                .padding(.horizontal, Theme.Spacing.card)
+                .padding(.vertical, Theme.Spacing.xxxl)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(Color.primary.opacity(0.03))
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .fill(Theme.Colors.surfaceCard)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.primary.opacity(0.09), lineWidth: 0.75)
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .stroke(Theme.Colors.cardStroke, lineWidth: 0.75)
                 )
             }
-            .frame(height: cardHeight)
-            .padding(.horizontal, 18)
-            .padding(.top, 2)
-            .padding(.bottom, 6)
+            .frame(height: Theme.Layout.monitorCardHeight)
+            .padding(.horizontal, Theme.Spacing.section)
+            .padding(.top, Theme.Spacing.xxs)
+            .padding(.bottom, Theme.Spacing.md)
         }
     }
     
@@ -560,16 +554,17 @@ struct ExpandedMonitoringView: View {
     
     private var cpuColor: Color {
         let usage = appState.performanceInfo.cpuUsage
+        // 状态语义色保持惯例：红=警告/橙=偏高 不被主题洗掉；正常态跟随主题强调色
         if usage > 85 { return Color.red.opacity(0.95) }
         if usage > 60 { return Color.orange.opacity(0.95) }
-        return Color.cyan.opacity(0.95)
+        return Theme.Colors.accent.opacity(0.95)
     }
     
     private var ramColor: Color {
         let usage = appState.performanceInfo.memoryUsagePercent
         if usage > 90 { return Color.red.opacity(0.95) }
         if usage > 75 { return Color.orange.opacity(0.95) }
-        return Color.mint.opacity(0.95)
+        return Theme.Colors.accent.opacity(0.95)
     }
 }
 
@@ -589,13 +584,13 @@ struct PomodoroPresetButton: View {
             appState.resetPomodoro(durationMinutes: minutes)
         } label: {
             Text(title)
-                .font(.system(size: 9.5, weight: isSelected ? .bold : .medium))
-                .foregroundColor(isSelected ? .orange : Color.primary.opacity(0.55))
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
+                .font(.system(size: Theme.Typography.caption, weight: isSelected ? .bold : .medium))
+                .foregroundColor(isSelected ? .orange : Theme.Colors.presetText)
+                .padding(.horizontal, Theme.Spacing.chip)
+                .padding(.vertical, Theme.Spacing.xxs)
                 .background(
                     Capsule()
-                        .fill(isSelected ? Color.orange.opacity(0.20) : Color.primary.opacity(0.04))
+                        .fill(isSelected ? Color.orange.opacity(0.20) : Theme.Colors.surfaceBadge)
                 )
         }
         .buttonStyle(.plain)

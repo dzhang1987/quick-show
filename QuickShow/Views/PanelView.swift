@@ -31,12 +31,12 @@ struct PanelView: View {
             // 字号随实际渲染宽度逐帧连续缩放；锚点 padding 随展开进度逐帧连续滑动
             // （端点 30↔8：展开态时钟贴近顶部，释放的空间让给状态栏与监控区呼吸）
             TimeDisplayView(appState: appState, panelWidth: renderedSize.width > 0 ? renderedSize.width : panelWidth)
-                .padding(.top, 30 - 22 * expandProgress)
-                .padding(.horizontal, 24)
+                .padding(.top, Theme.Layout.heroTopCompact - (Theme.Layout.heroTopCompact - Theme.Layout.heroTopExpanded) * expandProgress)
+                .padding(.horizontal, Theme.Spacing.panel)
             
             // 严格受限的自然呼吸微间距，彻底杜绝拉裂虚空（端点 36↔12 不变，随进度连续收缩）
             Spacer(minLength: 8)
-                .frame(maxHeight: 36 - 24 * expandProgress)
+                .frame(maxHeight: Theme.Layout.breathCompact - (Theme.Layout.breathCompact - Theme.Layout.breathExpanded) * expandProgress)
             
             // 细若游丝的微光渐隐分割线（严格保持 0.5pt 高度）
             // 0.25 是对比度下限：黑色低 alpha 在亮玻璃上是"阴影"型弱对比，
@@ -46,22 +46,22 @@ struct PanelView: View {
                     LinearGradient(
                         colors: [
                             Color.primary.opacity(0.0),
-                            Color.primary.opacity(0.25),
+                            Color.primary.opacity(Theme.Colors.dividerOpacity),
                             Color.primary.opacity(0.0)
                         ],
                         startPoint: .leading,
                         endPoint: .trailing
                     )
                 )
-                .frame(height: 0.5)
-                .padding(.horizontal, 24)
+                .frame(height: Theme.Layout.dividerHeight)
+                .padding(.horizontal, Theme.Spacing.panel)
             
             // 底部微状态栏（P0 状态：电池、WiFi、音频、常驻图钉）
             // padding 端点 16↔10 / 24↔12，随进度连续滑动（展开态底部呼吸加大）
             StatusBarView(appState: appState)
-                .padding(.horizontal, 24)
-                .padding(.top, 16 - 6 * expandProgress)
-                .padding(.bottom, 24 - 12 * expandProgress)
+                .padding(.horizontal, Theme.Spacing.panel)
+                .padding(.top, Theme.Layout.statusTopCompact - (Theme.Layout.statusTopCompact - Theme.Layout.statusTopExpanded) * expandProgress)
+                .padding(.bottom, Theme.Layout.statusBottomCompact - (Theme.Layout.statusBottomCompact - Theme.Layout.statusBottomExpanded) * expandProgress)
             
             // 展开后的监控面板 (P1 状态：CPU/内存负载、网速、日历日程、番茄钟)
             // 占位高度 = 完整高度 × 展开进度：窗口长多少它吃多少，逐帧由实际高度挤出，
@@ -70,11 +70,11 @@ struct PanelView: View {
             // 占位与 isExpanded 解耦（收起时随窗口收缩自然归零，无瞬跳），isExpanded 只管淡入淡出；
             // p=1 端点 = 内容 241.5 + 底部呼吸 14（时钟上移释放的空间转移至此）
             ExpandedMonitoringView(appState: appState)
-                .padding(.horizontal, 14)
-                .frame(height: (ExpandedMonitoringView.contentHeight + 14) * expandProgress, alignment: .top)
+                .padding(.horizontal, Theme.Spacing.xxxl)
+                .frame(height: (Theme.Layout.monitorContentHeight + Theme.Layout.monitorBreath) * expandProgress, alignment: .top)
                 .clipped()
                 .opacity(appState.isExpanded ? 1 : 0)
-                .animation(.easeInOut(duration: 0.18), value: appState.isExpanded)
+                .animation(.easeInOut(duration: Theme.Motion.windowResize), value: appState.isExpanded)
             
             // 注意：此处曾有 ESC/⌘,/⌘Q 三个隐形 keyboardShortcut Button 兜底，已删除。
             // 根因（最小复现实验铁证）：keyboardShortcut 在 NSGlassEffectView 承载的
@@ -95,7 +95,7 @@ struct PanelView: View {
                 Color.clear
             } else {
                 // 13~25 降级：原生超薄材质，跟随系统明暗翻转（内容语义色同步适配）
-                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
                     .fill(.ultraThinMaterial)
             }
         }
@@ -103,7 +103,7 @@ struct PanelView: View {
         .overlay {
             if appState.showCheatSheet {
                 CheatSheetView(appState: appState)
-                    .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                    .transition(.opacity.combined(with: .scale(scale: Theme.Motion.overlayScale)))
             }
         }
     }
@@ -114,18 +114,18 @@ struct CheatSheetView: View {
     @ObservedObject var appState: AppState
     
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Theme.Spacing.xxl) {
             // 顶部小标题栏
             HStack {
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Spacing.lg) {
                     Image(systemName: "command")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: Theme.Typography.badge, weight: .bold))
                         .foregroundColor(.orange)
                     Text("全键盘盲操速查表")
-                        .font(.system(size: 13, weight: .bold))
+                        .font(.system(size: Theme.Typography.badge, weight: .bold))
                         .foregroundColor(.primary)
                     Text("(按住 ⌘ 提示 · 松开自动收起)")
-                        .font(.system(size: 11, weight: .regular))
+                        .font(.system(size: Theme.Typography.body, weight: .regular))
                         .foregroundStyle(.tertiary)
                 }
                 
@@ -135,16 +135,16 @@ struct CheatSheetView: View {
                     appState.setCheatSheetVisible(false)
                 } label: {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 15))
-                        .foregroundColor(Color.primary.opacity(0.55))
+                        .font(.system(size: Theme.Typography.closeButton))
+                        .foregroundColor(Theme.Colors.closeIcon)
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.horizontal, 18)
-            .padding(.top, 14)
+            .padding(.horizontal, Theme.Spacing.section)
+            .padding(.top, Theme.Spacing.xxxl)
             
             // 三列结构化快捷键分组 (满铺卡片网格)
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: Theme.Spacing.xl) {
                 // 列 1：基础交互
                 ShortcutGroupCard(title: "基础控制", shortcuts: [
                     ("Tab", "展开 / 收起看板"),
@@ -172,18 +172,18 @@ struct CheatSheetView: View {
                     ("?", "速查卡片常驻开关")
                 ])
             }
-            .padding(.horizontal, 14)
-            .padding(.bottom, 14)
+            .padding(.horizontal, Theme.Spacing.xxxl)
+            .padding(.bottom, Theme.Spacing.xxxl)
             .frame(maxHeight: .infinity)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             // 原生超薄材质，跟随系统明暗翻转（与窗口玻璃同哲学）
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.cheatSheet, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .padding(6)
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.cheatSheet, style: .continuous))
+        .padding(Theme.Spacing.md)
     }
 }
 
@@ -192,27 +192,27 @@ struct ShortcutGroupCard: View {
     let shortcuts: [(String, String)]
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             Text(title)
-                .font(.system(size: 11.5, weight: .bold))
+                .font(.system(size: Theme.Typography.callout, weight: .bold))
                 .foregroundColor(.secondary)
-                .padding(.horizontal, 4)
-                .padding(.bottom, 2)
+                .padding(.horizontal, Theme.Spacing.sm)
+                .padding(.bottom, Theme.Spacing.xxs)
             
             ForEach(shortcuts, id: \.0) { key, desc in
-                HStack(spacing: 8) {
+                HStack(spacing: Theme.Spacing.lg) {
                     Text(key)
-                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                        .font(.system(size: Theme.Typography.keyCap, weight: .bold, design: .monospaced))
                         .foregroundColor(.orange.opacity(0.95))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xs)
                         .background(
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .fill(Color.primary.opacity(0.06))
+                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                                .fill(Theme.Colors.surfaceKeyCap)
                         )
                     
                     Text(desc)
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: Theme.Typography.body, weight: .medium))
                         .foregroundColor(.primary)
                         .lineLimit(1)
                     
@@ -222,15 +222,15 @@ struct ShortcutGroupCard: View {
             
             Spacer(minLength: 0)
         }
-        .padding(12)
+        .padding(Theme.Spacing.xxl)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.primary.opacity(0.03))
+            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                .fill(Theme.Colors.surfaceCard)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                .stroke(Theme.Colors.groupCardStroke, lineWidth: 0.5)
         )
     }
 }
@@ -242,7 +242,7 @@ private struct PanelRoundedClip: ViewModifier {
         if #available(macOS 26.0, *) {
             content
         } else {
-            content.clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+            content.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
         }
     }
 }

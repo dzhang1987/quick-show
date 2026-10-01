@@ -8,15 +8,15 @@ struct TimeDisplayView: View {
     
     private var clockFontSize: CGFloat {
         // 系统聚焦级大字排版：440宽为84pt，540宽为98pt，680宽为124pt，顶天立地主角气场
-        min(max(panelWidth * 0.183, 84.0), 126.0)
+        min(max(panelWidth * Theme.Typography.clockScale, Theme.Typography.clockMin), Theme.Typography.clockMax)
     }
     
     private var secondsFontSize: CGFloat {
-        clockFontSize * 0.42
+        clockFontSize * Theme.Typography.secondsRatio
     }
     
     private var periodFontSize: CGFloat {
-        clockFontSize * 0.22
+        clockFontSize * Theme.Typography.periodRatio
     }
     
     // 静态缓存 DateFormatter，避免每秒重复分配 ICU 字典与本地化对象
@@ -73,50 +73,50 @@ struct TimeDisplayView: View {
     }
     
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: Theme.Spacing.lg) {
             // 顶部日期徽章与灵动微反馈系统 (Zero-UI Toast)
             Group {
                 if let toast = appState.toastMessage {
-                    HStack(spacing: 4) {
+                    HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: Theme.Typography.body, weight: .semibold))
                             .foregroundColor(Color.green.opacity(0.95))
                         
                         Text(toast)
-                            .font(.system(size: 12.5, weight: .semibold, design: .default))
+                            .font(.system(size: Theme.Typography.toast, weight: .semibold, design: .default))
                             .foregroundColor(.primary)
                             .lineLimit(1)
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 4.5)
+                    .padding(.horizontal, Theme.Spacing.xxxl)
+                    .padding(.vertical, Theme.Spacing.smd)
                     .background(
                         // 语义色：primary 随玻璃明暗自动翻转；
                         // toast 是强提示，胶囊底/描边需明显高于普通徽章，亮玻璃下依然可感知
                         Capsule()
-                            .fill(Color.primary.opacity(0.13))
+                            .fill(Theme.Colors.toastFill)
                             .overlay(
                                 Capsule()
-                                    .stroke(Color.primary.opacity(0.25), lineWidth: 0.5)
+                                    .stroke(Theme.Colors.toastStroke, lineWidth: 0.5)
                             )
                     )
-                    .transition(.opacity.combined(with: .scale(scale: 0.95)))
+                    .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
                 } else {
                     Button {
                         appState.openCalendarApp()
                     } label: {
                         Text(dateFormatted)
-                            .font(.system(size: 13, weight: .semibold, design: .default))
-                            .tracking(1.2)
+                            .font(.system(size: Theme.Typography.badge, weight: .semibold, design: .default))
+                            .tracking(Theme.Typography.badgeTracking)
                             .foregroundColor(.secondary)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 4.5)
+                            .padding(.horizontal, Theme.Spacing.xxxl)
+                            .padding(.vertical, Theme.Spacing.smd)
                             .background(
                                 // 日期徽章底/描边上调对比度下限：黑色低 alpha 在亮玻璃下会"洗白"消失
                                 Capsule()
-                                    .fill(Color.primary.opacity(0.08))
+                                    .fill(Theme.Colors.badgeFill)
                                     .overlay(
                                         Capsule()
-                                            .stroke(Color.primary.opacity(0.15), lineWidth: 0.5)
+                                            .stroke(Theme.Colors.badgeStroke, lineWidth: 0.5)
                                     )
                             )
                     }
@@ -125,15 +125,15 @@ struct TimeDisplayView: View {
                     .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.16), value: appState.toastMessage)
+            .animation(.easeInOut(duration: Theme.Motion.contentFade), value: appState.toastMessage)
             
             // 核心大字时钟：原生超大字重、纯正黑曜石光感
-            HStack(alignment: .lastTextBaseline, spacing: 6) {
+            HStack(alignment: .lastTextBaseline, spacing: Theme.Spacing.md) {
                 if let period = period {
                     Text(period)
                         .font(.system(size: periodFontSize, weight: .bold, design: .default))
                         .foregroundColor(.secondary)
-                        .padding(.trailing, 2)
+                        .padding(.trailing, Theme.Spacing.xxs)
                 }
                 
                 // 时与分：原生 104pt 大字号 Medium 字重，结实有力，高对比主角（primary 随玻璃明暗自动翻转）
@@ -142,7 +142,7 @@ struct TimeDisplayView: View {
                     .monospacedDigit()
                     .foregroundStyle(
                         LinearGradient(
-                            colors: [Color.primary, Color.primary.opacity(0.9)],
+                            colors: [Theme.Colors.clockGradientTop, Theme.Colors.clockGradientBottom],
                             startPoint: .top,
                             endPoint: .bottom
                         )
@@ -150,7 +150,7 @@ struct TimeDisplayView: View {
                 
                 // 秒数：紧凑清晰副排版
                 if appState.showSeconds {
-                    HStack(spacing: 2) {
+                    HStack(spacing: Theme.Spacing.xxs) {
                         Text(":")
                             .font(.system(size: secondsFontSize, weight: .light, design: .default))
                             .foregroundStyle(.tertiary)
@@ -162,13 +162,13 @@ struct TimeDisplayView: View {
                             .foregroundStyle(
                                 // 三级副排版：primary 低透明度渐变，保留细腻质感且随玻璃翻转
                                 LinearGradient(
-                                    colors: [Color.primary.opacity(0.85), Color.primary.opacity(0.65)],
+                                    colors: [Theme.Colors.secondsGradientTop, Theme.Colors.secondsGradientBottom],
                                     startPoint: .top,
                                     endPoint: .bottom
                                 )
                             )
                     }
-                    .padding(.leading, 2)
+                    .padding(.leading, Theme.Spacing.xxs)
                 }
             }
         }
