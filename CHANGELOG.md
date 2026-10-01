@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-10-01
+
+### Fixed
+
+- API Key 钥匙串条目每次重启弹密码授权：旧条目在历史签名二进制下创建，ACL 未含当前稳定证书（QuickShow Development）授权，导致每次读取触发授权弹窗。`saveAPIKey` 由 `SecItemUpdate` 改为「删除重建」策略（先 `SecItemDelete` 再 `SecItemAdd`），每次保存在当前签名下重建条目使 ACL 始终与运行二进制一致；`SecItemAdd` 显式声明 `kSecAttrAccessibleWhenUnlocked`。存量条目需重新保存一次 API Key 完成迁移（迁移后不再弹窗）
+- 通用设置「呼出触发方式」选择与 AI 对话窗热键冲突的选项（如 AI 窗占用任意⌥时选左右侧⌥）被静默拒绝、UI 无任何反馈，表现为「选项选不上/显示回旧值」：对齐快捷键设置页的回读校验模式（写入后回读 `HotKeyManager.shared.currentType`），不一致即红字提示「与 AI 对话窗热键冲突，已保持原设置」并指引前往「快捷键设置」调整双路热键
+
 ## [1.5.0] - 2026-10-01
 
 ### Added

@@ -43,8 +43,8 @@ targets:
       path: QuickShow/Info.plist
       properties:
         # 版本号唯一真源在 project.yml：xcodegen 每次重写 Info.plist，手改 plist 会被打回默认 1.0
-        CFBundleShortVersionString: "1.5.0"
-        CFBundleVersion: "1.5.0"
+        CFBundleShortVersionString: "1.5.1"
+        CFBundleVersion: "1.5.1"
         LSUIElement: true
         CFBundleIdentifier: cn.chiproad.QuickShow
         CFBundleName: QuickShow

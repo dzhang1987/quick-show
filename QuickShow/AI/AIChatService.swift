@@ -550,18 +550,21 @@ final class AIChatService {
         return key
     }
 
-    /// 新增或更新 API Key。任何 Keychain 错误均静默忽略。
+    /// 保存 API Key（删除重建策略）。任何 Keychain 错误均静默忽略。
+    /// 为什么放弃 SecItemUpdate：条目可能是在旧签名二进制下创建的，其 ACL 不含当前
+    /// 稳定证书（QuickShow Development）的授权，导致此后每次读取都弹钥匙串密码。
+    /// 改为「先删后建」可确保条目始终在**当前签名**下重建，ACL 永远与运行二进制一致。
     func saveAPIKey(_ key: String) {
         guard let data = key.data(using: .utf8) else { return }
-        let query = baseKeychainQuery()
-        let attributes: [String: Any] = [kSecValueData as String: data]
 
-        let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if updateStatus == errSecItemNotFound {
-            var addQuery = query
-            addQuery[kSecValueData as String] = data
-            SecItemAdd(addQuery as CFDictionary, nil)
-        }
+        // 1) 先删除旧条目（忽略「不存在」错误），清除可能携带的旧签名 ACL。
+        SecItemDelete(baseKeychainQuery() as CFDictionary)
+
+        // 2) 在当前签名下重建条目；显式声明可访问性（行为与现状一致但更明确）。
+        var addQuery = baseKeychainQuery()
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+        SecItemAdd(addQuery as CFDictionary, nil)
     }
 
     /// 删除 API Key。

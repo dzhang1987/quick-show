@@ -121,22 +121,45 @@ struct SettingsView: View {
 struct GeneralSettingsForm: View {
     @ObservedObject var appState: AppState
     @Binding var launchAtLogin: Bool
-    
+
+    /// 热键互斥被拒时的即时提示（所选未实际生效时出现，红色小字）
+    @State private var conflictNotice: String?
+
+    /// 主面板热键绑定：写入后回读 HotKeyManager 实际生效值，被互斥拒绝则即时提示。
+    /// 与「快捷键设置」页的 mainTriggerBinding 同一套回读校验模式。
+    private var generalTriggerBinding: Binding<TriggerType> {
+        Binding(
+            get: { appState.triggerType },
+            set: { newValue in
+                appState.triggerType = newValue
+                // 互斥兜底在 AppState setter：被拒绝时实际生效值仍为旧值，与所选不同
+                if HotKeyManager.shared.currentType != newValue {
+                    conflictNotice = "与 AI 对话窗热键命中键冲突，已保持原设置。请在「快捷键设置」中调整双路热键"
+                } else {
+                    conflictNotice = nil
+                }
+            }
+        )
+    }
+
     var body: some View {
         Form {
             Section {
-                Picker("呼出触发方式", selection: Binding(
-                    get: { appState.triggerType },
-                    set: { appState.triggerType = $0 }
-                )) {
+                Picker("呼出触发方式", selection: generalTriggerBinding) {
                     ForEach(TriggerType.allCases) { type in
                         Text(type.displayName).tag(type)
                     }
                 }
+                if let conflictNotice {
+                    Text(conflictNotice)
+                        .font(.system(size: Theme.Typography.label))
+                        .foregroundColor(Theme.Colors.statusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             } header: {
                 Text("全局呼出")
             } footer: {
-                Text("推荐「双击 Command (⌘ ⌘)」或「双击 Control (⌃ ⌃)」，敲击两下极速呼出/收起，全屏沉浸零打断。")
+                Text("推荐「双击 Command (⌘ ⌘)」或「双击 Control (⌃ ⌃)」，敲击两下极速呼出/收起，全屏沉浸零打断。AI 对话窗热键在「快捷键设置」中独立配置。")
             }
             
             Section {
