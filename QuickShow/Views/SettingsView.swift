@@ -693,10 +693,22 @@ struct AIServiceSettingsForm: View {
     // Base URL / Model / System Prompt 均存 UserDefaults，键名与 AIChatService.ConfigKey 完全一致；
     // 直接以 @AppStorage 绑定同键，既能获得 SwiftUI 响应式刷新，又与 AIChatService 读写共享同一份数据。
     @AppStorage("ai.baseURL") private var baseURL: String = ""
-    @AppStorage("ai.model") private var model: String = ""
     @AppStorage("ai.systemPrompt") private var systemPrompt: String = ""
     // API 协议：原始值 "chat" / "responses"，键名与 AIChatService 保持一致
     @AppStorage("ai.apiProtocol") private var apiProtocolRaw: String = AIProtocolOption.chat.rawValue
+
+    /// 模型列表（显示名 + modelId，首项为默认）。由 AIChatService 读写，本表单仅做编辑态。
+    @State private var modelList: [AIModel] = []
+    /// 当前选中模型的 modelId。
+    @State private var selectedModelId: String = ""
+    /// 候选池：端点返回的全部可用 model id（只读，供搜索挑选）。
+    @State private var availableModels: [String] = []
+    /// 候选池搜索关键词（本地过滤，不动持久层）。
+    @State private var modelFilter: String = ""
+    /// 正在从 API 拉取模型列表。
+    @State private var isFetchingModels = false
+    /// 拉取失败的行内中文提示。
+    @State private var fetchError: String?
     
     /// Keychain 中已存 API Key（仅用于掩码展示，绝不持久化到 UserDefaults）
     @State private var storedKey: String = ""
@@ -760,12 +772,142 @@ struct AIServiceSettingsForm: View {
             }
             
             Section {
-                TextField("gpt-4o-mini / 自定义模型名", text: $model)
-                    .textFieldStyle(.roundedBorder)
+                if modelList.isEmpty {
+                    Text("尚未配置模型，请添加一项，或从下方「可用模型」中添加。")
+                        .font(.system(size: Theme.Typography.body))
+                        .foregroundColor(.secondary)
+                } else {
+                    // 当前使用的模型（我的模型通常仅几条，Picker 不卡）
+                    Picker("当前模型", selection: selectedModelBinding) {
+                        ForEach(modelList) { item in
+                            Text(item.name.isEmpty ? item.modelId : item.name).tag(item.modelId)
+                        }
+                    }
+
+                    ForEach(Array(modelList.enumerated()), id: \.element.id) { index, item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 8) {
+                                TextField("显示名", text: nameBinding(at: index))
+                                    .textFieldStyle(.roundedBorder)
+                                TextField("模型 ID", text: modelIdBinding(at: index))
+                                    .textFieldStyle(.roundedBorder)
+                                if index == 0 {
+                                    Text("默认")
+                                        .font(.system(size: Theme.Typography.mini, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            HStack(spacing: 10) {
+                                Button("上移") { moveModel(from: index, to: index - 1) }
+                                    .disabled(index == 0)
+                                Button("下移") { moveModel(from: index, to: index + 1) }
+                                    .disabled(index == modelList.count - 1)
+                                Button("设为默认") { setDefaultModel(at: index) }
+                                    .disabled(index == 0)
+                                Button("删除", role: .destructive) { removeModel(at: index) }
+                                Spacer(minLength: 0)
+                                if selectedModelId == item.modelId {
+                                    Text("当前使用")
+                                        .font(.system(size: Theme.Typography.mini))
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .font(.system(size: Theme.Typography.body))
+                            .buttonStyle(.borderless)
+                        }
+                        .padding(.vertical, 2)
+                    }
+
+                    Button("添加模型") { addModel() }
+                        .font(.system(size: Theme.Typography.body))
+                }
             } header: {
-                Text("Model")
+                Text("我的模型")
             } footer: {
-                Text("请求体中的 model 字段，填写端点支持的模型标识即可（如 gpt-4o-mini、qwen2.5、llama3 等）。")
+                Text("列表首项为默认模型；AI 窗的模型切换菜单只显示这里（我的模型）的条目。图片输入需端点与模型支持 vision。")
+            }
+
+            Section {
+                // 候选池：只读、可搜索、可挑选加入「我的模型」；几百条也保持流畅。
+                TextField("搜索模型 ID", text: $modelFilter)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack(spacing: 10) {
+                    Text(modelFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                         ? "共 \(availableModels.count) 个"
+                         : "匹配 \(filteredAvailableModels.count) / \(availableModels.count)")
+                        .font(.system(size: Theme.Typography.footnote))
+                        .foregroundColor(.secondary)
+                    Spacer(minLength: 0)
+                    Button("从 API 拉取") { fetchModelsFromAPI() }
+                        .font(.system(size: Theme.Typography.body, weight: .medium))
+                        .disabled(isFetchingModels)
+                    if isFetchingModels {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                if let fetchError {
+                    Text(fetchError)
+                        .font(.system(size: Theme.Typography.body))
+                        .foregroundColor(Theme.Colors.statusWarning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                if availableModels.isEmpty {
+                    Text("候选池为空，点击「从 API 拉取」获取端点可用模型。")
+                        .font(.system(size: Theme.Typography.body))
+                        .foregroundColor(.secondary)
+                } else {
+                    // 固定高度 + LazyVStack：只渲染可视行，几百条滚动不卡；行内严禁 TextField。
+                    // 滚动条隐藏：默认叠加式滚动条会压住行尾的「+」按钮，内容已有搜索过滤，无需滚动条存在感。
+                    ScrollView(.vertical) {
+                        LazyVStack(alignment: .leading, spacing: 2) {
+                            ForEach(filteredAvailableModels, id: \.self) { modelId in
+                                HStack(spacing: 8) {
+                                    Text(modelId)
+                                        .font(.system(size: Theme.Typography.body))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .foregroundColor(isModelAdded(modelId) ? .secondary : .primary)
+                                    Spacer(minLength: 0)
+                                    if isModelAdded(modelId) {
+                                        Text("已添加")
+                                            .font(.system(size: Theme.Typography.mini))
+                                            .foregroundColor(.secondary)
+                                    } else {
+                                        Button {
+                                            addModelFromPool(modelId)
+                                        } label: {
+                                            Image(systemName: "plus.circle")
+                                                .font(.system(size: Theme.Typography.body))
+                                        }
+                                        .buttonStyle(.borderless)
+                                        .help("加入我的模型")
+                                    }
+                                }
+                                .padding(.vertical, 1)
+                                // 行尾让出安全边距：确保「+」按钮不被列表右缘裁切
+                                .padding(.trailing, 6)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // 末行完整可见：底部留出滚动余量
+                        .padding(.bottom, 4)
+                    }
+                    .scrollIndicators(.hidden)
+                    .frame(height: 220)
+
+                    if !filteredAvailableModels.isEmpty || !modelFilter.isEmpty {
+                        Button("清空候选池", role: .destructive) { clearAvailableModels() }
+                            .font(.system(size: Theme.Typography.footnote))
+                    }
+                }
+            } header: {
+                Text("可用模型")
+            } footer: {
+                Text("端点返回的全部模型候选，仅供挑选；点击 + 加入「我的模型」。候选池清空不影响我的模型。")
             }
             
             Section {
@@ -790,7 +932,10 @@ struct AIServiceSettingsForm: View {
                 Text("全局双击 ⌥⌥ 随时唤出 / 关闭 AI 对话窗（热键可在「快捷键设置」中更改）；主面板激活时按 I 键亦可进入。")
             }
         }
-        .onAppear { loadStoredKey() }
+        .onAppear {
+            loadStoredKey()
+            loadModelList()
+        }
     }
     
     /// API 协议绑定：原始值字符串与枚举互转，默认 Chat Completions
@@ -833,6 +978,154 @@ struct AIServiceSettingsForm: View {
             AIChatService.shared.deleteAPIKey()
             storedKey = ""
             apiKeyInput = ""
+        }
+    }
+
+    // MARK: - 模型列表编辑
+
+    /// 当前模型绑定：写回服务层，对下一轮请求生效。
+    private var selectedModelBinding: Binding<String> {
+        Binding(
+            get: { selectedModelId },
+            set: { newValue in
+                selectedModelId = newValue
+                persistModelList()
+            }
+        )
+    }
+
+    private func nameBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { index < modelList.count ? modelList[index].name : "" },
+            set: { newValue in
+                guard index < modelList.count else { return }
+                modelList[index].name = newValue
+                persistModelList()
+            }
+        )
+    }
+
+    private func modelIdBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { index < modelList.count ? modelList[index].modelId : "" },
+            set: { newValue in
+                guard index < modelList.count else { return }
+                let oldValue = modelList[index].modelId
+                modelList[index].modelId = newValue
+                if selectedModelId == oldValue {
+                    selectedModelId = newValue
+                }
+                persistModelList()
+            }
+        )
+    }
+
+    private func loadModelList() {
+        Task { @MainActor in
+            modelList = AIChatService.shared.modelList
+            selectedModelId = AIChatService.shared.selectedModel
+            availableModels = AIChatService.shared.availableModels
+        }
+    }
+
+    private func persistModelList() {
+        let snapshot = modelList
+        let selected = selectedModelId
+        Task { @MainActor in
+            var list = snapshot
+            // 清理空 modelId 项，避免写入无效条目
+            list.removeAll { $0.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            AIChatService.shared.modelList = list
+            // 仅当选中项仍在列表中才写回，否则交由 setter 的校正逻辑兜底。
+            if list.contains(where: { $0.modelId == selected }) {
+                AIChatService.shared.selectedModel = selected
+            }
+        }
+    }
+
+    private func persistAvailableModels() {
+        let snapshot = availableModels
+        Task { @MainActor in
+            AIChatService.shared.availableModels = snapshot
+        }
+    }
+
+    private func addModel() {
+        modelList.append(AIModel(name: "", modelId: ""))
+        persistModelList()
+    }
+
+    private func removeModel(at index: Int) {
+        guard index < modelList.count else { return }
+        let removed = modelList.remove(at: index)
+        if selectedModelId == removed.modelId, let first = modelList.first {
+            selectedModelId = first.modelId
+        }
+        persistModelList()
+    }
+
+    private func moveModel(from index: Int, to target: Int) {
+        guard modelList.indices.contains(index), modelList.indices.contains(target) else { return }
+        modelList.swapAt(index, target)
+        persistModelList()
+    }
+
+    /// 设为默认：移到首项并切换为当前模型。
+    private func setDefaultModel(at index: Int) {
+        guard modelList.indices.contains(index) else { return }
+        let item = modelList.remove(at: index)
+        modelList.insert(item, at: 0)
+        selectedModelId = item.modelId
+        persistModelList()
+    }
+
+    // MARK: - 候选池
+
+    /// 本地过滤（忽略大小写，匹配 modelId），不动持久层。
+    private var filteredAvailableModels: [String] {
+        let keyword = modelFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !keyword.isEmpty else { return availableModels }
+        return availableModels.filter { $0.lowercased().contains(keyword) }
+    }
+
+    private func isModelAdded(_ modelId: String) -> Bool {
+        modelList.contains { $0.modelId == modelId }
+    }
+
+    /// 从候选池加入「我的模型」（显示名默认 = modelId）。
+    private func addModelFromPool(_ modelId: String) {
+        guard !isModelAdded(modelId) else { return }
+        modelList.append(AIModel(name: modelId, modelId: modelId))
+        persistModelList()
+    }
+
+    /// 清空候选池（条目都是拉来的，无需确认；不影响我的模型）。
+    private func clearAvailableModels() {
+        availableModels = []
+        modelFilter = ""
+        persistAvailableModels()
+    }
+
+    /// 从 API 拉取模型：结果只合并进候选池（去重），绝不直接进「我的模型」。
+    private func fetchModelsFromAPI() {
+        isFetchingModels = true
+        fetchError = nil
+        Task { @MainActor in
+            do {
+                let ids = try await AIChatService.shared.fetchModels()
+                var existing = Set(availableModels)
+                for id in ids where !existing.contains(id) {
+                    availableModels.append(id)
+                    existing.insert(id)
+                }
+                if availableModels.isEmpty {
+                    fetchError = "接口未返回任何模型。"
+                }
+                persistAvailableModels()
+            } catch {
+                fetchError = error.localizedDescription
+            }
+            isFetchingModels = false
         }
     }
 }

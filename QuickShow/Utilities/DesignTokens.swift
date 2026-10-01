@@ -163,6 +163,37 @@ enum Theme {
         static var clockGradientBottom: Color { Theme.palette.clockGradientBottom }
         static var secondsGradientTop: Color { Theme.palette.secondsGradientTop }
         static var secondsGradientBottom: Color { Theme.palette.secondsGradientBottom }
+
+        // MARK: AI 对话窗专用（2026-10 视觉层次专项）
+        // 设计逻辑：≥90% 不透明度底板稳定阅读区（玻璃穿透曾致文字对比度随位置波动、
+        // 侧栏出现模糊残影），半透明只留给窗体外缘；层级靠「底板深浅差 + 0.5pt 描边」
+        // 而非透明度叠加；全部随明暗模式自适应、与主题变体正交（不被琥珀/黑曜石洗掉）。
+        /// 主区底板：暗色近黑 94% / 亮色近白 95%
+        static let chatBase = aiAdaptive(dark: (0.115, 0.115, 0.125, 0.94), light: (0.99, 0.99, 0.99, 0.95))
+        /// 侧栏底板：比主区深半档（层级分区），不透明度更高一档压住列表滚动残影
+        static let chatSidebarBase = aiAdaptive(dark: (0.085, 0.085, 0.095, 0.95), light: (0.955, 0.955, 0.96, 0.95))
+        /// 助手消息气泡：比主区亮一档的低对比底板（亮色近纯白靠描边出层级）
+        static let chatAssistantBubble = aiAdaptive(dark: (1, 1, 1, 0.065), light: (1, 1, 1, 0.90))
+        /// 输入卡底板：操作焦点再亮半档，与主区明确拉开
+        static let chatInputCard = aiAdaptive(dark: (1, 1, 1, 0.085), light: (1, 1, 1, 0.95))
+        /// 提亮档描边（0.14）：输入卡 / 表格卡 / 浮动操作条——比 cardStroke(0.09) 高一档
+        static let chatStrokeStrong = Color.primary.opacity(0.14)
+        /// 表格表头行底色（与 surfaceTrack 同值，语义独立）
+        static let chatTableHeader = Color.primary.opacity(0.05)
+        /// 表格斑马纹（±4% 白量级，偶数行）
+        static let chatTableRowAlternate = Color.primary.opacity(0.035)
+
+        /// AI 窗专用自适应色构造（rgba 四元组，解析跟随视图 effectiveAppearance）
+        private static func aiAdaptive(
+            dark: (Double, Double, Double, Double),
+            light: (Double, Double, Double, Double)
+        ) -> Color {
+            Color(nsColor: NSColor(name: nil) { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                let c = isDark ? dark : light
+                return NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: c.3)
+            })
+        }
     }
     
     // MARK: - 字体角色（按语义角色命名，同值角色各自独立以便未来分调）

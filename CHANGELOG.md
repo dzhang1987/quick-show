@@ -4,6 +4,38 @@
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-01
+
+### Added
+
+- 多会话管理（对标 DeepSeek / Claude 移动端交互，翻译为 macOS 悬浮窗形态）：
+  - `ChatSessionStore`：每会话独立文件（`Application Support/QuickShow/AIChats/<uuid>.json`）原子写，旧 `AIChatSession.json` 一次性迁移为首个会话（旧文件保留）；上下文截断（最近 20 轮 / 24000 字符）按会话独立计算
+  - 会话侧栏（`⌘B` 显隐，窗口宽度经 `ai.sidebarVisible` 偏好联动 216pt 平滑加宽）：搜索（`⌘F` 聚焦，标题+消息全文忽略大小写）、时间分组（置顶 / 今天 / 昨天 / 过去 7 天 / 更早，组内 updatedAt 倒序）、置顶 / 行内重命名 / 删除（红色隔离）、`⌘N` 新建；`⌘K` 语义调整为清空当前会话
+  - 会话标题自动生成：首轮回复完成后后台非流式调用 LLM 生成 ≤12 字中文标题，失败静默降级为首条用户消息截断
+- 消息级操作：hover 浮动操作条——任意消息复制（对勾轻反馈）、最后一条助手回复重新生成（截断重发）
+- 图片附件（vision）：输入区 `⊕`（剪贴板导入 / 文件选择）、`⌘V` 粘贴（图优先于文本）、拖入（NSTextView 子类拖放拦截 + onDrop 兜底）；NSImage→JPEG base64（原图+缩略图等比压缩）；气泡内缩略图点击放大覆盖层（暗化遮罩，点击/ESC 关闭）；Chat Completions `image_url` 与 Responses `input_image` 双协议通路
+- 块级 Markdown 完整渲染：`MarkdownParser` 纯函数 AST（h1–h3 / 有序无序列表含一层嵌套 / 表格 / 引用块 / 代码块 + 行内粗体/斜体/行内代码/链接）；流式期间纯文本+呼吸指示，落定后整条分区渲染；表格斑马纹+表头实线+列距加大，标题三级字号梯度，代码块 hover 复制
+- 模型两层管理：
+  - 「我的模型」（编辑/排序/设默认，AI 窗模型 chip 只显示这里）+「可用模型」候选池（只读、搜索过滤、`+` 加入、一键清空）；`从 API 拉取`（GET `/models`）只合并进候选池去重，不再直接灌进编辑列表；几百候选经 `ScrollView+LazyVStack` 轻量行虚拟化保持流畅
+  - 键：`ai.modelList`（首项默认）/ `ai.selectedModel` / `ai.availableModels`；旧 `ai.model` 首读迁移；存量列表 >1 条时一次性迁移（全部进池、我的模型收缩为当前选中）
+  - AI 窗输入区模型胶囊（>1 个模型时显示），切换对下一轮生效
+- 空态欢迎页：已配置无消息时居中 Logo + 引导语 + 剪贴板快捷附加
+
+### Changed
+
+- 视觉层次重做（解决背景穿透 / 无层级 / 数据墙）：主区与侧栏高不透明稳定底板（94–95%，消除 vibrancy 穿透与残影）；用户消息右对齐琥珀气泡、助手消息亮一档底板+描边，连续同角色消息成组（组内 8 / 组间 26）；三级排版、间距分组节奏（标题前 18/14/10 梯度）；输入卡底色拉开+描边，发送键三态（可用 accent 实心圆 / 流式红底方块 / 禁用灰）；全窗强调色收敛单一通道；`DesignTokens` 新增 AI 窗专用 token 7 个（chatBase / chatSidebarBase / chatAssistantBubble / chatInputCard / chatStrokeStrong / chatTableHeader / chatTableRowAlternate，明暗自适应）
+- `AIChatState` 重构为 `ChatSessionStore` 门面，`messages` 经 Combine 从 store 同步；设置页「AI 服务」Model 单字段替换为模型两层编辑区
+- 请求体编码升级 `MessageContent` 枚举（text / parts）并显式携带 `stream` 参数
+
+### Fixed
+
+- 设置页候选池「+」按钮被常显滚动条遮挡：隐藏滚动指示器 + 行尾/底部安全边距，末行完整可见
+- 流式响应回归（Wave 重构引入的性能退化，网络层经 diff 排除）：
+  - 发送路径主线程 3 次全量会话 JSON 编码+写盘（带图 base64 时 50–200ms 叠加首 token 延迟）→ 全部 `persist: false`，落盘移至首 token 合帧时一次
+  - 每 token 全量 `@Published` 扇出（50–200 次/秒视图失效）→ 50ms 合帧冲刷（≤20 次/秒），中止 / 失败 / 正常结束三路强制 flush 不丢尾部内容
+  - `modelList` / `availableModels` 计算属性每次访问反序列化整个 JSON → `@MainActor` 串行内存缓存
+  - 流尾 `settle(persist:)` 与 `store.persist` 双写盘去重（单点落盘）
+
 ## [1.4.0] - 2026-10-01
 
 ### Added

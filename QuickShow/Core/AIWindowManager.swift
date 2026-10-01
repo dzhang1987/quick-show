@@ -145,7 +145,7 @@ final class AIWindowManager {
 
         let panel = ensurePanel()
         let screen = ScreenHelper.activeScreen
-        let size = aiChatSize(on: screen)
+        let size = targetAIChatSize(on: screen)
         panel.setFrame(ScreenHelper.centeredFrame(for: size, on: screen), display: true)
         panel.invalidateShadow()
 
@@ -214,11 +214,38 @@ final class AIWindowManager {
 
     // MARK: - 尺寸
 
-    /// 读取用户尺寸档位偏好（与主面板共用 panelScaleOption），返回 AI 窗尺寸
+    /// 侧栏显隐偏好键（AIChatView 与窗口尺寸共用单一来源；默认收起）。
+    static let sidebarVisibleKey = "ai.sidebarVisible"
+
+    /// 读取用户尺寸档位偏好（与主面板共用 panelScaleOption），返回 AI 窗基础尺寸
     private func aiChatSize(on screen: NSScreen) -> NSSize {
         let raw = UserDefaults.standard.string(forKey: "panelScaleOption") ?? PanelScaleOption.auto.rawValue
         let option = PanelScaleOption(rawValue: raw) ?? .auto
         return ScreenHelper.metrics(for: screen, option: option).aiChatSize
+    }
+
+    /// 目标尺寸：基础尺寸 + 侧栏附加宽度（侧栏展开时整体加宽，高度不变）。
+    private func targetAIChatSize(on screen: NSScreen) -> NSSize {
+        var size = aiChatSize(on: screen)
+        if UserDefaults.standard.bool(forKey: Self.sidebarVisibleKey) {
+            size.width += AIChatLayout.sidebarWidth
+        }
+        return size
+    }
+
+    /// 侧栏显隐联动（由 AIChatView ⌘B / 折叠按钮调用）：
+    /// 写偏好持久化；窗口可见时按目标尺寸重新居中，复用统一窗口尺寸动画时长。
+    func setSidebarVisible(_ visible: Bool) {
+        UserDefaults.standard.set(visible, forKey: Self.sidebarVisibleKey)
+        guard let panel, panel.isVisible else { return }
+        let screen = panel.screen ?? ScreenHelper.activeScreen
+        let frame = ScreenHelper.centeredFrame(for: targetAIChatSize(on: screen), on: screen)
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Theme.Motion.windowResize
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            ctx.allowsImplicitAnimation = true
+            panel.animator().setFrame(frame, display: true)
+        }
     }
 
     // MARK: - 窗口构建
@@ -232,7 +259,7 @@ final class AIWindowManager {
 
     private func makePanel() -> AIPanel {
         let screen = ScreenHelper.activeScreen
-        let frame = ScreenHelper.centeredFrame(for: aiChatSize(on: screen), on: screen)
+        let frame = ScreenHelper.centeredFrame(for: targetAIChatSize(on: screen), on: screen)
         let panel = AIPanel(contentRect: frame)
 
         // 内容视图：AIChatView（Lane C 交付）。
