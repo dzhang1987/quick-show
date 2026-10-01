@@ -481,7 +481,8 @@ struct AboutSettingsForm: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("QuickShow")
                             .font(.system(size: 18, weight: .bold))
-                        Text("版本 1.1.0")
+                        // 版本号读取自 Info.plist，避免文档与实际版本漂移
+                        Text("版本 \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0")")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                         Text("专为全屏沉浸与极简工作流打造的 macOS 原生极速信息悬浮窗。")
