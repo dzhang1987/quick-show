@@ -42,7 +42,7 @@ final class AppState: ObservableObject {
     }
     
     // 核心微状态（一瞥底栏）
-    @Published var batteryInfo: BatteryInfo = BatteryInfo(percentage: 100, isCharging: false, hasBattery: false)
+    @Published var batteryInfo: BatteryInfo = BatteryInfo(percentage: 100, isCharging: false, isOnACPower: false, hasBattery: false)
     @Published var wifiInfo: WiFiInfo = WiFiInfo(isConnected: false, ssid: nil)
     @Published var bluetoothDevices: [BluetoothDeviceInfo] = []
     var bluetoothDevice: BluetoothDeviceInfo? { bluetoothDevices.first }
@@ -124,7 +124,7 @@ final class AppState: ObservableObject {
     @AppStorage("themeVariant") var themeVariantRaw: String = ThemeVariant.standard.rawValue
     
     // 明暗模式（自动 / 浅色 / 深色，全 App 范围）
-    @AppStorage("appearanceMode") var appearanceModeRaw: String = AppearanceMode.auto.rawValue
+    @AppStorage("appearanceMode") var appearanceModeRaw: String = AppearanceMode.dark.rawValue
     
     var appearanceMode: AppearanceMode {
         get {

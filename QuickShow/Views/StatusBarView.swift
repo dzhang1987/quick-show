@@ -226,7 +226,8 @@ struct StatusBarView: View {
     
     private var batteryIconName: String {
         let pct = appState.batteryInfo.percentage
-        if appState.batteryInfo.isCharging {
+        // 接通外接电源（含满电插线维持供电）即显示闪电：bolt 语义 = 接电源
+        if appState.batteryInfo.isCharging || appState.batteryInfo.isOnACPower {
             return "battery.100.bolt"
         }
         if pct <= 15 { return "battery.0" }
@@ -237,11 +238,12 @@ struct StatusBarView: View {
     }
     
     private var batteryColor: Color {
-        if appState.batteryInfo.isCharging {
-            return Color(red: 0.35, green: 0.90, blue: 0.45)
+        // 插线即绿（含满电插线），用户直觉：绿色 = 正在使用外接电源
+        if appState.batteryInfo.isCharging || appState.batteryInfo.isOnACPower {
+            return Theme.Colors.statusGood
         }
         if appState.batteryInfo.percentage <= 20 {
-            return Color(red: 1.0, green: 0.35, blue: 0.35)
+            return Theme.Colors.statusWarning
         }
         return .primary
     }

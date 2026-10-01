@@ -141,6 +141,10 @@ enum Theme {
         static let solidButtonFill = Color.primary.opacity(0.92)
         static let solidButtonText = Color(.windowBackgroundColor)
         
+        // 状态语义色（全主题固定：绿=接电/健康、红=低电警告，惯例不被主题洗掉）
+        static let statusGood = Color(red: 0.35, green: 0.90, blue: 0.45)
+        static let statusWarning = Color(red: 1.0, green: 0.35, blue: 0.35)
+        
         // 变体通道（计算属性，随 Theme.variant 切换；调用点无需感知主题存在）
         static var accent: Color { Theme.palette.accent }
         static var clockGradientTop: Color { Theme.palette.clockGradientTop }

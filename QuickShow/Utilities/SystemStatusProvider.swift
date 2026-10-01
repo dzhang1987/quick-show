@@ -15,6 +15,7 @@ import CoreLocation
 struct BatteryInfo: Equatable {
     var percentage: Int
     var isCharging: Bool
+    var isOnACPower: Bool   // 是否接通外接电源（插电但已满电时 isCharging=false，此字段区分"插电"与"纯电池"）
     var hasBattery: Bool
 }
 
@@ -137,7 +138,7 @@ final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
         guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
               let sources = IOPSCopyPowerSourcesList(snapshot)?.takeRetainedValue() as? [CFTypeRef],
               !sources.isEmpty else {
-            return BatteryInfo(percentage: 100, isCharging: false, hasBattery: false)
+            return BatteryInfo(percentage: 100, isCharging: false, isOnACPower: false, hasBattery: false)
         }
         
         for source in sources {
@@ -149,14 +150,18 @@ final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
             let maxCapacity = description[kIOPSMaxCapacityKey] as? Int ?? 100
             let isCharging = (description[kIOPSIsChargingKey] as? Bool) ?? false
             let isPresent = (description[kIOPSIsPresentKey] as? Bool) ?? true
+            // 外接电源判定：插电但已满电时 isCharging=false（接线维持供电≠充电），
+            // 需读电源来源状态才能区分"满电插线"与"纯电池模式"
+            let powerState = description[kIOPSPowerSourceStateKey] as? String ?? kIOPSBatteryPowerValue
+            let isOnACPower = (powerState == kIOPSACPowerValue)
             
             if isPresent && maxCapacity > 0 {
                 let percent = Int((Double(curCapacity) / Double(maxCapacity)) * 100.0)
-                return BatteryInfo(percentage: min(max(percent, 0), 100), isCharging: isCharging, hasBattery: true)
+                return BatteryInfo(percentage: min(max(percent, 0), 100), isCharging: isCharging, isOnACPower: isOnACPower, hasBattery: true)
             }
         }
         
-        return BatteryInfo(percentage: 100, isCharging: false, hasBattery: false)
+        return BatteryInfo(percentage: 100, isCharging: false, isOnACPower: false, hasBattery: false)
     }
     
     // MARK: - WiFi 信息 (CoreWLAN)

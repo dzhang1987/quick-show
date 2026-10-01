@@ -178,9 +178,10 @@ struct CheatSheetView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
-            // 原生超薄材质，跟随系统明暗翻转（与窗口玻璃同哲学）
+            // 加厚至 thinMaterial：压住下方 124pt 大时钟的透出叠压（ultraThin 太薄会残影），
+            // 保持玻璃通透哲学、不叠额外底色、不做实心卡片；跟随系统明暗翻转
             RoundedRectangle(cornerRadius: Theme.Radius.cheatSheet, style: .continuous)
-                .fill(.ultraThinMaterial)
+                .fill(.thinMaterial)
         )
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.cheatSheet, style: .continuous))
         .padding(Theme.Spacing.md)
