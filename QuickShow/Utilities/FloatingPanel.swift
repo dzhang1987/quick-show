@@ -46,7 +46,13 @@ final class FloatingPanel: NSPanel {
         if event.type == .flagsChanged {
             let isCmd = event.modifierFlags.contains(.command)
             if isCmd {
-                if cmdLongPressTimer == nil {
+                // ⌘ 之外出现其他修饰键（⌥/⌃/⇧/fn），说明用户在构建组合键（如 ⌘⇧X 截屏），
+                // 长按意图不再纯净，立即取消长按判定，避免误触速查表
+                let hasOtherModifiers = !event.modifierFlags.intersection([.option, .control, .shift, .function]).isEmpty
+                if hasOtherModifiers {
+                    cmdLongPressTimer?.invalidate()
+                    cmdLongPressTimer = nil
+                } else if cmdLongPressTimer == nil {
                     cmdLongPressTimer = Timer.scheduledTimer(withTimeInterval: 0.35, repeats: false) { [weak self] _ in
                         self?.cmdLongPressTimer = nil
                         self?.onCommandLongPressed?()
