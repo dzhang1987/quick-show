@@ -168,6 +168,8 @@ final class AppState: ObservableObject {
     private var glanceTimer: Timer?
     private var clockTimer: AnyCancellable?
     private var tickCounter: Int = 0
+    // 高负载进程探测进行中标记：ps 未返回前跳过新一轮，防止任务堆积
+    private var isFetchingTopCPU = false
     
     var onTogglePanel: ((PanelMode) -> Void)?
     var onDismissPanel: (() -> Void)?
@@ -527,7 +529,7 @@ final class AppState: ObservableObject {
                 // 性能负载 (CPU & RAM)：展开时每 2 秒刷新一次，降低开销
                 if self.isExpanded && self.showPerformance && (self.tickCounter % 2 == 0) {
                     self.performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
-                    self.topCPUProcess = SystemStatusProvider.shared.getTopCPUProcess()
+                    self.fetchTopCPUProcess()
                 }
                 
                 // 状态栏每 5 秒做一次静默微更新
@@ -542,6 +544,19 @@ final class AppState: ObservableObject {
         clockTimer = nil
     }
     
+    /// 异步刷新高负载进程：带防重叠闸门，ps 未返回前不再发起新一轮
+    private func fetchTopCPUProcess() {
+        guard !isFetchingTopCPU else { return }
+        isFetchingTopCPU = true
+        SystemStatusProvider.shared.getTopCPUProcessAsync { [weak self] result in
+            guard let self = self else { return }
+            self.isFetchingTopCPU = false
+            // 面板已收起则丢弃过期结果，避免无谓刷新
+            guard self.isExpanded else { return }
+            self.topCPUProcess = result
+        }
+    }
+    
     // MARK: - 系统状态刷新
     func refreshAllSystemStatus() {
         refreshStatusBadges()
@@ -549,7 +564,10 @@ final class AppState: ObservableObject {
         diskInfo = SystemStatusProvider.shared.getDiskInfo()
         if showPerformance || isExpanded {
             performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
-            topCPUProcess = SystemStatusProvider.shared.getTopCPUProcess()
+            // ps 探测走后台异步，避免呼出瞬间主线程被 fork+waitUntilExit 阻塞
+            SystemStatusProvider.shared.getTopCPUProcessAsync { [weak self] result in
+                self?.topCPUProcess = result
+            }
         }
         if showNetworkSpeed || isExpanded {
             trafficInfo = SystemStatusProvider.shared.getNetworkTrafficInfo()

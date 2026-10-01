@@ -13,6 +13,8 @@ final class PanelManager {
     
     private var previousApp: NSRunningApplication?
     private var isDismissing: Bool = false
+    // 隐藏代次令牌：每次进入隐藏流程自增，用于精确作废迟到的旧淡出 completion
+    private var hideGeneration = 0
     
     // 窗口动画期间的逐帧尺寸轮询定时器（驱动 AppState.livePanelSize）
     private var framePollTimer: Timer?
@@ -194,6 +196,22 @@ final class PanelManager {
     func showPanel(mode: PanelMode) {
         guard let panel = panel else { return }
         
+        // 淡出尚未完成时被重新呼出：中断隐藏流程，接管面板，
+        // 避免旧淡出的 completion 把刚呼出的面板 orderOut 掐掉
+        if isDismissing {
+            isDismissing = false
+            hideGeneration += 1
+            panel.ignoresMouseEvents = false
+            // 焦点在 hidePanel 中已归还原应用，此刻最前台即原应用，重新记录以便下次退出归还
+            previousApp = NSWorkspace.shared.frontmostApplication
+            // 从当前半透明状态平滑恢复到完全显示
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Theme.Motion.panelFadeIn
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1.0
+            }
+        }
+        
         let screen = ScreenHelper.activeScreen
         let size = targetSize(on: screen)
         let newFrame = ScreenHelper.centeredFrame(for: size, on: screen)
@@ -269,6 +287,8 @@ final class PanelManager {
     func hidePanel() {
         guard let panel = panel, panel.isVisible, !isDismissing else { return }
         isDismissing = true
+        hideGeneration += 1
+        let token = hideGeneration
         
         stopClickOutsideMonitor()
         stopEscMonitor()
@@ -289,6 +309,8 @@ final class PanelManager {
             panel.animator().alphaValue = 0.0
         } completionHandler: { [weak self] in
             guard let self = self else { return }
+            // 仅当本次隐藏流程未被中断（show 中断会自增代次）且未被后续 hide 取代时才收尾
+            guard self.isDismissing, self.hideGeneration == token else { return }
             panel.orderOut(nil)
             panel.alphaValue = 1.0
             panel.ignoresMouseEvents = false

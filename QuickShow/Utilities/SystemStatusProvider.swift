@@ -841,6 +841,17 @@ final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
         return nil
     }
     
+    /// 异步探测高负载进程：ps 子进程在后台队列执行，避免 fork + waitUntilExit 阻塞主线程
+    /// 复用 getTopCPUProcess() 的解析逻辑，结果统一回主线程后通过 completion 返回
+    func getTopCPUProcessAsync(completion: @escaping (String?) -> Void) {
+        DispatchQueue.global(qos: .utility).async {
+            let result = self.getTopCPUProcess()
+            DispatchQueue.main.async {
+                completion(result)
+            }
+        }
+    }
+    
     // MARK: - 系统快捷应用打开
     func openActivityMonitor() {
         let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")

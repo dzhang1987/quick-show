@@ -72,9 +72,8 @@ final class HotKeyManager {
         case .hotKeyCmdShiftT:
             registerHotKey()
         case .doubleCmd, .doubleCtrl, .doubleOpt, .doubleShift:
+            // 仅监听双击修饰键；不再默认注册 ⌘⇧T，避免抢占浏览器等高频系统快捷键
             startMonitoring()
-            // 同时注册组合键作为备用，双重保险
-            registerHotKey()
         }
         
         NSLog("[QuickShow] 快捷触发模式更新为: \(type.displayName)")
