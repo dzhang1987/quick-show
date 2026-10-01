@@ -199,7 +199,6 @@ final class AppState: ObservableObject {
     func show(mode: PanelMode) {
         self.mode = mode
         self.isHovered = false
-        refreshAllSystemStatus()
         currentTime = Date()
         startClock()
         
@@ -208,7 +207,10 @@ final class AppState: ObservableObject {
             startGlanceTimer()
         }
         
+        // 窗口先上屏，状态后刷新：refreshAllSystemStatus 内部异步执行，
+        // 避免 WiFi/蓝牙等阻塞式系统查询拖慢双击呼出的即时响应
         onTogglePanel?(mode)
+        refreshAllSystemStatus()
     }
     
     /// 切换详细展开监控视图
@@ -558,22 +560,66 @@ final class AppState: ObservableObject {
     }
     
     // MARK: - 系统状态刷新
+
+    // 系统状态刷新专用串行后台队列：把 WiFi/蓝牙/音频等阻塞式系统查询移出主线程，
+    // 保证面板先上屏、状态随后异步补齐；串行执行也避免查询任务相互堆叠
+    private static let statusRefreshQueue = DispatchQueue(label: "com.quickshow.statusRefresh", qos: .userInitiated)
+
+    /// 刷新全部系统状态：查询在内部后台队列执行，结果统一回主线程赋值 @Published 状态。
+    /// 调用方（init / show）同步返回，无需感知异步细节，主线程不再被系统查询阻塞。
     func refreshAllSystemStatus() {
-        refreshStatusBadges()
-        isKeepAwake = SystemStatusProvider.shared.isKeepAwakeActive()
-        diskInfo = SystemStatusProvider.shared.getDiskInfo()
-        if showPerformance || isExpanded {
-            performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
-            // ps 探测走后台异步，避免呼出瞬间主线程被 fork+waitUntilExit 阻塞
-            SystemStatusProvider.shared.getTopCPUProcessAsync { [weak self] result in
-                self?.topCPUProcess = result
+        // 在主线程同步快照展示开关，避免后台读取 @AppStorage / @Published 产生线程问题
+        let perfVisible = showPerformance || isExpanded
+        let networkVisible = showNetworkSpeed || isExpanded
+        let wantBattery = showBattery
+        let wantWiFi = showWiFi
+        let wantBluetooth = showBluetooth
+        let wantAudio = showAudio
+        let wantDND = showDND
+        let wantCalendar = showCalendar
+
+        Self.statusRefreshQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            // —— 后台执行所有可能阻塞的同步系统查询 ——
+            var battery: BatteryInfo?
+            if wantBattery { battery = SystemStatusProvider.shared.getBatteryInfo() }
+            var wifi: WiFiInfo?
+            if wantWiFi { wifi = SystemStatusProvider.shared.getWiFiInfo() }
+            let bluetooth = wantBluetooth ? SystemStatusProvider.shared.getBluetoothDevices() : []
+            var audio: AudioInfo?
+            if wantAudio { audio = SystemStatusProvider.shared.getAudioInfo() }
+            var dnd: DNDInfo?
+            if wantDND { dnd = SystemStatusProvider.shared.getDNDInfo() }
+            let keepAwake = SystemStatusProvider.shared.isKeepAwakeActive()
+            let disk = SystemStatusProvider.shared.getDiskInfo()
+            var performance: SystemPerformanceInfo?
+            if perfVisible { performance = SystemStatusProvider.shared.getSystemPerformanceInfo() }
+            var traffic: NetworkTrafficInfo?
+            if networkVisible { traffic = SystemStatusProvider.shared.getNetworkTrafficInfo() }
+            var calendar: CalendarEventInfo?
+            if wantCalendar { calendar = SystemStatusProvider.shared.getNextCalendarEvent() }
+
+            // —— 回主线程统一赋值 @Published（SwiftUI 状态必须主线程更新） ——
+            DispatchQueue.main.async {
+                if let battery = battery { self.batteryInfo = battery }
+                if let wifi = wifi { self.wifiInfo = wifi }
+                self.bluetoothDevices = bluetooth
+                if let audio = audio { self.audioInfo = audio }
+                if let dnd = dnd { self.dndInfo = dnd }
+                self.isKeepAwake = keepAwake
+                self.diskInfo = disk
+                if let performance = performance { self.performanceInfo = performance }
+                if let traffic = traffic { self.trafficInfo = traffic }
+                if let calendar = calendar { self.calendarInfo = calendar }
             }
-        }
-        if showNetworkSpeed || isExpanded {
-            trafficInfo = SystemStatusProvider.shared.getNetworkTrafficInfo()
-        }
-        if showCalendar {
-            calendarInfo = SystemStatusProvider.shared.getNextCalendarEvent()
+
+            // ps 高负载进程探测本身已异步（内部回主线程），保持原逻辑
+            if perfVisible {
+                SystemStatusProvider.shared.getTopCPUProcessAsync { [weak self] result in
+                    self?.topCPUProcess = result
+                }
+            }
         }
     }
     

@@ -251,7 +251,7 @@ enum Theme {
     // MARK: - 动画时长（窗口尺寸动画是唯一尺寸时钟，其余为显隐/淡入淡出节奏）
     enum Motion {
         static let windowResize: Double = 0.18   // 窗口尺寸动画（AppKit 唯一尺寸时钟）
-        static let panelFadeIn: Double = 0.15    // 面板呼出淡入
+        static let panelFadeIn: Double = 0.08    // 面板呼出淡入
         static let panelFadeOut: Double = 0.08   // 面板极速淡出
         static let contentFade: Double = 0.16    // 内容显隐（CheatSheet/toast/监控区 opacity）
         static let toastOut: Double = 0.20       // toast 淡出

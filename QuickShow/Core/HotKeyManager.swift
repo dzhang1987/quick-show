@@ -154,9 +154,8 @@ final class HotKeyManager {
                 // 380 毫秒内连续两次按下即为双击
                 if elapsed > 0.04 && elapsed < 0.38 {
                     lastReleaseTime = 0
-                    DispatchQueue.main.async { [weak self] in
-                        self?.onTrigger?()
-                    }
+                    // NSEvent 监听回调本就在主线程，直接触发，省去一次多余的主线程跳转
+                    onTrigger?()
                 }
             }
         } else {
