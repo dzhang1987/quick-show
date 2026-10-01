@@ -113,7 +113,45 @@ struct StatusBarView: View {
                     }
                 }
                 
-                // 5. 勿扰 / 专注模式（仅在生效时点亮优雅微胶囊）
+                // 5. Now Playing 媒体微标（有媒体会话即点亮：播放中常态、暂停弱化呈现；
+                //    一瞥态仅曲目名，展开态附来源应用；点击激活来源应用）
+                if appState.showNowPlaying, let nowPlaying = appState.nowPlayingInfo {
+                    Button {
+                        appState.activateNowPlayingApp()
+                    } label: {
+                        HStack(spacing: Theme.Spacing.chip) {
+                            // 状态图标语义化：播放中音符点亮，暂停切换为暂停符
+                            Image(systemName: nowPlaying.isPlaying ? "music.note" : "pause.fill")
+                                .font(.system(size: Theme.Typography.body, weight: .medium))
+                                .foregroundColor(nowPlaying.isPlaying ? Color.pink.opacity(0.9) : Theme.Colors.iconRest)
+                            
+                            Text(nowPlaying.title)
+                                .font(.system(size: Theme.Typography.callout, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            
+                            if appState.isExpanded && !nowPlaying.appName.isEmpty {
+                                Text("· \(nowPlaying.appName)")
+                                    .font(.system(size: Theme.Typography.caption, weight: .medium))
+                                    .foregroundStyle(.tertiary)
+                                    .lineLimit(1)
+                            }
+                        }
+                        // 暂停态整体降低不透明度：克制弱化，保留可识别性
+                        .opacity(nowPlaying.isPlaying ? 1.0 : 0.55)
+                    }
+                    .buttonStyle(.plain)
+                    .help(nowPlaying.isPlaying
+                          ? (nowPlaying.artist.isEmpty
+                             ? "正在播放：\(nowPlaying.title)（点击激活来源应用）"
+                             : "正在播放：\(nowPlaying.title) - \(nowPlaying.artist)（点击激活来源应用）")
+                          : "已暂停：\(nowPlaying.title)（按 ⏎ 继续播放，点击激活来源应用）")
+                    // 曲目名限宽截断：底栏空间宝贵，杜绝挤压其他微标
+                    .frame(maxWidth: appState.isExpanded ? 240 : 140, alignment: .leading)
+                }
+                
+                // 6. 勿扰 / 专注模式（仅在生效时点亮优雅微胶囊）
                 if appState.showDND && appState.dndInfo.isEnabled {
                     Button {
                         appState.openFocusSettings()
@@ -138,7 +176,7 @@ struct StatusBarView: View {
                     .fixedSize()
                 }
                 
-                // 6. 咖啡因防休眠（仅在真正开启激活时，温和亮起微型咖啡图标，未激活时彻底隐形）
+                // 7. 咖啡因防休眠（仅在真正开启激活时，温和亮起微型咖啡图标，未激活时彻底隐形）
                 if appState.isKeepAwake {
                     Button {
                         appState.toggleKeepAwake()
@@ -152,7 +190,7 @@ struct StatusBarView: View {
                     .fixedSize()
                 }
                 
-                // 7. 番茄钟微标（运行中时在极简栏温和提示，支持点击暂停/继续）
+                // 8. 番茄钟微标（运行中时在极简栏温和提示，支持点击暂停/继续）
                 if appState.enablePomodoro && appState.pomodoroRunning && !appState.isExpanded {
                     Button {
                         appState.togglePomodoro()

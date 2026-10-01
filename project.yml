@@ -32,6 +32,13 @@ targets:
     platform: macOS
     sources:
       - path: QuickShow
+        excludes:
+          - "Resources/MediaRemote"
+      # mediaremote-adapter 以 folder reference 原样打进 bundle（保留 .framework 目录结构，
+      # 运行时由 /usr/bin/perl 加载，不参与编译链接）
+      - path: QuickShow/Resources/MediaRemote
+        type: folder
+        buildPhase: resources
     info:
       path: QuickShow/Info.plist
       properties:
@@ -71,3 +78,5 @@ targets:
         - "CoreBluetooth"
         - "-framework"
         - "CoreLocation"
+        - "-framework"
+        - "Network"

@@ -9,6 +9,8 @@ import CoreBluetooth
 import EventKit
 import Darwin
 import CoreLocation
+import Network
+import Combine
 
 // MARK: - 数据模型定义
 
@@ -67,13 +69,70 @@ struct CalendarEventInfo: Equatable {
     var meetingURL: URL?
 }
 
+struct NowPlayingInfo: Equatable {
+    var title: String           // 曲目名
+    var artist: String          // 艺术家（可为空）
+    var album: String           // 专辑（可为空）
+    var appName: String         // 来源应用名（如 Apple Music / Spotify）
+    var bundleIdentifier: String? // 来源应用 BundleID（用于点击激活）
+    var isPlaying: Bool
+    var duration: Double        // 总时长（秒，0 = 未知/流媒体）
+    var elapsedTime: Double     // 采样时刻的已播时长（秒）
+    var playbackRate: Double    // 播放速率（通常 1.0，暂停为 0）
+    var timestamp: Date?        // elapsedTime 的采样时刻（本地插值基准）
+    var artwork: NSImage?       // 解码后的封面（Provider 侧已按内容指纹缓存）
+    
+    /// 当前已播时长（本地插值推进）：播放中 = 基准值 + 距采样时刻 × 速率；
+    /// 暂停时停止插值恒返回基准值；总时长已知时钳制不越界
+    func currentElapsed(at now: Date) -> Double {
+        guard isPlaying, playbackRate > 0, let ts = timestamp else { return elapsedTime }
+        let estimated = elapsedTime + now.timeIntervalSince(ts) * playbackRate
+        return duration > 0 ? min(max(0, estimated), duration) : max(0, estimated)
+    }
+}
+
+// 媒体控制命令 ID（MRCommand，对应 adapter send 子命令）
+enum MediaCommand: Int {
+    case togglePlayPause = 2   // kMRATogglePlayPause
+    case nextTrack = 4
+    case previousTrack = 5
+    case skipBackward15 = 12   // 后退 15 秒
+    case skipForward15 = 13    // 快进 15 秒
+}
+
 // MARK: - 系统状态统一提供者
 
-final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
+final class SystemStatusProvider: NSObject, ObservableObject, CLLocationManagerDelegate {
     static let shared = SystemStatusProvider()
     
     // 防休眠 Assertion
     private var keepAwakeAssertionID: IOPMAssertionID = 0
+    
+    // Now Playing 媒体状态（mediaremote-adapter 流式推送驱动，无媒体会话时为 nil，待机零轮询）
+    @Published var nowPlayingInfo: NowPlayingInfo? = nil
+    // adapter 可用标记：test 未通过时永久为 false，nowPlayingInfo 恒 nil（不重试）
+    private var adapterAvailable = false
+    private var adapterStreamProcess: Process?
+    private var adapterStreamOutputHandle: FileHandle?
+    private var adapterBufferLock = NSLock()
+    private var adapterBuffer = Data()
+    private var appTerminationObserver: NSObjectProtocol?
+    
+    // diff 模式合并状态（仅 adapterParseQueue 串行访问，无需加锁）：
+    // payload 只含变更字段，新值覆盖对应 key，值为 null 的 key 移除
+    private var nowPlayingMergedState: [String: Any] = [:]
+    // 封面解码缓存：以 base64 串为内容指纹，同一封面不重复解码（大封面解码可达数十毫秒）
+    private var artworkCacheKey: String? = nil
+    private var artworkCache: NSImage? = nil
+    // payload 合并/模型构建专用串行队列：封面 base64 解码移出主线程，且保证 diff 按序合并
+    private static let adapterParseQueue = DispatchQueue(label: "com.quickshow.nowplaying.parse", qos: .utility)
+    // ISO8601 时间戳解析（timestamp 为 elapsedTime 的采样时刻，是进度插值基准）
+    private static let iso8601Formatter = ISO8601DateFormatter()
+    private static let iso8601FractionalFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
     
     // CPU 状态缓存
     private var prevCpuInfo: processor_info_array_t?
@@ -96,6 +155,248 @@ final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
     override private init() {
         super.init()
         locationManager.delegate = self
+        startNowPlayingAdapter()
+        // 单例不会 deinit，App 退出时经 willTerminate 主动回收 stream 进程（SIGTERM）
+        appTerminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.stopNowPlayingAdapter()
+        }
+    }
+    
+    deinit {
+        if let observer = appTerminationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        stopNowPlayingAdapter()
+    }
+    
+    // MARK: - Now Playing 媒体信息 (mediaremote-adapter 桥接)
+    // macOS 15.4+ 起 mediaremoted 对第三方进程做 entitlement 校验，直读 MediaRemote 恒返回空。
+    // 改用已 vendor 的 mediaremote-adapter：借系统自带 /usr/bin/perl（com.apple.perl 身份）
+    // 加载 helper framework 读取系统 Now Playing 数据。调用契约：
+    //   /usr/bin/perl <script> <framework> <子命令> [选项]   （所有路径必须绝对路径）
+    //   test   → 退出码 0 表示可用；非 0 表示被系统封锁，判定后不重试
+    //   stream → diff 模式持续按行输出 NDJSON（payload 只含变更字段，Swift 侧合并）直到 SIGTERM
+    //   send <ID> → 发送媒体控制命令（2=播放/暂停 4=下一首 5=上一首 12=快退15s 13=快进15s）
+    // 无媒体会话时合并状态为空，映射层置 nil；流属于事件推送，待机零轮询。
+
+    /// bundle 内 adapter 资源绝对路径；资源缺失时整体降级禁用
+    private var adapterResourcePaths: (script: String, framework: String, testClient: String)? {
+        guard let base = Bundle.main.resourceURL?.appendingPathComponent("MediaRemote") else { return nil }
+        let script = base.appendingPathComponent("mediaremote-adapter.pl").path
+        let framework = base.appendingPathComponent("MediaRemoteAdapter.framework").path
+        let testClient = base.appendingPathComponent("MediaRemoteAdapterTestClient").path
+        guard FileManager.default.fileExists(atPath: script),
+              FileManager.default.fileExists(atPath: framework),
+              FileManager.default.fileExists(atPath: testClient) else { return nil }
+        return (script, framework, testClient)
+    }
+
+    /// 启动桥接：后台先清理上次残留的孤儿 stream 进程，再跑 test 自检，通过才拉起 stream；失败/超时则永久禁用、nowPlayingInfo 恒 nil
+    private func startNowPlayingAdapter() {
+        guard let paths = adapterResourcePaths else { return }
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self = self else { return }
+            self.killOrphanAdapterProcesses(scriptPath: paths.script)
+            guard self.runAdapterTest(paths: paths) else { return }
+            DispatchQueue.main.async {
+                self.adapterAvailable = true
+                self.startAdapterStream(paths: paths)
+            }
+        }
+    }
+
+    /// 清理孤儿 stream 进程：上次实例若经 SIGTERM（如 killall）/强退等路径退出，不会触发
+    /// willTerminate 回收，其 stream 子进程会被重新挂到 launchd 下永久残留
+    /// （持续占用 mediaremoted XPC 连接与内存，且随每次重启累积）。
+    /// 以本 bundle 内脚本绝对路径做 pkill 精确匹配清理；调用时机在自身 stream 拉起之前，不会误杀自己。
+    private func killOrphanAdapterProcesses(scriptPath: String) {
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-f", scriptPath]
+        pkill.standardOutput = FileHandle.nullDevice
+        pkill.standardError = FileHandle.nullDevice
+        // 无孤儿时 pkill 返回非 0，属正常情况，忽略结果
+        try? pkill.run()
+        pkill.waitUntilExit()
+    }
+
+    /// 自检 adapter 是否被系统授权；5 秒超时兜底，超时强制终止并判定不可用
+    private func runAdapterTest(paths: (script: String, framework: String, testClient: String)) -> Bool {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = [paths.script, paths.framework, paths.testClient, "test"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let semaphore = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in semaphore.signal() }
+        do {
+            try process.run()
+        } catch {
+            return false
+        }
+        if semaphore.wait(timeout: .now() + 5) == .timedOut {
+            process.terminate()
+            return false
+        }
+        return process.terminationStatus == 0
+    }
+
+    /// 拉起 stream 子进程，逐行读取 NDJSON；进程生命周期由持有引用管理，退出即降级。
+    /// diff 模式（默认）：payload 只含变更字段，Swift 侧维护合并状态字典；
+    /// 保留封面输出（artworkData），供展开态媒体卡片渲染。
+    private func startAdapterStream(paths: (script: String, framework: String, testClient: String)) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = [paths.script, paths.framework, "stream", "--debounce=100"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        let outputHandle = pipe.fileHandleForReading
+        outputHandle.readabilityHandler = { [weak self] handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+            self?.consumeAdapterStream(data)
+        }
+        process.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.adapterStreamOutputHandle?.readabilityHandler = nil
+                self.adapterStreamOutputHandle = nil
+                self.adapterStreamProcess = nil
+                // 非零退出码 = 致命错误，不得重新拉起；置 nil 优雅降级
+                self.adapterAvailable = false
+                self.nowPlayingInfo = nil
+            }
+        }
+        do {
+            try process.run()
+            adapterStreamProcess = process
+            adapterStreamOutputHandle = outputHandle
+        } catch {
+            adapterAvailable = false
+        }
+    }
+
+    /// 按行切分流式输出（readabilityHandler 回调可能含半行，需缓冲拼接后再解析）
+    private func consumeAdapterStream(_ data: Data) {
+        adapterBufferLock.lock()
+        adapterBuffer.append(data)
+        var lines: [String] = []
+        while let newline = adapterBuffer.firstIndex(of: 0x0A) {
+            let lineData = adapterBuffer.subdata(in: adapterBuffer.startIndex..<newline)
+            adapterBuffer.removeSubrange(adapterBuffer.startIndex...newline)
+            if let line = String(data: lineData, encoding: .utf8) {
+                lines.append(line)
+            }
+        }
+        adapterBufferLock.unlock()
+        for line in lines {
+            parseAdapterLine(line)
+        }
+    }
+
+    /// 解析单行 NDJSON：stream 行形如 {"type":"data","payload":{...}}；
+    /// diff 合并与封面解码放专用串行队列（避免阻塞主线程），结果回主线程赋值
+    private func parseAdapterLine(_ line: String) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != "null", let data = trimmed.data(using: .utf8) else { return }
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+        let payload = object["payload"] as? [String: Any] ?? object
+        Self.adapterParseQueue.async { [weak self] in
+            guard let self = self else { return }
+            let info = self.buildNowPlayingInfo(from: payload)
+            DispatchQueue.main.async {
+                self.nowPlayingInfo = info
+            }
+        }
+    }
+
+    /// diff 合并 + 模型映射（仅 adapterParseQueue 串行执行）：
+    /// 新 payload 覆盖对应 key，值为 null 的 key 移除；
+    /// 「有媒体会话即显示」：title 非空即保留（暂停也显示，供 ⏎ 盲操恢复播放），空会话置 nil
+    private func buildNowPlayingInfo(from payload: [String: Any]) -> NowPlayingInfo? {
+        for (key, value) in payload {
+            if value is NSNull {
+                nowPlayingMergedState.removeValue(forKey: key)
+            } else {
+                nowPlayingMergedState[key] = value
+            }
+        }
+        let merged = nowPlayingMergedState
+        guard let title = merged["title"] as? String, !title.isEmpty else {
+            // 会话消失：清空合并状态与封面缓存，下次会话从零开始
+            nowPlayingMergedState = [:]
+            artworkCacheKey = nil
+            artworkCache = nil
+            return nil
+        }
+        let playing = merged["playing"] as? Bool ?? false
+        let bundleID = merged["bundleIdentifier"] as? String
+        let parentBundleID = merged["parentApplicationBundleIdentifier"] as? String
+        return NowPlayingInfo(
+            title: title,
+            artist: merged["artist"] as? String ?? "",
+            album: merged["album"] as? String ?? "",
+            appName: adapterAppName(parentBundleID: parentBundleID, bundleID: bundleID),
+            // WebKit.GPU 等辅助进程不可激活，存「可激活的应用」：优先父应用（如 Safari）
+            bundleIdentifier: parentBundleID ?? bundleID,
+            isPlaying: playing,
+            duration: merged["duration"] as? Double ?? 0,
+            elapsedTime: merged["elapsedTime"] as? Double ?? 0,
+            playbackRate: merged["playbackRate"] as? Double ?? (playing ? 1.0 : 0.0),
+            timestamp: (merged["timestamp"] as? String).flatMap(Self.parseISO8601),
+            artwork: decodeArtwork(base64: merged["artworkData"] as? String)
+        )
+    }
+    
+    /// ISO8601 时间戳解析：兼容带毫秒（.123Z）与标准（Z）两种格式
+    private static func parseISO8601(_ string: String) -> Date? {
+        if let date = iso8601FractionalFormatter.date(from: string) { return date }
+        return iso8601Formatter.date(from: string)
+    }
+    
+    /// 封面解码缓存：以 base64 串为内容指纹，同一封面不重复解码
+    private func decodeArtwork(base64: String?) -> NSImage? {
+        guard let base64 = base64, !base64.isEmpty else { return nil }
+        if artworkCacheKey == base64 { return artworkCache }
+        let image = Data(base64Encoded: base64).flatMap { NSImage(data: $0) }
+        artworkCacheKey = base64
+        artworkCache = image
+        return image
+    }
+    
+    /// 发送媒体控制命令：每次按键 spawn 一次性 perl 进程，
+    /// 忽略 stdout/stderr、短生命周期自然退出（即发即弃，不阻塞主线程）
+    func sendMediaCommand(_ command: MediaCommand) {
+        guard adapterAvailable, let paths = adapterResourcePaths else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = [paths.script, paths.framework, "send", "\(command.rawValue)"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try? process.run()
+    }
+
+    /// 反查来源应用展示名：优先父应用（用户心智中的 App），查不到退化为 bundle id 末段
+    private func adapterAppName(parentBundleID: String?, bundleID: String?) -> String {
+        guard let lookupID = parentBundleID ?? bundleID else { return "" }
+        if let app = NSRunningApplication.runningApplications(withBundleIdentifier: lookupID).first,
+           let name = app.localizedName, !name.isEmpty {
+            return name
+        }
+        return lookupID.split(separator: ".").last.map(String.init) ?? ""
+    }
+
+    /// 停止 stream 进程：App 退出/deinit 时发 SIGTERM，避免遗留孤儿进程
+    private func stopNowPlayingAdapter() {
+        adapterStreamOutputHandle?.readabilityHandler = nil
+        adapterStreamOutputHandle = nil
+        if let process = adapterStreamProcess, process.isRunning {
+            process.terminate()
+        }
+        adapterStreamProcess = nil
     }
     
     // MARK: - 定位权限管理 (用于读取真实 Wi-Fi SSID)
@@ -623,6 +924,63 @@ final class SystemStatusProvider: NSObject, CLLocationManagerDelegate {
             return String(format: "%.0f KB/s", bytesPerSec / 1024.0)
         } else {
             return String(format: "%.0f B/s", bytesPerSec)
+        }
+    }
+    
+    // MARK: - 网络延迟测量 (多目标 TCP connect 握手计时)
+    // ICMP ping 需要特权套接字，改用 NWConnection 对多个公共 DNS 的 443 端口并行发起 TCP 连接计时，
+    // 以最先完成握手的目标耗时近似网络往返延迟。单一目标不可靠：如 1.1.1.1 在国内网络常被墙，
+    // 导致延迟恒显「—」；多目标并行取最快者可跨网络环境稳定工作，全部失败或超时回调 nil，界面优雅降级。
+    func measureNetworkLatency(completion: @escaping (Int?) -> Void) {
+        // 探测目标：国内公共 DNS 优先（阿里 / 腾讯），国际（Cloudflare / Google）兜底
+        let targets = ["223.5.5.5", "119.29.29.29", "1.1.1.1", "8.8.8.8"]
+        // 专用串行队列：所有连接的状态回调与超时兜底在同一队列串行执行，标志位天然无线程竞争
+        let queue = DispatchQueue(label: "com.quickshow.latency", qos: .utility)
+        let start = Date()
+        var reported = false        // 是否已回调最终结果（只回调一次）
+        var remaining = targets.count // 尚未终止的探测目标数：归零仍未成功则回调 nil
+        var connections: [NWConnection] = []
+        
+        // 统一收口：成功传延迟毫秒数，失败传 nil；回收全部连接避免悬挂
+        func finish(_ ms: Int?) {
+            guard !reported else { return }
+            reported = true
+            for conn in connections {
+                conn.stateUpdateHandler = nil
+                conn.cancel()
+            }
+            connections.removeAll()
+            DispatchQueue.main.async { completion(ms) }
+        }
+        
+        for target in targets {
+            let connection = NWConnection(host: NWEndpoint.Host(target), port: 443, using: .tcp)
+            connections.append(connection)
+            var connectionDone = false // 单连接终止标志：确保 remaining 只递减一次
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    // 同刻并行起跑，最先握手成功者即最快目标
+                    let ms = Int(Date().timeIntervalSince(start) * 1000)
+                    connection.stateUpdateHandler = nil
+                    connection.cancel()
+                    finish(ms)
+                case .failed, .cancelled:
+                    guard !connectionDone else { return }
+                    connectionDone = true
+                    connection.stateUpdateHandler = nil
+                    remaining -= 1
+                    if remaining == 0 { finish(nil) }
+                default:
+                    break // .preparing / .waiting 交给超时兜底
+                }
+            }
+            connection.start(queue: queue)
+        }
+        
+        // 3 秒超时兜底：断网或高丢包时保证回调必然触发
+        queue.asyncAfter(deadline: .now() + 3) {
+            finish(nil)
         }
     }
     

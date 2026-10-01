@@ -262,10 +262,11 @@ struct StatusBarSettingsForm: View {
                 Toggle("显示蓝牙外设 (AirPods / 键鼠电量)", isOn: $appState.showBluetooth)
                 Toggle("显示音频输出与音量 / 静音", isOn: $appState.showAudio)
                 Toggle("显示专注 / 勿扰模式徽标", isOn: $appState.showDND)
+                Toggle("显示正在播放的媒体 (Now Playing)", isOn: $appState.showNowPlaying)
             } header: {
                 Text("微感知微标")
             } footer: {
-                Text("悬浮面板底部默认展示的轻量感知微标，即看即走。点击各个微标可触发快捷交互。")
+                Text("悬浮面板底部默认展示的轻量感知微标，即看即走。点击各个微标可触发快捷交互；正在播放有媒体会话即点亮（暂停时弱化呈现），展开看板展示封面与进度。")
             }
         }
     }
@@ -322,7 +323,37 @@ struct DashboardSettingsForm: View {
             } header: {
                 Text("效率与生产力")
             }
+            
+            Section {
+                Picker("第一时区", selection: worldClockCityBinding($appState.worldClockCity1Raw, fallback: .beijing)) {
+                    ForEach(WorldClockCity.allCases) { city in
+                        Text(city.displayName).tag(city)
+                    }
+                }
+                Picker("第二时区", selection: worldClockCityBinding($appState.worldClockCity2Raw, fallback: .london)) {
+                    ForEach(WorldClockCity.allCases) { city in
+                        Text(city.displayName).tag(city)
+                    }
+                }
+                Picker("第三时区", selection: worldClockCityBinding($appState.worldClockCity3Raw, fallback: .newYork)) {
+                    ForEach(WorldClockCity.allCases) { city in
+                        Text(city.displayName).tag(city)
+                    }
+                }
+            } header: {
+                Text("世界时钟")
+            } footer: {
+                Text("展开看板日程区展示 2~3 个时区的当前时间，选择「无」可隐藏对应槽位。")
+            }
         }
+    }
+    
+    /// 世界时钟槽位绑定：rawValue（IANA 时区标识）与枚举互转
+    private func worldClockCityBinding(_ raw: Binding<String>, fallback: WorldClockCity) -> Binding<WorldClockCity> {
+        Binding(
+            get: { WorldClockCity(rawValue: raw.wrappedValue) ?? fallback },
+            set: { raw.wrappedValue = $0.rawValue }
+        )
     }
 }
 
@@ -448,6 +479,28 @@ struct ShortcutsSettingsForm: View {
             } header: {
                 Text("单键盲操与效率")
             }
+            
+            Section {
+                HStack {
+                    Text("媒体播放 / 暂停切换")
+                    Spacer()
+                    KeyBadge(key: "⏎")
+                }
+                HStack {
+                    Text("上一首 / 下一首")
+                    Spacer()
+                    KeyBadge(key: "← / →")
+                }
+                HStack {
+                    Text("快退 / 快进 15 秒")
+                    Spacer()
+                    KeyBadge(key: ", / .")
+                }
+            } header: {
+                Text("媒体控制")
+            } footer: {
+                Text("仅在系统存在媒体会话（音乐 / 视频 / 播客等，含网页播放源）时生效，无会话时按键无副作用。")
+            }
         }
     }
 }
@@ -500,6 +553,10 @@ struct AboutSettingsForm: View {
                 LabeledContent("开源协议", value: "MIT License")
             } header: {
                 Text("软件信息")
+            } footer: {
+                Text("Now Playing 数据能力由 mediaremote-adapter（BSD-3-Clause）提供。")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary)
             }
         }
     }

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B0B0357916235B809E566B /* FloatingPanel.swift */; };
+		0FF0EAC1AC72FBE27721C977 /* MediaRemote in Resources */ = {isa = PBXBuildFile; fileRef = C01588AECCABE573EFDE95CD /* MediaRemote */; };
 		1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */; };
 		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
 		5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */; };
@@ -37,6 +38,7 @@
 		A717A5076D26657EA117861F /* HotKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
 		B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B7BF9C965803CBAE72E3577B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C01588AECCABE573EFDE95CD /* MediaRemote */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MediaRemote; path = QuickShow/Resources/MediaRemote; sourceTree = SOURCE_ROOT; };
 		F4584DE26B61ECF74718A252 /* ExpandedMonitoringView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedMonitoringView.swift; sourceTree = "<group>"; };
 		F99ABD71A91473D072310ABF /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenHelper.swift; sourceTree = "<group>"; };
@@ -79,6 +81,7 @@
 		5213C295391011042FC7DFE5 = {
 			isa = PBXGroup;
 			children = (
+				C01588AECCABE573EFDE95CD /* MediaRemote */,
 				CF516E079863CEF8EC5C397C /* QuickShow */,
 				9B0F05138AE231E7D18DDCA2 /* Products */,
 			);
@@ -103,6 +106,13 @@
 				51140C791DB8B1B86DE4B6FC /* Views */,
 			);
 			path = QuickShow;
+			sourceTree = "<group>";
+		};
+		"TEMP_A0053345-ABCD-4560-9650-190D8EB996C3" /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -162,6 +172,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F4BE6BFAA94DEC22AE533146 /* Assets.xcassets in Resources */,
+				0FF0EAC1AC72FBE27721C977 /* MediaRemote in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -222,6 +233,8 @@
 					CoreBluetooth,
 					"-framework",
 					CoreLocation,
+					"-framework",
+					Network,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = cn.chiproad.QuickShow;
 				PRODUCT_NAME = QuickShow;
@@ -390,6 +403,8 @@
 					CoreBluetooth,
 					"-framework",
 					CoreLocation,
+					"-framework",
+					Network,
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = cn.chiproad.QuickShow;
 				PRODUCT_NAME = QuickShow;

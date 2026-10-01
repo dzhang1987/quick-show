@@ -14,3 +14,6 @@ xcuserdata/
 # 调试与录屏产物（本地诊断用，不入库）
 .opencode/
 *.mov
+
+# 本地截图与诊断图片（不入库）
+images/

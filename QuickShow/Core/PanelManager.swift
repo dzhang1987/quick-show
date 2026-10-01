@@ -147,6 +147,22 @@ final class PanelManager {
             case 2: // D: 专注模式设置
                 appState.openFocusSettings()
                 return true
+            // 媒体控制盲操：仅存在媒体会话时消费按键（无会话时返回 false 不拦截事件）
+            case 36: // ⏎ 回车: 播放 / 暂停切换
+                appState.mediaTogglePlayPause()
+                return appState.hasNowPlayingSession
+            case 123: // ← 左方向键: 上一首
+                appState.mediaPreviousTrack()
+                return appState.hasNowPlayingSession
+            case 124: // → 右方向键: 下一首
+                appState.mediaNextTrack()
+                return appState.hasNowPlayingSession
+            case 43: // , 逗号: 后退 15 秒（无修饰键；⌘, 已在上游拦截为偏好设置）
+                appState.mediaSkipBackward()
+                return appState.hasNowPlayingSession
+            case 47: // . 句号: 快进 15 秒
+                appState.mediaSkipForward()
+                return appState.hasNowPlayingSession
             default:
                 return false
             }

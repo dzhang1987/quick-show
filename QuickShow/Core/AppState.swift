@@ -25,6 +25,39 @@ enum PanelScaleOption: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 世界时钟城市（时区可配置，rawValue 即 IANA 时区标识符）
+enum WorldClockCity: String, CaseIterable, Identifiable {
+    case none = "none"
+    case beijing = "Asia/Shanghai"
+    case tokyo = "Asia/Tokyo"
+    case singapore = "Asia/Singapore"
+    case london = "Europe/London"
+    case paris = "Europe/Paris"
+    case berlin = "Europe/Berlin"
+    case newYork = "America/New_York"
+    case sanFrancisco = "America/Los_Angeles"
+    case sydney = "Australia/Sydney"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .none: return "无"
+        case .beijing: return "北京"
+        case .tokyo: return "东京"
+        case .singapore: return "新加坡"
+        case .london: return "伦敦"
+        case .paris: return "巴黎"
+        case .berlin: return "柏林"
+        case .newYork: return "纽约"
+        case .sanFrancisco: return "旧金山"
+        case .sydney: return "悉尼"
+        }
+    }
+    
+    var timeZone: TimeZone? { TimeZone(identifier: rawValue) }
+}
+
 final class AppState: ObservableObject {
     @Published var mode: PanelMode = .hidden
     @Published var isExpanded: Bool = false
@@ -55,6 +88,11 @@ final class AppState: ObservableObject {
     @Published var calendarInfo: CalendarEventInfo = CalendarEventInfo(hasEvent: false, title: "", timeDescription: "", isAuthorized: false)
     @Published var diskInfo: DiskInfo = DiskInfo(freeGB: 0, totalGB: 0)
     @Published var topCPUProcess: String? = nil
+    // 网络延迟（毫秒，nil = 未知/失败/断网；仅面板展开时低频测量）
+    @Published var networkLatency: Int? = nil
+    // Now Playing 媒体状态（由 SystemStatusProvider adapter 流桥接，无媒体会话时为 nil）
+    @Published var nowPlayingInfo: NowPlayingInfo? = nil
+    private var nowPlayingCancellable: AnyCancellable?
     
     // 便捷操作与瞬态 Toast 微徽章
     @Published var toastMessage: String? = nil
@@ -97,6 +135,18 @@ final class AppState: ObservableObject {
     @AppStorage("showBluetooth") var showBluetooth: Bool = true
     @AppStorage("showAudio") var showAudio: Bool = true
     @AppStorage("showDND") var showDND: Bool = true
+    @AppStorage("showNowPlaying") var showNowPlaying: Bool = true
+    
+    // 世界时钟三槽位配置（可在偏好设置改为「无」隐藏对应槽位，默认北京/伦敦/纽约）
+    @AppStorage("worldClockCity1") var worldClockCity1Raw: String = WorldClockCity.beijing.rawValue
+    @AppStorage("worldClockCity2") var worldClockCity2Raw: String = WorldClockCity.london.rawValue
+    @AppStorage("worldClockCity3") var worldClockCity3Raw: String = WorldClockCity.newYork.rawValue
+    
+    // 番茄钟统计（持久化：今日完成数与连续天数，跨天自动重置）
+    @AppStorage("pomodoroTodayCount") var pomodoroTodayCount: Int = 0
+    @AppStorage("pomodoroTodayKey") private var pomodoroTodayKey: String = ""       // yyyy-MM-dd，今日计数锚点
+    @AppStorage("pomodoroStreakDays") var pomodoroStreakDays: Int = 0
+    @AppStorage("pomodoroStreakLastDay") private var pomodoroStreakLastDay: String = "" // yyyy-MM-dd，连续判定锚点
     
     // 扩展监控展示开关
     @AppStorage("showPerformance") var showPerformance: Bool = true
@@ -182,6 +232,12 @@ final class AppState: ObservableObject {
     init() {
         // 启动时同步主题变体到 Theme 读取通道（确保首帧渲染即使用持久化的主题）
         Theme.variant = themeVariant
+        // 桥接 Now Playing 状态：Provider 内部 adapter 流式推送零轮询，此处仅做状态转发
+        nowPlayingCancellable = SystemStatusProvider.shared.$nowPlayingInfo
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] info in
+                self?.nowPlayingInfo = info
+            }
         refreshAllSystemStatus()
     }
     
@@ -437,6 +493,9 @@ final class AppState: ObservableObject {
     }
     
     // MARK: - 番茄钟控制
+    // 本次计时是否为短休息（5m 短休息完成不计入番茄统计）
+    private var pomodoroIsRestSession: Bool = false
+    
     func togglePomodoro() {
         resetGlanceTimer()
         pomodoroRunning.toggle()
@@ -446,12 +505,104 @@ final class AppState: ObservableObject {
     func resetPomodoro(durationMinutes: Int = 25) {
         pomodoroRunning = false
         pomodoroRemainingSeconds = durationMinutes * 60
+        pomodoroIsRestSession = durationMinutes < 25
     }
     
     var formattedPomodoroTime: String {
         let m = pomodoroRemainingSeconds / 60
         let s = pomodoroRemainingSeconds % 60
         return String(format: "%02d:%02d", m, s)
+    }
+    
+    /// 番茄钟完成统计：专注时段归零时累计今日数并维护连续天数（短休息不计数）
+    private static let pomodoroDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+    
+    private func recordPomodoroCompletion() {
+        guard !pomodoroIsRestSession else { return }
+        let now = Date()
+        let today = Self.pomodoroDayFormatter.string(from: now)
+        // 跨天重置今日计数
+        if pomodoroTodayKey != today {
+            pomodoroTodayKey = today
+            pomodoroTodayCount = 0
+        }
+        pomodoroTodayCount += 1
+        // 连续天数：今日已记过保持不变；昨日有记录则累加；否则中断重计为 1
+        if pomodoroStreakLastDay != today {
+            let yesterday = Self.pomodoroDayFormatter.string(from: Calendar.current.date(byAdding: .day, value: -1, to: now) ?? now)
+            pomodoroStreakDays = (pomodoroStreakLastDay == yesterday) ? pomodoroStreakDays + 1 : 1
+            pomodoroStreakLastDay = today
+        }
+    }
+    
+    // MARK: - 世界时钟
+    /// 生效的世界时钟城市列表（剔除「无」并去重，保持槽位顺序）
+    var worldClockCities: [WorldClockCity] {
+        var seen = Set<String>()
+        return [worldClockCity1Raw, worldClockCity2Raw, worldClockCity3Raw]
+            .compactMap { WorldClockCity(rawValue: $0) }
+            .filter { $0 != .none && seen.insert($0.rawValue).inserted }
+    }
+    
+    // 复用单实例 Formatter：面板每秒刷新时钟，避免反复创建
+    private let worldClockFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+    
+    func worldClockTimeString(for city: WorldClockCity) -> String {
+        guard let tz = city.timeZone else { return "--:--" }
+        worldClockFormatter.timeZone = tz
+        return worldClockFormatter.string(from: currentTime)
+    }
+    
+    /// 点击 Now Playing 微标：激活来源应用并收起面板
+    func activateNowPlayingApp() {
+        guard let bundleID = nowPlayingInfo?.bundleIdentifier else { return }
+        NSWorkspace.shared.runningApplications
+            .first { $0.bundleIdentifier == bundleID }?
+            .activate(options: [.activateAllWindows])
+        dismiss()
+    }
+    
+    // MARK: - 媒体控制盲操（⏎ 播放暂停 / ←→ 切歌 / ,. ±15s）
+    // 仅存在媒体会话时生效，无会话按键无副作用（键位分发处据此决定是否消费事件）
+    var hasNowPlayingSession: Bool { nowPlayingInfo != nil }
+    
+    func mediaTogglePlayPause() {
+        guard hasNowPlayingSession else { return }
+        SystemStatusProvider.shared.sendMediaCommand(.togglePlayPause)
+        // 乐观提示：命令即发即弃无回执，约 100ms 内 stream 推送真实状态校正微标与卡片
+        showToast(nowPlayingInfo?.isPlaying == true ? "已暂停 ⏸" : "继续播放 ▶")
+    }
+    
+    /// 上一首 (←)
+    func mediaPreviousTrack() {
+        guard hasNowPlayingSession else { return }
+        SystemStatusProvider.shared.sendMediaCommand(.previousTrack)
+    }
+    
+    /// 下一首 (→)
+    func mediaNextTrack() {
+        guard hasNowPlayingSession else { return }
+        SystemStatusProvider.shared.sendMediaCommand(.nextTrack)
+    }
+    
+    /// 后退 15 秒 (,)
+    func mediaSkipBackward() {
+        guard hasNowPlayingSession else { return }
+        SystemStatusProvider.shared.sendMediaCommand(.skipBackward15)
+    }
+    
+    /// 快进 15 秒 (.)
+    func mediaSkipForward() {
+        guard hasNowPlayingSession else { return }
+        SystemStatusProvider.shared.sendMediaCommand(.skipForward15)
     }
     
     // MARK: - 定时调度器与液态流体动效
@@ -519,6 +670,7 @@ final class AppState: ObservableObject {
                     self.pomodoroRemainingSeconds -= 1
                     if self.pomodoroRemainingSeconds == 0 {
                         self.pomodoroRunning = false
+                        self.recordPomodoroCompletion()
                         self.showToast("🎉 番茄专注时段已完成！")
                     }
                 }
@@ -526,6 +678,14 @@ final class AppState: ObservableObject {
                 // 实时网速：每秒更新
                 if self.isExpanded && self.showNetworkSpeed {
                     self.trafficInfo = SystemStatusProvider.shared.getNetworkTrafficInfo()
+                }
+                
+                // 网络延迟：展开且开启网速展示时每 5 秒异步低频测量一次
+                //（面板隐藏时主时钟停摆，天然满足"仅面板可见时测量"，待机零消耗）
+                if self.isExpanded && self.showNetworkSpeed && (self.tickCounter % 5 == 2) {
+                    SystemStatusProvider.shared.measureNetworkLatency { [weak self] ms in
+                        self?.networkLatency = ms
+                    }
                 }
                 
                 // 性能负载 (CPU & RAM)：展开时每 2 秒刷新一次，降低开销

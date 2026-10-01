@@ -224,7 +224,13 @@ struct ExpandedMonitoringView: View {
                     
                     Spacer(minLength: Theme.Spacing.xxs)
                     
-                    // 5. 实时网络吞吐与本机 IP
+                    // 4.5 正在播放媒体条（存在媒体会话时出现，无会话彻底隐形不占位；
+                    //     高度 ~32pt 嵌入底部弹性区，不挤压上方槽组）
+                    if appState.showNowPlaying, let nowPlaying = appState.nowPlayingInfo {
+                        NowPlayingCardRow(nowPlaying: nowPlaying, now: appState.currentTime)
+                    }
+                    
+                    // 5. 实时网络吞吐、延迟与本机 IP
                     HStack {
                         // 吞吐速率
                         HStack(spacing: Theme.Spacing.xxl) {
@@ -247,6 +253,18 @@ struct ExpandedMonitoringView: View {
                                     .monospacedDigit()
                                     .foregroundColor(.primary)
                             }
+                            
+                            // 网络延迟（TCP 握手计时，失败/断网显示「—」）
+                            HStack(spacing: Theme.Spacing.sm) {
+                                Image(systemName: "network")
+                                    .font(.system(size: Theme.Typography.caption, weight: .bold))
+                                    .foregroundStyle(.tertiary)
+                                Text(appState.networkLatency.map { "\($0) ms" } ?? "—")
+                                    .font(.system(size: Theme.Typography.callout, weight: .semibold))
+                                    .monospacedDigit()
+                                    .foregroundColor(.secondary)
+                            }
+                            .help("到 1.1.1.1:443 的 TCP 连接延迟，每 5 秒测量一次")
                         }
                         
                         Spacer()
@@ -317,11 +335,21 @@ struct ExpandedMonitoringView: View {
                     
                     // 2. 番茄钟工作台
                     HStack(spacing: Theme.Spacing.xl) {
-                        // 倒计时大字
-                        Text(appState.formattedPomodoroTime)
-                            .font(.system(size: Theme.Typography.pomodoro, weight: .bold, design: .monospaced))
-                            .foregroundColor(appState.pomodoroRunning ? .orange : .primary)
-                            .shadow(color: appState.pomodoroRunning ? Color.orange.opacity(0.3) : .clear, radius: 4)
+                        // 倒计时大字 + 番茄统计小字
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                            Text(appState.formattedPomodoroTime)
+                                .font(.system(size: Theme.Typography.pomodoro, weight: .bold, design: .monospaced))
+                                .foregroundColor(appState.pomodoroRunning ? .orange : .primary)
+                                .shadow(color: appState.pomodoroRunning ? Color.orange.opacity(0.3) : .clear, radius: 4)
+                            
+                            // 番茄统计：今日完成数与连续天数，无记录时彻底隐形
+                            if appState.pomodoroTodayCount > 0 || appState.pomodoroStreakDays > 0 {
+                                Text("今日 \(appState.pomodoroTodayCount) 个 · 连续 \(appState.pomodoroStreakDays) 天")
+                                    .font(.system(size: Theme.Typography.mini, weight: .medium))
+                                    .foregroundStyle(.tertiary)
+                                    .monospacedDigit()
+                            }
+                        }
                         
                         // 预设时长快捷切换胶囊 (25m / 45m / 5m)
                         HStack(spacing: Theme.Spacing.sm) {
@@ -451,6 +479,28 @@ struct ExpandedMonitoringView: View {
                                 .buttonStyle(.plain)
                             }
                         }
+                        
+                        // 世界时钟行：独立于日历授权状态展示，城市可在偏好设置中配置
+                        if !appState.worldClockCities.isEmpty {
+                            HStack(spacing: Theme.Spacing.lg) {
+                                Image(systemName: "globe")
+                                    .font(.system(size: Theme.Typography.mini))
+                                    .foregroundStyle(.tertiary)
+                                ForEach(appState.worldClockCities) { city in
+                                    HStack(spacing: Theme.Spacing.xs) {
+                                        Text(city.displayName)
+                                            .font(.system(size: Theme.Typography.mini, weight: .medium))
+                                            .foregroundStyle(.tertiary)
+                                        Text(appState.worldClockTimeString(for: city))
+                                            .font(.system(size: Theme.Typography.caption, weight: .bold))
+                                            .monospacedDigit()
+                                            .foregroundColor(.secondary)
+                                    }
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.top, Theme.Spacing.xxs)
+                        }
                     }
                     .padding(.horizontal, Theme.Spacing.xl)
                     .padding(.vertical, Theme.Spacing.md)
@@ -565,6 +615,104 @@ struct ExpandedMonitoringView: View {
         if usage > 90 { return Color.red.opacity(0.95) }
         if usage > 75 { return Color.orange.opacity(0.95) }
         return Theme.Colors.accent.opacity(0.95)
+    }
+}
+
+// MARK: - 正在播放媒体条（展开态左卡片内嵌）
+// 紧凑单行卡：封面 32×32 + 标题 / 艺术家·来源 / 进度条+时间；
+// 进度本地插值推进（随主时钟每秒刷新），暂停时停止插值并弱化封面
+struct NowPlayingCardRow: View {
+    let nowPlaying: NowPlayingInfo
+    let now: Date   // 主时钟（AppState.currentTime）每秒推进，驱动插值刷新
+    
+    private var elapsed: Double { nowPlaying.currentElapsed(at: now) }
+    
+    // 艺术家 · 来源应用（均可为空，双空则整行隐藏）
+    private var subtitle: String {
+        [nowPlaying.artist, nowPlaying.appName]
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+    
+    var body: some View {
+        HStack(spacing: Theme.Spacing.xl) {
+            // 封面：无封面数据时优雅降级为音符占位；暂停态降低不透明度
+            ZStack {
+                if let artwork = nowPlaying.artwork {
+                    Image(nsImage: artwork)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                } else {
+                    Image(systemName: "music.note")
+                        .font(.system(size: Theme.Typography.callout, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .frame(width: 32, height: 32)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.surfaceBadge)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous))
+            .opacity(nowPlaying.isPlaying ? 1.0 : 0.55)
+            
+            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                // 标题 + 已播 / 总时长（mm:ss）
+                HStack(spacing: Theme.Spacing.md) {
+                    Text(nowPlaying.title)
+                        .font(.system(size: Theme.Typography.caption, weight: .bold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    
+                    Spacer(minLength: 0)
+                    
+                    Text(timeText)
+                        .font(.system(size: Theme.Typography.mini, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(.tertiary)
+                }
+                
+                // 艺术家 · 来源应用（双空时整行隐藏）
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.system(size: Theme.Typography.mini, weight: .medium))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                
+                // 进度条：总时长未知（直播流等）时不显示
+                if nowPlaying.duration > 0 {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Theme.Colors.surfaceTrack)
+                            Capsule()
+                                .fill(Theme.Colors.accent.opacity(0.85))
+                                .frame(width: max(0, min(geo.size.width * CGFloat(elapsed / nowPlaying.duration), geo.size.width)))
+                        }
+                    }
+                    .frame(height: 3)
+                }
+            }
+        }
+    }
+    
+    private var timeText: String {
+        if nowPlaying.duration > 0 {
+            return "\(Self.formatMediaTime(elapsed)) / \(Self.formatMediaTime(nowPlaying.duration))"
+        }
+        return Self.formatMediaTime(elapsed)
+    }
+    
+    /// mm:ss 格式化；超过 1 小时（长视频/播客）自动升级为 H:MM:SS
+    static func formatMediaTime(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds.rounded()))
+        if s >= 3600 {
+            return String(format: "%d:%02d:%02d", s / 3600, (s % 3600) / 60, s % 60)
+        }
+        return String(format: "%d:%02d", s / 60, s % 60)
     }
 }
 
