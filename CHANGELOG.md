@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-01
+
+### Added
+
+- AI 工具调用体系（模型可调用本地工具并以结果多轮续写，从"纯聊天"升级为"能动手"）：
+  - `QuickShow/AI/Tools/`：`AITool` 协议（name / description / JSON Schema / isDangerous）+ 注册表（`ai.tools.enabled` 持久化开关，键缺失默认除 `run_shell` 外全部启用）+ 执行器（危险工具 NSAlert 确认（sheet 附着 AI 窗、无窗降级 runModal）、30 秒超时竞速、结果统一 `{"ok":...}` JSON 包装、拒绝落 `denied`）
+  - 14 个内置工具：`read_clipboard` / `write_clipboard`、`get_system_status`（CPU/内存/电池/网络/磁盘，包 SystemStatusProvider 公开只读 API，支持 section 过滤）、`list_running_apps` / `open_app`、`read_file` / `write_file`（`ai.tools.fileWhitelist` 目录白名单，标准化+软链解析前缀匹配防 `../` 逃逸，读取 200KB 上限）、`get_env` / `set_env` / `list_env`（`ai.envVars` 自定义存储优先，进程环境只读兜底；`list_env` 仅返回变量名不泄露值）、`get_quickshow_state`（窗口可见性扫描 + UserDefaults 偏好快照）、`run_shell`（Process 合并输出截断 32KB，默认关闭）
+  - 联网工具：`web_search`（Tavily REST，Bearer 鉴权，15 秒超时，返回 answer + results[]；Key 存 Keychain `tavilyApiKey`，`QUICKSHOW_TAVILY_API_KEY` 环境变量只读兜底，未配置返回可读指引）；`fetch_url`（URLSession + 重定向上限 5 次 + 20 秒超时，仅 text/html 与 text/plain；手写 HTML 提取：去注释/脚本/样式 → 去标签 → 通用实体解码 → 折叠空白 + `<title>` 提取；charset 声明支持 UTF-8/GBK/GB18030/Big5/Latin-1，正文 64KB 截断；零第三方依赖）
+  - 协议层（双协议）：Chat Completions 顶层 `tools` 数组与 `delta.tool_calls[]` 按 index 合帧累积；Responses 顶层 `tools` 与 `output_item.added(function_call)` / `function_call_arguments.delta|done` 事件解析；非流式路径同步支持；流式接口升级为 `AIStreamEvent`（text / toolCalls 两态）取代纯文本流，文本路径行为不变；工具结果回传 Chat Completions 走 assistant(tool_calls)+role:tool 消息，Responses 走 function_call / function_call_output input items；标题摘要等后台请求不带工具声明
+  - 对话回路（`AIChatState.startConversationLoop`）：模型请求工具 → 记录（pending→running→done/failed/denied，经 store 消息更新链路实时驱动 UI）→ 串行执行 → wire 格式回传续写，`AIToolExecutor.maxToolRounds`（8 轮）防死循环，超限落文本说明；中止可打断全回路（轮前/工具前/工具后三处检查，未落定调用标 failed）；重试清理尾部失败消息从原用户消息重发；历史重建将带结果的工具消息还原为合法配对请求，结果缺失退化为纯文本
+  - 消息模型与 UI：`ToolCallRecord`（id/name/arguments/result/status）随会话持久化，`decodeIfPresent` 兼容旧会话文件恢复；聊天流工具卡片（一条消息一卡多工具条目，五状态徽标，参数/结果等宽渲染、失败/拒绝默认展开并自动展开一次、可读错误摘要提取、超长结果 2000 字符折叠与限高滚动）；纯工具消息不渲染空气泡
+  - 设置页 AI 分区新增四小节：工具开关列表（危险徽标 + `run_shell` 红字警示，键缺失按默认值初始化写盘、翻动写完整列表）、文件访问白名单（NSOpenPanel 添加目录、逐行可删）、自定义环境变量（键值对即时写盘）、联网搜索（Tavily API Key 安全输入，掩码/替换/清除复刻主 Key 交互，仅存 Keychain）
+  - AI 配置环境变量兜底：`QUICKSHOW_AI_BASE_URL` / `QUICKSHOW_AI_API_KEY` / `QUICKSHOW_AI_MODEL` 在对应配置留空时生效（env 只读不写盘，API Key 不落 Keychain，已有配置优先）
+
+### Fixed
+
+- 危险工具确认 sheet 抢占 key 状态时 AI 窗触发 `resignKey` 被误判「被动切走」而自动隐藏：`AIWindowManager.performHide` 对 `panel.attachedSheet != nil` 短路跳过，sheet 关闭后焦点自然回归父窗
+
 ## [1.5.1] - 2026-10-01
 
 ### Fixed

@@ -12,12 +12,16 @@
 		0FF0EAC1AC72FBE27721C977 /* MediaRemote in Resources */ = {isa = PBXBuildFile; fileRef = C01588AECCABE573EFDE95CD /* MediaRemote */; };
 		1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */; };
 		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
+		48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57013FDF715F8B5844F318F0 /* BuiltInTools.swift */; };
 		492029441824493F4626037D /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491F9CCD9C383D8736352FDA /* CalendarView.swift */; };
 		5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */; };
+		5B5A3E7275818436396E7FAF /* AIToolExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */; };
 		5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */; };
 		6EBCA67406643D8157B55A57 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99ABD71A91473D072310ABF /* DesignTokens.swift */; };
 		7325565C24EBC2891BB84D17 /* PanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB3F9819E7541B279D9C3FB /* PanelManager.swift */; };
 		753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */; };
+		7E7814E04576707C2E177CD2 /* WebTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */; };
+		809266C1C45B4248D7842710 /* AIToolCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D265EF154F546FE21365CDDE /* AIToolCardView.swift */; };
 		851C980FD0829DA5AD6402D2 /* AIChatSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */; };
 		86FE75DF91D637852C56DA63 /* AIChatService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */; };
 		873EB16C0D9C58155D24B3B8 /* SystemStatusProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 13486C36433281599CC36C34 /* SystemStatusProvider.swift */; };
@@ -30,6 +34,7 @@
 		AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80187D648ECC52984FCD6D2C /* QuickShowApp.swift */; };
 		AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */; };
 		B294658D1B91F980CBB27E32 /* AIChatMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */; };
+		C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */; };
 		C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02C56336313E564A9C58442B /* AppState.swift */; };
 		E542D68A284B997ED9194C5F /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 209D2082B5AB449D9864B03C /* ChatSessionStore.swift */; };
 		F13C2D9C4C12EFB1BF2857DA /* AIChatView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 804C2AFE4E28879F9C343208 /* AIChatView.swift */; };
@@ -43,13 +48,17 @@
 		0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMarkdownView.swift; sourceTree = "<group>"; };
 		13486C36433281599CC36C34 /* SystemStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusProvider.swift; sourceTree = "<group>"; };
 		17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TimeDisplayView.swift; sourceTree = "<group>"; };
+		1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolExecutor.swift; sourceTree = "<group>"; };
 		1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatAttachmentViews.swift; sourceTree = "<group>"; };
 		209D2082B5AB449D9864B03C /* ChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
 		26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatState.swift; sourceTree = "<group>"; };
 		2708792B4D8EF72329E95098 /* QuickShow.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = QuickShow.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolRegistry.swift; sourceTree = "<group>"; };
+		3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebTools.swift; sourceTree = "<group>"; };
 		3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAttachment.swift; sourceTree = "<group>"; };
 		491F9CCD9C383D8736352FDA /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
 		4CB3F9819E7541B279D9C3FB /* PanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelManager.swift; sourceTree = "<group>"; };
+		57013FDF715F8B5844F318F0 /* BuiltInTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInTools.swift; sourceTree = "<group>"; };
 		63AE6828207BF9FDF55E3684 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		6EC8BA98E9C478A6D25D3962 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatSidebarView.swift; sourceTree = "<group>"; };
@@ -61,6 +70,7 @@
 		B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		B7BF9C965803CBAE72E3577B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C01588AECCABE573EFDE95CD /* MediaRemote */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MediaRemote; path = QuickShow/Resources/MediaRemote; sourceTree = SOURCE_ROOT; };
+		D265EF154F546FE21365CDDE /* AIToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolCardView.swift; sourceTree = "<group>"; };
 		D63AB70CD13631A39A802994 /* LunarCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunarCalendar.swift; sourceTree = "<group>"; };
 		F4584DE26B61ECF74718A252 /* ExpandedMonitoringView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedMonitoringView.swift; sourceTree = "<group>"; };
 		F99ABD71A91473D072310ABF /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
@@ -99,6 +109,7 @@
 				0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */,
 				7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */,
 				804C2AFE4E28879F9C343208 /* AIChatView.swift */,
+				D265EF154F546FE21365CDDE /* AIToolCardView.swift */,
 				491F9CCD9C383D8736352FDA /* CalendarView.swift */,
 				F4584DE26B61ECF74718A252 /* ExpandedMonitoringView.swift */,
 				8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */,
@@ -126,6 +137,7 @@
 				209D2082B5AB449D9864B03C /* ChatSessionStore.swift */,
 				3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */,
 				FC77F949B43F2F53CE7959C4 /* MarkdownParser.swift */,
+				A6396C9BB874D8C3216A5C33 /* Tools */,
 			);
 			path = AI;
 			sourceTree = "<group>";
@@ -136,6 +148,17 @@
 				2708792B4D8EF72329E95098 /* QuickShow.app */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A6396C9BB874D8C3216A5C33 /* Tools */ = {
+			isa = PBXGroup;
+			children = (
+				1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */,
+				297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */,
+				57013FDF715F8B5844F318F0 /* BuiltInTools.swift */,
+				3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */,
+			);
+			path = Tools;
 			sourceTree = "<group>";
 		};
 		CF516E079863CEF8EC5C397C /* QuickShow */ = {
@@ -152,7 +175,7 @@
 			path = QuickShow;
 			sourceTree = "<group>";
 		};
-		"TEMP_2583D1BB-8D20-4C82-95B0-0A9EBD64615A" /* Resources */ = {
+		"TEMP_87761D0D-819B-4281-A272-C46FBDD41D18" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -233,8 +256,12 @@
 				851C980FD0829DA5AD6402D2 /* AIChatSidebarView.swift in Sources */,
 				A3E1307AC8680216CF70DC61 /* AIChatState.swift in Sources */,
 				F13C2D9C4C12EFB1BF2857DA /* AIChatView.swift in Sources */,
+				809266C1C45B4248D7842710 /* AIToolCardView.swift in Sources */,
+				5B5A3E7275818436396E7FAF /* AIToolExecutor.swift in Sources */,
+				C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */,
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
 				C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */,
+				48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */,
 				492029441824493F4626037D /* CalendarView.swift in Sources */,
 				E542D68A284B997ED9194C5F /* ChatSessionStore.swift in Sources */,
 				6EBCA67406643D8157B55A57 /* DesignTokens.swift in Sources */,
@@ -252,6 +279,7 @@
 				9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */,
 				873EB16C0D9C58155D24B3B8 /* SystemStatusProvider.swift in Sources */,
 				5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */,
+				7E7814E04576707C2E177CD2 /* WebTools.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

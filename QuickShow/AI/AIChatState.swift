@@ -125,34 +125,150 @@ final class AIChatState: ObservableObject {
         sendPathPersisted = false
         isStreaming = true
 
-        // 3) 组装请求（注入 system prompt + 截断后的上下文），发起流。
+        // 3) 组装请求（注入 system prompt + 截断后的上下文），进入工具调用回路。
         let requestMessages = buildRequestMessages(for: sessionId)
-        let stream = service.send(messages: requestMessages)
+        startConversationLoop(
+            sessionId: sessionId,
+            initialWire: requestMessages,
+            firstAssistantID: assistantID
+        )
+    }
 
+    /// 工具调用回路：流式请求 → 执行工具 → 结果回传 → 续请求，直到产出文本或达轮数上限。
+    /// 整个回路运行在单个 Task 内，`abortStreaming` 取消该任务即可打断包含工具轮在内的全流程。
+    private func startConversationLoop(
+        sessionId: UUID,
+        initialWire: [ChatCompletionMessage],
+        firstAssistantID: UUID
+    ) {
         streamTask = Task { [weak self] in
             guard let self else { return }
+            var wireMessages = initialWire
+            var assistantID = firstAssistantID
+            var toolRounds = 0
             var didComplete = false
+
             do {
-                for try await token in stream {
-                    self.appendToken(token, to: assistantID, in: sessionId)
+                roundLoop: while true {
+                    // 进入新一轮前若已中止则不再发起请求（避免工具轮后继续续请求）。
+                    if self.abortRequested || Task.isCancelled {
+                        self.settle(assistantID, state: .aborted, in: sessionId)
+                        break roundLoop
+                    }
+                    // 每轮独立发起一次流式请求。
+                    let stream = self.service.send(messages: wireMessages)
+                    var roundText = ""
+                    var completedCalls: [CompletedToolCall] = []
+
+                    for try await event in stream {
+                        switch event {
+                        case let .text(token):
+                            roundText += token
+                            self.appendToken(token, to: assistantID, in: sessionId)
+                        case let .toolCalls(calls):
+                            completedCalls = calls
+                        }
+                    }
+                    // 冲刷本轮尾部缓冲。
+                    self.forceFlushPendingTokens()
+
+                    // 用户中止：落定为 .aborted 并结束整个回路。
+                    if self.abortRequested {
+                        self.settle(assistantID, state: .aborted, in: sessionId)
+                        break roundLoop
+                    }
+
+                    // 没有工具调用：本助手消息为最终文本，正常结束。
+                    if completedCalls.isEmpty {
+                        self.settle(assistantID, state: .done, in: sessionId)
+                        didComplete = true
+                        break roundLoop
+                    }
+
+                    // 有工具调用：先把记录挂到当前助手消息（状态逐个 pending）。
+                    let records = completedCalls.map {
+                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending)
+                    }
+                    self.attachToolCalls(assistantID, text: roundText, records: records, in: sessionId)
+
+                    // assistant 的 tool_calls 追加到 wire（随后每条结果紧跟其后）。
+                    let wireCalls = completedCalls.map {
+                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+                    }
+                    wireMessages.append(ChatCompletionMessage(
+                        role: "assistant",
+                        content: roundText.isEmpty ? nil : .text(roundText),
+                        toolCalls: wireCalls,
+                        toolCallId: nil
+                    ))
+
+                    // 串行执行工具，避免并发副作用；每次执行前检查中止。
+                    for call in completedCalls {
+                        if self.abortRequested || Task.isCancelled {
+                            self.failUnresolvedToolCalls(assistantID, in: sessionId)
+                            self.settle(assistantID, state: .aborted, in: sessionId)
+                            break roundLoop
+                        }
+                        self.updateToolCallStatus(assistantID, callID: call.id, in: sessionId, status: .running)
+                        let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
+                        let result = await AIToolExecutor.shared.execute(call: request)
+                        self.updateToolCallResult(
+                            assistantID,
+                            callID: call.id,
+                            in: sessionId,
+                            result: result.resultJSON,
+                            status: result.status
+                        )
+                        // 工具结果回传模型。
+                        wireMessages.append(ChatCompletionMessage.toolResult(callID: call.id, content: result.resultJSON))
+                    }
+                    // 工具执行期间发生中止：工具轮已全部落定，不再发起续请求。
+                    if self.abortRequested || Task.isCancelled {
+                        self.settle(assistantID, state: .done, in: sessionId)
+                        break roundLoop
+                    }
+
+                    // 本轮工具全部执行完，工具调用助手消息落定为 done（单点落盘）。
+                    self.settle(assistantID, state: .done, in: sessionId)
+
+                    toolRounds += 1
+                    if toolRounds >= AIToolExecutor.maxToolRounds {
+                        // 达到轮数上限：落一条文本说明并停止续请求。
+                        let limitNote = "已达工具调用轮数上限（\(AIToolExecutor.maxToolRounds) 轮），停止继续调用工具。"
+                        self.store.appendMessage(
+                            ChatMessage(role: .assistant, content: limitNote, state: .done),
+                            to: sessionId,
+                            persist: true
+                        )
+                        didComplete = true
+                        break roundLoop
+                    }
+
+                    // 创建下一轮助手占位，继续回路。
+                    assistantID = UUID()
+                    self.store.appendMessage(
+                        ChatMessage(id: assistantID, role: .assistant, content: "", state: .sending),
+                        to: sessionId,
+                        persist: false
+                    )
+                    self.sendPathPersisted = false
                 }
-                // 正常结束：先冲刷尾部缓冲，再落定状态（settle 负责最终落盘）。
-                self.forceFlushPendingTokens()
-                self.settle(assistantID, state: .done, in: sessionId)
-                didComplete = true
             } catch is CancellationError {
                 // 用户主动中止：保留半截回复，落定为 .aborted。
                 self.forceFlushPendingTokens()
+                self.failUnresolvedToolCalls(assistantID, in: sessionId)
                 self.settle(assistantID, state: .aborted, in: sessionId)
             } catch {
                 // 中止与超时错误竞争时优先落定为用户中止。
                 self.forceFlushPendingTokens()
                 if self.abortRequested {
+                    self.failUnresolvedToolCalls(assistantID, in: sessionId)
                     self.settle(assistantID, state: .aborted, in: sessionId)
                 } else {
                     self.settle(assistantID, state: .failed(error.localizedDescription), in: sessionId)
                 }
             }
+
             self.isStreaming = false
             // 首轮助手回复完成后，后台生成中文标题（失败静默，不影响主对话流）。
             if didComplete {
@@ -291,6 +407,53 @@ final class AIChatState: ObservableObject {
         }
     }
 
+    /// 把工具调用记录挂到助手消息上（内存即时；状态初始为 pending）。
+    /// 不改变消息状态：流式期间仍是 sending/streaming，由 settle 最终落定。
+    private func attachToolCalls(_ id: UUID, text: String, records: [ToolCallRecord], in sessionId: UUID) {
+        store.updateMessage(id: id, in: sessionId) { message in
+            message.content = text
+            message.toolCalls = records
+        }
+    }
+
+    /// 更新单个工具调用的状态（内存即时，不落盘；由回合结束时的 settle 统一落盘）。
+    private func updateToolCallStatus(_ id: UUID, callID: String, in sessionId: UUID, status: ToolCallStatus) {
+        store.updateMessage(id: id, in: sessionId) { message in
+            guard var calls = message.toolCalls,
+                  let index = calls.firstIndex(where: { $0.id == callID }) else { return }
+            calls[index].status = status
+            message.toolCalls = calls
+        }
+    }
+
+    /// 写入单个工具调用的结果与最终状态。
+    private func updateToolCallResult(
+        _ id: UUID,
+        callID: String,
+        in sessionId: UUID,
+        result: String,
+        status: ToolCallStatus
+    ) {
+        store.updateMessage(id: id, in: sessionId) { message in
+            guard var calls = message.toolCalls,
+                  let index = calls.firstIndex(where: { $0.id == callID }) else { return }
+            calls[index].result = result
+            calls[index].status = status
+            message.toolCalls = calls
+        }
+    }
+
+    /// 中止时将仍未落定的工具调用（pending/running）标记为 failed，避免 UI 卡在进行中。
+    private func failUnresolvedToolCalls(_ id: UUID, in sessionId: UUID) {
+        store.updateMessage(id: id, in: sessionId) { message in
+            guard var calls = message.toolCalls else { return }
+            for index in calls.indices where calls[index].status == .pending || calls[index].status == .running {
+                calls[index].status = .failed
+            }
+            message.toolCalls = calls
+        }
+    }
+
     /// 本地即时失败（未发起请求，如未配置端点）。
     private func appendLocalFailure(_ text: String) {
         let session = store.ensureCurrentSession()
@@ -325,13 +488,42 @@ final class AIChatState: ObservableObject {
             result.append(ChatCompletionMessage(role: ChatMessage.Role.system.rawValue, content: system))
         }
         for message in trimmedContextMessages(in: sessionId) {
-            result.append(makeRequestMessage(from: message))
+            result.append(contentsOf: makeRequestMessages(from: message))
         }
         return result
     }
 
-    /// 单条消息 → 请求消息：用户消息带图时组装多模态 content 数组。
-    private func makeRequestMessage(from message: ChatMessage) -> ChatCompletionMessage {
+    /// 单条展示消息 → wire 消息（可能展开为多条）。
+    /// 带工具调用的助手消息会被重建为 assistant(tool_calls) + 逐条 tool 结果，保证协议合法；
+    /// 若存在未落定结果的调用（如中止/失败），退化为纯文本消息，避免出现无配对结果的 tool_calls。
+    private func makeRequestMessages(from message: ChatMessage) -> [ChatCompletionMessage] {
+        guard message.role == .assistant, let records = message.toolCalls, !records.isEmpty else {
+            return [makeBasicRequestMessage(from: message)]
+        }
+
+        let allResolved = records.allSatisfy { $0.result != nil }
+        guard allResolved else {
+            return [makeBasicRequestMessage(from: message)]
+        }
+
+        var result: [ChatCompletionMessage] = []
+        let calls = records.map {
+            WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+        }
+        result.append(ChatCompletionMessage(
+            role: "assistant",
+            content: message.content.isEmpty ? nil : .text(message.content),
+            toolCalls: calls,
+            toolCallId: nil
+        ))
+        for record in records {
+            result.append(ChatCompletionMessage.toolResult(callID: record.id, content: record.result ?? ""))
+        }
+        return result
+    }
+
+    /// 普通单条消息 → wire 消息：用户消息带图时组装多模态 content 数组。
+    private func makeBasicRequestMessage(from message: ChatMessage) -> ChatCompletionMessage {
         let role = message.role.rawValue
         guard message.role == .user, !message.images.isEmpty else {
             return ChatCompletionMessage(role: role, content: message.content)
@@ -393,7 +585,8 @@ final class AIChatState: ObservableObject {
     private func scheduleTitleSummary(sessionId: UUID) {
         guard let session = store.session(id: sessionId), session.titleNeedsSummary else { return }
         guard let firstUser = session.messages.first(where: { $0.role == .user }),
-              let firstAssistant = session.messages.first(where: { $0.role == .assistant && $0.state == .done }) else {
+              // 取首条有正文的落定助手消息作为种子（跳过仅含工具调用的助手消息）。
+              let firstAssistant = session.messages.first(where: { $0.role == .assistant && $0.state == .done && !$0.content.isEmpty }) else {
             return
         }
 
@@ -449,17 +642,22 @@ final class AIChatState: ObservableObject {
         send()
     }
 
-    /// 移除当前会话尾部的失败占位消息。
+    /// 移除当前会话尾部、与本轮重试无关的残留消息：
+    /// 尾部失败占位，以及工具回路产生的助手工具调用消息（避免重发后残留孤立 tool_calls）。
     private func messagesSnapshotRemoveFailed(in sessionId: UUID) {
-        var failedIDs: [UUID] = []
+        var staleIDs: [UUID] = []
         for message in store.messages(in: sessionId).reversed() {
             if case .failed = message.state {
-                failedIDs.append(message.id)
-            } else {
-                break
+                staleIDs.append(message.id)
+                continue
             }
+            if message.role == .assistant, !(message.toolCalls?.isEmpty ?? true) {
+                staleIDs.append(message.id)
+                continue
+            }
+            break
         }
-        for id in failedIDs {
+        for id in staleIDs {
             store.removeMessage(id: id, in: sessionId)
         }
     }

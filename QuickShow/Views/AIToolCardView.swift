@@ -1,0 +1,377 @@
+import AppKit
+import SwiftUI
+
+// MARK: - AI 工具调用卡片
+//
+// 渲染数据源：ChatMessage.toolCalls（[ToolCallRecord]），由 ChatSessionStore 消息更新机制驱动刷新
+// （工具执行时 status 实时流转 pending → running → done/failed/denied，本视图无需轮询）。
+//
+// 视觉原则：完全融入现有聊天气泡体系——
+// - 卡片容器与助手文本气泡同款（chatAssistantBubble 底 + cardStroke 0.5pt 描边 + Radius.groupCard），
+//   宽度与文本气泡一致（maxWidth .infinity，行内与气泡共用同一可用宽度）
+// - 一条助手消息可能发起多个工具调用：一张卡片内多行条目（0.5pt 细线分隔），比多卡更紧凑
+// - JSON（参数 / 结果）一律等宽小号渲染，复用 CodeBlockView 的内嵌底语言（surfaceBadge）
+// - 本文件严禁新增设计令牌，全部走 DesignTokens 既有值
+
+/// 工具调用卡片：一条助手消息的全部工具调用记录。
+struct AIToolCallCardView: View {
+    let toolCalls: [ToolCallRecord]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(toolCalls.enumerated()), id: \.element.id) { index, record in
+                // 条目间细若游丝的分隔线（与气泡/输入卡同款 0.5pt 语言）
+                if index > 0 {
+                    Rectangle()
+                        .fill(Theme.Colors.cardStroke)
+                        .frame(height: Theme.Layout.dividerHeight)
+                        .padding(.horizontal, Theme.Spacing.xxl)
+                }
+                ToolCallRow(record: record)
+                    .padding(.horizontal, Theme.Spacing.xxl)
+                    .padding(.vertical, Theme.Spacing.xl)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                .fill(Theme.Colors.chatAssistantBubble)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 单个工具调用条目
+
+/// 一条工具调用：头部行（工具名 + 状态徽标 + 展开箭头）常驻，点击展开参数与结果。
+/// 默认折叠策略：失败 / 已拒绝默认展开（错误详情直接可见），其余默认折叠保持紧凑；
+/// 运行中的条目状态落定到 failed/denied 时自动展开一次，暴露错误。
+private struct ToolCallRow: View {
+    let record: ToolCallRecord
+
+    /// 展开 / 折叠（参数与结果区）。
+    @State private var expanded: Bool
+    /// 长结果（>2000 字符）是否已展开完整内容。
+    @State private var showFullResult = false
+
+    /// 结果文本折叠上限：超出部分先截断，由「展开完整结果」释放。
+    private static let resultTruncateLimit = 2000
+    /// 参数文本展示上限：write_file 等参数可能携带大段内容，卡片内只保留头部。
+    private static let argumentsPreviewLimit = 600
+
+    init(record: ToolCallRecord) {
+        self.record = record
+        // 失败 / 已拒绝默认展开，其余默认折叠
+        _expanded = State(initialValue: record.status == .failed || record.status == .denied)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            header
+            if expanded {
+                expandedBody
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // 状态落定到失败 / 拒绝时自动展开（用户无需多点一次才能看到错误）
+        .onChange(of: record.status) { status in
+            if status == .failed || status == .denied {
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded = true }
+            }
+        }
+    }
+
+    // MARK: 头部行
+
+    private var header: some View {
+        Button {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
+        } label: {
+            HStack(spacing: Theme.Spacing.lg) {
+                // 工具名：等宽字体，蛇形命名与协议层原文一致
+                Text(record.name)
+                    .font(Theme.Typography.mono(12, .medium))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: 0)
+                ToolStatusBadge(status: record.status)
+                Image(systemName: "chevron.right")
+                    .font(Theme.Typography.text(9, .semibold))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(expanded ? "收起详情" : "展开参数与结果")
+    }
+
+    // MARK: 展开区（参数 + 结果）
+
+    @ViewBuilder
+    private var expandedBody: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            argumentsBlock
+            if let result = record.result {
+                ToolCallResultBlock(
+                    result: result,
+                    status: record.status,
+                    showFullResult: $showFullResult,
+                    truncateLimit: Self.resultTruncateLimit
+                )
+            }
+        }
+        .transition(.opacity)
+    }
+
+    /// 参数区：JSON 原文等宽小号，超出预览长度截断（完整内容模型侧已持有，卡片只需可辨）。
+    private var argumentsBlock: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            Text("参数")
+                .font(Theme.Typography.text(10, .semibold))
+                .foregroundColor(Theme.Colors.contentTertiary)
+            if record.arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text("（无参数）")
+                    .font(Theme.Typography.mono(11))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+            } else {
+                Text(previewText(record.arguments, limit: Self.argumentsPreviewLimit))
+                    .font(Theme.Typography.mono(11))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.vertical, Theme.Spacing.lg)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                            .fill(Theme.Colors.surfaceBadge)
+                    )
+            }
+        }
+    }
+
+    /// 截断预览：JSON 美化后超长发省略号。
+    private func previewText(_ raw: String, limit: Int) -> String {
+        let pretty = ToolJSONText.pretty(raw)
+        guard pretty.count > limit else { return pretty }
+        return String(pretty.prefix(limit)) + " …"
+    }
+}
+
+// MARK: - 结果区
+
+/// 结果区：failed/denied 先给一行用户可读错误摘要，再附完整 JSON；
+/// JSON 等宽渲染、限高可滚动，超过 2000 字符先截断、可展开完整结果。
+private struct ToolCallResultBlock: View {
+    let result: String
+    let status: ToolCallStatus
+    @Binding var showFullResult: Bool
+    let truncateLimit: Int
+
+    @State private var hovered = false
+    @State private var copied = false
+
+    /// 美化后的完整结果文本。
+    private var prettyResult: String { ToolJSONText.pretty(result) }
+    /// 是否超长（需折叠 + 展开入口）。
+    private var isTruncatable: Bool { prettyResult.count > truncateLimit }
+    /// 当前展示的文本（折叠态只取前 2000 字符）。
+    private var displayedResult: String {
+        if isTruncatable && !showFullResult {
+            return String(prettyResult.prefix(truncateLimit)) + " …"
+        }
+        return prettyResult
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            HStack(spacing: Theme.Spacing.lg) {
+                Text("结果")
+                    .font(Theme.Typography.text(10, .semibold))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+                Spacer(minLength: 0)
+                // hover 渐显复制钮（与 CodeBlockView 同一语言）
+                if hovered || copied {
+                    Button(action: copyResult) {
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                                .font(Theme.Typography.text(9.5, .medium))
+                            Text(copied ? "已复制" : "复制")
+                                .font(Theme.Typography.text(9.5, .medium))
+                        }
+                        .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xxs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                                .fill(Theme.Colors.surfaceButton)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.opacity)
+                }
+            }
+            .frame(minHeight: 14)
+
+            // 失败 / 拒绝：先给一行可读摘要（从 {"ok":false,"error":...} 提取）
+            if showsErrorSummary, let error = ToolJSONText.errorMessage(from: result) {
+                HStack(alignment: .top, spacing: Theme.Spacing.md) {
+                    Image(systemName: status == .denied ? "hand.raised" : "xmark.octagon")
+                        .font(Theme.Typography.text(10, .semibold))
+                    Text(error)
+                        .font(Theme.Typography.text(11))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundColor(status == .denied
+                                 ? Theme.Colors.contentTertiary
+                                 : Theme.Colors.statusWarning)
+            }
+
+            // 完整 JSON：等宽、限高可滚动
+            ScrollView(.vertical, showsIndicators: false) {
+                Text(displayedResult)
+                    .font(Theme.Typography.mono(11))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .lineSpacing(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.vertical, Theme.Spacing.lg)
+            }
+            .frame(maxHeight: showFullResult ? 260 : 180, alignment: .top)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.surfaceBadge)
+            )
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+            }
+
+            // 超长结果的展开 / 收起入口
+            if isTruncatable {
+                Button {
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                        showFullResult.toggle()
+                    }
+                } label: {
+                    Text(showFullResult ? "收起结果" : "展开完整结果（\(prettyResult.count) 字符）")
+                        .font(Theme.Typography.text(10, .medium))
+                        .foregroundColor(Theme.Colors.accent)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    /// 是否展示错误摘要行（仅失败 / 已拒绝两态）。
+    private var showsErrorSummary: Bool {
+        status == .failed || status == .denied
+    }
+
+    private func copyResult() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(prettyResult, forType: .string)
+        copied = true
+        // 轻反馈：对勾短暂停留后复位
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+    }
+}
+
+// MARK: - 状态徽标
+
+/// 状态徽标：胶囊底 + 图标 + 文案，五态视觉区分——
+/// pending 灰「排队中」/ running 强调色 spinner「执行中」/ done 绿「完成」/
+/// failed 红「失败」/ denied 灰「已拒绝」。
+private struct ToolStatusBadge: View {
+    let status: ToolCallStatus
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            if status == .running {
+                // 执行中：小 spinner（缩到与徽标文字同高）
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.55)
+                    .frame(width: 10, height: 10)
+            } else {
+                Image(systemName: iconName)
+                    .font(Theme.Typography.text(9, .semibold))
+            }
+            Text(label)
+                .font(Theme.Typography.text(10, .medium))
+        }
+        .foregroundColor(color)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.xxs)
+        .background(Capsule(style: .continuous).fill(color.opacity(0.12)))
+        .overlay(Capsule(style: .continuous).stroke(color.opacity(0.28), lineWidth: 0.5))
+    }
+
+    private var label: String {
+        switch status {
+        case .pending: return "排队中"
+        case .running: return "执行中"
+        case .done: return "完成"
+        case .failed: return "失败"
+        case .denied: return "已拒绝"
+        }
+    }
+
+    private var iconName: String {
+        switch status {
+        case .pending: return "hourglass"
+        case .running: return ""      // spinner 占位，不走图标
+        case .done: return "checkmark"
+        case .failed: return "xmark"
+        case .denied: return "hand.raised"
+        }
+    }
+
+    private var color: Color {
+        switch status {
+        case .pending: return Theme.Colors.contentTertiary
+        case .running: return Theme.Colors.accent
+        case .done: return Theme.Colors.statusGood
+        case .failed: return Theme.Colors.statusWarning
+        case .denied: return Theme.Colors.contentTertiary
+        }
+    }
+}
+
+// MARK: - JSON 文本辅助
+
+/// 工具调用参数 / 结果的 JSON 文本处理：美化（键排序 + 缩进）与错误摘要提取。
+enum ToolJSONText {
+    /// JSON 美化：解析成功则按排序键 + 2 空格缩进重排；非 JSON 原文返回。
+    static func pretty(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data),
+              JSONSerialization.isValidJSONObject(object),
+              let prettyData = try? JSONSerialization.data(
+                  withJSONObject: object,
+                  options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+              ),
+              let text = String(data: prettyData, encoding: .utf8) else {
+            return raw
+        }
+        return text
+    }
+
+    /// 从统一结果包装 {"ok":false,"error":"..."} 中提取用户可读错误文案。
+    static func errorMessage(from raw: String) -> String? {
+        guard let data = raw.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let error = object["error"] as? String,
+              !error.isEmpty else {
+            return nil
+        }
+        return error
+    }
+}

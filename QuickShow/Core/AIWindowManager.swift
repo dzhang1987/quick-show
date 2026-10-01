@@ -185,6 +185,9 @@ final class AIWindowManager {
     ///   false = 被动失焦（切走 / 被本 App 其他窗口抢 key），焦点已自然转移，不夺回。
     private func performHide(restoreFocus: Bool) {
         guard let panel = panel, panel.isVisible, !isDismissing else { return }
+        // 危险工具确认 sheet 抢占 key 状态时父窗会 resignKey，属本窗内交互，
+        // 不视为被动切走（sheet 关闭后焦点自然回归父窗）
+        if panel.attachedSheet != nil { return }
         isDismissing = true
         hideGeneration += 1
         let token = hideGeneration

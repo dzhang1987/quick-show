@@ -40,9 +40,22 @@ struct ChatImageAttachment: Identifiable, Equatable, Codable {
     var dataURI: String { "data:image/jpeg;base64,\(base64JPEG)" }
 }
 
+// MARK: - 工具调用记录
+
+/// 一次工具调用记录（随会话持久化，UI 卡片渲染用）。
+/// 说明：字段与工具执行层（ToolCallStatus）对齐；`result` 为工具返回的 JSON 字符串。
+struct ToolCallRecord: Codable, Equatable {
+    let id: String
+    let name: String
+    var arguments: String
+    var result: String?
+    var status: ToolCallStatus
+}
+
 // MARK: - 消息模型
 
-/// 单条对话消息。相较于旧版新增 `images` 图片附件字段，旧数据缺失该字段时按空数组解码。
+/// 单条对话消息。相较于旧版新增 `images` 图片附件与 `toolCalls` 工具调用记录字段，
+/// 旧数据缺失这些字段时分别按空数组 / nil 解码，保证向后兼容。
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: Role
@@ -50,6 +63,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var state: MessageState
     /// 图片附件（仅用户消息会携带；助手消息恒为空）。
     var images: [ChatImageAttachment]
+    /// 助手消息发起的工具调用记录（仅带工具调用的助手消息会携带；普通消息为 nil）。
+    var toolCalls: [ToolCallRecord]?
 
     /// 消息角色。system 仅用于请求注入，不进入 UI 会话数组。
     enum Role: String, Codable {
@@ -75,20 +90,22 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         role: Role,
         content: String,
         state: MessageState,
-        images: [ChatImageAttachment] = []
+        images: [ChatImageAttachment] = [],
+        toolCalls: [ToolCallRecord]? = nil
     ) {
         self.id = id
         self.role = role
         self.content = content
         self.state = state
         self.images = images
+        self.toolCalls = toolCalls
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, content, state, images
+        case id, role, content, state, images, toolCalls
     }
 
-    /// 自定义解码：兼容旧持久化数据（缺失 images / titleNeedsSummary 等新字段）。
+    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls 等新字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -96,6 +113,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         content = try container.decode(String.self, forKey: .content)
         state = try container.decode(MessageState.self, forKey: .state)
         images = try container.decodeIfPresent([ChatImageAttachment].self, forKey: .images) ?? []
+        // 旧会话无此字段：decodeIfPresent 保证可正常恢复。
+        toolCalls = try container.decodeIfPresent([ToolCallRecord].self, forKey: .toolCalls)
     }
 }
 

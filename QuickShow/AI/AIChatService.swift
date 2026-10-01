@@ -68,6 +68,25 @@ enum APIProtocol: String, CaseIterable {
     case responses = "responses"
 }
 
+// MARK: - 流式事件
+
+/// 一轮流式响应中收集到的一次完整工具调用（分片累积后的结果）。
+struct CompletedToolCall: Equatable {
+    /// 工具调用 id（Chat Completions 的 `id` / Responses 的 `call_id`）。
+    let id: String
+    let name: String
+    /// 完整参数 JSON 字符串。
+    let arguments: String
+}
+
+/// 流式事件：文本增量（打字机）或一次完整的工具调用集合。
+/// 文本事件保持与旧 `AsyncStream<String>` 完全一致的行为；工具调用在流结束（[DONE] /
+/// response.completed / 自然关闭）时一次性产出，避免中途回合。
+enum AIStreamEvent {
+    case text(String)
+    case toolCalls([CompletedToolCall])
+}
+
 // MARK: - 模型列表项
 
 /// 模型列表中的一项：显示名 + 请求体 model 标识。
@@ -144,19 +163,142 @@ struct ChatContentPart: Codable {
     }
 }
 
-/// 发往 OpenAI 兼容端点的单条消息。
+/// 请求装配层的工具调用项（assistant 消息回传模型时使用）。
+/// 对应 Chat Completions 的 `tool_calls[]` 元素；Responses 会映射为 function_call 项。
+struct WireToolCall: Codable {
+    let id: String
+    let type: String
+    let function: WireToolCallFunction
+
+    init(id: String, name: String, arguments: String) {
+        self.id = id
+        self.type = "function"
+        self.function = WireToolCallFunction(name: name, arguments: arguments)
+    }
+}
+
+/// WireToolCall 的 function 载荷。
+struct WireToolCallFunction: Codable {
+    let name: String
+    let arguments: String
+}
+
+/// 发往 OpenAI 兼容端点的单条 wire 消息。
+/// 支持三种形态：普通 role+content、assistant 携带 tool_calls（content 可为 null）、
+/// role == "tool" 携带 tool_call_id 的工具结果。
+/// 说明：这是请求装配层类型，与展示层 ChatMessage 语义分离。
 struct ChatCompletionMessage: Codable {
     let role: String
-    let content: MessageContent
+    /// 普通消息恒非空；assistant 仅发起工具调用时可为 nil（编码为 null）。
+    let content: MessageContent?
+    /// assistant 回传的工具调用清单。
+    let toolCalls: [WireToolCall]?
+    /// role == "tool" 时对应的调用 id。
+    let toolCallId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, content
+        case toolCalls = "tool_calls"
+        case toolCallId = "tool_call_id"
+    }
 
     init(role: String, content: String) {
         self.role = role
         self.content = .text(content)
+        self.toolCalls = nil
+        self.toolCallId = nil
     }
 
     init(role: String, content: MessageContent) {
         self.role = role
         self.content = content
+        self.toolCalls = nil
+        self.toolCallId = nil
+    }
+
+    /// 完整构造：assistant tool_calls 或 tool 结果使用。
+    init(role: String, content: MessageContent?, toolCalls: [WireToolCall]?, toolCallId: String?) {
+        self.role = role
+        self.content = content
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
+    }
+
+    /// 构造一条工具结果消息（role == "tool"）。
+    static func toolResult(callID: String, content: String) -> ChatCompletionMessage {
+        ChatCompletionMessage(role: "tool", content: .text(content), toolCalls: nil, toolCallId: callID)
+    }
+
+    /// 自定义编码：content 为 nil 时显式写 null（assistant 仅含 tool_calls 的合法形态）；
+    /// tool_calls / tool_call_id 仅在存在时输出。
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(role, forKey: .role)
+        if let content {
+            try container.encode(content, forKey: .content)
+        } else {
+            try container.encodeNil(forKey: .content)
+        }
+        try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
+        try container.encodeIfPresent(toolCallId, forKey: .toolCallId)
+    }
+}
+
+/// Chat Completions 的工具声明。
+private struct ChatToolDefinition: Encodable {
+    let type: String
+    let function: ChatToolFunctionDefinition
+}
+
+private struct ChatToolFunctionDefinition: Encodable {
+    let name: String
+    let description: String
+    let parameters: JSONValue
+}
+
+/// Responses 的工具声明（扁平结构）。
+private struct ResponsesToolDefinition: Encodable {
+    let type: String
+    let name: String
+    let description: String
+    let parameters: JSONValue
+}
+
+/// 任意 JSON 值的 Encodable 包装：把工具参数 schema（[String: Any]）编码进请求体。
+struct JSONValue: Encodable {
+    let value: Any
+
+    init(_ value: Any) {
+        self.value = value
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try Self.encode(value, into: &container)
+    }
+
+    private static func encode(_ value: Any, into container: inout SingleValueEncodingContainer) throws {
+        switch value {
+        case let bool as Bool:
+            try container.encode(bool)
+        case let int as Int:
+            try container.encode(int)
+        case let double as Double:
+            try container.encode(double)
+        case let string as String:
+            try container.encode(string)
+        case let array as [Any]:
+            try container.encode(array.map { JSONValue($0) })
+        case let dict as [String: Any]:
+            try container.encode(dict.mapValues { JSONValue($0) })
+        case let number as NSNumber:
+            try container.encode(number.doubleValue)
+        case is NSNull:
+            try container.encodeNil()
+        default:
+            // 兜底：非标准 JSON 值退化为字符串，避免整体请求体编码失败。
+            try container.encode(String(describing: value))
+        }
     }
 }
 
@@ -165,6 +307,8 @@ private struct ChatCompletionRequestBody: Encodable {
     let model: String
     let messages: [ChatCompletionMessage]
     let stream: Bool
+    /// 启用的工具；为空时由合成编码自动省略该字段，保持旧行为。
+    let tools: [ChatToolDefinition]?
 }
 
 /// Responses 请求体：system prompt 走 instructions，对话历史走 input。
@@ -172,14 +316,49 @@ private struct ResponsesRequestBody: Encodable {
     let model: String
     /// 可选；nil 时由 Encodable 合成逻辑（encodeIfPresent）自动省略该字段。
     let instructions: String?
-    let input: [ResponsesInputMessage]
+    let input: [ResponsesInputItem]
     let stream: Bool
+    let tools: [ResponsesToolDefinition]?
 }
 
-/// Responses 的 input 单条消息（role 仅 user/assistant）。
-private struct ResponsesInputMessage: Encodable {
-    let role: String
-    let content: ResponsesContent
+/// Responses 的 input 项：普通 message / function_call / function_call_output 三种变体。
+/// 采用单结构 + 自定义编码，按类型只输出相关字段，避免 null 污染请求体。
+private struct ResponsesInputItem: Encodable {
+    let role: String?
+    let content: ResponsesContent?
+    let type: String?
+    let callId: String?
+    let name: String?
+    let arguments: String?
+    let output: String?
+
+    enum CodingKeys: String, CodingKey {
+        case role, content, type, name, arguments, output
+        case callId = "call_id"
+    }
+
+    static func message(role: String, content: ResponsesContent) -> ResponsesInputItem {
+        ResponsesInputItem(role: role, content: content, type: nil, callId: nil, name: nil, arguments: nil, output: nil)
+    }
+
+    static func functionCall(callId: String, name: String, arguments: String) -> ResponsesInputItem {
+        ResponsesInputItem(role: nil, content: nil, type: "function_call", callId: callId, name: name, arguments: arguments, output: nil)
+    }
+
+    static func functionCallOutput(callId: String, output: String) -> ResponsesInputItem {
+        ResponsesInputItem(role: nil, content: nil, type: "function_call_output", callId: callId, name: nil, arguments: nil, output: output)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encodeIfPresent(type, forKey: .type)
+        try container.encodeIfPresent(callId, forKey: .callId)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(arguments, forKey: .arguments)
+        try container.encodeIfPresent(output, forKey: .output)
+    }
 }
 
 /// Responses 的内容：纯文本编码为字符串，含图时编码为片段数组。
@@ -232,15 +411,75 @@ struct ResponsesContentPart: Encodable {
     }
 }
 
-/// Chat Completions 的 SSE 增量分片：只关心 choices[0].delta.content。
+/// Chat Completions 的 SSE 增量分片：choices[0].delta 的 content 或 tool_calls 分片。
 private struct StreamChunk: Decodable {
     struct Choice: Decodable {
         struct Delta: Decodable {
             let content: String?
+            let toolCalls: [DeltaToolCall]?
+
+            enum CodingKeys: String, CodingKey {
+                case content
+                case toolCalls = "tool_calls"
+            }
         }
         let delta: Delta?
     }
     let choices: [Choice]
+}
+
+/// Chat Completions 的 tool_calls 分片：name/id/type 通常首片给出，arguments 逐片累积。
+private struct DeltaToolCall: Decodable {
+    struct DeltaFunction: Decodable {
+        let name: String?
+        let arguments: String?
+    }
+    let index: Int?
+    let id: String?
+    let type: String?
+    let function: DeltaFunction?
+}
+
+/// Chat Completions tool_calls 分片累积器：按 index 归并 name 与 arguments。
+/// 全程在 MainActor 上使用，无并发访问。
+private final class ChatToolCallAccumulator {
+    private struct Partial {
+        var id: String?
+        var name: String?
+        var arguments: String = ""
+    }
+
+    private var byIndex: [Int: Partial] = [:]
+
+    func ingest(_ deltas: [DeltaToolCall]) {
+        for delta in deltas {
+            let index = delta.index ?? 0
+            var partial = byIndex[index] ?? Partial()
+            if let id = delta.id, !id.isEmpty { partial.id = id }
+            if let name = delta.function?.name, !name.isEmpty {
+                // name 一般整块到达；若端点分片则拼接，保证不丢内容。
+                partial.name = (partial.name ?? "") + name
+            }
+            if let args = delta.function?.arguments { partial.arguments += args }
+            byIndex[index] = partial
+        }
+    }
+
+    var isEmpty: Bool { byIndex.isEmpty }
+
+    func clear() { byIndex.removeAll() }
+
+    /// 按 index 顺序产出完整调用；name 缺失的分片跳过。
+    var completed: [CompletedToolCall] {
+        byIndex.keys.sorted().compactMap { index in
+            guard let partial = byIndex[index], let name = partial.name, !name.isEmpty else { return nil }
+            return CompletedToolCall(
+                id: partial.id ?? UUID().uuidString,
+                name: name,
+                arguments: partial.arguments
+            )
+        }
+    }
 }
 
 /// Responses 的 SSE 事件：按顶层 type 分流，字段宽松可选（缺失即忽略该事件）。
@@ -253,11 +492,35 @@ private struct ResponsesEvent: Decodable {
         let error: ErrorBody?
     }
 
+    /// output_item 载荷：type == "function_call" 时携带 call_id/name/arguments。
+    struct OutputItem: Decodable {
+        let type: String?
+        let id: String?
+        let callId: String?
+        let name: String?
+        let arguments: String?
+
+        enum CodingKeys: String, CodingKey {
+            case type, id, name, arguments
+            case callId = "call_id"
+        }
+    }
+
     let type: String?
-    let delta: String?      // response.output_text.delta 的增量文本
+    let delta: String?      // response.output_text.delta / function_call_arguments.delta 的增量
     let message: String?    // 顶层错误信息（type == "error" 时）
     let error: ErrorBody?
     let response: ResponseBody?
+    let item: OutputItem?   // response.output_item.added / done 的 item
+    let itemId: String?     // response.function_call_arguments.* 的 item_id
+    let outputIndex: Int?   // 无 item_id 时按 output_index 归并
+    let arguments: String?  // response.function_call_arguments.done 的完整参数
+
+    enum CodingKeys: String, CodingKey {
+        case type, delta, message, error, response, item, arguments
+        case itemId = "item_id"
+        case outputIndex = "output_index"
+    }
 
     /// 依次尝试顶层 message / error.message / response.error.message，返回可读错误信息。
     var resolvedErrorMessage: String {
@@ -267,6 +530,59 @@ private struct ResponsesEvent: Decodable {
             }
         }
         return "流式响应异常中断。"
+    }
+}
+
+/// Responses function_call 累积器：按 item_id（缺失时回退 output_index）归并 call_id/name/arguments。
+/// 全程在 MainActor 上使用，无并发访问。
+private final class ResponsesToolCallAccumulator {
+    private struct Partial {
+        var callId: String?
+        var name: String?
+        var arguments: String = ""
+    }
+
+    private var byKey: [String: Partial] = [:]
+    private var order: [String] = []
+
+    private func ensure(_ key: String) -> Partial {
+        if let existing = byKey[key] { return existing }
+        order.append(key)
+        return Partial()
+    }
+
+    /// 登记/更新一个 function_call 项（added / done / arguments.done 共用）。
+    func register(key: String, callID: String?, name: String?, arguments: String?) {
+        var partial = ensure(key)
+        if let callID, !callID.isEmpty { partial.callId = callID }
+        if let name, !name.isEmpty { partial.name = name }
+        if let arguments, !arguments.isEmpty { partial.arguments = arguments }
+        byKey[key] = partial
+    }
+
+    func appendArguments(key: String, delta: String) {
+        var partial = ensure(key)
+        partial.arguments += delta
+        byKey[key] = partial
+    }
+
+    var isEmpty: Bool { byKey.isEmpty }
+
+    func clear() {
+        byKey.removeAll()
+        order.removeAll()
+    }
+
+    /// 按出现顺序产出完整调用；name/callId 缺失的项跳过（无法回传结果）。
+    var completed: [CompletedToolCall] {
+        order.compactMap { key in
+            guard let partial = byKey[key], let name = partial.name, !name.isEmpty else { return nil }
+            return CompletedToolCall(
+                id: partial.callId ?? key,
+                name: name,
+                arguments: partial.arguments
+            )
+        }
     }
 }
 
@@ -286,25 +602,51 @@ private struct ModelListResponse: Decodable {
     let data: [Item]?
 }
 
-/// Chat Completions 非流式响应：取 choices[0].message.content。
+/// Chat Completions 非流式响应：取 choices[0].message.content 与 tool_calls。
 private struct ChatCompletionResponse: Decodable {
     struct Choice: Decodable {
         struct Message: Decodable {
             let content: String?
+            let toolCalls: [ResponseToolCall]?
+
+            enum CodingKeys: String, CodingKey {
+                case content
+                case toolCalls = "tool_calls"
+            }
         }
         let message: Message?
     }
     let choices: [Choice]?
 }
 
-/// Responses 非流式响应：拼接 output[].content[] 中 type == output_text 的文本。
+/// 非流式响应中的工具调用项（Chat Completions）。
+private struct ResponseToolCall: Decodable {
+    struct Function: Decodable {
+        let name: String?
+        let arguments: String?
+    }
+    let id: String?
+    let function: Function?
+}
+
+/// Responses 非流式响应：拼接 output[].content[] 中 type == output_text 的文本，
+/// 并解析 output[] 中 type == "function_call" 的工具调用项。
 private struct ResponsesResponse: Decodable {
     struct Output: Decodable {
         struct Content: Decodable {
             let type: String?
             let text: String?
         }
+        let type: String?
+        let callId: String?
+        let name: String?
+        let arguments: String?
         let content: [Content]?
+
+        enum CodingKeys: String, CodingKey {
+            case type, name, arguments, content
+            case callId = "call_id"
+        }
     }
     let output: [Output]?
 }
@@ -336,9 +678,21 @@ final class AIChatService {
     }
 
     /// 用户填写的根地址，如 `https://api.openai.com/v1`。
+    /// 未配置时回退环境变量 `QUICKSHOW_AI_BASE_URL`（仅内存兜底，不落盘）。
     var baseURL: String {
-        get { UserDefaults.standard.string(forKey: ConfigKey.baseURL) ?? "" }
+        get {
+            let stored = UserDefaults.standard.string(forKey: ConfigKey.baseURL) ?? ""
+            if !stored.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return stored }
+            return environmentValue("QUICKSHOW_AI_BASE_URL") ?? ""
+        }
         set { UserDefaults.standard.set(newValue, forKey: ConfigKey.baseURL) }
+    }
+
+    /// 读取环境变量兜底值：缺失或空白返回 nil。
+    private func environmentValue(_ key: String) -> String? {
+        guard let raw = ProcessInfo.processInfo.environment[key] else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     var model: String {
@@ -499,6 +853,8 @@ final class AIChatService {
                 return stored
             }
             if let first = list.first { return first.modelId }
+            // 无任何配置时回退环境变量 `QUICKSHOW_AI_MODEL`（仅内存兜底）。
+            if let envModel = environmentValue("QUICKSHOW_AI_MODEL") { return envModel }
             return stored
         }
         set {
@@ -531,7 +887,8 @@ final class AIChatService {
     private let keychainService = "com.dzhang.quickshow.ai"
     private let keychainAccount = "apiKey"
 
-    /// 读取 API Key。读不到（未配置/Keychain 异常）返回 nil —— 静默降级，不抛出。
+    /// 读取 API Key。读不到（未配置/Keychain 异常）时回退环境变量 `QUICKSHOW_AI_API_KEY`
+    /// （仅内存兜底，绝不写入 Keychain）；仍无则返回 nil。
     var apiKey: String? {
         var query = baseKeychainQuery()
         query[kSecReturnData as String] = true
@@ -539,15 +896,17 @@ final class AIChatService {
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              let key = String(data: data, encoding: .utf8) else {
-            // 诊断日志：status 常见值（SecBase.h）——-25300 errSecItemNotFound 条目不存在；
-            // -34018 errSecInteractionNotAllowed 无 UI 交互场景；-60007 errSecAuthFailed 签名/授权被拒
-            logger.warning("Keychain 读取失败 status=\(status) dataNil=\(item == nil)")
-            return nil
+        if status == errSecSuccess,
+           let data = item as? Data,
+           let key = String(data: data, encoding: .utf8) {
+            return key
         }
-        return key
+        // 环境变量兜底：优先内存注入，避免把 CI/测试用 Key 落盘。
+        if let envKey = environmentValue("QUICKSHOW_AI_API_KEY") { return envKey }
+        // 诊断日志：status 常见值（SecBase.h）——-25300 errSecItemNotFound 条目不存在；
+        // -34018 errSecInteractionNotAllowed 无 UI 交互场景；-60007 errSecAuthFailed 签名/授权被拒
+        logger.warning("Keychain 读取失败 status=\(status) dataNil=\(item == nil)")
+        return nil
     }
 
     /// 保存 API Key（删除重建策略）。任何 Keychain 错误均静默忽略。
@@ -585,21 +944,22 @@ final class AIChatService {
     /// 当前进行中的生产任务，供 abort() 取消。
     private var currentTask: Task<Void, Never>?
 
-    /// 发起一次流式对话，逐 token 产出增量文本。
+    /// 发起一次流式对话，产出文本增量或完整工具调用事件。
+    /// - 文本事件行为与旧 `AsyncThrowingStream<String>` 完全一致；工具调用在流结束时整批产出。
     /// - 错误通过 AsyncThrowingStream 抛出，由 State 层呈现。
-    func send(messages: [ChatCompletionMessage]) -> AsyncThrowingStream<String, Error> {
+    func send(messages: [ChatCompletionMessage]) -> AsyncThrowingStream<AIStreamEvent, Error> {
         // 重复发送前先中止上一次请求，避免并发流交叉。
         abort()
 
-        return AsyncThrowingStream<String, Error> { continuation in
+        return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
             let task = Task { [weak self] in
                 guard let self else {
                     continuation.finish()
                     return
                 }
                 do {
-                    try await self.performStream(messages: messages) { token in
-                        continuation.yield(token)
+                    try await self.performStream(messages: messages) { event in
+                        continuation.yield(event)
                     }
                     continuation.finish()
                 } catch is CancellationError {
@@ -670,11 +1030,13 @@ final class AIChatService {
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        // 非流式补全用于标题摘要等轻量后台请求：不带工具，避免摘要器误触发工具调用。
         request.httpBody = try encodeRequestBody(
             proto: proto,
             model: resolvedModel,
             messages: messages,
-            stream: false
+            stream: false,
+            includeTools: false
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -683,18 +1045,32 @@ final class AIChatService {
             let body = String(data: data, encoding: .utf8) ?? ""
             throw AIChatError.http(status: http.statusCode, message: extractErrorMessage(from: body))
         }
-        return try extractCompletionText(proto: proto, data: data)
+        // 非流式路径同样解析 tool_calls（当前调用方只取文本，解析能力保持一致）。
+        return try extractCompletion(proto: proto, data: data).text
     }
 
-    /// 从非流式响应中提取文本。
-    private func extractCompletionText(proto: APIProtocol, data: Data) throws -> String {
+    /// 从非流式响应中提取文本与工具调用（两种协议）。
+    /// 文本为空但存在工具调用时不视为错误；两者均空才抛 invalidResponse。
+    private func extractCompletion(proto: APIProtocol, data: Data) throws -> (text: String, toolCalls: [CompletedToolCall]) {
         if proto == .responses {
             guard let decoded = try? JSONDecoder().decode(ResponsesResponse.self, from: data) else {
                 throw AIChatError.invalidResponse
             }
             let outputs: [ResponsesResponse.Output] = decoded.output ?? []
             var pieces: [String] = []
+            var calls: [CompletedToolCall] = []
             for output in outputs {
+                if output.type == "function_call" {
+                    let name = output.name ?? ""
+                    if !name.isEmpty {
+                        calls.append(CompletedToolCall(
+                            id: output.callId ?? UUID().uuidString,
+                            name: name,
+                            arguments: output.arguments ?? ""
+                        ))
+                    }
+                    continue
+                }
                 let contents: [ResponsesResponse.Output.Content] = output.content ?? []
                 for content in contents {
                     if content.type == "output_text" || content.type == nil {
@@ -703,15 +1079,24 @@ final class AIChatService {
                 }
             }
             let text = pieces.joined()
-            guard !text.isEmpty else { throw AIChatError.invalidResponse }
-            return text
+            guard !text.isEmpty || !calls.isEmpty else { throw AIChatError.invalidResponse }
+            return (text, calls)
         }
-        guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data),
-              let text = decoded.choices?.first?.message?.content,
-              !text.isEmpty else {
+        guard let decoded = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) else {
             throw AIChatError.invalidResponse
         }
-        return text
+        let message = decoded.choices?.first?.message
+        let text = message?.content ?? ""
+        let calls = (message?.toolCalls ?? []).compactMap { raw -> CompletedToolCall? in
+            guard let name = raw.function?.name, !name.isEmpty else { return nil }
+            return CompletedToolCall(
+                id: raw.id ?? UUID().uuidString,
+                name: name,
+                arguments: raw.function?.arguments ?? ""
+            )
+        }
+        guard !text.isEmpty || !calls.isEmpty else { throw AIChatError.invalidResponse }
+        return (text, calls)
     }
 
     // MARK: 内部实现
@@ -721,10 +1106,10 @@ final class AIChatService {
         var received = false
     }
 
-    /// 执行一次 SSE 请求并逐 token 回调（MainActor 上下文）。
+    /// 执行一次 SSE 请求并逐事件回调（MainActor 上下文）。
     private func performStream(
         messages: [ChatCompletionMessage],
-        onToken: (String) -> Void
+        onEvent: (AIStreamEvent) -> Void
     ) async throws {
         // 协议在请求发起时一次性快照，避免流进行中被设置变更影响分流。
         let proto = apiProtocol
@@ -746,7 +1131,8 @@ final class AIChatService {
             proto: proto,
             model: resolvedModel,
             messages: messages,
-            stream: true
+            stream: true,
+            includeTools: true
         )
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -787,6 +1173,10 @@ final class AIChatService {
             }
         }
 
+        // 工具调用分片累积器（每轮流各自独立）。
+        let chatAccumulator = ChatToolCallAccumulator()
+        let responsesAccumulator = ResponsesToolCallAccumulator()
+
         do {
             streaming: for try await line in bytes.lines {
                 try Task.checkCancellation()
@@ -807,27 +1197,75 @@ final class AIChatService {
                     case "response.output_text.delta":
                         guard let delta = event.delta, !delta.isEmpty else { continue }
                         markFirstToken()
-                        onToken(delta)
+                        onEvent(.text(delta))
+                    case "response.output_item.added", "response.output_item.done":
+                        // function_call 项登记：added 记 call_id/name，done 时携带最终 arguments。
+                        guard let item = event.item, item.type == "function_call" else { continue }
+                        let key = item.id ?? "index-\(event.outputIndex ?? 0)"
+                        responsesAccumulator.register(
+                            key: key,
+                            callID: item.callId,
+                            name: item.name,
+                            arguments: item.arguments
+                        )
+                        markFirstToken()
+                    case "response.function_call_arguments.delta":
+                        guard let delta = event.delta, !delta.isEmpty else { continue }
+                        let key = event.itemId ?? "index-\(event.outputIndex ?? 0)"
+                        responsesAccumulator.appendArguments(key: key, delta: delta)
+                        markFirstToken()
+                    case "response.function_call_arguments.done":
+                        guard let itemID = event.itemId else { continue }
+                        responsesAccumulator.register(
+                            key: itemID,
+                            callID: nil,
+                            name: nil,
+                            arguments: event.arguments
+                        )
                     case "response.completed":
+                        if !responsesAccumulator.isEmpty {
+                            onEvent(.toolCalls(responsesAccumulator.completed))
+                            responsesAccumulator.clear()
+                        }
                         break streaming // 正常结束
                     case "response.failed", "response.error", "error":
                         throw AIChatError.streamError(event.resolvedErrorMessage)
                     default:
-                        continue // response.created / output_item.* / content_part.* 等一律忽略
+                        continue // response.created / content_part.* 等一律忽略
                     }
                 } else {
-                    // Chat Completions：data: {...} 取 delta.content，[DONE] 结束。
-                    if payload == "[DONE]" { break streaming }
+                    // Chat Completions：data: {...} 取 delta.content / delta.tool_calls，[DONE] 结束。
+                    if payload == "[DONE]" {
+                        if !chatAccumulator.isEmpty {
+                            onEvent(.toolCalls(chatAccumulator.completed))
+                            chatAccumulator.clear()
+                        }
+                        break streaming
+                    }
                     // 个别分片解析失败不中断整段流（如 usage-only chunk）。
-                    guard let chunk = try? JSONDecoder().decode(StreamChunk.self, from: data) else {
+                    guard let chunk = try? JSONDecoder().decode(StreamChunk.self, from: data),
+                          let delta = chunk.choices.first?.delta else {
                         continue
                     }
-                    guard let delta = chunk.choices.first?.delta?.content, !delta.isEmpty else {
-                        continue
+                    if let content = delta.content, !content.isEmpty {
+                        markFirstToken()
+                        onEvent(.text(content))
                     }
-                    markFirstToken()
-                    onToken(delta)
+                    if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
+                        chatAccumulator.ingest(toolCalls)
+                        markFirstToken()
+                    }
                 }
+            }
+            // 流自然结束（部分端点无 [DONE]/completed 哨兵）：补发累积的工具调用。
+            if proto == .responses {
+                if !responsesAccumulator.isEmpty {
+                    onEvent(.toolCalls(responsesAccumulator.completed))
+                    responsesAccumulator.clear()
+                }
+            } else if !chatAccumulator.isEmpty {
+                onEvent(.toolCalls(chatAccumulator.completed))
+                chatAccumulator.clear()
             }
         } catch is CancellationError {
             // 区分「用户主动中止」与「首 token 超时」：超时需向 State 抛出明确错误。
@@ -848,23 +1286,29 @@ final class AIChatService {
     }
 
     /// 按协议构造请求体：
-    /// - chat：`{model, messages:[{role,content}], stream}`（system prompt 维持注入 messages[0]）
-    /// - responses：`{model, instructions?, input:[{role,content}], stream}`（system 转 instructions）
+    /// - chat：`{model, messages:[...], stream, tools?}`（system prompt 维持注入 messages[0]）
+    /// - responses：`{model, instructions?, input:[...], stream, tools?}`（system 转 instructions）
+    /// `includeTools` 为 false 或无启用工具时不携带 tools 字段（保持旧行为）。
     private func encodeRequestBody(
         proto: APIProtocol,
         model: String,
         messages: [ChatCompletionMessage],
-        stream: Bool
+        stream: Bool,
+        includeTools: Bool
     ) throws -> Data {
+        // 启用的工具声明：为空时返回 nil，合成编码自动省略该字段。
+        let chatTools = includeTools ? chatToolDefinitions() : nil
+        let responsesTools = includeTools ? responsesToolDefinitions() : nil
+
         guard proto == .responses else {
             return try JSONEncoder().encode(
-                ChatCompletionRequestBody(model: model, messages: messages, stream: stream)
+                ChatCompletionRequestBody(model: model, messages: messages, stream: stream, tools: chatTools)
             )
         }
 
         // 从消息数组提取 system 作为 instructions；缺失时回退配置中的 systemPrompt。
         var instructions: String?
-        if let system = messages.first(where: { $0.role == "system" })?.content.plainText {
+        if let system = messages.first(where: { $0.role == "system" })?.content?.plainText {
             let trimmed = system.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty { instructions = trimmed }
         }
@@ -873,14 +1317,78 @@ final class AIChatService {
             if !fallback.isEmpty { instructions = fallback }
         }
 
-        // 对话历史（非 system）映射为 input，role 仅 user/assistant。
-        let input = messages
-            .filter { $0.role != "system" }
-            .map { ResponsesInputMessage(role: $0.role, content: ResponsesContent(from: $0.content)) }
+        // 对话历史（非 system）映射为 input：普通消息、assistant function_call、工具结果三类。
+        let input = responsesInput(from: messages)
 
         return try JSONEncoder().encode(
-            ResponsesRequestBody(model: model, instructions: instructions, input: input, stream: stream)
+            ResponsesRequestBody(model: model, instructions: instructions, input: input, stream: stream, tools: responsesTools)
         )
+    }
+
+    /// 基于启用的工具构造 Chat Completions 工具声明；无工具返回 nil。
+    private func chatToolDefinitions() -> [ChatToolDefinition]? {
+        let tools = AIToolRegistry.shared.enabledTools()
+        guard !tools.isEmpty else { return nil }
+        return tools.map { tool in
+            ChatToolDefinition(
+                type: "function",
+                function: ChatToolFunctionDefinition(
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: JSONValue(tool.parametersSchema)
+                )
+            )
+        }
+    }
+
+    /// 基于启用的工具构造 Responses 工具声明；无工具返回 nil。
+    private func responsesToolDefinitions() -> [ResponsesToolDefinition]? {
+        let tools = AIToolRegistry.shared.enabledTools()
+        guard !tools.isEmpty else { return nil }
+        return tools.map { tool in
+            ResponsesToolDefinition(
+                type: "function",
+                name: tool.name,
+                description: tool.description,
+                parameters: JSONValue(tool.parametersSchema)
+            )
+        }
+    }
+
+    /// 把 wire 消息数组映射为 Responses input 项：
+    /// - system：跳过（走 instructions）
+    /// - tool：function_call_output（call_id + output 文本）
+    /// - assistant：有文本则输出 assistant message，其 tool_calls 逐条输出 function_call 项
+    /// - 其他：普通 role + content 消息
+    private func responsesInput(from messages: [ChatCompletionMessage]) -> [ResponsesInputItem] {
+        var items: [ResponsesInputItem] = []
+        for message in messages {
+            switch message.role {
+            case "system":
+                continue
+            case "tool":
+                items.append(.functionCallOutput(
+                    callId: message.toolCallId ?? "",
+                    output: message.content?.plainText ?? ""
+                ))
+            case "assistant":
+                if let content = message.content, let text = content.plainText, !text.isEmpty {
+                    items.append(.message(role: "assistant", content: ResponsesContent(from: content)))
+                }
+                for call in message.toolCalls ?? [] {
+                    items.append(.functionCall(
+                        callId: call.id,
+                        name: call.function.name,
+                        arguments: call.function.arguments
+                    ))
+                }
+            default:
+                if let content = message.content {
+                    items.append(.message(role: message.role, content: ResponsesContent(from: content)))
+                }
+            }
+        }
+        return items
     }
 
     /// 从错误 body 中提取 `error.message`，失败则回退为原始文本前缀。

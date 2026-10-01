@@ -835,6 +835,22 @@ private struct ChatMessageRow: View, Equatable {
 
     @ViewBuilder
     private var assistantContent: some View {
+        // 文本气泡与工具调用卡片纵向排列：一轮助手消息可能兼有文本与工具调用，
+        // 纯工具调用轮（无文本）只渲染卡片、不留空文本气泡；卡片与气泡同宽
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            assistantTextPart
+            if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                AIToolCallCardView(toolCalls: toolCalls)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// 助手消息的文本部分（按状态分派）；纯工具调用消息（无文本）不渲染空气泡。
+    @ViewBuilder
+    private var assistantTextPart: some View {
+        // 有工具调用且文本为空时跳过文本气泡（工具卡片单独成段）
+        let skipsTextBubble = message.content.isEmpty && !(message.toolCalls?.isEmpty ?? true)
         switch message.state {
         case .sending, .streaming:
             // 流式/首 token 等待：纯文本增量 + 呼吸态（流结束后切完整 AST 渲染）
@@ -843,11 +859,15 @@ private struct ChatMessageRow: View, Equatable {
             FailedMessageView(errorText: errorText, onRetry: onRetry)
         case .done:
             // 落定态：完整块级 Markdown 渲染（AIChatMarkdownView）
-            AssistantMarkdownView(content: message.content)
+            if !skipsTextBubble {
+                AssistantMarkdownView(content: message.content)
+            }
         case .aborted:
             // 中止：保留半截内容的富渲染 + 弱标记
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                AssistantMarkdownView(content: message.content)
+                if !skipsTextBubble {
+                    AssistantMarkdownView(content: message.content)
+                }
                 AbortedTag()
             }
         }
