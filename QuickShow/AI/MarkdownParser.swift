@@ -2,13 +2,15 @@ import Foundation
 
 // MARK: - 行内 Token
 
-/// 行内 Markdown 解析结果（粗体 / 斜体 / 行内代码 / 链接 / 纯文本）。
+/// 行内 Markdown 解析结果（粗体 / 斜体 / 行内代码 / 链接 / 数学公式 / 纯文本）。
 indirect enum InlineToken: Equatable {
     case text(String)
     case bold([InlineToken])
     case italic([InlineToken])
     case code(String)
     case link(text: [InlineToken], url: String)
+    /// 行内数学公式：已剥离定界符（$…$ / \(…\)）的纯 LaTeX 源串。
+    case math(String)
 }
 
 // MARK: - 列表项
@@ -42,6 +44,8 @@ indirect enum MarkdownBlock: Equatable {
     case blockquote([MarkdownBlock])
     case table(MarkdownTable)
     case codeBlock(language: String?, code: String)
+    /// 块级数学公式：已剥离定界符（$$…$$ / \[…\]）的纯 LaTeX 源串。
+    case mathBlock(latex: String)
 }
 
 // MARK: - 解析器（纯函数）
@@ -89,6 +93,14 @@ enum MarkdownParser {
                     language: tag.isEmpty ? nil : tag,
                     code: codeLines.joined(separator: "\n")
                 ))
+                continue
+            }
+
+            // 块级数学公式（$$…$$ / \[…\]）：单行与跨行两种形态；必须放在围栏代码块之后。
+            if let math = parseMathBlock(lines: lines, start: index) {
+                flushParagraph()
+                blocks.append(math.block)
+                index = math.next
                 continue
             }
 
@@ -169,6 +181,19 @@ enum MarkdownParser {
         while index < chars.count {
             let current = chars[index]
 
+            // 行内数学 \(...\)：必须在反斜杠转义分支之前识别，否则 \( 会被当转义吃掉。
+            if current == "\\", index + 1 < chars.count, chars[index + 1] == "(" {
+                if let close = findClosingDelimiter(chars, from: index + 2, first: "\\", second: ")") {
+                    let inner = String(chars[(index + 2)..<close])
+                    if !inner.isEmpty {
+                        flush()
+                        tokens.append(.math(inner))
+                        index = close + 2
+                        continue
+                    }
+                }
+            }
+
             // 反斜杠转义。
             if current == "\\", index + 1 < chars.count {
                 buffer.append(chars[index + 1])
@@ -181,6 +206,14 @@ enum MarkdownParser {
                 flush()
                 tokens.append(.code(String(chars[(index + 1)..<close])))
                 index = close + 1
+                continue
+            }
+
+            // 行内数学 $...$（在行内代码之后、粗体斜体之前；货币启发式保护见 parseInlineMath）。
+            if current == "$", let math = parseInlineMath(chars, from: index) {
+                flush()
+                tokens.append(.math(math.content))
+                index = math.next
                 continue
             }
 
@@ -220,6 +253,55 @@ enum MarkdownParser {
         }
         flush()
         return tokens
+    }
+
+    // MARK: - 内部：块级数学
+
+    /// 块级数学公式解析：支持 `$$` 跨行 / 单行 `$$…$$` 与 `\[` 跨行 / 单行 `\[…\]`。
+    /// 跨行未闭合时，把剩余全部行收进公式（与围栏代码块同策略）。
+    private static func parseMathBlock(lines: [String], start: Int) -> (block: MarkdownBlock, next: Int)? {
+        let trimmed = lines[start].trimmingCharacters(in: .whitespaces)
+
+        // \[ … \] 跨行
+        if trimmed == "\\[" {
+            return collectMathBody(lines: lines, start: start, closer: "\\]")
+        }
+        // \[ … \] 单行
+        if trimmed.hasPrefix("\\["), trimmed.hasSuffix("\\]"), trimmed.count > 4 {
+            let inner = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
+            return (.mathBlock(latex: inner), start + 1)
+        }
+
+        // $$ … $$ 跨行
+        if trimmed == "$$" {
+            return collectMathBody(lines: lines, start: start, closer: "$$")
+        }
+        // $$ … $$ 单行
+        if trimmed.hasPrefix("$$"), trimmed.hasSuffix("$$"), trimmed.count > 4 {
+            let inner = String(trimmed.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespaces)
+            return (.mathBlock(latex: inner), start + 1)
+        }
+
+        return nil
+    }
+
+    /// 从 start 的下一行起收集到 closer 行；未闭合则把剩余全部收进。
+    private static func collectMathBody(lines: [String], start: Int, closer: String) -> (block: MarkdownBlock, next: Int) {
+        var body: [String] = []
+        var index = start + 1
+        while index < lines.count {
+            let candidate = lines[index].trimmingCharacters(in: .whitespaces)
+            if candidate == closer {
+                return (.mathBlock(latex: normalizeMathBody(body)), index + 1)
+            }
+            body.append(lines[index])
+            index += 1
+        }
+        return (.mathBlock(latex: normalizeMathBody(body)), index)
+    }
+
+    private static func normalizeMathBody(_ body: [String]) -> String {
+        body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     // MARK: - 内部：标题
@@ -342,6 +424,43 @@ enum MarkdownParser {
         while index < chars.count {
             if chars[index] == marker { return index }
             index += 1
+        }
+        return nil
+    }
+
+    /// 查找双字符定界符序列（如 `\)`）的起始位置。
+    private static func findClosingDelimiter(_ chars: [Character], from: Int, first: Character, second: Character) -> Int? {
+        var index = from
+        while index + 1 < chars.count {
+            if chars[index] == first, chars[index + 1] == second { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    /// 行内数学 `$...$` 识别 + 货币保护启发式。
+    /// 开定界符：`$` 后必须紧跟非 `$`、非空白字符；
+    /// 闭定界符：前一个字符不得为空白，后一个字符不得为数字，且不能是 `$$` 的开头。
+    /// 不满足任一条件则返回 nil，交由调用方按普通字符处理（如「$5 和 $10」不会被误判）。
+    private static func parseInlineMath(_ chars: [Character], from: Int) -> (content: String, next: Int)? {
+        guard from + 1 < chars.count else { return nil }
+        let next = chars[from + 1]
+        guard next != "$", !next.isWhitespace else { return nil }
+
+        var close = from + 1
+        while close < chars.count {
+            if chars[close] == "$" {
+                let prev = chars[close - 1]
+                let afterIsDigit = close + 1 < chars.count && chars[close + 1].isNumber
+                let afterIsDollar = close + 1 < chars.count && chars[close + 1] == "$"
+                if !prev.isWhitespace, !afterIsDigit, !afterIsDollar {
+                    let content = String(chars[(from + 1)..<close])
+                    if !content.isEmpty {
+                        return (content, close + 1)
+                    }
+                }
+            }
+            close += 1
         }
         return nil
     }

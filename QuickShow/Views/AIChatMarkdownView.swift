@@ -57,10 +57,13 @@ private struct MarkdownBlockView: View {
             headingView(level: level, inlines: inlines)
 
         case let .paragraph(inlines):
-            Text(MarkdownInline.render(inlines))
+            MarkdownInlineText(inlines: inlines)
                 .lineSpacing(6)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+        case let .mathBlock(latex):
+            mathBlockView(latex)
 
         case let .orderedList(items):
             MarkdownListView(items: items)
@@ -85,28 +88,58 @@ private struct MarkdownBlockView: View {
         switch level {
         case 1:
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                Text(MarkdownInline.render(inlines, bodyColor: Theme.Colors.contentPrimary))
-                    .font(Theme.Typography.text(18, .bold))
-                    .foregroundColor(Theme.Colors.contentPrimary)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                MarkdownInlineText(
+                    inlines: inlines,
+                    bodyColor: Theme.Colors.contentPrimary,
+                    baseSize: 18,
+                    weight: .bold,
+                    explicitColor: Theme.Colors.contentPrimary
+                )
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
                 Rectangle()
                     .fill(Theme.Colors.cardStroke)
                     .frame(height: Theme.Layout.dividerHeight)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case 2:
-            Text(MarkdownInline.render(inlines, bodyColor: Theme.Colors.contentPrimary))
-                .font(Theme.Typography.text(16, .semibold))
-                .foregroundColor(Theme.Colors.contentPrimary)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            MarkdownInlineText(
+                inlines: inlines,
+                bodyColor: Theme.Colors.contentPrimary,
+                baseSize: 16,
+                weight: .semibold,
+                explicitColor: Theme.Colors.contentPrimary
+            )
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
         default:
-            Text(MarkdownInline.render(inlines, bodyColor: Theme.Colors.contentPrimary))
-                .font(Theme.Typography.text(14, .semibold))
+            MarkdownInlineText(
+                inlines: inlines,
+                bodyColor: Theme.Colors.contentPrimary,
+                baseSize: 14,
+                weight: .semibold,
+                explicitColor: Theme.Colors.contentPrimary
+            )
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 块级公式：居中展示（display 模式 14pt），上下 4pt 呼吸；
+    /// 光栅化失败时降级为等宽原始 LaTeX 文本。
+    @ViewBuilder
+    private func mathBlockView(_ latex: String) -> some View {
+        let nsColor = MathRasterizer.resolvedColor(Theme.Colors.contentPrimary, appearance: NSApp.effectiveAppearance)
+        if MathRasterizer.rasterize(latex: latex, pointSize: 14, color: nsColor, isDisplay: true) != nil {
+            MathBlockView(latex: latex, fontSize: 14, color: Theme.Colors.contentPrimary)
+                .padding(.vertical, Theme.Spacing.sm)
+                .frame(maxWidth: .infinity, alignment: .center)
+        } else {
+            Text(latex)
+                .font(Theme.Typography.mono(13))
                 .foregroundColor(Theme.Colors.contentPrimary)
-                .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -141,7 +174,7 @@ private struct MarkdownListItemRow: View {
                           : Theme.Typography.text(13, .medium))
                     .foregroundColor(Theme.Colors.contentTertiary)
                     .frame(minWidth: 14, alignment: .trailing)
-                Text(MarkdownInline.render(item.inlines))
+                MarkdownInlineText(inlines: item.inlines)
                     .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -157,7 +190,7 @@ private struct MarkdownListItemRow: View {
                                       : Theme.Typography.text(13))
                                 .foregroundColor(Theme.Colors.contentTertiary)
                                 .frame(minWidth: 14, alignment: .trailing)
-                            Text(MarkdownInline.render(child.inlines))
+                            MarkdownInlineText(inlines: child.inlines)
                                 .lineSpacing(6)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -211,11 +244,15 @@ private struct MarkdownTableView: View {
             // 表头：加粗 + 整行底色
             HStack(spacing: Theme.Spacing.card) {
                 ForEach(Array(table.headers.enumerated()), id: \.offset) { _, header in
-                    Text(MarkdownInline.render(header, bodyColor: Theme.Colors.contentPrimary))
-                        .font(Theme.Typography.text(12.5, .semibold))
-                        .foregroundColor(Theme.Colors.contentPrimary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MarkdownInlineText(
+                        inlines: header,
+                        bodyColor: Theme.Colors.contentPrimary,
+                        baseSize: 12.5,
+                        weight: .semibold,
+                        explicitColor: Theme.Colors.contentPrimary
+                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(.horizontal, Theme.Spacing.xl)
@@ -231,11 +268,14 @@ private struct MarkdownTableView: View {
             ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
                 HStack(spacing: Theme.Spacing.card) {
                     ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                        Text(MarkdownInline.render(cell, bodyColor: Theme.Colors.contentPrimary))
-                            .font(Theme.Typography.text(12.5))
-                            .foregroundColor(Theme.Colors.contentPrimary)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        MarkdownInlineText(
+                            inlines: cell,
+                            bodyColor: Theme.Colors.contentPrimary,
+                            baseSize: 12.5,
+                            explicitColor: Theme.Colors.contentPrimary
+                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
@@ -367,6 +407,13 @@ enum MarkdownInline {
                 if let linkURL = URL(string: url) {
                     piece.link = linkURL
                 }
+                result.append(piece)
+            case let .math(value):
+                // SwiftUI AttributedString 无法内嵌图片；含公式的路径统一改走 MarkdownInlineNS。
+                // 此处仅作兜底：以等宽文本显示原始 LaTeX（正常渲染不会触达）。
+                var piece = AttributedString(value)
+                piece.font = Theme.Typography.mono(12)
+                piece.foregroundColor = bodyColor
                 result.append(piece)
             }
         }

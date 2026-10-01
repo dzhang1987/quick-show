@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-02
+
+### Added
+
+- AI 对话数学公式渲染（LaTeX 真排版，接入 SwiftMath 1.7.3——纯 Swift + CoreText 数学排版库，项目首个 SPM 依赖，无 WebView/JS）：
+  - 解析层：`MarkdownParser` 新增行内 `math` token 与块级 `mathBlock`，支持 `$…$`（行内）与 `$$…$$` / `\(…\)` / `\[…\]`（块级，单行与跨行均支持，未闭合收剩余全部行与围栏代码块同策略）；行内 `$…$` 带货币保护启发式（开 `$` 后非空白、闭 `$` 前非空白且后非数字/`$`，「$5 和 $10」不误判）；公式内容整段切片不递归解析，内部 `\frac` 等不会二次转义
+  - 渲染层（新文件 `QuickShow/Views/AIChatMathViews.swift`）：公式经 `MathImage.asImage()` 光栅化为 NSImage，静态缓存 key 含 latex + 字号 + 已解析 sRGB 四色分量 + 显示/行内模式（亮暗两套位图独立，暗色不黑底黑字）；行内公式 NSTextAttachment 按 `LayoutInfo.descent` 精确基线对齐嵌入文本流；块级公式 NSImageView 居中（display 模式 14pt）；解析失败降级等宽原始源码显示
+  - 分流策略：`MarkdownInlineText` 统一入口替换 8 处 `Text(MarkdownInline.render(...))` 调用点，递归检测公式（含粗体/斜体/链接内嵌）；无公式 100% 走原 AttributedString 路径（视觉零回归），含公式段落改走 `NSTextField(labelWithAttributedString:)` 路径，`MarkdownInlineNS` 镜像原行内排版语义（等宽代码 / 加粗提亮 labelColor / accent 链接下划线 / 引号归一）
+  - 不直接使用 `MTMathUILabel` 进视图树（规避 macOS 1.7.3 intrinsicContentSize 哨兵值 (-1,-1) 与 Auto Layout 裁剪/重叠问题 issue #73），统一走图片路径
+
+### Changed
+
+- 版本号真源 project.yml 1.5.1 → 1.7.0：追平 1.6.0 / 1.6.1 两版遗留的 CHANGELOG 版本漂移
+
 ## [1.6.1] - 2026-10-02
 
 ### Changed

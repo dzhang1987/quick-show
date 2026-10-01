@@ -5,6 +5,12 @@ options:
     macOS: "13.0"
   xcodeVersion: "16.0"
 
+# SPM 依赖（与 targets 同级）：SwiftMath 提供数学公式排版渲染
+packages:
+  SwiftMath:
+    url: https://github.com/mgriebling/SwiftMath.git
+    exactVersion: 1.7.3
+
 settings:
   base:
     PRODUCT_NAME: QuickShow
@@ -30,6 +36,8 @@ targets:
   QuickShow:
     type: application
     platform: macOS
+    dependencies:
+      - package: SwiftMath
     sources:
       - path: QuickShow
         excludes:
@@ -43,8 +51,8 @@ targets:
       path: QuickShow/Info.plist
       properties:
         # 版本号唯一真源在 project.yml：xcodegen 每次重写 Info.plist，手改 plist 会被打回默认 1.0
-        CFBundleShortVersionString: "1.5.1"
-        CFBundleVersion: "1.5.1"
+        CFBundleShortVersionString: "1.7.0"
+        CFBundleVersion: "1.7.0"
         LSUIElement: true
         CFBundleIdentifier: cn.chiproad.QuickShow
         CFBundleName: QuickShow

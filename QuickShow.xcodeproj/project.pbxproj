@@ -3,12 +3,13 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
 		066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B0B0357916235B809E566B /* FloatingPanel.swift */; };
 		06AFDE855BCBA67DE767B4E1 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC77F949B43F2F53CE7959C4 /* MarkdownParser.swift */; };
+		0AA920A015F067EDDBAF0AE6 /* SwiftMath in Frameworks */ = {isa = PBXBuildFile; productRef = FB879F88486452EB8E08B9DB /* SwiftMath */; };
 		0FF0EAC1AC72FBE27721C977 /* MediaRemote in Resources */ = {isa = PBXBuildFile; fileRef = C01588AECCABE573EFDE95CD /* MediaRemote */; };
 		1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */; };
 		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
@@ -31,6 +32,7 @@
 		9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63AE6828207BF9FDF55E3684 /* StatusBarView.swift */; };
 		A3E1307AC8680216CF70DC61 /* AIChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */; };
 		A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AE831E93734F1F74D7F169 /* AIWindowManager.swift */; };
+		ACA81BBE00536E8C914F3A1D /* AIChatMathViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */; };
 		AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80187D648ECC52984FCD6D2C /* QuickShowApp.swift */; };
 		AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */; };
 		B294658D1B91F980CBB27E32 /* AIChatMarkdownView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */; };
@@ -71,12 +73,24 @@
 		B7BF9C965803CBAE72E3577B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C01588AECCABE573EFDE95CD /* MediaRemote */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MediaRemote; path = QuickShow/Resources/MediaRemote; sourceTree = SOURCE_ROOT; };
 		D265EF154F546FE21365CDDE /* AIToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolCardView.swift; sourceTree = "<group>"; };
+		D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMathViews.swift; sourceTree = "<group>"; };
 		D63AB70CD13631A39A802994 /* LunarCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunarCalendar.swift; sourceTree = "<group>"; };
 		F4584DE26B61ECF74718A252 /* ExpandedMonitoringView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedMonitoringView.swift; sourceTree = "<group>"; };
 		F99ABD71A91473D072310ABF /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
 		FC77F949B43F2F53CE7959C4 /* MarkdownParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownParser.swift; sourceTree = "<group>"; };
 		FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScreenHelper.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		EED7EA50917A3162414D8210 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0AA920A015F067EDDBAF0AE6 /* SwiftMath in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		1735B580DC3B51B3B6946295 /* Utilities */ = {
@@ -107,6 +121,7 @@
 			children = (
 				1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */,
 				0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */,
+				D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */,
 				7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */,
 				804C2AFE4E28879F9C343208 /* AIChatView.swift */,
 				D265EF154F546FE21365CDDE /* AIToolCardView.swift */,
@@ -175,7 +190,7 @@
 			path = QuickShow;
 			sourceTree = "<group>";
 		};
-		"TEMP_ECD8B4EA-3862-485F-819B-76463E9C39E7" /* Resources */ = {
+		"TEMP_F6341C81-0BA1-46EC-A434-E22DA8C101D6" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -191,12 +206,16 @@
 			buildPhases = (
 				6E85668974090CE620EF86E7 /* Sources */,
 				4DFC12B0ABCB3EFE106243C1 /* Resources */,
+				EED7EA50917A3162414D8210 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
 			name = QuickShow;
+			packageProductDependencies = (
+				FB879F88486452EB8E08B9DB /* SwiftMath */,
+			);
 			productName = QuickShow;
 			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
 			productType = "com.apple.product-type.application";
@@ -217,7 +236,6 @@
 				};
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -225,6 +243,12 @@
 				en,
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				358D5CA836E57F9FFA933A22 /* XCRemoteSwiftPackageReference "SwiftMath" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9B0F05138AE231E7D18DDCA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -252,6 +276,7 @@
 			files = (
 				AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */,
 				B294658D1B91F980CBB27E32 /* AIChatMarkdownView.swift in Sources */,
+				ACA81BBE00536E8C914F3A1D /* AIChatMathViews.swift in Sources */,
 				86FE75DF91D637852C56DA63 /* AIChatService.swift in Sources */,
 				851C980FD0829DA5AD6402D2 /* AIChatSidebarView.swift in Sources */,
 				A3E1307AC8680216CF70DC61 /* AIChatState.swift in Sources */,
@@ -518,6 +543,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		358D5CA836E57F9FFA933A22 /* XCRemoteSwiftPackageReference "SwiftMath" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/mgriebling/SwiftMath.git";
+			requirement = {
+				kind = exactVersion;
+				version = 1.7.3;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		FB879F88486452EB8E08B9DB /* SwiftMath */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 358D5CA836E57F9FFA933A22 /* XCRemoteSwiftPackageReference "SwiftMath" */;
+			productName = SwiftMath;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 90D56D6065E97DA3300D9C84 /* Project object */;
 }
