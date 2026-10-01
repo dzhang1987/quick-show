@@ -252,6 +252,11 @@ enum Theme {
         static let standardCalendar = NSSize(width: 740, height: 640)
         static let comfortCalendar = NSSize(width: 620, height: 560)
         static let legacyCalendar = NSSize(width: 520, height: 500)
+        // AI 对话窗尺寸（窄长居中，跟随主面板三档偏好；standard 基准 560×680，
+        // compact 约 0.88 比例递减，legacy 约 0.78 比例，保持与主面板档位相同的递减风格）
+        static let standardAIChat = NSSize(width: 560, height: 680)
+        static let comfortAIChat = NSSize(width: 500, height: 600)
+        static let legacyAIChat = NSSize(width: 440, height: 520)
         // 日历视图整面板内边距（日历态无时钟/底栏，日历贴面板主边距排布）
         static let calendarTop: CGFloat = 18       // 日历卡片顶部呼吸
         static let calendarBottom: CGFloat = 14    // 日历卡片底部呼吸

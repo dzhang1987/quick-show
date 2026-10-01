@@ -185,6 +185,7 @@ struct CheatSheetView: View {
                 
                 // 列 2：效率工具
                 ShortcutGroupCard(title: "效率加速", shortcuts: [
+                    ("I", "AI 对话"),
                     ("A", "防休眠阻止息屏"),
                     ("C", "清理释放系统内存"),
                     ("X", "剪贴板纯文本化"),

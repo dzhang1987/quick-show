@@ -5,6 +5,7 @@ struct PanelLayoutMetrics: Equatable {
     let expandedSize: NSSize
     let calendarSize: NSSize          // 日历视图尺寸（按 G 任意状态直达日历档）
     let calendarCellHeight: CGFloat   // 日历格子行高（月视图，按档）
+    let aiChatSize: NSSize            // AI 对话窗尺寸（独立窄长居中窗，跟随同一档位偏好）
 }
 
 enum ScreenHelper {
@@ -26,21 +27,24 @@ enum ScreenHelper {
                 compactSize: Theme.Layout.standardCompact,
                 expandedSize: Theme.Layout.standardExpanded,
                 calendarSize: Theme.Layout.standardCalendar,
-                calendarCellHeight: Theme.Layout.calendarCellStandard
+                calendarCellHeight: Theme.Layout.calendarCellStandard,
+                aiChatSize: Theme.Layout.standardAIChat
             )
         case .compact: // 适中舒适（宽 540 / 高 280，展开 620 / 高 460，日历 620 / 高 560）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.comfortCompact,
                 expandedSize: Theme.Layout.comfortExpanded,
                 calendarSize: Theme.Layout.comfortCalendar,
-                calendarCellHeight: Theme.Layout.calendarCellComfort
+                calendarCellHeight: Theme.Layout.calendarCellComfort,
+                aiChatSize: Theme.Layout.comfortAIChat
             )
         case .legacy: // 极简小巧（宽 440 / 高 230，展开 520 / 高 400，日历 520 / 高 500）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.legacyCompact,
                 expandedSize: Theme.Layout.legacyExpanded,
                 calendarSize: Theme.Layout.legacyCalendar,
-                calendarCellHeight: Theme.Layout.calendarCellLegacy
+                calendarCellHeight: Theme.Layout.calendarCellLegacy,
+                aiChatSize: Theme.Layout.legacyAIChat
             )
         case .auto:
             // 依据当前活跃屏幕有效宽高智能匹配最佳自然贴合档位
@@ -54,7 +58,8 @@ enum ScreenHelper {
                     compactSize: Theme.Layout.standardCompact,
                     expandedSize: Theme.Layout.standardExpanded,
                     calendarSize: Theme.Layout.standardCalendar,
-                    calendarCellHeight: Theme.Layout.calendarCellStandard
+                    calendarCellHeight: Theme.Layout.calendarCellStandard,
+                    aiChatSize: Theme.Layout.standardAIChat
                 )
             } else {
                 // 标准分辨率屏（<= 1512 宽且 < 1000 高）
@@ -62,7 +67,8 @@ enum ScreenHelper {
                     compactSize: Theme.Layout.comfortCompact,
                     expandedSize: Theme.Layout.comfortExpanded,
                     calendarSize: Theme.Layout.comfortCalendar,
-                    calendarCellHeight: Theme.Layout.calendarCellComfort
+                    calendarCellHeight: Theme.Layout.calendarCellComfort,
+                    aiChatSize: Theme.Layout.comfortAIChat
                 )
             }
         }

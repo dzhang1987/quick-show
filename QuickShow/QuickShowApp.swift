@@ -37,10 +37,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 预热悬浮面板，确保快捷键唤醒零延迟
         PanelManager.shared.setup(with: state)
         
-        HotKeyManager.shared.onTrigger = { [weak state] in
-            state?.toggleFromHotKey()
+        // 双路分流：热键回调携带实际命中的触发类型——AI 类型 → AI 窗，其余 → 主面板
+        HotKeyManager.shared.onTrigger = { [weak state] type in
+            guard let state = state else { return }
+            if type == state.aiTriggerType {
+                AIWindowManager.shared.toggle()
+            } else {
+                state.toggleFromHotKey()
+            }
         }
-        HotKeyManager.shared.configure(type: state.triggerType)
+        HotKeyManager.shared.configure(type: state.triggerType, aiType: state.aiTriggerType)
         
         setupMainMenu()
         setupStatusItem()
@@ -110,6 +116,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenu.addItem(quitItem)
         
         appMenuItem.submenu = appMenu
+
+        // 标准 Edit 菜单：无它则文本系统（设置窗口表单 / AI 输入框）的
+        // ⌘C/⌘V/⌘X/⌘A 键等效派发链路缺失，粘贴等基础操作失效
+        let editMenuItem = NSMenuItem()
+        mainMenu.addItem(editMenuItem)
+        let editMenu = NSMenu(title: "编辑")
+        editMenu.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenuItem.submenu = editMenu
+
         NSApp.mainMenu = mainMenu
     }
     

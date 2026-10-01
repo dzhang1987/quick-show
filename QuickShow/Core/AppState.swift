@@ -227,15 +227,39 @@ final class AppState: ObservableObject {
     @AppStorage("enablePomodoro") var enablePomodoro: Bool = false
     
     @AppStorage("triggerType") var triggerTypeRaw: String = TriggerType.doubleCmd.rawValue
+    // AI 对话窗全局热键（独立分流；默认双击 ⌥⌥）。rawValue 存储，旧值（任意侧）继续有效。
+    @AppStorage("aiTriggerTypeRaw") var aiTriggerTypeRaw: String = TriggerType.doubleOpt.rawValue
     
     var triggerType: TriggerType {
         get {
             TriggerType(rawValue: triggerTypeRaw) ?? .doubleCmd
         }
         set {
+            // 互斥校验：与 AI 热键命中键冲突则拒绝（设置 UI 亦会提示，此处兜底）
+            guard !newValue.conflicts(with: aiTriggerType) else {
+                NSLog("[QuickShow] 主面板热键与 AI 热键冲突，已忽略变更：\(newValue.displayName)")
+                objectWillChange.send()
+                return
+            }
             triggerTypeRaw = newValue.rawValue
             objectWillChange.send()
-            HotKeyManager.shared.configure(type: newValue)
+            HotKeyManager.shared.configure(type: newValue, aiType: aiTriggerType)
+        }
+    }
+    
+    var aiTriggerType: TriggerType {
+        get {
+            TriggerType(rawValue: aiTriggerTypeRaw) ?? .doubleOpt
+        }
+        set {
+            guard !newValue.conflicts(with: triggerType) else {
+                NSLog("[QuickShow] AI 热键与主面板热键冲突，已忽略变更：\(newValue.displayName)")
+                objectWillChange.send()
+                return
+            }
+            aiTriggerTypeRaw = newValue.rawValue
+            objectWillChange.send()
+            HotKeyManager.shared.configure(type: triggerType, aiType: newValue)
         }
     }
     

@@ -13,6 +13,10 @@ final class PanelManager {
     
     private var previousApp: NSRunningApplication?
     private var isDismissing: Bool = false
+    
+    /// 记录中的「呼出前最前台应用」。按 I 从主面板切到 AI 窗时，
+    /// 由 AIWindowManager 继承此焦点归还目标（主面板与 AI 窗焦点纪律一致）。
+    var focusReturnApp: NSRunningApplication? { previousApp }
     // 隐藏代次令牌：每次进入隐藏流程自增，用于精确作废迟到的旧淡出 completion
     private var hideGeneration = 0
     
@@ -153,6 +157,10 @@ final class PanelManager {
                 return true
             case 2: // D: 专注模式设置
                 appState.openFocusSettings()
+                return true
+            case 34: // I: 进入 AI 对话窗（不走 PanelContext 路由；要求无修饰键，避免 ⌘I 等组合误触）
+                guard event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty else { return false }
+                AIWindowManager.shared.toggle()
                 return true
             case 18, 19, 20: // 1/2/3: 日历 月/周/日 视图切换（仅日历视图内）
                 guard appState.currentContext == .calendar else { return false }
@@ -320,7 +328,10 @@ final class PanelManager {
         updatePanelFrameAnimated()
     }
     
-    func hidePanel() {
+    /// - Parameter restoreFocus: true = 常规关闭，毫秒级归还焦点；
+    ///   false = 切换到 AI 窗（I 键），焦点改由 AIWindowManager 接管并在其关闭时归还，
+    ///   此处不抢焦点，避免与紧随其后的 AI 窗抢 active 状态。
+    func hidePanel(restoreFocus: Bool = true) {
         guard let panel = panel, panel.isVisible, !isDismissing else { return }
         isDismissing = true
         hideGeneration += 1
@@ -333,7 +344,7 @@ final class PanelManager {
         panel.ignoresMouseEvents = true
         
         // 2. 瞬间将焦点归还给呼出前的应用
-        if let prev = previousApp, prev.bundleIdentifier != Bundle.main.bundleIdentifier {
+        if restoreFocus, let prev = previousApp, prev.bundleIdentifier != Bundle.main.bundleIdentifier {
             prev.activate(options: [.activateIgnoringOtherApps])
         }
         previousApp = nil

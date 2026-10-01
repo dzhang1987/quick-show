@@ -6,6 +6,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     case general = "通用"
     case statusBar = "一瞥底栏"
     case dashboard = "监控看板"
+    case aiService = "AI 服务"
     case shortcuts = "快捷键设置"
     case about = "关于"
     
@@ -16,6 +17,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         case .general: return "gearshape.fill"
         case .statusBar: return "sparkles"
         case .dashboard: return "gauge.with.needle.fill"
+        case .aiService: return "brain.head.profile"
         case .shortcuts: return "command"
         case .about: return "info.circle.fill"
         }
@@ -26,6 +28,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
         case .general: return Color.gray
         case .statusBar: return Color.cyan
         case .dashboard: return Color.blue
+        case .aiService: return Color.indigo
         case .shortcuts: return Color.orange
         case .about: return Color.purple
         }
@@ -75,6 +78,8 @@ struct SettingsView: View {
                     StatusBarSettingsForm(appState: appState, isLocationAuthorized: $isLocationAuthorized)
                 case .dashboard:
                     DashboardSettingsForm(appState: appState, isCalendarAuthorized: $isCalendarAuthorized)
+                case .aiService:
+                    AIServiceSettingsForm(appState: appState)
                 case .shortcuts:
                     ShortcutsSettingsForm(appState: appState)
                 case .about:
@@ -361,6 +366,9 @@ struct DashboardSettingsForm: View {
 struct ShortcutsSettingsForm: View {
     @ObservedObject var appState: AppState
     
+    /// 热键互斥被拒时的即时提示（所选未实际生效时出现，红色小字）
+    @State private var conflictNotice: String?
+    
     var body: some View {
         Form {
             Section {
@@ -381,18 +389,32 @@ struct ShortcutsSettingsForm: View {
             }
             
             Section {
-                HStack {
-                    Text("全局呼出 / 关闭悬浮面板")
-                    Spacer()
-                    KeyBadge(key: appState.triggerType.displayName)
+                Picker("主面板呼出 / 关闭", selection: mainTriggerBinding) {
+                    triggerOptions()
+                }
+                Picker("AI 对话窗呼出 / 关闭", selection: aiTriggerBinding) {
+                    triggerOptions()
                 }
                 HStack {
                     Text("备用全局组合键呼出")
                     Spacer()
                     KeyBadge(key: "⌘ ⇧ T")
                 }
+                HStack {
+                    Text("主面板激活时打开 AI 对话窗")
+                    Spacer()
+                    KeyBadge(key: "I")
+                }
             } header: {
                 Text("全局唤醒")
+            } footer: {
+                if let conflictNotice = conflictNotice {
+                    Text(conflictNotice)
+                        .font(.system(size: Theme.Typography.label))
+                        .foregroundColor(.red)
+                } else {
+                    Text("主面板与 AI 对话窗热键各自独立、并行生效；两者命中键冲突时后设置者被拒绝并保持原设置（左⌘ + 右⌘ 可共存，任意⌘ + 左⌘ 冲突）。")
+                }
             }
             
             Section {
@@ -525,6 +547,67 @@ struct ShortcutsSettingsForm: View {
             }
         }
     }
+    
+    // MARK: 热键绑定与选项
+    
+    /// 主面板热键绑定：写入后读取 HotKeyManager 实际生效值，被互斥拒绝则即时回退并提示。
+    private var mainTriggerBinding: Binding<TriggerType> {
+        Binding(
+            get: { appState.triggerType },
+            set: { newValue in
+                appState.triggerType = newValue
+                // 互斥兜底在 AppState setter：被拒绝时实际生效值仍为旧值，与所选不同
+                if HotKeyManager.shared.currentType != newValue {
+                    conflictNotice = "与 AI 对话窗热键冲突，已保持原设置"
+                } else {
+                    conflictNotice = nil
+                }
+            }
+        )
+    }
+    
+    /// AI 对话窗热键绑定：同上，读取 aiTriggerType 实际生效值做即时校验。
+    private var aiTriggerBinding: Binding<TriggerType> {
+        Binding(
+            get: { appState.aiTriggerType },
+            set: { newValue in
+                appState.aiTriggerType = newValue
+                if HotKeyManager.shared.aiTriggerType != newValue {
+                    conflictNotice = "与主面板热键冲突，已保持原设置"
+                } else {
+                    conflictNotice = nil
+                }
+            }
+        )
+    }
+    
+    /// 13 案触发类型选项：按 ⌘ / ⌃ / ⌥ / ⇧ 四族分组（每族 任意侧 / 左 / 右），外加组合键分组。
+    @ViewBuilder
+    private func triggerOptions() -> some View {
+        Section("双击 ⌘（Command）") {
+            Text("双击 ⌘（任意侧）").tag(TriggerType.doubleCmd)
+            Text("双击左⌘").tag(TriggerType.doubleLeftCmd)
+            Text("双击右⌘").tag(TriggerType.doubleRightCmd)
+        }
+        Section("双击 ⌃（Control）") {
+            Text("双击 ⌃（任意侧）").tag(TriggerType.doubleCtrl)
+            Text("双击左⌃").tag(TriggerType.doubleLeftCtrl)
+            Text("双击右⌃").tag(TriggerType.doubleRightCtrl)
+        }
+        Section("双击 ⌥（Option）") {
+            Text("双击 ⌥（任意侧）").tag(TriggerType.doubleOpt)
+            Text("双击左⌥").tag(TriggerType.doubleLeftOpt)
+            Text("双击右⌥").tag(TriggerType.doubleRightOpt)
+        }
+        Section("双击 ⇧（Shift）") {
+            Text("双击 ⇧（任意侧）").tag(TriggerType.doubleShift)
+            Text("双击左⇧").tag(TriggerType.doubleLeftShift)
+            Text("双击右⇧").tag(TriggerType.doubleRightShift)
+        }
+        Section("组合键") {
+            Text("⌘⇧T 组合键").tag(TriggerType.hotKeyCmdShiftT)
+        }
+    }
 }
 
 // MARK: - 5. 关于表单
@@ -580,6 +663,176 @@ struct AboutSettingsForm: View {
                     .font(.system(size: Theme.Typography.label))
                     .foregroundColor(.secondary)
             }
+        }
+    }
+}
+
+// MARK: - AI 接口协议选项
+/// AI 接口协议选项（rawValue 与 AIChatService.APIProtocol 保持一致："chat" / "responses"）。
+/// 说明：并行实现的 AIChatService.APIProtocol 公开接口暂不可见时，本表单按同键
+/// `@AppStorage("ai.apiProtocol")` 私有绑定，读写同一份 UserDefaults 原始值，后续可无痛切换到服务接口。
+private enum AIProtocolOption: String, CaseIterable, Identifiable {
+    case chat = "chat"
+    case responses = "responses"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .chat: return "Chat Completions（通用兼容）"
+        case .responses: return "Responses（OpenAI 官方新协议）"
+        }
+    }
+}
+
+// MARK: - 6. AI 服务设置表单
+struct AIServiceSettingsForm: View {
+    // appState 作为设置中心的统一状态入口保留（本表单配置项均为独立键，暂不依赖其成员）
+    @ObservedObject var appState: AppState
+    
+    // Base URL / Model / System Prompt 均存 UserDefaults，键名与 AIChatService.ConfigKey 完全一致；
+    // 直接以 @AppStorage 绑定同键，既能获得 SwiftUI 响应式刷新，又与 AIChatService 读写共享同一份数据。
+    @AppStorage("ai.baseURL") private var baseURL: String = ""
+    @AppStorage("ai.model") private var model: String = ""
+    @AppStorage("ai.systemPrompt") private var systemPrompt: String = ""
+    // API 协议：原始值 "chat" / "responses"，键名与 AIChatService 保持一致
+    @AppStorage("ai.apiProtocol") private var apiProtocolRaw: String = AIProtocolOption.chat.rawValue
+    
+    /// Keychain 中已存 API Key（仅用于掩码展示，绝不持久化到 UserDefaults）
+    @State private var storedKey: String = ""
+    /// 新输入的 API Key（仅内存态，保存成功后清空）
+    @State private var apiKeyInput: String = ""
+    
+    var body: some View {
+        Form {
+            Section {
+                Picker("API 协议", selection: apiProtocolBinding) {
+                    ForEach(AIProtocolOption.allCases) { option in
+                        Text(option.displayName).tag(option)
+                    }
+                }
+            } header: {
+                Text("API 协议")
+            } footer: {
+                Text("Chat Completions 兼容大多数 OpenAI 兼容端点（中转 / Ollama / vLLM 等）；Responses 为 OpenAI 官方新协议，仅官方端点支持。选择 Responses 时 Base URL 填官方地址。")
+            }
+            
+            Section {
+                // 占位文案用中性描述且以 verbatim 传入，避免 URL 被 Markdown 自动识别成蓝色链接；
+                // prompt 压成 contentTertiary 灰，与其他字段（如「输入 API Key」）的占位观感一致。
+                TextField("Base URL", text: $baseURL, prompt: Text(verbatim: "例如 api.openai.com/v1").foregroundColor(Theme.Colors.contentTertiary))
+                    .textFieldStyle(.roundedBorder)
+            } header: {
+                Text("Base URL")
+            } footer: {
+                // verbatim 纯文本：footer 中的示例地址不做 Markdown 链接着色，保持普通灰白说明文字。
+                Text(verbatim: "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方端点填 https://api.openai.com/v1；本地 Ollama / vLLM 填 http://localhost:端口/v1。")
+            }
+            
+            Section {
+                if storedKey.isEmpty {
+                    SecureField("输入 API Key", text: $apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                } else {
+                    HStack {
+                        Text("已存储 ····\(maskedKeySuffix)")
+                            .font(.system(size: Theme.Typography.body))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button("清除") { clearAPIKey() }
+                            .font(.system(size: Theme.Typography.body))
+                    }
+                    SecureField("输入新的 API Key 以替换", text: $apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                }
+                
+                if !trimmedAPIKeyInput.isEmpty {
+                    HStack {
+                        Spacer()
+                        Button("保存 API Key") { saveAPIKey() }
+                            .font(.system(size: Theme.Typography.body, weight: .medium))
+                    }
+                }
+            } header: {
+                Text("API Key")
+            } footer: {
+                Text("API Key 仅保存于系统钥匙串（Keychain），绝不写入配置文件或 UserDefaults，避免随 iCloud / Time Machine 备份被明文带走。")
+            }
+            
+            Section {
+                TextField("gpt-4o-mini / 自定义模型名", text: $model)
+                    .textFieldStyle(.roundedBorder)
+            } header: {
+                Text("Model")
+            } footer: {
+                Text("请求体中的 model 字段，填写端点支持的模型标识即可（如 gpt-4o-mini、qwen2.5、llama3 等）。")
+            }
+            
+            Section {
+                TextField("留空则不发送 system 消息", text: $systemPrompt, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(3...6)
+            } header: {
+                Text("System Prompt（可选）")
+            } footer: {
+                Text("可选的角色设定 / 前置指令，留空则不发送 system 消息。")
+            }
+            
+            Section {
+                HStack {
+                    Text("打开 AI 对话窗")
+                    Spacer()
+                    KeyBadge(key: "双击 ⌥ / I")
+                }
+            } header: {
+                Text("使用")
+            } footer: {
+                Text("全局双击 ⌥⌥ 随时唤出 / 关闭 AI 对话窗（热键可在「快捷键设置」中更改）；主面板激活时按 I 键亦可进入。")
+            }
+        }
+        .onAppear { loadStoredKey() }
+    }
+    
+    /// API 协议绑定：原始值字符串与枚举互转，默认 Chat Completions
+    private var apiProtocolBinding: Binding<AIProtocolOption> {
+        Binding(
+            get: { AIProtocolOption(rawValue: apiProtocolRaw) ?? .chat },
+            set: { apiProtocolRaw = $0.rawValue }
+        )
+    }
+    
+    /// 已存 key 的末 4 位掩码文本
+    private var maskedKeySuffix: String {
+        String(storedKey.suffix(4))
+    }
+    
+    private var trimmedAPIKeyInput: String {
+        apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    
+    /// Keychain 读取走 AIChatService 公开接口（@MainActor），用 MainActor Task 包裹，
+    /// 避免在非隔离的 View 上下文中直接调用产生隔离告警。
+    private func loadStoredKey() {
+        Task { @MainActor in
+            storedKey = AIChatService.shared.apiKey ?? ""
+        }
+    }
+    
+    private func saveAPIKey() {
+        let key = trimmedAPIKeyInput
+        guard !key.isEmpty else { return }
+        Task { @MainActor in
+            AIChatService.shared.saveAPIKey(key)
+            storedKey = key
+            apiKeyInput = ""
+        }
+    }
+    
+    private func clearAPIKey() {
+        Task { @MainActor in
+            AIChatService.shared.deleteAPIKey()
+            storedKey = ""
+            apiKeyInput = ""
         }
     }
 }
