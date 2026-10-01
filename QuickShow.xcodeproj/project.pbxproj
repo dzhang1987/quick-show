@@ -175,7 +175,7 @@
 			path = QuickShow;
 			sourceTree = "<group>";
 		};
-		"TEMP_87761D0D-819B-4281-A272-C46FBDD41D18" /* Resources */ = {
+		"TEMP_ECD8B4EA-3862-485F-819B-76463E9C39E7" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);

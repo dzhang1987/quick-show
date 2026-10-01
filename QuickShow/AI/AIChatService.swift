@@ -653,7 +653,7 @@ private struct ResponsesResponse: Decodable {
 
 // MARK: - 服务
 
-/// OpenAI 兼容 SSE 客户端 + Keychain 存取 + 配置读写。
+/// OpenAI 兼容 SSE 客户端 + API Key 文件存取 + 配置读写。
 /// 服务层无 UI 依赖（不 import SwiftUI/AppKit）；整体 @MainActor 以保证状态访问串行、回调落在主线程。
 @MainActor
 final class AIChatService {
@@ -879,63 +879,122 @@ final class AIChatService {
         set { UserDefaults.standard.set(newValue.rawValue, forKey: ConfigKey.apiProtocol) }
     }
 
-    // MARK: Keychain（敏感信息，绝不落 UserDefaults）
+    // MARK: API Key 文件存储（放弃 Keychain）
 
-    /// 诊断日志：Keychain 读取失败的原因可在「控制台.app」或 `log show` 按 subsystem 过滤查看
-    private let logger = Logger(subsystem: "com.dzhang.quickshow.ai", category: "keychain")
+    /// 诊断日志：文件读写异常可在此查看
+    private let logger = Logger(subsystem: "com.dzhang.quickshow.ai", category: "apikey")
 
-    private let keychainService = "com.dzhang.quickshow.ai"
-    private let keychainAccount = "apiKey"
+    /// 旧版 Keychain 坐标（仅用于一次性迁移与清理遗留条目）。
+    private let legacyKeychainService = "com.dzhang.quickshow.ai"
+    private let legacyKeychainAccount = "apiKey"
 
-    /// 读取 API Key。读不到（未配置/Keychain 异常）时回退环境变量 `QUICKSHOW_AI_API_KEY`
-    /// （仅内存兜底，绝不写入 Keychain）；仍无则返回 nil。
-    var apiKey: String? {
-        var query = baseKeychainQuery()
+    /// API Key 落盘文件：`~/Library/Application Support/QuickShow/apikey`（纯文本单行）。
+    /// 放弃 Keychain 的原因：本地开发频繁重编译导致签名变化，Keychain 条目 ACL 每次读取都弹密码授权。
+    private var apiKeyFileURL: URL? {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first?
+            .appendingPathComponent("QuickShow", isDirectory: true)
+            .appendingPathComponent("apikey")
+    }
+
+    /// 读取 API Key（对外兼容旧属性名）：文件 → 旧 Keychain 一次性迁移 → 环境变量兜底。
+    var apiKey: String? { loadAPIKey() }
+
+    /// 读取 API Key。文件不存在时尝试从旧 Keychain 条目搬家；任何异常静默返回 nil，不阻塞主流程。
+    func loadAPIKey() -> String? {
+        if let url = apiKeyFileURL, FileManager.default.fileExists(atPath: url.path) {
+            // 读取前顺手把过宽权限收紧到 0600。
+            tightenPermissionsIfNeeded(at: url)
+            if let data = try? Data(contentsOf: url),
+               let key = String(data: data, encoding: .utf8) {
+                let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        } else if let migrated = migrateLegacyKeychainKeyIfNeeded() {
+            // 文件尚不存在：从旧 Keychain 搬家（v1.5.2 前旧版本存量数据），成功后直接返回。
+            return migrated
+        }
+
+        // 环境变量兜底：仅内存注入，绝不落盘。
+        if let envKey = environmentValue("QUICKSHOW_AI_API_KEY") { return envKey }
+        return nil
+    }
+
+    /// 保存 API Key：原子写文件并设 0600 权限。任何错误静默忽略。
+    func saveAPIKey(_ key: String) {
+        guard let url = apiKeyFileURL else { return }
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let data = trimmed.data(using: .utf8) else { return }
+
+        let fileManager = FileManager.default
+        let directory = url.deletingLastPathComponent()
+        do {
+            // 目录不存在则创建并设 0700（已存在则复用，不覆盖其权限）。
+            if !fileManager.fileExists(atPath: directory.path) {
+                try fileManager.createDirectory(
+                    at: directory,
+                    withIntermediateDirectories: true,
+                    attributes: [.posixPermissions: 0o700]
+                )
+            }
+            // 原子写：先写临时文件再替换，避免中途崩溃留下半截内容。
+            try data.write(to: url, options: .atomic)
+            // 文件权限收紧为仅当前用户可读写。
+            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            logger.warning("API Key 写入失败：\(error.localizedDescription)")
+        }
+    }
+
+    /// 清除 API Key：删文件，并尽力删除旧 Keychain 遗留条目（错误忽略）。
+    func clearAPIKey() {
+        if let url = apiKeyFileURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        SecItemDelete(legacyKeychainQuery() as CFDictionary)
+    }
+
+    /// 把文件权限收紧为 0600（仅当存在 group/other 权限位时）。
+    private func tightenPermissionsIfNeeded(at url: URL) {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+              let permissions = attributes[.posixPermissions] as? NSNumber else {
+            return
+        }
+        if permissions.intValue & 0o077 != 0 {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
+    }
+
+    /// 一次性 Keychain 迁移：把 v1.5.2 之前旧版本存在 Keychain 的 API Key 搬到文件并清理旧条目。
+    /// 读取旧条目可能弹最后一次钥匙串授权属预期；用户拒绝或任何错误一律静默放弃，绝不阻塞。
+    private func migrateLegacyKeychainKeyIfNeeded() -> String? {
+        var query = legacyKeychainQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecSuccess,
-           let data = item as? Data,
-           let key = String(data: data, encoding: .utf8) {
-            return key
+        guard status == errSecSuccess,
+              let data = item as? Data,
+              let key = String(data: data, encoding: .utf8) else {
+            return nil
         }
-        // 环境变量兜底：优先内存注入，避免把 CI/测试用 Key 落盘。
-        if let envKey = environmentValue("QUICKSHOW_AI_API_KEY") { return envKey }
-        // 诊断日志：status 常见值（SecBase.h）——-25300 errSecItemNotFound 条目不存在；
-        // -34018 errSecInteractionNotAllowed 无 UI 交互场景；-60007 errSecAuthFailed 签名/授权被拒
-        logger.warning("Keychain 读取失败 status=\(status) dataNil=\(item == nil)")
-        return nil
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // 搬到文件后清掉 Keychain 条目，彻底摆脱授权弹窗。
+        saveAPIKey(trimmed)
+        SecItemDelete(legacyKeychainQuery() as CFDictionary)
+        return trimmed
     }
 
-    /// 保存 API Key（删除重建策略）。任何 Keychain 错误均静默忽略。
-    /// 为什么放弃 SecItemUpdate：条目可能是在旧签名二进制下创建的，其 ACL 不含当前
-    /// 稳定证书（QuickShow Development）的授权，导致此后每次读取都弹钥匙串密码。
-    /// 改为「先删后建」可确保条目始终在**当前签名**下重建，ACL 永远与运行二进制一致。
-    func saveAPIKey(_ key: String) {
-        guard let data = key.data(using: .utf8) else { return }
-
-        // 1) 先删除旧条目（忽略「不存在」错误），清除可能携带的旧签名 ACL。
-        SecItemDelete(baseKeychainQuery() as CFDictionary)
-
-        // 2) 在当前签名下重建条目；显式声明可访问性（行为与现状一致但更明确）。
-        var addQuery = baseKeychainQuery()
-        addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
-        SecItemAdd(addQuery as CFDictionary, nil)
-    }
-
-    /// 删除 API Key。
-    func deleteAPIKey() {
-        SecItemDelete(baseKeychainQuery() as CFDictionary)
-    }
-
-    private func baseKeychainQuery() -> [String: Any] {
+    /// 旧版 Keychain 条目的查询字典（迁移与清理共用）。
+    private func legacyKeychainQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
-            kSecAttrAccount as String: keychainAccount
+            kSecAttrService as String: legacyKeychainService,
+            kSecAttrAccount as String: legacyKeychainAccount
         ]
     }
 

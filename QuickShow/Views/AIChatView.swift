@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// Wave 2 结构：
 /// - 左侧会话窄栏（⌘B 显隐，展开时窗口整体加宽，见 AIWindowManager.setSidebarVisible）
-/// - 消息列表：hover 渐显操作条（复制；最后一条落定助手消息附「重新生成」）
+/// - 消息列表：AI 回复无气泡铺底排版；消息下方常驻弱显示操作行（复制；最后一条落定助手消息附「重新生成」）
 /// - 输入卡：⊕ 图片附件菜单 + 模型 chip + 剪贴板附加 + 发送/中止
 /// - 快捷键 ⌘N/⌘B/⌘F 由 AIChatKeyMonitor（本地事件监听）接线；ESC/⌘K 仍走窗口层
 ///
@@ -30,8 +30,11 @@ struct AIChatView: View {
         _sidebarVisible = State(initialValue: UserDefaults.standard.bool(forKey: AIWindowManager.sidebarVisibleKey))
     }
 
-    /// 输入框占位文案（⏎/⇧⏎/ESC 语义提示）。
-    private let inputPlaceholder = "问点什么…（⏎ 发送 · ⇧⏎ 换行 · ESC 关闭）"
+    /// 输入框占位文案（⏎/⇧⏎/ESC 语义提示已下沉到底部快捷键条，占位只留一句）。
+    private let inputPlaceholder = "问点什么…"
+    /// 阅读列最大宽度：行长控制（对标 DeepSeek/CC），窗口更宽时整列居中、两侧透出玻璃；
+    /// 消息列与输入坞共用同一限宽，保证左缘/右缘对齐。
+    private let contentMaxWidth: CGFloat = 600
     /// 滚动到底部的锚点 id。
     private let bottomAnchorID = "aiChat.bottom"
 
@@ -139,28 +142,12 @@ struct AIChatView: View {
                 messageList
             }
 
-            // 细若游丝的分割线（复刻主面板语言）：分隔对话区与输入区
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.primary.opacity(0.0),
-                            Color.primary.opacity(Theme.Colors.dividerOpacity),
-                            Color.primary.opacity(0.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: Theme.Layout.dividerHeight)
-                .padding(.horizontal, Theme.Spacing.panel)
-
             inputArea
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 高不透明底板（≥90%）：稳定阅读区，压住玻璃穿透导致的文字对比度波动；
-        // 半透明只留给窗体外缘（玻璃/材质边缘），层级靠深浅差而非透明度叠加
-        .background(Theme.Colors.chatBase)
+        // 复刻主面板分层模式：窗口级玻璃（26+ NSGlassEffectView / 13~25 视图层 ultraThinMaterial）
+        // 之上再铺一层超薄材质做阅读区分层，玻璃透出不盖死；文字全走语义色随 effectiveAppearance 翻转
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - 消息列表
@@ -198,9 +185,13 @@ struct AIChatView: View {
                         .frame(height: 1)
                         .id(bottomAnchorID)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                // 阅读列限宽 + 居中：先限内容宽，再整体居中于滚动区（窗口加宽时两侧透玻璃）
+                .frame(maxWidth: contentMaxWidth, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.section)
-                .padding(.vertical, Theme.Spacing.section)
+                .padding(.top, Theme.Spacing.section)
+                // 底部仅留 4pt：与输入区顶距 12 合成 16pt 浮动缝隙（输入坞浮起，不再堆空隙）
+                .padding(.bottom, Theme.Spacing.sm)
+                .frame(maxWidth: .infinity)
             }
             .onAppear { scrollToBottom(proxy, animated: false) }
             // 新消息落定：动画滚到底
@@ -307,14 +298,16 @@ struct AIChatView: View {
                 .padding(.bottom, Theme.Spacing.lg)
             }
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                    // 输入卡比主区底板亮一档半：操作焦点明确可辨（原 surfaceInset 与主背景几乎无差）
-                    .fill(Theme.Colors.chatInputCard)
+                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                    // 浮在玻璃上的输入坞：超薄材质透出窗口玻璃，与消息区材质层拉开深浅差
+                    .fill(.ultraThinMaterial)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
                     .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
             )
+            // 极轻投影托起浮卡感（无框窗口上投影克制，仅拉开前后层级）
+            .shadow(color: .black.opacity(0.28), radius: 10, y: 3)
             // 拖到输入卡边缘 padding 区也能接住（主路径在 NSTextView 子类）
             .onDrop(of: ["public.image", "public.file-url"], isTargeted: nil) { providers in
                 handleDropProviders(providers)
@@ -355,14 +348,17 @@ struct AIChatView: View {
 
                 Spacer(minLength: 0)
 
-                Text("⌘B 会话 · ⌘K 清空 · ESC 关闭")
+                Text("⏎ 发送 · ⇧⏎ 换行 · ⌘B 会话 · ⌘K 清空 · ESC 关闭")
                     .font(Theme.Typography.text(10.5))
                     .foregroundColor(Theme.Colors.idleText.opacity(0.85))
             }
         }
+        // 输入坞与消息列同限宽、同居中：顶距 12 与列表底 4 合成 16pt 浮动缝隙
+        .frame(maxWidth: contentMaxWidth, alignment: .leading)
         .padding(.horizontal, Theme.Spacing.section)
         .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xxl)
+        .frame(maxWidth: .infinity)
         // 鼠标进入输入区时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径）
         .onHover { _ in refreshClipboardAvailability() }
     }
@@ -716,73 +712,48 @@ private struct ChatMessageRow: View, Equatable {
     }
 
     @State private var rowHovered = false
-    @State private var pillHovered = false
     @State private var copied = false
 
-    /// 操作条可见性：行 hover、操作条自身 hover（探出行外部分）、复制反馈期三任一。
-    private var actionsVisible: Bool { rowHovered || pillHovered || copied }
-
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
-            if message.role == .user { Spacer(minLength: Theme.Spacing.panel) }
-            content
-            if message.role == .assistant { Spacer(minLength: Theme.Spacing.panel) }
+        // 消息内容 + 下方常驻操作行（与正文底部留 10pt 成组间距；用户消息整体右对齐）
+        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Theme.Spacing.xl) {
+            HStack(alignment: .top, spacing: 0) {
+                if message.role == .user { Spacer(minLength: Theme.Spacing.panel) }
+                content
+                if message.role == .assistant { Spacer(minLength: Theme.Spacing.panel) }
+            }
+            if message.role != .system {
+                actionRow
+            }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { rowHovered = hovering }
         }
-        // hover 渐显操作条：浮起 pill 跨骑气泡下缘（一半在气泡 padding 区、一半探入下方间距），
-        // 不占布局位——恒占位的做法会让同角色消息组的组内紧凑节奏失效
-        .overlay(alignment: message.role == .user ? .bottomTrailing : .bottomLeading) {
-            if actionsVisible, message.role != .system {
-                actionPill
-                    .offset(y: 10)
-                    .transition(.opacity)
-            }
-        }
     }
 
-    /// 浮动操作条：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」。
-    /// 实心底板 + 提亮描边 + 微阴影：跨骑气泡与行间空隙，需自身可辨（不靠背景衬托）。
-    private var actionPill: some View {
-        HStack(spacing: Theme.Spacing.xxs) {
-            Button(action: copyContent) {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(Theme.Typography.text(10, .medium))
-                    .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                    .frame(width: 20, height: 14)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("复制")
+    /// 常驻操作行：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」。
+    /// 弱化常驻：图标静止 38% 灰、整行 hover 提亮 85%；按钮自身 hover 叠 0.08 圆角底，不抢正文层级。
+    private var actionRow: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            ChatActionIconButton(
+                systemName: copied ? "checkmark" : "doc.on.doc",
+                tint: copied ? Theme.Colors.accent : nil,
+                help: "复制",
+                rowHovered: rowHovered,
+                action: copyContent
+            )
 
             if canRegenerate {
-                Button(action: onRegenerate) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(Theme.Typography.text(10, .medium))
-                        .foregroundColor(Theme.Colors.contentTertiary)
-                        .frame(width: 20, height: 14)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("重新生成")
+                ChatActionIconButton(
+                    systemName: "arrow.clockwise",
+                    tint: nil,
+                    help: "重新生成",
+                    rowHovered: rowHovered,
+                    action: onRegenerate
+                )
             }
-        }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, Theme.Spacing.xxs)
-        .background(
-            Capsule(style: .continuous)
-                .fill(Theme.Colors.chatInputCard)
-        )
-        .overlay(
-            Capsule(style: .continuous)
-                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(0.18), radius: 4, y: 1)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { pillHovered = hovering }
         }
     }
 
@@ -808,6 +779,7 @@ private struct ChatMessageRow: View, Equatable {
     }
 
     /// 用户消息：右对齐气泡，琥珀强调色底 + 同系描边（容器感）；图片缩略图排在文本上方（点击放大）。
+    /// 气泡容器保持原样，仅行距与 AI 正文同节奏（13pt + 6 ≈ 1.7 倍行高）。
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: Theme.Spacing.lg) {
             if !message.images.isEmpty {
@@ -817,7 +789,7 @@ private struct ChatMessageRow: View, Equatable {
                 Text(message.content)
                     .font(Theme.Typography.text(13))
                     .foregroundColor(Theme.Colors.contentPrimary)
-                    .lineSpacing(3)
+                    .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -835,8 +807,8 @@ private struct ChatMessageRow: View, Equatable {
 
     @ViewBuilder
     private var assistantContent: some View {
-        // 文本气泡与工具调用卡片纵向排列：一轮助手消息可能兼有文本与工具调用，
-        // 纯工具调用轮（无文本）只渲染卡片、不留空文本气泡；卡片与气泡同宽
+        // 文本（无气泡铺底）与工具调用卡片纵向排列：一轮助手消息可能兼有文本与工具调用，
+        // 纯工具调用轮（无文本）只渲染卡片、不留空文本段；卡片与正文同宽
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             assistantTextPart
             if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
@@ -846,26 +818,27 @@ private struct ChatMessageRow: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    /// 助手消息的文本部分（按状态分派）；纯工具调用消息（无文本）不渲染空气泡。
+    /// 助手消息的文本部分（按状态分派）；纯工具调用消息（无文本）不渲染空文本段。
     @ViewBuilder
     private var assistantTextPart: some View {
-        // 有工具调用且文本为空时跳过文本气泡（工具卡片单独成段）
-        let skipsTextBubble = message.content.isEmpty && !(message.toolCalls?.isEmpty ?? true)
+        // 有工具调用且文本为空时跳过文本段（工具卡片单独成段）
+        let skipsTextPart = message.content.isEmpty && !(message.toolCalls?.isEmpty ?? true)
         switch message.state {
         case .sending, .streaming:
             // 流式/首 token 等待：纯文本增量 + 呼吸态（流结束后切完整 AST 渲染）
             StreamingMessageView(content: message.content)
         case .failed(let errorText):
+            // 失败态保留提示卡片（状态提示，非正文排版）
             FailedMessageView(errorText: errorText, onRetry: onRetry)
         case .done:
             // 落定态：完整块级 Markdown 渲染（AIChatMarkdownView）
-            if !skipsTextBubble {
+            if !skipsTextPart {
                 AssistantMarkdownView(content: message.content)
             }
         case .aborted:
             // 中止：保留半截内容的富渲染 + 弱标记
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                if !skipsTextBubble {
+                if !skipsTextPart {
                     AssistantMarkdownView(content: message.content)
                 }
                 AbortedTag()
@@ -874,33 +847,59 @@ private struct ChatMessageRow: View, Equatable {
     }
 }
 
+/// 操作行图标钮：13pt hierarchical 符号、26×26 命中区；
+/// 图标色随行 hover 提亮（0.38 → 0.85），自身 hover 叠 primary 0.08 圆角底（macOS 工具图标惯例）。
+private struct ChatActionIconButton: View {
+    let systemName: String
+    /// 反馈色（如复制成功的 accent 对勾）；nil = 常规灰度档。
+    var tint: Color? = nil
+    let help: String
+    /// 父行 hover 态：驱动图标色提亮（行级弱化/增强的统一信号）。
+    let rowHovered: Bool
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(Theme.Typography.text(13, .medium))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundColor(tint ?? Color.primary.opacity(rowHovered ? 0.85 : 0.38))
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(hovered ? 0.08 : 0))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
+    }
+}
+
 /// 流式消息：纯文本增量（不解析 Markdown，避免半截语法抖动），末尾附呼吸态提示。
+/// 与落定态一致无气泡：直接铺在玻璃材质上，正文色同步降档（0.80）且引号归一，
+/// 避免流式→定稿瞬间颜色/引号跳变。
 private struct StreamingMessageView: View {
     let content: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             if !content.isEmpty {
-                Text(content)
+                Text(MarkdownInline.normalizeQuotes(content))
                     .font(Theme.Typography.text(13))
-                    .foregroundColor(Theme.Colors.contentPrimary)
-                    .lineSpacing(3)
+                    .foregroundColor(Color.primary.opacity(0.80))
+                    .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             StreamingIndicator()
         }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.vertical, Theme.Spacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.chatAssistantBubble)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
-        )
     }
 }
 

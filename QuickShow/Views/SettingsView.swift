@@ -734,7 +734,7 @@ struct AIServiceSettingsForm: View {
     /// 拉取失败的行内中文提示。
     @State private var fetchError: String?
     
-    /// Keychain 中已存 API Key（仅用于掩码展示，绝不持久化到 UserDefaults）
+    /// 已存 API Key（仅用于掩码展示，绝不持久化到 UserDefaults）
     @State private var storedKey: String = ""
     /// 新输入的 API Key（仅内存态，保存成功后清空）
     @State private var apiKeyInput: String = ""
@@ -792,7 +792,7 @@ struct AIServiceSettingsForm: View {
             } header: {
                 Text("API Key")
             } footer: {
-                Text("API Key 仅保存于系统钥匙串（Keychain），绝不写入配置文件或 UserDefaults，避免随 iCloud / Time Machine 备份被明文带走。")
+                Text("API Key 以仅当前用户可读的文件权限存储在本机应用支持目录，不写入 UserDefaults，不随 iCloud 同步。")
             }
             
             Section {
@@ -986,7 +986,7 @@ struct AIServiceSettingsForm: View {
         apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
     }
     
-    /// Keychain 读取走 AIChatService 公开接口（@MainActor），用 MainActor Task 包裹，
+    /// API Key 读取走 AIChatService 公开接口（@MainActor），用 MainActor Task 包裹，
     /// 避免在非隔离的 View 上下文中直接调用产生隔离告警。
     private func loadStoredKey() {
         Task { @MainActor in
@@ -1006,7 +1006,7 @@ struct AIServiceSettingsForm: View {
     
     private func clearAPIKey() {
         Task { @MainActor in
-            AIChatService.shared.deleteAPIKey()
+            AIChatService.shared.clearAPIKey()
             storedKey = ""
             apiKeyInput = ""
         }

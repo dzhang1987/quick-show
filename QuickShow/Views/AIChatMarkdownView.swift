@@ -3,12 +3,14 @@ import SwiftUI
 // MARK: - 助手消息 Markdown 完整渲染
 
 /// 助手落定消息：消费 MarkdownParser 的完整块级 AST。
-/// 视觉层次原则（2026-10 专项）：
-/// - 三级排版：标题加大加粗拉开字号字重梯度（h1 附底部分隔线），正文 contentPrimary 保底可读，
-///   引用/辅助内容降一档灰度
+/// 视觉层次原则（2026-10 排版专项，对标 DeepSeek / Claude Code 对话排版）：
+/// - 无气泡：正文直接铺在玻璃材质上左对齐、无内边距，层级全靠字号/字重/留白表达
+/// - 三级排版：h1 18 bold（附减弱底部分隔线）/ h2 16 semibold / h3 14 semibold，均 contentPrimary；
+///   正文与列表降两档（primary 0.80），与加粗档（contentPrimary semibold）肉眼可分
 /// - 间距节奏：块间距不由 VStack 统一值承担，改为每块自带顶距——
-///   标题前 18/14/10（与上文拉开成组），表格/代码块前 12，段落/列表/引用前 10，首块无顶距
-/// - 容器：气泡底 = chatAssistantBubble（比主区亮一档）+ 0.5pt 描边，圆角 12
+///   标题前 26/20/16（与上文拉开成组），标题后 8（与紧随内容成组），内容块之间 16，首块无顶距
+/// - 行高：正文/列表/代码 lineSpacing 6（13pt ≈ 1.7 倍）；列表项间 8、嵌套子项间 6
+/// - 引号归一：成对 ASCII 直引号显示为「」（仅 text token，代码/链接不受影响）
 struct AssistantMarkdownView: View {
     let content: String
 
@@ -17,37 +19,29 @@ struct AssistantMarkdownView: View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 MarkdownBlockView(block: block)
-                    .padding(.top, index == 0 ? 0 : block.topSpacing)
+                    .padding(.top, index == 0 ? 0 : block.topSpacing(after: blocks[index - 1]))
             }
         }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.vertical, Theme.Spacing.xl)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.chatAssistantBubble)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
-        )
     }
 }
 
 private extension MarkdownBlock {
-    /// 块顶距：间距节奏的唯一来源（标题前拉开成组，内容块前紧凑跟随）。
-    var topSpacing: CGFloat {
+    /// 块顶距：间距节奏的唯一来源。
+    /// 标题前大幅拉开（h1 26 / h2 20 / h3 16）形成成组锚点；
+    /// 标题后收紧为 8（after 为标题时），让标题与紧随内容成组；
+    /// 其余内容块（段落/列表/引用/表格/代码块）之间统一 16。
+    func topSpacing(after previous: MarkdownBlock) -> CGFloat {
+        if case .heading = previous { return Theme.Spacing.lg }      // 8：标题后收紧成组
         switch self {
         case let .heading(level, _):
             switch level {
-            case 1: return Theme.Spacing.section      // 18：一级标题成组锚点
-            case 2: return Theme.Spacing.xxxl         // 14
-            default: return Theme.Spacing.xl          // 10
+            case 1: return Theme.Spacing.section + Theme.Spacing.lg  // 26：一级标题成组锚点
+            case 2: return Theme.Spacing.divider                     // 20
+            default: return Theme.Spacing.card                       // 16
             }
-        case .table, .codeBlock:
-            return Theme.Spacing.xxl                  // 12：容器块前后呼吸
         default:
-            return Theme.Spacing.xl                   // 10：段落/列表/引用
+            return Theme.Spacing.card                                // 16：段落/列表/引用/表格/代码块
         }
     }
 }
@@ -64,7 +58,7 @@ private struct MarkdownBlockView: View {
 
         case let .paragraph(inlines):
             Text(MarkdownInline.render(inlines))
-                .lineSpacing(3)
+                .lineSpacing(6)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -85,33 +79,33 @@ private struct MarkdownBlockView: View {
         }
     }
 
-    /// 标题：h1 17 bold + 底部分隔线；h2 15 semibold；h3 13.5 semibold 降一档灰度。
+    /// 标题：h1 18 bold + 减弱底部分隔线；h2 16 semibold；h3 14 semibold；均 contentPrimary。
     @ViewBuilder
     private func headingView(level: Int, inlines: [InlineToken]) -> some View {
         switch level {
         case 1:
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                Text(MarkdownInline.render(inlines))
-                    .font(Theme.Typography.text(17, .bold))
+                Text(MarkdownInline.render(inlines, bodyColor: Theme.Colors.contentPrimary))
+                    .font(Theme.Typography.text(18, .bold))
                     .foregroundColor(Theme.Colors.contentPrimary)
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                 Rectangle()
-                    .fill(Theme.Colors.chatStrokeStrong)
+                    .fill(Theme.Colors.cardStroke)
                     .frame(height: Theme.Layout.dividerHeight)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case 2:
-            Text(MarkdownInline.render(inlines))
-                .font(Theme.Typography.text(15, .semibold))
+            Text(MarkdownInline.render(inlines, bodyColor: Theme.Colors.contentPrimary))
+                .font(Theme.Typography.text(16, .semibold))
                 .foregroundColor(Theme.Colors.contentPrimary)
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         default:
-            Text(MarkdownInline.render(inlines))
-                .font(Theme.Typography.text(13.5, .semibold))
-                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+            Text(MarkdownInline.render(inlines, bodyColor: Theme.Colors.contentPrimary))
+                .font(Theme.Typography.text(14, .semibold))
+                .foregroundColor(Theme.Colors.contentPrimary)
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -125,7 +119,8 @@ private struct MarkdownListView: View {
     let items: [MarkdownListItem]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+        // 列表项间 8：大间距节奏，提升扫读性（对标 CC 列表呼吸感）
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 MarkdownListItemRow(item: item)
             }
@@ -147,13 +142,13 @@ private struct MarkdownListItemRow: View {
                     .foregroundColor(Theme.Colors.contentTertiary)
                     .frame(minWidth: 14, alignment: .trailing)
                 Text(MarkdownInline.render(item.inlines))
-                    .lineSpacing(3)
+                    .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            // 一层嵌套子项：缩进对齐到父项文本起点
+            // 一层嵌套子项：缩进对齐到父项文本起点；子项间 6（略小于顶层 8）
             if !item.children.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
                     ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
                         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.lg) {
                             Text(child.ordered ? "\(child.number ?? 1)." : "◦")
@@ -163,7 +158,7 @@ private struct MarkdownListItemRow: View {
                                 .foregroundColor(Theme.Colors.contentTertiary)
                                 .frame(minWidth: 14, alignment: .trailing)
                             Text(MarkdownInline.render(child.inlines))
-                                .lineSpacing(3)
+                                .lineSpacing(6)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
@@ -216,7 +211,7 @@ private struct MarkdownTableView: View {
             // 表头：加粗 + 整行底色
             HStack(spacing: Theme.Spacing.card) {
                 ForEach(Array(table.headers.enumerated()), id: \.offset) { _, header in
-                    Text(MarkdownInline.render(header))
+                    Text(MarkdownInline.render(header, bodyColor: Theme.Colors.contentPrimary))
                         .font(Theme.Typography.text(12.5, .semibold))
                         .foregroundColor(Theme.Colors.contentPrimary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -236,7 +231,7 @@ private struct MarkdownTableView: View {
             ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
                 HStack(spacing: Theme.Spacing.card) {
                     ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                        Text(MarkdownInline.render(cell))
+                        Text(MarkdownInline.render(cell, bodyColor: Theme.Colors.contentPrimary))
                             .font(Theme.Typography.text(12.5))
                             .foregroundColor(Theme.Colors.contentPrimary)
                             .fixedSize(horizontal: false, vertical: true)
@@ -302,7 +297,7 @@ struct CodeBlockView: View {
             Text(code)
                 .font(Theme.Typography.mono(12.5))
                 .foregroundColor(Theme.Colors.contentPrimary)
-                .lineSpacing(2)
+                .lineSpacing(6)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
@@ -340,27 +335,33 @@ enum MarkdownInline {
     /// 正文基准字号。
     static let baseSize: CGFloat = 13
 
-    static func render(_ tokens: [InlineToken]) -> AttributedString {
+    /// bodyColor：纯文本/行内代码的颜色——正文与列表降两档（primary 0.80），
+    /// 与加粗档（contentPrimary 纯白/纯黑）肉眼可分区分开；标题、表格等调用处显式传 contentPrimary。
+    /// 加粗递归时把基色提为 contentPrimary（而非事后整段覆盖），嵌套链接的 accent 得以保留。
+    static func render(_ tokens: [InlineToken], bodyColor: Color = Color.primary.opacity(0.80)) -> AttributedString {
         var result = AttributedString()
         for token in tokens {
             switch token {
             case let .text(value):
-                result.append(AttributedString(value))
+                var piece = AttributedString(normalizeQuotes(value))
+                piece.foregroundColor = bodyColor
+                result.append(piece)
             case let .code(value):
                 var piece = AttributedString(value)
                 piece.font = Theme.Typography.mono(12.5)
+                piece.foregroundColor = bodyColor
                 piece.backgroundColor = Theme.Colors.surfaceTrack
                 result.append(piece)
             case let .bold(inner):
-                var piece = render(inner)
-                piece.font = Theme.Typography.text(baseSize, .bold)
+                var piece = render(inner, bodyColor: Theme.Colors.contentPrimary)
+                piece.font = Theme.Typography.text(baseSize, .semibold)
                 result.append(piece)
             case let .italic(inner):
-                var piece = render(inner)
+                var piece = render(inner, bodyColor: bodyColor)
                 piece.font = Theme.Typography.text(baseSize).italic()
                 result.append(piece)
             case let .link(label, url):
-                var piece = render(label)
+                var piece = render(label, bodyColor: bodyColor)
                 piece.foregroundColor = Theme.Colors.accent
                 piece.underlineStyle = .single
                 if let linkURL = URL(string: url) {
@@ -369,9 +370,37 @@ enum MarkdownInline {
                 result.append(piece)
             }
         }
-        // 统一基础字体与正文色（行内覆盖（代码/加粗等）已在上面设定，这里只设默认值）
+        // 统一基础字体（行内覆盖（代码/加粗等）已在上面设定，这里只设默认值）
         result.font = Theme.Typography.text(baseSize)
-        result.foregroundColor = Theme.Colors.contentPrimary
+        return result
+    }
+
+    /// 成对 ASCII 直引号归一为中文引号「」（未配对的单个 " 保留原样）。
+    /// 仅供显示层调用（text token 与流式纯文本），绝不触碰行内代码/代码块/链接 URL；
+    /// 不改原始文本，复制/重发内容不受影响。
+    static func normalizeQuotes(_ text: String) -> String {
+        guard text.contains("\"") else { return text }
+        var result = ""
+        result.reserveCapacity(text.count)
+        var isOpen = false
+        var remaining = text[...]
+        while let first = remaining.first {
+            let after = remaining.dropFirst()
+            if first == "\"" {
+                if !isOpen, after.contains("\"") {
+                    result.append("「")   // 存在后续配对：开引号
+                    isOpen = true
+                } else if isOpen {
+                    result.append("」")   // 处于开引状态：合引号
+                    isOpen = false
+                } else {
+                    result.append(first)  // 未配对的单个 "，原样保留
+                }
+            } else {
+                result.append(first)
+            }
+            remaining = after
+        }
         return result
     }
 }

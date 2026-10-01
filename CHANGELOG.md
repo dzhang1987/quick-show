@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-10-02
+
+### Changed
+
+- AI 对话窗口界面重做（对标 DeepSeek / Claude Code 对话排版，落成 macOS Liquid Glass 形态）：
+  - 背景材质：消息区弃用 94% 不透明 `chatBase` 实心底板，改 `.ultraThinMaterial` 材质分层——窗口级 `NSGlassEffectView` 玻璃真正透出（与主面板同款模式），明暗随壁纸经 `effectiveAppearance` 自动翻转；输入坞改为浮起玻璃卡（材质底 + 0.5pt `chatStrokeStrong` 描边 + 轻投影），与消息区留 16pt 浮动缝隙；阅读列限宽 600pt 居中，窗口加宽时两侧透玻璃（消息列与输入坞同宽对齐）
+  - 助手消息去气泡：markdown 正文直接铺在材质上左对齐、无内边距（用户消息琥珀气泡与工具卡片容器语言保留），层级全靠字号 / 字重 / 留白表达
+  - 排版体系：正文行距 lineSpacing 3→6（13pt 等效行高约 1.7）；标题三级 h1 18 bold / h2 16 semibold / h3 14 semibold 纯白（h1 底部分隔线减弱为 `cardStroke`），正文与列表降档 primary 0.80 与加粗纯白拉开两档；块间距节奏重排——标题前 26/20/16、标题后 8 成组、内容块（段落/列表/引用/表格/代码块）之间 16，列表项间 8 / 嵌套子项间 6
+  - 直引号显示层归一：markdown text token 与流式纯文本中成对 `"…"` 转中文引号「」（行内代码 / 代码块 / 链接 URL 不转换，未配对单引号保留原样；流式与定稿共用同一转换，杜绝落定瞬间跳变）
+  - 消息操作行：hover 渐显的浮动跨骑 pill 改为消息下方常驻弱显示行——13pt medium hierarchical 图标、26×26 命中区、静止 38% / 悬停 85% 提亮并叠 8% 圆角底；复制对勾反馈与重新生成（仅最后一条落定回复，`canRegenerate`）逻辑不变
+  - placeholder 减负：「问点什么…（⏎ 发送 · ⇧⏎ 换行 · ESC 关闭）」→「问点什么…」，快捷键提示合并至底部常驻条（⏎ 发送 · ⇧⏎ 换行 · ⌘B 会话 · ⌘K 清空 · ESC 关闭）
+  - 删除对话区 / 输入区之间的羽化分隔线（输入坞改浮卡后多余，空隙归入浮动缝隙）；列表底部 padding 18→4，消除操作图标下方空洞堆积
+
+### Fixed
+
+- API Key 存储放弃 Keychain 改纯文本文件（`~/Library/Application Support/QuickShow/apikey`，目录 0700 / 文件 0600、临时文件原子写、读取前权限自动收紧）：本地开发频繁重编译导致签名变化，Keychain 条目 ACL 每次读取都弹密码授权（v1.5.1 的删除重建策略对开发期签名漂移无效）；首读时自动从旧 Keychain 条目一次性迁移（旧条目同时清理），`QUICKSHOW_AI_API_KEY` 环境变量只读兜底不变；设置页 API Key 存储说明文案同步更新
+
 ## [1.6.0] - 2026-10-01
 
 ### Added
