@@ -23,7 +23,8 @@
 ### Fixed
 
 - App 启动即崩（恢复含 `\textcolor` 公式的会话时）：SwiftMath `MTTypesetter` `.textcolor` display 分支数组越界陷阱（fatal 不可捕获）——转译层把 `\textcolor{c}{X}` 改写为 `{\color{c} X}` 规避，渲染语义等价
-- AI 窗整窗玻璃方角残影（拖动 / 缩放后方形玻璃从圆角缺口露出）：WindowServer 在方形窗口矩形上合成 behind-window 材质，重栅格化后方形玻璃从 `cornerRadius` 缺口处露出灰色方角——新增 `GlassClipContainerView` 窗口级圆角裁剪容器（`layer.masksToBounds` + CAShapeLayer 路径 mask，玻璃经其裁剪后再作 contentView）+ 窗口 `didMove`/`didResize` 后 `invalidateShadow()`（透明窗口系统阴影由不透明像素推导、拖动后不自动重算，保留方形轮廓与残影叠加成「四个方角」）
+- AI 窗整窗玻璃方角残影（拖动 / 缩放后方形玻璃从圆角缺口露出）：WindowServer 在方形窗口矩形上合成 behind-window 材质，重栅格化后方形玻璃从 `cornerRadius` 缺口处露出灰色方角——新增 `GlassClipContainerView` 窗口级圆角裁剪容器（`layer.masksToBounds` + CAShapeLayer 路径 mask，玻璃经其裁剪后再作 contentView）+ 窗口 `didMove`/`didResize` 后 `invalidateShadow()`（透明窗口系统阴影由不透明像素推导、拖动后不自动重算，保留方形轮廓与残影叠加成「四个方角」）；主面板 glass 同步补 `clipsToBounds = true` 材质渲染层面圆角基础项
+- AI 窗冷启动白屏（主内容区消息行卡近零透明度、白屏 + 幽灵残影，切会话重渲染才恢复）：根因是 0.08s 窗口级淡入动画与 SwiftUI 首帧建树的 CA 事务提交在同一时间窗竞态。三层防线：**A** 首建面板满 alpha 直接上屏、不播窗口级淡入（`isFreshlyBuilt` 区分首建 / 复用，复用热路径内容已就绪、保留淡入）；**B** 上屏前 `layoutSubtreeIfNeeded()` 强制完成建树与布局，不让离屏半建状态上屏后与渲染事务竞态；**C** 首载装载态 `isInitialHistoryLoad`——期间消息入场过渡降 `.identity`、列表 count 动画禁用（无 CA 动画可被窗口上屏竞态卡在近零透明度），首帧布局完成后的下一 runloop 解除，此后流式新消息恢复入场淡入。附带：操作行渲染条件收紧（`showsActionRow`——仅落定终态 `done`/`aborted` 的助手消息渲染操作行；流式 / 发送中不提供半截内容的复制入口，`failed` 有独立重试卡片）
 
 ## [1.11.0] - 2026-10-02
 

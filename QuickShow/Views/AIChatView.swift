@@ -65,6 +65,12 @@ struct AIChatView: View {
     @State private var scrollWheelMonitor = AIChatScrollWheelMonitor()
     /// 会话窄栏显隐（持久化到 UserDefaults，窗口宽度联动见 AIWindowManager）。
     @State private var sidebarVisible = false
+    /// C（冷启动白屏修复）：首载装载态。冷启动首帧为 true——消息行入场过渡降为
+    /// .identity、列表动画禁用：冷启动首帧 LazyVStack 惰性实例化与窗口上屏/渲染
+    /// 事务竞态时，opacity 过渡的 CA 动画会卡在近零透明度且永不完成（主内容区呈
+    /// 白屏 + 幽灵残影）；首帧布局完成后的下一 runloop 翻回 false，之后流式新消息
+    /// 恢复入场淡入。切会话是窗口在屏的正常 diff 重渲染，不受此标志影响。
+    @State private var isInitialHistoryLoad = true
     /// ⌘F 聚焦令牌：递增即让侧栏搜索框聚焦。
     @State private var searchFocusRequest = 0
     /// 行内重命名进行中的会话 id（非 nil 时 ESC 优先取消重命名，由按键监听消费）。
@@ -318,7 +324,10 @@ struct AIChatView: View {
                                 // 以稳定 id 渲染；State 只 mutate content，不改 id
                                 .id(message.id)
                                 // 落定消息入场：0.16s 淡入 + 2pt 上移（offset 是渲染位移，不参与布局，列表不跳动）
-                                .transition(.opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
+                                // 首载装载期间降为 .identity：无 CA 动画可被窗口上屏竞态卡死（见 isInitialHistoryLoad）
+                                .transition(isInitialHistoryLoad
+                                    ? .identity
+                                    : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
                             }
                         }
                     }
@@ -347,8 +356,10 @@ struct AIChatView: View {
                             }
                         }
                 }
-                // 新消息插入时应用入场过渡（动画只挂 count 变化，流式 mutate 不触发）
-                .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.messages.count)
+                // 新消息插入时应用入场过渡（动画只挂 count 变化，流式 mutate 不触发）；
+                // 首载装载期间禁用（见 isInitialHistoryLoad）
+                .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
+                           value: state.messages.count)
                 // 阅读列限宽 + 居中：先限内容宽，再整体居中于滚动区（窗口加宽时两侧透玻璃）
                 .frame(maxWidth: contentMaxWidth, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.section)
@@ -357,7 +368,11 @@ struct AIChatView: View {
                 // 滚动中消息从玻璃坞底下穿过被糊掉透出）
                 .frame(maxWidth: .infinity)
             }
-            .onAppear { scrollToBottom(proxy, animated: false) }
+            .onAppear {
+                scrollToBottom(proxy, animated: false)
+                // 首帧布局完成后的下一 runloop 解除装载态（此后新消息恢复入场动画）
+                DispatchQueue.main.async { isInitialHistoryLoad = false }
+            }
             // 新一轮消息落定（发送/重试/切会话）：用户刚发起动作，强制回底并恢复跟随
             .onChange(of: state.messages.count) { _ in
                 stickToBottom = true
@@ -929,8 +944,9 @@ private struct ChatMessageRow: View, Equatable {
                 content
                 if message.role == .assistant { Spacer(minLength: Theme.Spacing.panel) }
             }
-            // 操作行只对助手消息渲染（用户消息操作行已删，给气泡减负）
-            if message.role == .assistant {
+            // 操作行仅对落定终态的助手消息渲染（done/aborted；失败态有独立重试卡片，
+            // 流式期间不提供半截内容的复制入口）（用户消息操作行已删，给气泡减负）
+            if showsActionRow {
                 actionRow
             }
         }
@@ -941,8 +957,21 @@ private struct ChatMessageRow: View, Equatable {
         }
     }
 
+    /// 操作行渲染条件：助手消息且已落定（done/aborted）。
+    /// 流式/发送中不渲染（复制半截内容无意义且暗示完成）；failed 有独立重试卡片。
+    private var showsActionRow: Bool {
+        guard message.role == .assistant else { return false }
+        switch message.state {
+        case .done, .aborted:
+            return true
+        case .sending, .streaming, .failed:
+            return false
+        }
+    }
+
     /// 常驻操作行：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」。
     /// 弱化常驻：图标静止 38% 灰、整行 hover 提亮 85%；按钮自身 hover 叠 0.08 圆角底，不抢正文层级。
+    /// 仅在落定终态渲染（见 showsActionRow）。
     private var actionRow: some View {
         HStack(spacing: Theme.Spacing.md) {
             ChatActionIconButton(
@@ -1101,31 +1130,30 @@ private struct ChatActionIconButton: View {
 
 /// 流式消息：增量 Markdown 渲染（节流）+ 闪烁块状光标。
 /// 与落定态一致无气泡，流式→定稿不再发生排版/颜色跳变。
-/// 两级表达：① 无正文时 = 光标 + 弱化阶段词「思考中…」（有 reasoning 时阶段词省略，
-/// 活性由上方的思考折叠区摘要行承担）；② 有正文增量后 = 光标跟随文尾，无状态词。
+/// 两级表达：① 无正文且无 reasoning = 光标 + 弱化阶段词「思考中…」（首 token 等待）；
+/// ② 无正文但有 reasoning = 不渲染任何占位，活性由上方的思考折叠区摘要行实时更新承担
+/// （避免孤儿光标噪声）；③ 有正文增量后 = 光标跟随文尾，无状态词。
 private struct StreamingMessageView: View {
     let content: String
-    /// 是否已有思考过程（reasoning 折叠区由外层 assistantContent 承载，此处只做状态词取舍）。
+    /// 是否已有思考过程（reasoning 折叠区由外层 assistantContent 承载，此处只做空态取舍）。
     let hasReasoning: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-            if !content.isEmpty {
+        if !content.isEmpty {
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 StreamingMarkdownContentView(content: content)
                 // 光标跟随文尾（置于内容块尾行下方左侧，模拟文尾 caret）
                 BlinkingCaret()
-            } else {
-                HStack(spacing: Theme.Spacing.sm) {
-                    BlinkingCaret()
-                    if !hasReasoning {
-                        Text("思考中…")
-                            .font(Theme.Typography.text(Theme.Typography.footnote))
-                            .foregroundColor(Theme.Colors.contentTertiary)
-                    }
-                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if !hasReasoning {
+            HStack(spacing: Theme.Spacing.sm) {
+                BlinkingCaret()
+                Text("思考中…")
+                    .font(Theme.Typography.text(Theme.Typography.footnote))
+                    .foregroundColor(Theme.Colors.contentTertiary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1170,9 +1198,12 @@ private struct ReasoningDisclosureView: View {
                         .font(Theme.Typography.text(Theme.Typography.footnote))
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    // chevron 固定行尾：摘要流式更新时宽度变化不带动其位置，消除抖动
+                    Spacer(minLength: Theme.Spacing.sm)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(Theme.Typography.text(Theme.Typography.micro, .medium))
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .foregroundColor(Theme.Colors.contentTertiary)
                 .contentShape(Rectangle())
             }

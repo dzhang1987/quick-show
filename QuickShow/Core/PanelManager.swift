@@ -268,6 +268,8 @@ final class PanelManager {
                 glass.style = .regular
                 glass.cornerRadius = Theme.Radius.panel
                 glass.tintColor = nil
+                // 基础项补齐：材质渲染层面尊重圆角（仅此项不够，见 GlassClipContainerView 注释）
+                glass.clipsToBounds = true
                 NSAnimationContext.runAnimationGroup({ ctx in
                     ctx.duration = 0
                     ctx.allowsImplicitAnimation = false
@@ -275,8 +277,17 @@ final class PanelManager {
                     glass.contentView = hostingView
                 })
                 hostingView.autoresizingMask = [.width, .height]
-                panel.contentView = glass
+                // 窗口级圆角裁剪容器（2026-10 方角残影修复，与 AI 窗同款）：
+                // WindowServer 在方形窗口矩形上合成 behind-window 玻璃材质，
+                // 重栅格化后方形玻璃从圆角缺口露出四角灰块；玻璃经容器裁剪后再作 contentView。
+                let clip = GlassClipContainerView(cornerRadius: Theme.Radius.panel)
+                clip.frame = NSRect(origin: .zero, size: newFrame.size)
+                glass.autoresizingMask = [.width, .height]
+                clip.addSubview(glass)
+                panel.contentView = clip
                 panelGlass = glass
+                // contentView 变更后系统阴影（由不透明像素推导）需重算
+                panel.invalidateShadow()
             }
             panel.alphaValue = 0.0
             panel.makeKeyAndOrderFront(nil)

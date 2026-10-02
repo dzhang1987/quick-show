@@ -171,6 +171,11 @@ final class AIWindowManager {
         // 恢复持久化的钉住态（用户可能在其他入口改过）。
         isPinned = UserDefaults.standard.bool(forKey: Self.pinnedKey)
 
+        // A（冷启动白屏修复）：区分首建与复用。首建面板满 alpha 直接上屏、
+        // 不播窗口级淡入——0.08s 的 animator alpha 动画与 SwiftUI 首帧建树的
+        // CA 事务提交在同一时间窗竞态，冷启动必现主内容区消息行卡在近零透明度
+        // （白屏 + 幽灵残影，切会话重渲染才恢复）；复用热路径内容已就绪，保留淡入。
+        let isFreshlyBuilt = self.panel == nil
         let panel = ensurePanel()
         let screen = ScreenHelper.activeScreen
         // 有有效存档则恢复记忆的位置/大小；否则走居中默认尺寸（首启）。
@@ -195,17 +200,25 @@ final class AIWindowManager {
         isDismissing = false
         hideGeneration += 1
         panel.ignoresMouseEvents = false
-        panel.alphaValue = 0.0
+
+        // B（冷启动白屏修复）：上屏前强制完成 SwiftUI 建树与布局，
+        // 不让离屏半建状态随 orderFront 上屏后与渲染事务竞态
+        panel.contentView?.layoutSubtreeIfNeeded()
+
+        // A：alpha 必须先于 orderFront 设置（复用路径 0→1 淡入；首建满 alpha）
+        panel.alphaValue = isFreshlyBuilt ? 1.0 : 0.0
 
         // 窗口先上屏，避免冷启动首帧卡顿
         panel.makeKeyAndOrderFront(nil)
         panel.makeKey()
         NSApp.activate(ignoringOtherApps: true)
 
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = Theme.Motion.panelFadeIn
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            panel.animator().alphaValue = 1.0
+        if !isFreshlyBuilt {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = Theme.Motion.panelFadeIn
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                panel.animator().alphaValue = 1.0
+            }
         }
     }
 
