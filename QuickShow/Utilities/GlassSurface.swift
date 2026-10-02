@@ -41,6 +41,19 @@ extension View {
     }
 }
 
+// MARK: - 运行时系统能力开关
+//
+// 整窗 Liquid Glass（NSGlassEffectView）实验开关：SDK ≥ 26 编译、运行时按版本分支。
+// SwiftUI 视图层（AIChatView 等）用它决定「内容层透玻璃」还是「降级铺材质」，
+// 与 AppKit 窗口层（AIWindowManager）的装载分支保持同一判断源。
+enum OSFeatures {
+    /// macOS 26+：AppKit Liquid Glass 可用，整窗走真玻璃。
+    static let liquidGlass: Bool = {
+        if #available(macOS 26.0, *) { return true }
+        return false
+    }()
+}
+
 // MARK: - 无边框窗口 contentView 统一圆角裁剪
 //
 // 两个窗口（主面板 / AI 窗）共用同一套：整窗 NSGlassEffectView 已移除，

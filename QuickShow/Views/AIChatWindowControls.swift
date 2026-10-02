@@ -5,7 +5,9 @@ import SwiftUI
 //
 // 无边框 AIPanel 的自定义窗口操作三件套：
 // 1. 顶部拖动条：自定义 mouseDragged 循环逐帧 setFrame（不用 performDrag，才能逐帧吸附计算）；
-// 2. 拖动吸附：中心线磁吸 + 左右边缘半屏 + 顶边全高，磁滞阈值防抖，窗口级 overlay 显示辅助线/预览；
+// 2. 拖动吸附（松手才吸附）：拖动全程窗口自由跟随鼠标（free frame + 屏内约束），
+//    吸附检测（左右边缘半屏 / 顶边全高 / 中心居中，磁滞阈值防抖）只驱动窗口级 overlay 的区域预览；
+//    松手时若命中则以短动画落到吸附目标，未命中则留在原地；
 // 3. 边缘 resize：8 向热区（四边 5pt / 四角 12pt），对应系统光标，最小 480×560、最大屏幕可见区。
 //
 // 全部视觉走既有 DesignTokens 令牌，不新增令牌。
@@ -25,10 +27,10 @@ struct WindowSnapState: OptionSet {
     var hasEdgeHalf: Bool { contains(.leftHalf) || contains(.rightHalf) }
 }
 
-// MARK: - 吸附辅助线 overlay（窗口级）
+// MARK: - 吸附预览 overlay（窗口级）
 
-/// 吸附辅助线窗口：无边框透明、忽略鼠标、层级高于 .statusBar 面板。
-/// 拖动时显示，拖动结束 orderOut 移除。
+/// 吸附预览窗口：无边框透明、忽略鼠标、层级高于 .statusBar 面板。
+/// 拖动命中吸附区时显示目标区域预览，命中消失或拖动结束时 orderOut 移除。
 final class SnapGuideOverlayWindow: NSWindow {
     init() {
         super.init(
@@ -42,45 +44,24 @@ final class SnapGuideOverlayWindow: NSWindow {
         hasShadow = false
         ignoresMouseEvents = true
         isMovableByWindowBackground = false
-        // 与 AIPanel 同为 .statusBar，辅助线需再高一档才不被面板盖住
+        // 与 AIPanel 同为 .statusBar，预览需再高一档才不被面板盖住
         level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         contentView = SnapGuideView(frame: .zero)
     }
 }
 
-/// 辅助线绘制：中心线 1pt accent 60%，半屏/全高预览 accent 10% 填充 + 1pt 描边。
+/// 吸附区域预览：仅画一块圆角矩形 = 松手后窗口将落到的 frame（与 snappedFrame 结果一致）。
+/// 柔和语言：accent 低透明度填充 + 细描边（描边略实于填充出层次），连续曲率圆角与面板一致。
 final class SnapGuideView: NSView {
-    /// 当前吸附状态（决定画哪条中心线）。
-    var state: WindowSnapState = []
     /// 屏幕可见区（全局坐标，用于把全局矩形换算到本视图局部坐标）。
     var screenFrame: NSRect = .zero
-    /// 半屏/全高预览轮廓（全局坐标）。
+    /// 吸附目标预览矩形（全局坐标；.zero 表示无预览、不绘制）。
     var previewRect: NSRect = .zero
 
     override func draw(_ dirtyRect: NSRect) {
-        let accent = NSColor(Theme.Colors.accent)
-
-        if state.contains(.centerX) {
-            let x = screenFrame.midX - screenFrame.origin.x
-            let path = NSBezierPath()
-            path.move(to: NSPoint(x: x, y: 0))
-            path.line(to: NSPoint(x: x, y: bounds.height))
-            path.lineWidth = 1
-            accent.withAlphaComponent(0.6).setStroke()
-            path.stroke()
-        }
-        if state.contains(.centerY) {
-            let y = screenFrame.midY - screenFrame.origin.y
-            let path = NSBezierPath()
-            path.move(to: NSPoint(x: 0, y: y))
-            path.line(to: NSPoint(x: bounds.width, y: y))
-            path.lineWidth = 1
-            accent.withAlphaComponent(0.6).setStroke()
-            path.stroke()
-        }
-
         guard previewRect != .zero else { return }
+        let accent = NSColor(Theme.Colors.accent)
         let local = NSRect(
             x: previewRect.origin.x - screenFrame.origin.x,
             y: previewRect.origin.y - screenFrame.origin.y,
@@ -94,7 +75,7 @@ final class SnapGuideView: NSView {
         )
         accent.withAlphaComponent(0.10).setFill()
         path.fill()
-        accent.setStroke()
+        accent.withAlphaComponent(0.45).setStroke()
         path.lineWidth = 1
         path.stroke()
     }
@@ -102,18 +83,19 @@ final class SnapGuideView: NSView {
 
 // MARK: - 顶部拖动条 NSView
 
-/// 顶部拖动条：记录窗口偏移，逐帧 setFrame + 吸附计算 + 辅助线显示。
+/// 顶部拖动条：记录窗口偏移，拖动全程自由跟随鼠标（free frame 逐帧 setFrame），
+/// 吸附检测仅驱动 overlay 区域预览；松手才应用吸附结果（短动画落位）。
 /// 拖动约束：窗口至少 100pt 宽/高留在当前屏幕内。
 final class WindowDragHandleNSView: NSView {
     private var dragStartMouse: NSPoint = .zero
-    /// 拖动基准 frame：拖动开始或吸附状态切换时的窗口 frame（避免尺寸吸附逐帧抖动）。
+    /// 拖动基准 frame：拖动开始时的窗口 frame（free frame 每帧由它 + 位移直接算出，无中途锚点重置）。
     private var dragBaseFrame: NSRect = .zero
     private var activeSnap: WindowSnapState = []
     private let overlay = SnapGuideOverlayWindow()
 
-    /// 水平/垂直中心磁吸与边缘吸附的获取阈值。
+    /// 吸附获取阈值（预览出现）。
     private let acquireThreshold: CGFloat = 20
-    /// 已吸附后的释放阈值（磁滞，放宽到 30 避免边界抖动）。
+    /// 命中后的释放阈值（磁滞 30：预览显隐防抖，避免在边界处来回闪烁）。
     private let releaseThreshold: CGFloat = 30
     /// 拖出屏幕前必须保留在屏内的最小边长。
     private let minOnScreen: CGFloat = 100
@@ -126,7 +108,7 @@ final class WindowDragHandleNSView: NSView {
         dragStartMouse = NSEvent.mouseLocation
         dragBaseFrame = window.frame
         activeSnap = []
-        updateOverlay(for: screenContaining(dragStartMouse), state: [], preview: .zero)
+        overlay.orderOut(nil)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -135,46 +117,49 @@ final class WindowDragHandleNSView: NSView {
         let screen = screenContaining(mouse)
         let visible = screen.visibleFrame
 
-        var free = dragBaseFrame.offsetBy(
+        // 窗口始终自由跟随鼠标，绝不即时跳到吸附目标
+        let free = dragBaseFrame.offsetBy(
             dx: mouse.x - dragStartMouse.x,
             dy: mouse.y - dragStartMouse.y
         )
-        let detected = detectSnap(free: free, screenFrame: visible, currentlyActive: activeSnap)
-
-        if detected != activeSnap {
-            // 状态切换（获取/释放）：以当前窗口 frame 为新锚点，防止逐帧来回跳变
-            activeSnap = detected
-            dragBaseFrame = window.frame
-            dragStartMouse = mouse
-            free = dragBaseFrame
-        }
-
-        var target: NSRect
-        var preview: NSRect = .zero
-        if activeSnap.isEmpty {
-            target = constrain(free, to: visible)
-        } else {
-            target = constrain(snappedFrame(activeSnap, free: free, screenFrame: visible), to: visible)
-            if activeSnap.hasEdgeHalf {
-                preview = halfPreviewRect(screenFrame: visible, state: activeSnap)
-            } else if activeSnap.contains(.topFull) {
-                preview = NSRect(x: target.origin.x, y: visible.minY, width: target.width, height: visible.height)
-            }
-        }
-
-        window.setFrame(target, display: true)
+        window.setFrame(constrain(free, to: visible), display: true)
         window.invalidateShadow()
-        updateOverlay(for: screen, state: activeSnap, preview: preview)
+
+        // 吸附检测只驱动预览：预览矩形 = 松手时 snappedFrame 将给到的目标 frame（含屏内约束，与落点严格一致）
+        activeSnap = detectSnap(free: free, screenFrame: visible, currentlyActive: activeSnap)
+        let preview = activeSnap.isEmpty
+            ? .zero
+            : constrain(snappedFrame(activeSnap, free: free, screenFrame: visible), to: visible)
+        updateOverlay(for: screen, preview: preview)
     }
 
     override func mouseUp(with event: NSEvent) {
+        // 无论命中与否，overlay 都要收掉（先收预览，再落位，避免预览框挂在动画上）
+        let snap = activeSnap
         activeSnap = []
         overlay.orderOut(nil)
+        guard !snap.isEmpty, let window else { return }
+
+        let mouse = NSEvent.mouseLocation
+        let visible = screenContaining(mouse).visibleFrame
+        let free = dragBaseFrame.offsetBy(
+            dx: mouse.x - dragStartMouse.x,
+            dy: mouse.y - dragStartMouse.y
+        )
+        let target = constrain(snappedFrame(snap, free: free, screenFrame: visible), to: visible)
+        // 短促平滑地落到吸附目标（节奏复用窗口尺寸动画令牌，与全窗口 resize 语言一致）
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = Theme.Motion.windowResize
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().setFrame(target, display: true)
+        }
     }
 
     // MARK: 吸附计算
 
-    /// 逐帧探测吸附类型；命中边缘半屏/顶边全高时不再判中心线，避免叠加冲突。
+    /// 逐帧探测吸附类型（仅供预览显隐，磁滞防抖）。
+    /// 组合语义与 snappedFrame 一致：顶边全高可与中心 X 叠加；左右半屏期间不判 centerX、
+    /// 全高期间不判 centerY（这些组合在 snappedFrame 中会互相覆盖，预览须与落点严格一致）。
     private func detectSnap(free: NSRect, screenFrame vf: NSRect, currentlyActive active: WindowSnapState) -> WindowSnapState {
         let threshold = active.isEmpty ? acquireThreshold : releaseThreshold
         func near(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= threshold }
@@ -197,7 +182,8 @@ final class WindowDragHandleNSView: NSView {
         return state
     }
 
-    /// 吸附目标 frame：左右边缘 → 半屏（全高）；顶边 → 全高（宽度位置保持）；中心线 → 居中。
+    /// 吸附目标 frame（预览与松手落位的唯一来源，两者严格一致）：
+    /// 左右边缘 → 半屏（全高）；顶边 → 全高（宽度位置保持）；中心 → 按当前尺寸居中（centerX/centerY 可各自独立叠加）。
     private func snappedFrame(_ state: WindowSnapState, free: NSRect, screenFrame vf: NSRect) -> NSRect {
         var frame = free
         if state.contains(.leftHalf) {
@@ -219,16 +205,6 @@ final class WindowDragHandleNSView: NSView {
         return frame
     }
 
-    private func halfPreviewRect(screenFrame vf: NSRect, state: WindowSnapState) -> NSRect {
-        if state.contains(.leftHalf) {
-            return NSRect(x: vf.minX, y: vf.minY, width: vf.width / 2, height: vf.height)
-        }
-        if state.contains(.rightHalf) {
-            return NSRect(x: vf.midX, y: vf.minY, width: vf.width / 2, height: vf.height)
-        }
-        return .zero
-    }
-
     /// 窗口至少保留 minOnScreen 边长在可见区内。
     private func constrain(_ frame: NSRect, to vf: NSRect) -> NSRect {
         var result = frame
@@ -247,8 +223,9 @@ final class WindowDragHandleNSView: NSView {
             ?? ScreenHelper.activeScreen
     }
 
-    private func updateOverlay(for screen: NSScreen, state: WindowSnapState, preview: NSRect) {
-        guard !state.isEmpty || preview != .zero else {
+    /// 预览显隐：preview 为 .zero（未命中）时收起 overlay，否则贴屏显示目标区域预览。
+    private func updateOverlay(for screen: NSScreen, preview: NSRect) {
+        guard preview != .zero else {
             overlay.orderOut(nil)
             return
         }
@@ -256,7 +233,6 @@ final class WindowDragHandleNSView: NSView {
         overlay.setFrame(visible, display: false)
         if let guide = overlay.contentView as? SnapGuideView {
             guide.screenFrame = visible
-            guide.state = state
             guide.previewRect = preview
             guide.needsDisplay = true
         }

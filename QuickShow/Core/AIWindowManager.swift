@@ -377,11 +377,30 @@ final class AIWindowManager {
                 onClose: { [weak self] in self?.hide() }
             ))
         }
-        // 整窗 NSGlassEffectView 已移除（HIG：Liquid Glass 只用于功能层，内容层用标准材质）。
-        // hostingView 直接作为 contentView，根图层连续曲率圆角裁剪，与主面板同一套；
-        // 功能面 glass 见 AIChatView 的 GlassSurface（顶栏 / 输入坞）。
-        PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
-        panel.contentView = hostingView
+        // 整窗 Liquid Glass 实验（2026-10 质感专项）：26+ 恢复 NSGlassEffectView 整窗玻璃。
+        // 当年移除主因是 NSGlassEffectView+NSHostingView+Button 测量死锁；现按社区成熟规避落地：
+        // ① hostingView.sizingOptions=[] 禁其反推窗口尺寸；② 玻璃组装全程零时长动画上下文
+        // （玻璃隐式动画会打断 SwiftUI 建树 → AttributeGraph 崩溃）；③ 先组装、最后挂 contentView。
+        // <26 降级路径保持原状（hostingView 直接作 contentView + 根图层圆角裁剪）。
+        if #available(macOS 26.0, *) {
+            hostingView.sizingOptions = []
+            let glass = NSGlassEffectView()
+            glass.style = .regular          // 文字为主 → regular（自适应明暗保可读性）
+            glass.cornerRadius = Theme.Radius.panel
+            glass.tintColor = nil
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0
+                ctx.allowsImplicitAnimation = false
+                glass.frame = NSRect(origin: .zero, size: frame.size)
+                glass.contentView = hostingView   // 唯一受保证的装载方式（勿 addSubview）
+            })
+            // hosting 填满玻璃 + resize 热区挂载均依赖 autoresizing 跟随
+            hostingView.autoresizingMask = [.width, .height]
+            panel.contentView = glass
+        } else {
+            PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
+            panel.contentView = hostingView
+        }
         panel.invalidateShadow()
 
         // 边缘 resize 热区：直接挂在内容视图最上层（真实 AppKit 命中测试，中心区域放行给 SwiftUI）。

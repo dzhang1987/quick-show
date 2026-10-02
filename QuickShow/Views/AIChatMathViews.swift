@@ -49,6 +49,16 @@ enum MathRasterizer {
         return resolved
     }
 
+    /// SwiftUI colorScheme → 固定 appearance。
+    /// 位图烤色后不会自动跟随明暗翻转，必须经 @Environment(\.colorScheme) 驱动
+    /// updateNSView 重调（SwiftUI 只追踪环境依赖，不追踪 NSApp.effectiveAppearance），
+    /// 再由此处换用对应 appearance 重新取色光栅化。
+    static func appearance(for scheme: ColorScheme) -> NSAppearance {
+        scheme == .dark
+            ? NSAppearance(named: .darkAqua) ?? NSAppearance(named: .aqua)!
+            : NSAppearance(named: .aqua)!
+    }
+
     /// 公式 → 位图（唯一入口，带缓存）。解析失败返回 nil，由调用方降级显示原始 LaTeX。
     /// - Parameter isDisplay: 块级用 true（display 模式，分式/积分更舒展），行内用 false（text 模式）。
     static func rasterize(latex: String, pointSize: CGFloat, color: NSColor, isDisplay: Bool) -> Rasterized? {
@@ -359,6 +369,10 @@ struct MathBlockView: NSViewRepresentable {
     var fontSize: CGFloat = 14
     var color: Color = Color.primary
 
+    /// 明暗翻转追踪：SwiftUI 环境变化才触发 updateNSView 重调（读 NSApp.effectiveAppearance
+    /// 不被追踪，外观切换后旧位图会钉死），翻转后经缓存 key（含颜色分量）自动换新位图。
+    @Environment(\.colorScheme) private var colorScheme
+
     func makeNSView(context: Context) -> NSImageView {
         let view = NSImageView()
         view.imageScaling = .scaleProportionallyDown
@@ -368,7 +382,7 @@ struct MathBlockView: NSViewRepresentable {
     }
 
     func updateNSView(_ view: NSImageView, context: Context) {
-        let nsColor = MathRasterizer.resolvedColor(color, appearance: NSApp.effectiveAppearance)
+        let nsColor = MathRasterizer.resolvedColor(color, appearance: MathRasterizer.appearance(for: colorScheme))
         let raster = MathRasterizer.rasterize(
             latex: latex, pointSize: fontSize, color: nsColor, isDisplay: true
         )
@@ -385,6 +399,10 @@ struct MathParagraphView: NSViewRepresentable {
     var baseSize: CGFloat = 13
     var weight: Font.Weight = .regular
     var color: Color = Color.primary.opacity(0.80)
+
+    /// 明暗翻转追踪：同 MathBlockView，环境驱动 updateNSView 重调后重新取色光栅化；
+    /// 原先读 field.effectiveAppearance 依赖视图已挂入窗口，且翻转不触发刷新。
+    @Environment(\.colorScheme) private var colorScheme
 
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField(labelWithAttributedString: NSAttributedString())
@@ -403,7 +421,7 @@ struct MathParagraphView: NSViewRepresentable {
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
-        let nsColor = MathRasterizer.resolvedColor(color, appearance: field.effectiveAppearance)
+        let nsColor = MathRasterizer.resolvedColor(color, appearance: MathRasterizer.appearance(for: colorScheme))
         let nsFont = MarkdownInlineNS.font(size: baseSize, weight: MarkdownInlineNS.nsWeight(weight))
         field.attributedStringValue = MarkdownInlineNS.renderNS(
             inlines,

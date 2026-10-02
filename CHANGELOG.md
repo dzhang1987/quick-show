@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-10-02
+
+### Changed
+
+- AI 窗恢复整窗 Liquid Glass（用户反馈「与系统聚焦面板质感差距大」；经截图逐像素比对诊断，根因是 1.8.0 移除整窗 `NSGlassEffectView` 后 `ultraThinMaterial` 在深色模式下 tint 过重近乎实心，backdrop 折射/透底/受光边缘全失效，走不到系统 Liquid Glass 渲染管线）：
+  - 26+ 恢复 `NSGlassEffectView` 整窗玻璃（`.regular` 样式 + 26pt 连续曲率圆角）作 `panel.contentView`；当年移除主因（NSGlassEffectView+NSHostingView+Button 测量死锁）按社区成熟规避落地：① `sizingOptions=[]` 禁 hosting 反推窗口尺寸；② 玻璃组装全程零时长 `NSAnimationContext`（玻璃隐式动画会打断 SwiftUI 建树 → AttributeGraph 崩溃）；③ 先组装、最后挂 contentView
+  - 内容层背景 26+ 透明化（内容「印」在玻璃上，系统 Spotlight 语义），手绘方向性 rim light 移除（玻璃自带 specular 受光边缘，叠加出双边缘）；`<26` 降级路径不变（ultraThinMaterial + rim）
+  - 新增 `OSFeatures.liquidGlass` 运行时能力开关，SwiftUI 视图层与 AppKit 窗口层共用同一判断源
+- AI 窗拖动吸附改「松手落位」交互：拖动全程窗口自由跟随鼠标，吸附检测只驱动窗口级目标区域预览（预览矩形 = 松手落点，严格一致），松手命中才以短动画（`Motion.windowResize`）落位；替换原逐帧吸附（中途锚点重置与中心线/半屏叠加冲突）——预览层去掉中心线，只画目标区域圆角轮廓
+
+### Fixed
+
+- 数学公式位图明暗翻转钉死：`MathBlockView`/`MarkdownBlockView` 追加 `@Environment(\.colorScheme)` 驱动 `updateNSView` 重调（SwiftUI 不追踪 `NSApp.effectiveAppearance`，外观切换后旧位图不换），经缓存 key（含颜色分量）自动取对应明暗位图；新增 `MathRasterizer.appearance(for:)` 把 colorScheme 映射到固定 `NSAppearance` 取色
+
 ## [1.9.0] - 2026-10-02
 
 ### Added

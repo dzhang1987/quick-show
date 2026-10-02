@@ -51,6 +51,10 @@ private extension MarkdownBlock {
 private struct MarkdownBlockView: View {
     let block: MarkdownBlock
 
+    /// 块级公式降级预检的取色外观：跟随环境 colorScheme（NSApp.effectiveAppearance
+    /// 不被 SwiftUI 追踪，明暗翻转后分支判定会与位图脱节）。
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
         switch block {
         case let .heading(level, inlines):
@@ -138,7 +142,7 @@ private struct MarkdownBlockView: View {
     /// 光栅化失败时降级为等宽原始 LaTeX 文本。
     @ViewBuilder
     private func mathBlockView(_ latex: String) -> some View {
-        let nsColor = MathRasterizer.resolvedColor(Theme.Colors.contentPrimary, appearance: NSApp.effectiveAppearance)
+        let nsColor = MathRasterizer.resolvedColor(Theme.Colors.contentPrimary, appearance: MathRasterizer.appearance(for: colorScheme))
         if MathRasterizer.rasterize(latex: latex, pointSize: 14, color: nsColor, isDisplay: true) != nil {
             MathBlockView(latex: latex, fontSize: 14, color: Theme.Colors.contentPrimary)
                 .padding(.vertical, Theme.Spacing.sm)

@@ -111,18 +111,25 @@ struct AIChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
-            // 内容层标准材质（HIG：内容层必须用标准材质，Liquid Glass 只属于功能层）。
-            // 整窗 NSGlassEffectView 已移除后，26+ 与 13~25 统一铺 ultraThinMaterial，
-            // 明暗翻转由材质自身随 effectiveAppearance 驱动，语义色同源无错位。
-            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
-                .fill(.ultraThinMaterial)
+            // 内容层背景：26+ 整窗真玻璃（窗口层 NSGlassEffectView）直接透出，内容「印」在
+            // 玻璃上（系统 Spotlight 语义）；<26 降级路径铺 ultraThinMaterial 保持观感接近。
+            if OSFeatures.liquidGlass {
+                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                    .fill(.clear)
+            } else {
+                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
         }
         // 窗口边缘 rim light（方向性内描边：顶 ~70% 白 → 侧 ~15% → 底 ~5%，另底缘 1pt 黑 8% 重边）
-        // 受光方向 = 玻璃厚度感；替代无边框窗口默认的均匀灰边（无受光方向 = 塑料片观感）。
-        // 写在放大层之前：放大覆盖层激活时盖住 rim；allowsHitTesting(false) 防描边层吞点击。
+        // 仅 <26 降级路径需要：26+ 整窗 NSGlassEffectView 自带 specular rim（受光方向 + 断面
+        // 折光），手绘描边叠加会出双边缘。写在放大层之前：放大覆盖层激活时盖住 rim；
+        // allowsHitTesting(false) 防描边层吞点击。
         .overlay {
-            windowRimLight
-                .allowsHitTesting(false)
+            if !OSFeatures.liquidGlass {
+                windowRimLight
+                    .allowsHitTesting(false)
+            }
         }
         // 图片点击放大覆盖层（轻量自实现；ESC 由 keyMonitor 先行消费关闭）
         // 注意顺序：overlay 必须写在圆角裁剪之前，否则 13~25 降级路径下覆盖层会是直角
