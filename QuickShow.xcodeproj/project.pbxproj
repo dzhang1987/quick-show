@@ -199,7 +199,7 @@
 			path = QuickShow;
 			sourceTree = "<group>";
 		};
-		"TEMP_55E920A5-0C69-408C-9EE2-AFA528608A7A" /* Resources */ = {
+		"TEMP_411BF6C2-DED7-4336-A51B-B5A810CCD78C" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);

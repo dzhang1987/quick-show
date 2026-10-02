@@ -22,6 +22,12 @@ final class PanelManager {
     
     // 窗口动画期间的逐帧尺寸轮询定时器（驱动 AppState.livePanelSize）
     private var framePollTimer: Timer?
+
+    /// 26+ 整窗玻璃引用（NSGlassEffectView，以 NSView 存储规避属性级 @available 标注）。
+    private weak var panelGlass: NSView?
+    /// 26+ 玻璃组装延迟到首次 show（学 AI 窗「组装紧跟上屏」），setup 期暂存内容视图。
+    /// 暂存期间不在窗口层级、无其他持有者，必须强引用。
+    private var panelHostingView: NSHostingView<PanelView>?
     
     private init() {}
     
@@ -34,12 +40,20 @@ final class PanelManager {
         
         let contentView = PanelView(appState: appState)
         let hostingView = NSHostingView(rootView: contentView)
-        // 整窗 NSGlassEffectView 已移除（HIG：Liquid Glass 只用于功能层，内容层必须用标准材质；
-        // 整窗包玻璃是官方点名的反模式）。hostingView 直接作为 contentView，由 AppKit 根图层
-        // 施加连续曲率圆角裁剪，与 13~25 降级路径完全同一套；明暗翻转交由材质自身驱动
-        //（语义色与材质同源 effectiveAppearance，无错位）。功能面 glass 见 GlassSurface。
-        PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
-        panel.contentView = hostingView
+        // 整窗 Liquid Glass（2026-10 质感专项第二轮：主面板与 AI 窗统一）。
+        // 26+ 玻璃组装延迟到首次 show（学 AI 窗 makePanel 在 show 路径内、组装与上屏
+        // 零间隔）——不留「装载后长期 orderOut 挂起」空窗期；hostingView setup 期暂存
+        // （暂存期间不在窗口层级，panelHostingView 强引用持有）。
+        // 死锁规避与 AI 窗同款（sizingOptions=[] / 零时长动画上下文 / 先组装后挂窗；
+        // 当年 PreferenceKey 测量链已改 60Hz 轮询驱动，见 updatePanelFrameAnimated）。
+        // <26 降级路径保持原状（hostingView 直接作 contentView + 根图层圆角裁剪）。
+        if #available(macOS 26.0, *) {
+            hostingView.sizingOptions = []
+            panelHostingView = hostingView
+        } else {
+            PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
+            panel.contentView = hostingView
+        }
         // 注：旧整窗玻璃承载 NSHostingView 时，SwiftUI PreferenceKey 测量链在含 Button 内容下
         // 会死锁（V6 实验坐实），布局进度仍由 PanelManager 逐帧推送窗口 frame 驱动
         //（见 updatePanelFrameAnimated）。整窗 glass 已移除，该 workaround 待观察后清理。
@@ -246,6 +260,24 @@ final class PanelManager {
             previousApp = NSWorkspace.shared.frontmostApplication
             isDismissing = false
             panel.ignoresMouseEvents = false
+            // 玻璃组装学 AI 窗（AIWindowManager.makePanel→show 完全同序）：组装→alpha 0→
+            // orderFront→fade，组装与上屏零间隔，backdrop 采样与 window server 的握手即时
+            // 完成。仅首次组装（后续 show 复用已挂载玻璃；hide 只 orderOut 不销毁）。
+            if #available(macOS 26.0, *), panelGlass == nil, let hostingView = panelHostingView {
+                let glass = NSGlassEffectView()
+                glass.style = .regular
+                glass.cornerRadius = Theme.Radius.panel
+                glass.tintColor = nil
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0
+                    ctx.allowsImplicitAnimation = false
+                    glass.frame = NSRect(origin: .zero, size: newFrame.size)
+                    glass.contentView = hostingView
+                })
+                hostingView.autoresizingMask = [.width, .height]
+                panel.contentView = glass
+                panelGlass = glass
+            }
             panel.alphaValue = 0.0
             panel.makeKeyAndOrderFront(nil)
             panel.makeKey()

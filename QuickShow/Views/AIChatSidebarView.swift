@@ -63,7 +63,8 @@ struct AIChatSidebarView: View {
         }
         .frame(width: AIChatLayout.sidebarWidth)
         .frame(maxHeight: .infinity)
-        // 侧栏底板：比主区深半档（层级分区），≥95% 不透明度压住玻璃穿透与列表滚动残影
+        // 侧栏底板：比主区深半档的轻纱层（低透明度令整窗玻璃折射从侧栏透出，分区
+        // 靠深浅差；选中/hover 语言在玻璃上同样成立，见 SessionRowView）
         .background(Theme.Colors.chatSidebarBase)
         .onChange(of: searchFocusRequest) { _ in
             searchFocused = true

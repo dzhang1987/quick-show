@@ -54,6 +54,32 @@ enum OSFeatures {
     }()
 }
 
+// MARK: - 整窗玻璃窗体的内容层背景
+//
+// 与窗口层 NSGlassEffectView 配套：26+ 内容层透明（透出真玻璃，内容「印」在玻璃上，
+// 系统 Spotlight 语义）；<26 降级路径铺 ultraThinMaterial 保持观感接近。
+// 主面板 / AI 窗共用，避免两处 if/else 漂移。
+struct LiquidPanelBackground: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background {
+            if OSFeatures.liquidGlass {
+                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                    .fill(.clear)
+            } else {
+                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            }
+        }
+    }
+}
+
+extension View {
+    /// 整窗玻璃窗体的内容层背景（26+ 透明透玻璃 / <26 降级铺材质）。
+    func liquidPanelBackground() -> some View {
+        modifier(LiquidPanelBackground())
+    }
+}
+
 // MARK: - 无边框窗口 contentView 统一圆角裁剪
 //
 // 两个窗口（主面板 / AI 窗）共用同一套：整窗 NSGlassEffectView 已移除，

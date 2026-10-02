@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-02
+
+### Changed
+
+- 整窗 Liquid Glass 推广到主面板（两窗统一，26+）：`NSGlassEffectView` 同款装载移植到 `PanelManager`；玻璃组装时机学 AI 窗——**首次 show 时组装、与上屏零间隔**（组装→alpha 0→orderFront→fade 与 `AIWindowManager.makePanel`→show 完全同序），不留「启动期装载、长期 orderOut 挂起」的空窗期；后续呼出复用已挂载玻璃。当年死锁根因（PreferenceKey 测量链）已由 60Hz 轮询时钟绕过，主面板大量 Button 内容下未复现
+- 两窗内容层背景统一走新增共享 `LiquidPanelBackground` modifier（26+ 透明透玻璃 / <26 铺 ultraThinMaterial），替代各视图散落的 if/else 分支；`PanelView` 背景换用同款
+- AI 窗侧栏融入玻璃：`chatSidebarBase` 不透明度 0.95→0.35 轻纱层（分区靠深浅差而非实色）——旧实色是「整窗无玻璃」时代的压底设计，真玻璃上即窗中窗割裂；玻璃折射从侧栏透出，选中/hover 微胶囊语言在玻璃上自然成立
+- AI 窗 ⌘B 侧栏动效同步：侧栏从 `if` 插拔（瞬间占位挤窄主区、窗口渐宽再弹回的跳变卡顿）改为**常驻 + 宽度 0↔216pt 动画**（内层内容恒宽不重排，外层与窗口 `setFrame` 同曲线同时长伸缩，`.leading` 锚定左缘展开）；`withAnimation` 曲线 easeOut→easeInOut 与窗口侧严格一致；分割线随侧栏同步收拢
+
+### Fixed
+
+- 主面板玻璃完全不渲染（背景全透明、桌面零模糊穿透、仅底边倒计时微光条残留）：根因是 1.10.0 开发期装载分支编辑残留——`panel.contentView = hostingView` 在玻璃分支之后无条件执行，把刚组装进窗口的玻璃踢出窗口层级（玻璃对象存在但从未上屏，backdrop 采样零执行）；删除残留行 + 组装时机迁移后修复。期间两轮错误假设（「挂起期握手未完成」→ show 时重挂 contentView；「重挂时机撞上 alphaValue=0」）均被该 bug 掩盖，最终以两窗装载代码逐行比对定位
+- 主面板 fade-in 期间的玻璃渲染路径随组装时机迁移一并覆盖（fade 起步 alpha 0 不再影响首次组装后的采样握手）
+
 ## [1.9.1] - 2026-10-02
 
 ### Changed

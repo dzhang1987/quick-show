@@ -109,13 +109,9 @@ struct PanelView: View {
         // focusEffectDisabled 从 macOS 14 起可用且对整个视图树传播；
         // macOS 13 降级路径下 plain 按钮默认不绘制焦点环，无需等效处理
         .modifier(FocusRingDisabledModifier())
-        .background {
-            // 内容层标准材质（HIG：内容层必须用标准材质，Liquid Glass 只属于功能层）。
-            // 整窗 NSGlassEffectView 已移除后，26+ 与 13~25 统一铺 ultraThinMaterial，
-            // 明暗翻转由材质自身随 effectiveAppearance 驱动，语义色同源无错位。
-            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
-                .fill(.ultraThinMaterial)
-        }
+        // 内容层背景：26+ 整窗真玻璃（窗口层 NSGlassEffectView）直接透出；
+        // <26 降级路径铺 ultraThinMaterial（两窗共用 LiquidPanelBackground，与 AI 窗同一判断源）
+        .liquidPanelBackground()
         // 一瞥倒计时微光进度条：bottom overlay 贴面板底边，与 VStack 内容排布完全解耦——
         // 展开/收起窗口动画期间 hosting view 逐帧变形，overlay 底边自动跟随，绝无悬空错位；
         // 置于 PanelRoundedClip 之前：随内容被圆角统一裁剪（底角弧形贴边正确）

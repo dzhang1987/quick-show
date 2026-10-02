@@ -80,47 +80,43 @@ struct AIChatView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            // 左侧会话窄栏（⌘B 显隐；窗口宽度由 AIWindowManager 同步加宽/收窄）
-            if sidebarVisible {
-                AIChatSidebarView(
-                    store: state.store,
-                    searchFocusRequest: searchFocusRequest,
-                    renamingSessionId: $renamingSessionId,
-                    onSelect: { id in state.selectSession(id: id) },
-                    onNewSession: { newSession() }
-                )
-                .transition(.opacity)
+            // 左侧会话窄栏（⌘B 显隐；窗口宽度由 AIWindowManager 同步加宽/收窄）。
+            // 常驻视图 + 宽度 0↔sidebarWidth 动画：内层内容恒为最终宽度（不随动画重排），
+            // 外层宽度与窗口 setFrame 同参数变化，消除旧「if 插拔瞬间占位挤窄主区、
+            // 窗口渐宽再弹回」的跳变卡顿；.leading 锚定从左缘展开，clipped 裁掉溢出。
+            AIChatSidebarView(
+                store: state.store,
+                searchFocusRequest: searchFocusRequest,
+                renamingSessionId: $renamingSessionId,
+                onSelect: { id in state.selectSession(id: id) },
+                onNewSession: { newSession() }
+            )
+            .opacity(sidebarVisible ? 1 : 0)
+            .allowsHitTesting(sidebarVisible)
+            .frame(width: sidebarVisible ? AIChatLayout.sidebarWidth : 0, alignment: .leading)
+            .clipped()
 
-                // 竖向细分割线（与横分割线同款两端羽化语言）
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color.primary.opacity(0.0),
-                                Color.primary.opacity(Theme.Colors.dividerOpacity),
-                                Color.primary.opacity(0.0)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
+            // 竖向细分割线（与横分割线同款两端羽化语言）：随侧栏同参数收拢/展开
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.primary.opacity(0.0),
+                            Color.primary.opacity(Theme.Colors.dividerOpacity),
+                            Color.primary.opacity(0.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
                     )
-                    .frame(width: Theme.Layout.dividerHeight)
-            }
+                )
+                .frame(width: sidebarVisible ? Theme.Layout.dividerHeight : 0)
 
             mainColumn
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background {
-            // 内容层背景：26+ 整窗真玻璃（窗口层 NSGlassEffectView）直接透出，内容「印」在
-            // 玻璃上（系统 Spotlight 语义）；<26 降级路径铺 ultraThinMaterial 保持观感接近。
-            if OSFeatures.liquidGlass {
-                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
-                    .fill(.clear)
-            } else {
-                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
-        }
+        // 内容层背景：26+ 整窗真玻璃透出（内容「印」在玻璃上，系统 Spotlight 语义）；
+        // <26 降级铺 ultraThinMaterial。两窗共用 LiquidPanelBackground。
+        .liquidPanelBackground()
         // 窗口边缘 rim light（方向性内描边：顶 ~70% 白 → 侧 ~15% → 底 ~5%，另底缘 1pt 黑 8% 重边）
         // 仅 <26 降级路径需要：26+ 整窗 NSGlassEffectView 自带 specular rim（受光方向 + 断面
         // 折光），手绘描边叠加会出双边缘。写在放大层之前：放大覆盖层激活时盖住 rim；
@@ -728,7 +724,10 @@ struct AIChatView: View {
 
     private func setSidebarVisible(_ visible: Bool) {
         guard visible != sidebarVisible else { return }
-        withAnimation(.easeOut(duration: Theme.Motion.windowResize)) {
+        // 曲线/时长与窗口侧 animator().setFrame 严格一致（AIWindowManager.setSidebarVisible
+        // 的 easeInEaseOut + windowResize；SwiftUI 侧同名曲线为 easeInOut）：
+        // 内容宽度与窗口 frame 同速变化，窗与内容一体伸缩
+        withAnimation(.easeInOut(duration: Theme.Motion.windowResize)) {
             sidebarVisible = visible
         }
         AIWindowManager.shared.setSidebarVisible(visible)
