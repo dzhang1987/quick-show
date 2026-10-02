@@ -24,6 +24,7 @@
 
 ### Fixed
 
+- 主面板顶部日期徽章被点击后成为 first responder，系统围绕按钮 bounds 绘制蓝色键盘焦点环（圆角与徽章胶囊形状不贴合，视觉脏点）：`PanelView` 根部全局 `focusEffectDisabled`（macOS 14+ 对整棵视图树传播，macOS 13 透传），面板内所有按钮一并免疫；键盘交互本由 `FloatingPanel.sendEvent` 自行拦截分发，零功能损失
 - 中文输入法组字时 placeholder「问点什么…」不消失且与组字文本重叠：`setMarkedText`/`unmarkText` 回调驱动占位符显隐（组字期间 `textDidChange` 不触发，绑定不感知组字态）
 - 中文输入首键拼音闪失（上项修复引入的回归）：组字期间 `updateNSView` 的程序化回写会摧毁组字文本——双防线修复：`hasMarkedText()` 门控拦截回写 + 组字文本实时同步进绑定；组字中流式 token 到达引发的重渲染亦不再打断输入
 

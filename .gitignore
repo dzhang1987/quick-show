@@ -15,5 +15,8 @@ xcuserdata/
 .opencode/
 *.mov
 
+# 工具本地状态目录（不入库）
+.evolver/
+
 # 本地截图与诊断图片（不入库）
 images/
