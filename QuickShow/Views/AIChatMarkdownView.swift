@@ -65,6 +65,13 @@ private struct MarkdownBlockView: View {
         case let .mathBlock(latex):
             mathBlockView(latex)
 
+        case .horizontalRule:
+            // 水平分隔线：通栏细线，视觉语言对齐 h1 底部分隔线
+            Rectangle()
+                .fill(Theme.Colors.cardStroke)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Theme.Layout.dividerHeight)
+
         case let .orderedList(items):
             MarkdownListView(items: items)
 

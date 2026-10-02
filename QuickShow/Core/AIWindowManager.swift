@@ -36,6 +36,10 @@ final class AIPanel: NSPanel {
         isFloatingPanel = true
         becomesKeyOnlyIfNeeded = false
         level = .statusBar
+        // NSPanel 默认 hidesOnDeactivate=true：应用失活时 AppKit 会直接 orderOut，
+        // 绕过 onResignKey 的钉住门控，导致「钉住常驻」失效。置 false 后失焦只走 resignKey，
+        // 由 onResignKey 依据 isPinned 决定隐藏或常驻。
+        hidesOnDeactivate = false
         backgroundColor = NSColor.clear
         isOpaque = false
         hasShadow = true
@@ -121,6 +125,27 @@ final class AIWindowManager {
     private var isDismissing: Bool = false
     // 隐藏代次令牌：作废迟到的旧淡出 completion（与 PanelManager 同款防抖）
     private var hideGeneration = 0
+    // 窗口位置/大小存档通知观察者令牌（singleton 常驻，无需移除）
+    private var frameObservers: [NSObjectProtocol] = []
+    // frame 落盘防抖（拖动/缩放每帧都触发 didMove/didResize，合并写盘）
+    private var frameSaveWorkItem: DispatchWorkItem?
+
+    // MARK: - 钉住 / 位置持久化
+
+    /// 钉住键（常驻置顶：失焦不自动隐藏）。
+    static let pinnedKey = "ai.pinned"
+    /// 窗口 frame 存档键（NSStringFromRect 落盘）。
+    static let windowFrameKey = "ai.windowFrame"
+    /// 最小尺寸（与边缘 resize 热区一致）。
+    private let minWindowSize = NSSize(width: 480, height: 560)
+
+    /// 是否已钉住常驻（show() 时从 UserDefaults 恢复）。
+    private(set) var isPinned: Bool = UserDefaults.standard.bool(forKey: AIWindowManager.pinnedKey)
+
+    /// 面板当前是否可见（供流式完成通知判断）。
+    var isPanelVisible: Bool { panel?.isVisible ?? false }
+    /// 面板当前是否为 key 窗口（供流式完成通知判断）。
+    var isPanelKey: Bool { panel?.isKeyWindow ?? false }
 
     private init() {}
 
@@ -143,10 +168,18 @@ final class AIWindowManager {
         // 避免主面板归还焦点与紧随其后的 AI 窗抢 active 状态
         PanelManager.shared.hidePanel(restoreFocus: false)
 
+        // 恢复持久化的钉住态（用户可能在其他入口改过）。
+        isPinned = UserDefaults.standard.bool(forKey: Self.pinnedKey)
+
         let panel = ensurePanel()
         let screen = ScreenHelper.activeScreen
-        let size = targetAIChatSize(on: screen)
-        panel.setFrame(ScreenHelper.centeredFrame(for: size, on: screen), display: true)
+        // 有有效存档则恢复记忆的位置/大小；否则走居中默认尺寸（首启）。
+        if let restored = restoredFrame() {
+            panel.setFrame(restored, display: true)
+        } else {
+            let size = targetAIChatSize(on: screen)
+            panel.setFrame(ScreenHelper.centeredFrame(for: size, on: screen), display: true)
+        }
         panel.invalidateShadow()
 
         // 焦点纪律：优先继承主面板的「呼出前应用」，否则取当前最前台（排除自身）
@@ -188,6 +221,8 @@ final class AIWindowManager {
         // 危险工具确认 sheet 抢占 key 状态时父窗会 resignKey，属本窗内交互，
         // 不视为被动切走（sheet 关闭后焦点自然回归父窗）
         if panel.attachedSheet != nil { return }
+        // 隐藏前落盘当前位置/大小，确保本次移动被记住。
+        saveFrame()
         isDismissing = true
         hideGeneration += 1
         let token = hideGeneration
@@ -237,18 +272,85 @@ final class AIWindowManager {
     }
 
     /// 侧栏显隐联动（由 AIChatView ⌘B / 折叠按钮调用）：
-    /// 写偏好持久化；窗口可见时按目标尺寸重新居中，复用统一窗口尺寸动画时长。
+    /// 写偏好持久化；窗口可见时**保锚点缩放**——不再居中重排，
+    /// 保持当前左上角（若贴右缘则保右缘），宽度 ±sidebarWidth，clamp 到屏幕内。
     func setSidebarVisible(_ visible: Bool) {
         UserDefaults.standard.set(visible, forKey: Self.sidebarVisibleKey)
         guard let panel, panel.isVisible else { return }
         let screen = panel.screen ?? ScreenHelper.activeScreen
-        let frame = ScreenHelper.centeredFrame(for: targetAIChatSize(on: screen), on: screen)
+        let visibleFrame = screen.visibleFrame
+        let delta = AIChatLayout.sidebarWidth * (visible ? 1 : -1)
+
+        var frame = panel.frame
+        let wasRightAnchored = abs(frame.maxX - visibleFrame.maxX) <= 20
+        let oldMaxX = frame.maxX
+        frame.size.width += delta
+        if wasRightAnchored {
+            // 贴右缘：保持右缘不动，向左扩展/收缩
+            frame.origin.x = oldMaxX - frame.size.width
+        }
+        frame = clampedFrame(frame, on: screen)
+
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = Theme.Motion.windowResize
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             ctx.allowsImplicitAnimation = true
             panel.animator().setFrame(frame, display: true)
         }
+    }
+
+    // MARK: - 钉住
+
+    /// 切换钉住常驻：立即落盘。钉住时失焦不自动隐藏；解钉后恢复失焦隐藏（当次不立即隐藏）。
+    func togglePin() {
+        isPinned.toggle()
+        UserDefaults.standard.set(isPinned, forKey: Self.pinnedKey)
+    }
+
+    // MARK: - 位置/大小持久化
+
+    /// 落盘当前窗口 frame（同步，用于隐藏前兜底）。
+    private func saveFrame() {
+        frameSaveWorkItem?.cancel()
+        frameSaveWorkItem = nil
+        guard let panel else { return }
+        UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.windowFrameKey)
+    }
+
+    /// 防抖落盘：拖动/缩放期间 didMove/didResize 高频触发，合并为一次写盘。
+    private func scheduleFrameSave() {
+        frameSaveWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, let panel = self.panel else { return }
+            self.frameSaveWorkItem = nil
+            UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.windowFrameKey)
+        }
+        frameSaveWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
+    }
+
+    /// 读取并校验存档 frame：需与任一屏幕可见区有 ≥100×100 实质交集，随后 clamp 到 [min, 屏幕可见区] 且完整可见。
+    private func restoredFrame() -> NSRect? {
+        guard let raw = UserDefaults.standard.string(forKey: Self.windowFrameKey), !raw.isEmpty else { return nil }
+        let rect = NSRectFromString(raw)
+        guard rect.width >= 1, rect.height >= 1 else { return nil }
+        guard let screen = NSScreen.screens.first(where: { screen in
+            let intersection = screen.visibleFrame.intersection(rect)
+            return intersection.width >= 100 && intersection.height >= 100
+        }) else { return nil }
+        return clampedFrame(rect, on: screen)
+    }
+
+    /// 把 frame 夹到最小尺寸与指定屏幕可见区内（宽高 clamp + 完整可见）。
+    private func clampedFrame(_ frame: NSRect, on screen: NSScreen) -> NSRect {
+        let visibleFrame = screen.visibleFrame
+        var size = frame.size
+        size.width = min(max(size.width, minWindowSize.width), visibleFrame.width)
+        size.height = min(max(size.height, minWindowSize.height), visibleFrame.height)
+        var origin = frame.origin
+        origin.x = min(max(origin.x, visibleFrame.minX), max(visibleFrame.minX, visibleFrame.maxX - size.width))
+        origin.y = min(max(origin.y, visibleFrame.minY), max(visibleFrame.minY, visibleFrame.maxY - size.height))
+        return NSRect(origin: origin, size: size)
     }
 
     // MARK: - 窗口构建
@@ -275,29 +377,35 @@ final class AIWindowManager {
                 onClose: { [weak self] in self?.hide() }
             ))
         }
-        if #available(macOS 26.0, *) {
-            // 官方 Liquid Glass：与主面板同款做法，玻璃材质/高光/阴影由窗口层玻璃视图提供
-            let glass = NSGlassEffectView()
-            glass.style = .regular
-            glass.wantsLayer = true
-            glass.clipsToBounds = true
-            glass.layer?.masksToBounds = true
-            glass.layer?.cornerCurve = .continuous
-            // 双写圆角：glass.cornerRadius 管光效形状，layer.cornerRadius 管裁剪路径
-            glass.cornerRadius = Theme.Radius.panel
-            glass.layer?.cornerRadius = Theme.Radius.panel
-            glass.contentView = hostingView
-            panel.contentView = glass
-        } else {
-            // 13~25 降级路径：AppKit 根图层硬件级连续曲率圆角裁剪 + SwiftUI 层 ultraThinMaterial 玻璃
-            hostingView.wantsLayer = true
-            hostingView.layer?.cornerRadius = Theme.Radius.panel
-            hostingView.layer?.cornerCurve = .continuous
-            hostingView.layer?.masksToBounds = true
-            hostingView.layer?.backgroundColor = NSColor.clear.cgColor
-            panel.contentView = hostingView
-        }
+        // 整窗 NSGlassEffectView 已移除（HIG：Liquid Glass 只用于功能层，内容层用标准材质）。
+        // hostingView 直接作为 contentView，根图层连续曲率圆角裁剪，与主面板同一套；
+        // 功能面 glass 见 AIChatView 的 GlassSurface（顶栏 / 输入坞）。
+        PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
+        panel.contentView = hostingView
         panel.invalidateShadow()
+
+        // 边缘 resize 热区：直接挂在内容视图最上层（真实 AppKit 命中测试，中心区域放行给 SwiftUI）。
+        let resizeView = WindowResizeHotZoneView()
+        resizeView.frame = hostingView.bounds
+        resizeView.autoresizingMask = [.width, .height]
+        hostingView.addSubview(resizeView)
+
+        // 位置/大小持久化：NSWindow.didMove / didResize 时落盘。
+        let center = NotificationCenter.default
+        frameObservers.append(center.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleFrameSave()
+        })
+        frameObservers.append(center.addObserver(
+            forName: NSWindow.didResizeNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            self?.scheduleFrameSave()
+        })
 
         // 接线：ESC 两阶段（直连 AIChatState） / ⌘K 清空 / 被动失焦隐藏
         // AIChatState 为 @MainActor，闭包恒在主线程按键路径触发，assumeIsolated 同步桥接
@@ -318,8 +426,12 @@ final class AIWindowManager {
             MainActor.assumeIsolated { AIChatState.shared.clearSession() }
         }
         panel.onResignKey = { [weak self] in
+            guard let self else { return }
+            // 钉住常驻：失焦不隐藏，保持 .statusBar 置顶层级。
+            // 解钉后恢复失焦自动隐藏（当次不立即隐藏，等下次失焦/ESC）。
+            if self.isPinned { return }
             // 非激活即隐藏：被动失焦不夺回焦点（避免与本 App 主面板/其他窗口争抢）
-            self?.performHide(restoreFocus: false)
+            self.performHide(restoreFocus: false)
         }
         return panel
     }

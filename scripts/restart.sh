@@ -21,7 +21,10 @@ fi
 echo "🔨 正在编译 QuickShow (Release)..."
 # 编译输出落盘到临时日志：成功即删；失败打印错误摘要与完整日志路径，不再静默吞错
 BUILD_LOG="$(mktemp -t quickshow_build)"
-if ! xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release CODE_SIGN_IDENTITY="$SIGN_IDENTITY" build > "$BUILD_LOG" 2>&1; then
+# CODE_SIGN_STYLE=Manual：SPM 包产物（如 SwiftMath）默认 Automatic 风格会强制要求
+# 开发团队（Team），自签证书没有 Team 会编译失败；全局覆盖为 Manual 后包产物跳过
+# Team 校验，随主 target 一并用 SIGN_IDENTITY 签名，身份稳定，TCC 权限跨编译持续有效
+if ! xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release CODE_SIGN_IDENTITY="$SIGN_IDENTITY" CODE_SIGN_STYLE=Manual build > "$BUILD_LOG" 2>&1; then
     echo "❌ 编译失败，错误摘要："
     grep -E "error: " "$BUILD_LOG" | head -20 || echo "（日志中无 error: 行，请查看完整日志）"
     echo "💡 完整日志：$BUILD_LOG"

@@ -46,6 +46,8 @@ indirect enum MarkdownBlock: Equatable {
     case codeBlock(language: String?, code: String)
     /// 块级数学公式：已剥离定界符（$$…$$ / \[…\]）的纯 LaTeX 源串。
     case mathBlock(latex: String)
+    /// 水平分隔线（thematic break）：整行由 ≥3 个 `-` / `*` / `_` 组成。
+    case horizontalRule
 }
 
 // MARK: - 解析器（纯函数）
@@ -101,6 +103,15 @@ enum MarkdownParser {
                 flushParagraph()
                 blocks.append(math.block)
                 index = math.next
+                continue
+            }
+
+            // 水平分隔线：整行由 ≥3 个 `-` / `*` / `_` 组成。
+            // 与列表（需 `- ` 前缀+内容）、表格分隔行（必须含 `|`）、围栏代码块互斥，顺序无冲突。
+            if isThematicBreak(trimmed) {
+                flushParagraph()
+                blocks.append(.horizontalRule)
+                index += 1
                 continue
             }
 
@@ -384,6 +395,13 @@ enum MarkdownParser {
     }
 
     // MARK: - 内部：表格
+
+    /// 水平分隔线（thematic break）：整行由 ≥3 个相同字符 `-` / `*` / `_` 组成且不含其他字符。
+    private static func isThematicBreak(_ trimmed: String) -> Bool {
+        guard trimmed.count >= 3, let first = trimmed.first,
+              first == "-" || first == "*" || first == "_" else { return false }
+        return trimmed.allSatisfy { $0 == first }
+    }
 
     /// 表格分隔行：仅由 |、-、:、空格组成，且至少含一个 -。
     private static func isTableSeparator(_ line: String) -> Bool {

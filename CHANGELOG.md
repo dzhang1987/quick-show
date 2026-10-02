@@ -4,6 +4,29 @@
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-02
+
+### Added
+
+- AI 对话窗口交互升级：
+  - 钉住常驻置顶：右上角图钉按钮（状态持久化 `ai.pinned`），钉住时失焦不隐藏、保持置顶；ESC / 热键关窗语义不变。根因修复：NSPanel 浮动面板 `hidesOnDeactivate` 默认 true，应用失活时 AppKit 直接 orderOut 绕过钉住门控——显式置 false 后钉住真正生效
+  - 窗口自由移动与缩放（新文件 `AIChatWindowControls.swift`）：顶部拖动条自定义逐帧拖动，磁吸对齐——屏幕中心线（辅助线）、左右缘半屏、顶边全高（预览轮廓），20/30pt 磁滞防抖；四边 5pt + 四角 12pt 八向热区缩放（480×560 下限）；位置/大小跨重启记忆（`ai.windowFrame`，换屏校验失效自动回居中）；侧栏 ⌘B 展宽改保锚点缩放不再居中重排
+  - 流式完成通知（新文件 `AICompletionNotifier.swift`）：响应自然完成（排除中止/失败）且窗口不可见或非焦点时发系统通知（会话标题 + 回复纯文本摘要 ~80 字），点击唤出对话窗；首次使用时请求权限，被拒后静默
+- 数学公式转译层（`MathLatexTranspiler`，渲染前把 SwiftMath 1.7.3 实测不支持的命令自动转译，独立 harness 逐条验证）：`\dfrac`/`\tfrac`/`\cfrac`→`\frac`、`\iint`/`\iiint`→`\!` 紧凑积分、单列 `cases` 自动补列、`\substack`→`\atop` 堆叠、`\pmod{X}`→`\;(\text{mod}~X)`、`\:`→`\,`；后续新失败命令可继续扩充映射表
+- Markdown 水平分隔线：`---`/`***`/`___` 渲染为通栏细线（此前被当段落文本显示为连字符短线）
+- 流式期间实时渲染：流式输出走 250ms 节流增量 Markdown/公式渲染（重解析 ≤4Hz），落定后全量渲染收尾（此前流式期间纯文本、落定才整体渲染）
+
+### Changed
+
+- Liquid Glass 官方分层重构（按 HIG Materials「glass 只属功能层，内容层必须标准材质」）：移除主面板与 AI 窗的整窗 `NSGlassEffectView`（官方点名的反模式，观感如磨砂塑料）；内容层统一 `ultraThinMaterial`；新增 `GlassSurface` modifier（26+ `.glassEffect` / <26 材质+描边，分层语义跨版本一致）用于功能面（AI 窗输入坞）；两窗 contentView 统一 `PanelHostingConfigurator` 圆角裁剪；26+ 与 <26 路径同构
+- 视觉协调（用户反馈驱动）：AI 窗顶部拖动条改纯透明热区（恢复一体观感，拖动/吸附功能不变）；两窗图钉按钮统一克制语言（accent 着色无底衬、hover 轻圆底）；主面板底部状态栏恢复整合观感（与顶部日期徽章同层级同明度）；AI 窗材质层级收敛为两级（基面 + 输入坞唯一浮层）
+- 构建脚本：`restart.sh` Release 构建加 `CODE_SIGN_STYLE=Manual`——SPM 包产物默认 Automatic 签名风格强制要求开发团队 Team，自签证书无 Team 时 Release 编译失败
+
+### Fixed
+
+- 中文输入法组字时 placeholder「问点什么…」不消失且与组字文本重叠：`setMarkedText`/`unmarkText` 回调驱动占位符显隐（组字期间 `textDidChange` 不触发，绑定不感知组字态）
+- 中文输入首键拼音闪失（上项修复引入的回归）：组字期间 `updateNSView` 的程序化回写会摧毁组字文本——双防线修复：`hasMarkedText()` 门控拦截回写 + 组字文本实时同步进绑定；组字中流式 token 到达引发的重渲染亦不再打断输入
+
 ## [1.7.0] - 2026-10-02
 
 ### Added

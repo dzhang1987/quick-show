@@ -19,7 +19,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         // 确保在 Dock 程序坞上完全隐藏图标，仅在状态栏与快捷浮动面板常驻
         NSApp.setActivationPolicy(.accessory)
-        
+
+        // 尽早安装通知代理：通知点击可能在冷启动时先于用户交互到达
+        AICompletionNotifier.shared.installDelegateIfNeeded()
+
         let state = AppState()
         self.appState = state
         

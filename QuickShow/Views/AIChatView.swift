@@ -41,6 +41,8 @@ struct AIChatView: View {
     /// 端点配置可用性：hasConfiguredEndpoint 读 UserDefaults/Keychain，非 @Published，
     /// 故在视图出现与关键窗口激活时主动刷新（避免设置后回到对话窗仍显示引导）。
     @State private var configured = false
+    /// 输入内容空态：独立于 state.inputText（IME 组字期间绑定不更新），驱动 placeholder 显隐。
+    @State private var inputEmpty = true
     /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
     @State private var hasClipboardText = false
     /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
@@ -60,6 +62,10 @@ struct AIChatView: View {
     @State private var selectedModelId: String = ""
     /// AI 窗快捷键监听（⌘N/⌘B/⌘F + 重命名/放大态下的 ESC 先行消费）。
     @State private var keyMonitor = AIChatKeyMonitor()
+    /// 钉住常驻态（窗口层真源在 AIWindowManager，视图侧仅镜像渲染）。
+    @State private var pinned = AIWindowManager.shared.isPinned
+    /// 图钉按钮 hover 态。
+    @State private var pinHovered = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -94,14 +100,11 @@ struct AIChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background {
-            // 复刻主面板做法：26+ 材质由窗口层 NSGlassEffectView 统一提供，内容背景透明；
-            // 13~25 降级用原生超薄材质（随系统明暗翻转）
-            if #available(macOS 26.0, *) {
-                Color.clear
-            } else {
-                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
+            // 内容层标准材质（HIG：内容层必须用标准材质，Liquid Glass 只属于功能层）。
+            // 整窗 NSGlassEffectView 已移除后，26+ 与 13~25 统一铺 ultraThinMaterial，
+            // 明暗翻转由材质自身随 effectiveAppearance 驱动，语义色同源无错位。
+            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                .fill(.ultraThinMaterial)
         }
         // 图片点击放大覆盖层（轻量自实现；ESC 由 keyMonitor 先行消费关闭）
         // 注意顺序：overlay 必须写在圆角裁剪之前，否则 13~25 降级路径下覆盖层会是直角
@@ -118,11 +121,19 @@ struct AIChatView: View {
         .onAppear {
             refreshEnvironment()
             installKeyMonitor()
+            pinned = AIWindowManager.shared.isPinned
         }
         .onDisappear { keyMonitor.remove() }
         // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             refreshEnvironment()
+            pinned = AIWindowManager.shared.isPinned
+        }
+        // 外部清空输入（发送 / ⌘K / 重试）经 state.inputText 变化同步空态。
+        // 组字期间 ChatInputNSTextView 的 setMarkedText 回调已实时同步 state.inputText（见 syncInputState），
+        // 因此这里对组字文本同样生效；绑定与 textView.string 一致后不会形成回写回路。
+        .onChange(of: state.inputText) { newValue in
+            inputEmpty = newValue.isEmpty
         }
     }
 
@@ -130,6 +141,8 @@ struct AIChatView: View {
 
     private var mainColumn: some View {
         VStack(spacing: 0) {
+            windowTopBar
+
             // 三态：未配置引导 / 空态欢迎页 / 消息列表
             if !configured && state.messages.isEmpty {
                 UnconfiguredGuideView(onOpenSettings: onOpenSettings)
@@ -145,9 +158,52 @@ struct AIChatView: View {
             inputArea
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 复刻主面板分层模式：窗口级玻璃（26+ NSGlassEffectView / 13~25 视图层 ultraThinMaterial）
-        // 之上再铺一层超薄材质做阅读区分层，玻璃透出不盖死；文字全走语义色随 effectiveAppearance 翻转
-        .background(.ultraThinMaterial)
+        // 全窗材质两级收敛：根部 ultraThinMaterial 是唯一内容基面（铺满主列与阅读区），
+        // 输入坞 glass 是唯一浮层语言；此处不再叠第二层材质——双层材质叠压曾让内容区
+        // 与快捷键提示条之间出现多余亮度档，单层基面后全窗亮度关系唯一且自洽。
+    }
+
+    // MARK: - 顶部拖动条（移动窗口 + 图钉）
+
+    /// 顶部拖动条：真实占位高 28pt 全宽，左段为可拖动区域，右端图钉按钮消费点击。
+    private var windowTopBar: some View {
+        HStack(spacing: 0) {
+            WindowDragHandle()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            pinButton
+                .padding(.trailing, Theme.Spacing.xxl)
+        }
+        .padding(.horizontal, Theme.Spacing.sm)
+        .frame(height: 28)
+        .frame(maxWidth: .infinity)
+        // 纯透明热区：不铺 glass/底色/描边——顶栏只承担拖动与图钉命中功能，
+        // 根部内容材质一铺到窗口圆角，恢复重构前的一体观感（告别独立「帽子」横带）。
+        // 28pt 高度与 WindowDragHandle 命中区完整保留，拖动/吸附功能不受影响。
+    }
+
+    /// 图钉按钮：与主面板 StatusBarView 同一克制语言——静止 iconRest 灰、hover 提亮 + 圆底，
+    /// pinned 态仅 accent 着色 pin.fill 表达状态，不叠高饱和圆块（全窗唯一的浮起语言留给输入坞）。
+    private var pinButton: some View {
+        Button {
+            AIWindowManager.shared.togglePin()
+            pinned = AIWindowManager.shared.isPinned
+        } label: {
+            Image(systemName: pinned ? "pin.fill" : "pin")
+                .font(Theme.Typography.text(Theme.Typography.callout, .medium))
+                .foregroundColor(pinned
+                                 ? Theme.Colors.accent
+                                 : (pinHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest))
+                .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
+                .background(
+                    Circle().fill(pinHovered ? Theme.Colors.iconHoverBg : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { pinHovered = hovering }
+        }
+        .help(pinned ? "已常驻置顶 (点击解除)" : "点击常驻置顶")
     }
 
     // MARK: - 消息列表
@@ -272,11 +328,12 @@ struct AIChatView: View {
                 ZStack(alignment: .topLeading) {
                     ChatInputTextView(
                         text: $state.inputText,
+                        isInputEmpty: $inputEmpty,
                         onSubmit: { state.send() },
                         onEscape: { handleEscape() },
                         onInsertImages: { images in insertImages(images) }
                     )
-                    if state.inputText.isEmpty {
+                    if inputEmpty {
                         Text(inputPlaceholder)
                             .font(Theme.Typography.text(13))
                             .foregroundColor(Theme.Colors.idleText)
@@ -297,15 +354,9 @@ struct AIChatView: View {
                 .padding(.horizontal, Theme.Spacing.xl)
                 .padding(.bottom, Theme.Spacing.lg)
             }
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                    // 浮在玻璃上的输入坞：超薄材质透出窗口玻璃，与消息区材质层拉开深浅差
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-            )
+            // 功能层：输入坞是典型控件面（输入条/发送/附件/模型 chip），26+ 官方 Liquid Glass，
+            // <26 退化为 ultraThinMaterial + 0.5pt 描边；内部输入框/按钮/chip 保持原视觉、不叠各自 glass。
+            .glassSurface(RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous))
             // 极轻投影托起浮卡感（无框窗口上投影克制，仅拉开前后层级）
             .shadow(color: .black.opacity(0.28), radius: 10, y: 3)
             // 拖到输入卡边缘 padding 区也能接住（主路径在 NSTextView 子类）
@@ -881,25 +932,44 @@ private struct ChatActionIconButton: View {
     }
 }
 
-/// 流式消息：纯文本增量（不解析 Markdown，避免半截语法抖动），末尾附呼吸态提示。
-/// 与落定态一致无气泡：直接铺在玻璃材质上，正文色同步降档（0.80）且引号归一，
-/// 避免流式→定稿瞬间颜色/引号跳变。
+/// 流式消息：增量 Markdown 渲染（节流）+ 呼吸态提示。
+/// 与落定态一致无气泡，流式→定稿不再发生排版/颜色跳变。
 private struct StreamingMessageView: View {
     let content: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             if !content.isEmpty {
-                Text(MarkdownInline.normalizeQuotes(content))
-                    .font(Theme.Typography.text(13))
-                    .foregroundColor(Color.primary.opacity(0.80))
-                    .lineSpacing(6)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                StreamingMarkdownContentView(content: content)
             }
             StreamingIndicator()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 流式 Markdown 增量渲染：把高频 token 触发的重解析节流到 ≤4Hz（250ms 时间门控）。
+/// - rendered 仅在距上次渲染 ≥250ms 时更新；被跳过的中间帧不补渲染。
+/// - 收尾帧完整性由 streaming→done/aborted 后切换的 AssistantMarkdownView 全量渲染保证。
+/// - 未闭合 `$$`/`**` 短暂显示源码属预期，不做特殊处理。
+private struct StreamingMarkdownContentView: View {
+    let content: String
+
+    @State private var rendered: String = ""
+    @State private var lastRenderAt: Date = .distantPast
+
+    var body: some View {
+        AssistantMarkdownView(content: rendered)
+            .onAppear {
+                rendered = content
+                lastRenderAt = Date()
+            }
+            .onChange(of: content) { newValue in
+                let now = Date()
+                guard now.timeIntervalSince(lastRenderAt) >= 0.25 else { return }
+                lastRenderAt = now
+                rendered = newValue
+            }
     }
 }
 
@@ -1108,6 +1178,9 @@ private struct UnconfiguredGuideView: View {
 /// 通过 markedRange 判定中文输入法组字，避免组字回车被误判为发送。
 private struct ChatInputTextView: NSViewRepresentable {
     @Binding var text: String
+    /// 输入内容是否为空的独立回写通道：IME 组字期间 SwiftUI 绑定不更新，
+    /// 需由 setMarkedText 回调驱动，避免组字文本与 placeholder 重叠。
+    @Binding var isInputEmpty: Bool
     let onSubmit: () -> Void
     let onEscape: () -> Void
     /// 粘贴/拖入图片（NSImage 数组，由调用方转附件）。
@@ -1130,6 +1203,12 @@ private struct ChatInputTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onEscape = onEscape
         textView.onInsertImages = onInsertImages
+        // IME 组字（marked text）不触发 textDidChange：靠该回调同步组字文本与空态，
+        // 避免 placeholder 重叠，并让绑定不滞后于组字内容（防止 updateNSView 误回写）。
+        textView.onContentStateChanged = { [weak coordinator = context.coordinator] in
+            guard let coordinator, let tv = coordinator.textView else { return }
+            coordinator.syncInputState(tv)
+        }
         textView.isRichText = false
         textView.allowsUndo = true
         textView.isEditable = true
@@ -1184,8 +1263,11 @@ private struct ChatInputTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         textView.onEscape = onEscape
         textView.onInsertImages = onInsertImages
-        // 外部（发送清空 / ⌘K / 重试）修改文本时回写；仅在内容不一致时写，避免打断输入与 IME 组字
-        if textView.string != text {
+        // 外部（发送清空 / ⌘K / 重试）修改文本时回写；仅在内容不一致时写。
+        // 关键防线：IME 组字期间（markedRange 非空）绝不做程序化回写——textDidChange 在组字时不触发，
+        // 绑定必然滞后于组字文本（如首键 "a" 尚未进绑定），此时回写会摧毁组字导致首字母闪失。
+        // 组字提交/取消后 textDidChange（或 syncInputState 回调）会补齐绑定，届时再对账。
+        if textView.string != text, !textView.hasMarkedText() {
             textView.string = text
             let end = (text as NSString).length
             textView.setSelectedRange(NSRange(location: end, length: 0))
@@ -1206,9 +1288,22 @@ private struct ChatInputTextView: NSViewRepresentable {
 
         func textDidChange(_ notification: Notification) {
             guard let tv = notification.object as? NSTextView else { return }
-            // 同步到绑定：仅在不等时写，避免与 updateNSView 形成回写回路
+            // 提交/普通输入：合并同步 text 与空态（仅在不等时写，避免与 updateNSView 形成回写回路）
+            syncInputState(tv)
+        }
+
+        /// 同步输入状态（供 textDidChange 与 IME setMarkedText/unmarkText 回调共用）：
+        /// - 组字期间 textDidChange 不触发，绑定会滞后；这里把组字文本实时写入 parent.text，
+        ///   使 `.onChange(of: state.inputText)` 与 updateNSView 对账天然一致；
+        /// - 组字取消 setMarkedText("") 时绑定随之清空，placeholder 正确恢复；
+        /// - 同时刷新 isInputEmpty（独立于 state.inputText 的 placeholder 通道）。
+        func syncInputState(_ tv: NSTextView) {
             if parent.text != tv.string {
                 parent.text = tv.string
+            }
+            let empty = tv.string.isEmpty
+            if parent.isInputEmpty != empty {
+                parent.isInputEmpty = empty
             }
         }
 
@@ -1260,6 +1355,20 @@ private struct ChatInputTextView: NSViewRepresentable {
 private final class ChatInputNSTextView: NSTextView {
     var onEscape: (() -> Void)?
     var onInsertImages: (([NSImage]) -> Void)?
+    /// 内容状态变化回调（IME 组字/取消组字时 textDidChange 不触发，需单独通知 placeholder）。
+    var onContentStateChanged: (() -> Void)?
+
+    /// IME 组字更新：marked text 变化不触发 textDidChange，这里主动通知空态变化。
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        onContentStateChanged?()
+    }
+
+    /// 取消/提交组字：ESC 取消组字会走 unmarkText（string 可能回到空），同样通知空态。
+    override func unmarkText() {
+        super.unmarkText()
+        onContentStateChanged?()
+    }
 
     // 无 Edit 菜单的轻量应用里，文本系统的标准编辑键等效可能不被派发——
     // 显式接住，保证 ⌘V 粘贴 / ⌘C 拷贝 / ⌘X 剪切 / ⌘A 全选任何环境下可用
@@ -1312,14 +1421,11 @@ private final class ChatInputNSTextView: NSTextView {
     }
 }
 
-// MARK: - 面板圆角裁剪（仅 13~25 降级路径生效）
-
+// MARK: - 面板圆角裁剪（统一路径）
+// 整窗 glass 已移除后，窗口层圆角由 PanelHostingConfigurator 在 AppKit 根图层统一施加；
+// 这里再对 SwiftUI 内容做一次同半径裁剪，保证自绘内容不越界。
 private struct AIChatRoundedClip: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
-        } else {
-            content.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
-        }
+        content.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
     }
 }

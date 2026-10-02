@@ -109,6 +109,7 @@ final class AppState: ObservableObject {
     // 背景：SwiftUI PreferenceKey 测量链在 NSGlassEffectView + Button 组合下会被卡死
     //（最小复现实验坐实：占位 Text 测量正常，加入任意 Button 即死锁恒 0x0），
     // 因此布局进度/字号缩放改由 AppKit 侧直接驱动，数据源是窗口 frame 本身，绝对可靠
+    // 整窗 glass 已移除，该 workaround 待观察后清理。
     @Published var livePanelSize: CGSize = .zero
     
     /// PanelManager 在窗口动画每帧调用（SwiftUI 主线程）

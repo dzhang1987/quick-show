@@ -52,6 +52,8 @@ enum MathRasterizer {
     /// 公式 → 位图（唯一入口，带缓存）。解析失败返回 nil，由调用方降级显示原始 LaTeX。
     /// - Parameter isDisplay: 块级用 true（display 模式，分式/积分更舒展），行内用 false（text 模式）。
     static func rasterize(latex: String, pointSize: CGFloat, color: NSColor, isDisplay: Bool) -> Rasterized? {
+        // 先转译再算缓存 key：转译结果稳定，缓存命中率更高；行内/块级共用此入口。
+        let latex = MathLatexTranspiler.transpile(latex)
         let srgb = color.usingColorSpace(.sRGB) ?? color
         let key = CacheKey(
             latex: latex,
@@ -83,6 +85,247 @@ enum MathRasterizer {
         )
         cache[key] = result
         return result
+    }
+}
+
+// MARK: - LaTeX 预处理转译
+//
+// SwiftMath 1.7.3 实测不支持以下命令/写法（MTMathListBuilder.build 会失败），
+// 在送入光栅化前先做纯文本转译；转译仍在 parse 失败时走既有降级路径（等宽源码）：
+//   - \dfrac / \tfrac / \cfrac → \frac（命令边界替换，避免误伤后续字母）
+//   - \iint / \iiint            → 多个 \int 用负空格 \! 紧排
+//   - \:                        → \,
+//   - \substack{a \\ b}         → a \atop b（外层已有下标花括号时直接吐内容，否则补一层）
+//   - \begin{cases} 单列        → 每行补一个 & 凑成两列（已是两列及以上不动）
+//   - \pmod{X}                  → \;(mod X)（展开为普通文本模运算）
+// 以下命令实测正常，保持原样：\qquad \quad \oint \vec \, \; \! \partial \lim \atop
+//   \varphi \phi \equiv \nabla \times \psi \sin \pm \text（\varphi 实测支持，勿动）。
+enum MathLatexTranspiler {
+
+    static func transpile(_ latex: String) -> String {
+        var result = latex
+        // 1. 分数命令族：统一降级为 \frac（命令边界：后一个字符不是字母才替换）
+        result = replaceCommand(result, command: "\\dfrac", with: "\\frac")
+        result = replaceCommand(result, command: "\\tfrac", with: "\\frac")
+        result = replaceCommand(result, command: "\\cfrac", with: "\\frac")
+        // 2. 多重积分：拆成多个 \int，用 \! 负空格把积分号贴紧（长命令先替换，避免前缀误判）
+        result = replaceCommand(result, command: "\\iiint", with: "\\int\\!\\!\\!\\int\\!\\!\\!\\int")
+        result = replaceCommand(result, command: "\\iint", with: "\\int\\!\\!\\!\\int")
+        // 3. 中等空格 \: 不支持，降级为 \,
+        result = result.replacingOccurrences(of: "\\:", with: "\\,")
+        // 4. \substack 堆叠转 \atop
+        result = replaceSubstack(result)
+        // 5. \pmod{X} 展开（SwiftMath 无 \pmod）
+        result = replacePmod(result)
+        // 6. 单列 cases 补列
+        result = padSingleColumnCases(result)
+        return result
+    }
+
+    // MARK: 命令边界替换
+
+    /// 替换命令名时要求后一个字符不是字母（命令边界），避免 `\dfracX` 之类被误伤。
+    private static func replaceCommand(_ source: String, command: String, with replacement: String) -> String {
+        let chars = Array(source)
+        let pattern = Array(command)
+        var out = ""
+        out.reserveCapacity(chars.count)
+        var index = 0
+        while index < chars.count {
+            if matches(chars, at: index, pattern: pattern) {
+                let after = index + pattern.count
+                if after >= chars.count || !chars[after].isLetter {
+                    out.append(contentsOf: replacement)
+                    index = after
+                    continue
+                }
+            }
+            out.append(chars[index])
+            index += 1
+        }
+        return out
+    }
+
+    // MARK: \substack → \atop
+
+    /// 扫描 `\substack{...}`，按花括号计数找到配对 `}`，
+    /// 内部**顶层** `\\` 替换为 ` \atop `（嵌套花括号内的 `\\` 不动）。
+    ///
+    /// 括号配对推演：`\substack` 命令连同其外层花括号整体视为一个分组。
+    /// - `_{\substack{A \\ B}}`：`\substack` 前一个字符是 `{` → 直接吐内容，
+    ///   得 `_{A \atop B}`（单层花括号，下标分组正确）。
+    /// - 独立 `\substack{A \\ B}`：前一个字符不是 `{` → 补一层花括号，
+    ///   得 `{A \atop B}`，保证 \atop 分组不被上下文吞并。
+    private static func replaceSubstack(_ source: String) -> String {
+        let chars = Array(source)
+        let marker = Array("\\substack")
+        var out = ""
+        var index = 0
+        while index < chars.count {
+            if matches(chars, at: index, pattern: marker),
+               index + marker.count < chars.count,
+               chars[index + marker.count] == "{",
+               let bodyEnd = matchingBrace(chars, openIndex: index + marker.count) {
+                let bodyStart = index + marker.count + 1
+                let stacked = replaceTopLevelDoubleBackslash(String(chars[bodyStart..<bodyEnd]))
+                let alreadyGrouped = index > 0 && chars[index - 1] == "{"
+                if alreadyGrouped {
+                    out.append(stacked)
+                } else {
+                    out.append("{")
+                    out.append(stacked)
+                    out.append("}")
+                }
+                index = bodyEnd + 1
+                continue
+            }
+            out.append(chars[index])
+            index += 1
+        }
+        return out
+    }
+
+    /// 顶层（花括号深度 0）的 `\\` → ` \atop `。
+    private static func replaceTopLevelDoubleBackslash(_ body: String) -> String {
+        let chars = Array(body)
+        var out = ""
+        var depth = 0
+        var index = 0
+        while index < chars.count {
+            let char = chars[index]
+            if char == "{" { depth += 1; out.append(char); index += 1; continue }
+            if char == "}" { depth -= 1; out.append(char); index += 1; continue }
+            if depth == 0, char == "\\", index + 1 < chars.count, chars[index + 1] == "\\" {
+                out.append(" \\atop ")
+                index += 2
+                continue
+            }
+            out.append(char)
+            index += 1
+        }
+        return out
+    }
+
+    // MARK: \pmod{X} 展开
+
+    /// 扫描 `\pmod{...}`，按花括号计数找配对 `}`，整体替换为 `\;(\text{mod}~X)`。
+    /// SwiftMath 1.7.3 实测 `\pmod` 报 "Invalid command \pmod"；
+    /// 而 `\;`、`\text{...}`、`~` 均实测可用。`\varphi` 实测支持，此处不做映射。
+    private static func replacePmod(_ source: String) -> String {
+        let chars = Array(source)
+        let marker = Array("\\pmod")
+        var out = ""
+        var index = 0
+        while index < chars.count {
+            if matches(chars, at: index, pattern: marker),
+               index + marker.count < chars.count,
+               chars[index + marker.count] == "{",
+               let bodyEnd = matchingBrace(chars, openIndex: index + marker.count) {
+                let bodyStart = index + marker.count + 1
+                let inner = String(chars[bodyStart..<bodyEnd])
+                out.append("\\;(\\text{mod}~")
+                out.append(inner)
+                out.append(")")
+                index = bodyEnd + 1
+                continue
+            }
+            out.append(chars[index])
+            index += 1
+        }
+        return out
+    }
+
+    // MARK: 单列 cases 补列
+
+    /// 扫描 `\begin{cases}` … `\end{cases}`（区分大小写）；内容无 `&` 时按顶层 `\\` 拆行，
+    /// 每个非空行尾补 ` &` 凑成两列；已含 `&`（两列及以上）整体不动。
+    private static func padSingleColumnCases(_ source: String) -> String {
+        let chars = Array(source)
+        let beginTag = Array("\\begin{cases}")
+        let endTag = Array("\\end{cases}")
+        var out = ""
+        var index = 0
+        while index < chars.count {
+            if matches(chars, at: index, pattern: beginTag) {
+                let bodyStart = index + beginTag.count
+                if let endIndex = findPattern(chars, pattern: endTag, from: bodyStart) {
+                    let body = String(chars[bodyStart..<endIndex])
+                    out.append(contentsOf: beginTag)
+                    out.append(body.contains("&") ? body : padCaseRows(body))
+                    out.append(contentsOf: endTag)
+                    index = endIndex + endTag.count
+                    continue
+                }
+            }
+            out.append(chars[index])
+            index += 1
+        }
+        return out
+    }
+
+    /// 按顶层 `\\` 拆分 cases 行，非空行尾补 ` &`，再用 `\\` 拼回。
+    private static func padCaseRows(_ body: String) -> String {
+        let chars = Array(body)
+        var rows: [String] = []
+        var current = ""
+        var depth = 0
+        var index = 0
+        while index < chars.count {
+            let char = chars[index]
+            if char == "{" { depth += 1; current.append(char); index += 1; continue }
+            if char == "}" { depth -= 1; current.append(char); index += 1; continue }
+            if depth == 0, char == "\\", index + 1 < chars.count, chars[index + 1] == "\\" {
+                rows.append(current)
+                current = ""
+                index += 2
+                continue
+            }
+            current.append(char)
+            index += 1
+        }
+        rows.append(current)
+        let padded = rows.map { row -> String in
+            row.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? row : row + " &"
+        }
+        return padded.joined(separator: "\\\\")
+    }
+
+    // MARK: 通用扫描辅助
+
+    /// 在 chars 的 index 处是否精确匹配 pattern。
+    private static func matches(_ chars: [Character], at index: Int, pattern: [Character]) -> Bool {
+        guard index + pattern.count <= chars.count else { return false }
+        for offset in 0..<pattern.count where chars[index + offset] != pattern[offset] {
+            return false
+        }
+        return true
+    }
+
+    /// 从 from 起查找 pattern 首次出现的位置。
+    private static func findPattern(_ chars: [Character], pattern: [Character], from: Int) -> Int? {
+        var index = from
+        while index < chars.count {
+            if matches(chars, at: index, pattern: pattern) { return index }
+            index += 1
+        }
+        return nil
+    }
+
+    /// openIndex 指向 `{`，返回配对 `}` 的下标（含嵌套花括号计数）。
+    private static func matchingBrace(_ chars: [Character], openIndex: Int) -> Int? {
+        guard openIndex < chars.count, chars[openIndex] == "{" else { return nil }
+        var depth = 0
+        var index = openIndex
+        while index < chars.count {
+            if chars[index] == "{" {
+                depth += 1
+            } else if chars[index] == "}" {
+                depth -= 1
+                if depth == 0 { return index }
+            }
+            index += 1
+        }
+        return nil
     }
 }
 

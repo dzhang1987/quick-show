@@ -34,39 +34,15 @@ final class PanelManager {
         
         let contentView = PanelView(appState: appState)
         let hostingView = NSHostingView(rootView: contentView)
-        if #available(macOS 26.0, *) {
-            // 官方 Liquid Glass：玻璃材质/高光/阴影由玻璃视图提供
-            let glass = NSGlassEffectView()
-            glass.style = .regular
-            // 明暗翻转链说明（实测确认，无需额外同步代码）：
-            // 玻璃随"背后壁纸内容"自适应明暗，并同步调整 contentView(hostingView) 的
-            // effectiveAppearance（与 NSVisualEffectView 材质同步行为一致），
-            // SwiftUI 语义色（primary/secondary/tertiary）随之翻转——亮玻璃下自动黑字。
-            // 13~25 降级路径的 ultraThinMaterial 与语义色本就同源（同一 effectiveAppearance），无错位风险。
-            // 关键修复：cornerRadius 只塑造玻璃材质形状，不裁剪 backing layer；
-            // macOS 14+ clipsToBounds 默认 false，borderless 窗口又无系统圆角兜底，
-            // 必须手动补 layer 裁剪（alt-tab 生产验证做法），否则四角呈方形
-            glass.wantsLayer = true
-            glass.clipsToBounds = true
-            glass.layer?.masksToBounds = true
-            glass.layer?.cornerCurve = .continuous
-            // 双写圆角：glass.cornerRadius 管玻璃光效形状，layer.cornerRadius 管裁剪路径
-            glass.cornerRadius = Theme.Radius.panel
-            glass.layer?.cornerRadius = Theme.Radius.panel
-            // 注：玻璃会正常拉伸 contentView；但 SwiftUI 的 PreferenceKey 测量链
-            // 在含 Button 的内容下会被卡死（V6 实验坐实），布局进度改由
-            // PanelManager 逐帧推送窗口 frame 驱动（见 updatePanelFrameAnimated）
-            glass.contentView = hostingView
-            panel.contentView = glass
-        } else {
-            hostingView.wantsLayer = true
-            // 降级路径：在 AppKit 根图层硬件级施加连续曲率圆角裁剪，沉稳克制，杜绝直角
-            hostingView.layer?.cornerRadius = Theme.Radius.panel
-            hostingView.layer?.cornerCurve = .continuous
-            hostingView.layer?.masksToBounds = true
-            hostingView.layer?.backgroundColor = NSColor.clear.cgColor
-            panel.contentView = hostingView
-        }
+        // 整窗 NSGlassEffectView 已移除（HIG：Liquid Glass 只用于功能层，内容层必须用标准材质；
+        // 整窗包玻璃是官方点名的反模式）。hostingView 直接作为 contentView，由 AppKit 根图层
+        // 施加连续曲率圆角裁剪，与 13~25 降级路径完全同一套；明暗翻转交由材质自身驱动
+        //（语义色与材质同源 effectiveAppearance，无错位）。功能面 glass 见 GlassSurface。
+        PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
+        panel.contentView = hostingView
+        // 注：旧整窗玻璃承载 NSHostingView 时，SwiftUI PreferenceKey 测量链在含 Button 内容下
+        // 会死锁（V6 实验坐实），布局进度仍由 PanelManager 逐帧推送窗口 frame 驱动
+        //（见 updatePanelFrameAnimated）。整窗 glass 已移除，该 workaround 待观察后清理。
         panel.invalidateShadow()
         // 初始同步面板尺寸到 SwiftUI（首帧布局即有正确数据，避免 0 尺寸起步）
         appState.updateLivePanelSize(initialSize)
@@ -299,6 +275,7 @@ final class PanelManager {
         // （在 NSGlassEffectView + Button 内容下死锁，实验坐实），因此动画期间以
         // 60Hz 轮询窗口 frame 并逐帧推送给 SwiftUI（livePanelSize），
         // 驱动布局进度/字号缩放连续变化；完成后推送终值并停表、重建精准阴影
+        // 整窗 glass 已移除，该 workaround 待观察后清理。
         appState?.updateLivePanelSize(panel.frame.size)
         stopFramePolling()
         framePollTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / Theme.Motion.framePollHz, repeats: true) { [weak self, weak panel] _ in

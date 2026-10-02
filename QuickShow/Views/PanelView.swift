@@ -8,6 +8,7 @@ struct PanelView: View {
     // NSGlassEffectView 承载的 NSHostingView 中只要内容含 Button，测量就会死锁在 0x0
     // （最小复现实验 V6 坐实：占位 Text 测量正常，加一个普通 Button 即死锁），
     // 因此布局进度的数据源是 AppKit 侧窗口 frame，绝对可靠
+    // 整窗 glass 已移除，该 workaround 待观察后清理。
     private var renderedSize: CGSize {
         appState.livePanelSize
     }
@@ -90,6 +91,7 @@ struct PanelView: View {
                 // NSHostingView 中会卡死 SwiftUI 布局链——首帧布局停在 0x0 后，窗口 resize
                 // 不再触发测量上报（renderedSize 恒 0 → expandProgress 恒 0 → 监控卡片零高消失）。
                 // 快捷键由 FloatingPanel.sendEvent/keyDown/cancelOperation 完整拦截，无功能损失。
+                // 整窗 glass 已移除，该 workaround 待观察后清理。
             }
         }
         // 日历态 ↔ 常规态整体切换：交叉淡化与窗口尺寸动画同节奏（0.16s ≈ 0.18s），无跳变闪烁
@@ -101,20 +103,22 @@ struct PanelView: View {
         // hosting view 随窗口逐帧变大/变小，SwiftUI 内容跟随可用空间自然 reflow（live resize 质感），
         // 严禁恢复固定 .frame(width:height:) 尺寸插值，否则与窗口动画双时钟打架抖动
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 全局禁用系统键盘焦点环：本应用键盘交互全由 FloatingPanel.sendEvent 自行拦截分发，
+        // SwiftUI Button 无需接收键盘焦点；按钮被点击/键盘导航后成为 first responder 时
+        // 系统会围绕按钮 bounds 画蓝色 focus ring（圆角与胶囊形状不贴合，视觉脏点）。
+        // focusEffectDisabled 从 macOS 14 起可用且对整个视图树传播；
+        // macOS 13 降级路径下 plain 按钮默认不绘制焦点环，无需等效处理
+        .modifier(FocusRingDisabledModifier())
         .background {
-            if #available(macOS 26.0, *) {
-                // 26+：材质由窗口层 NSGlassEffectView 统一提供，内容背景保持透明
-                Color.clear
-            } else {
-                // 13~25 降级：原生超薄材质，跟随系统明暗翻转（内容语义色同步适配）
-                RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
+            // 内容层标准材质（HIG：内容层必须用标准材质，Liquid Glass 只属于功能层）。
+            // 整窗 NSGlassEffectView 已移除后，26+ 与 13~25 统一铺 ultraThinMaterial，
+            // 明暗翻转由材质自身随 effectiveAppearance 驱动，语义色同源无错位。
+            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                .fill(.ultraThinMaterial)
         }
         // 一瞥倒计时微光进度条：bottom overlay 贴面板底边，与 VStack 内容排布完全解耦——
         // 展开/收起窗口动画期间 hosting view 逐帧变形，overlay 底边自动跟随，绝无悬空错位；
-        // 置于 PanelRoundedClip 之前：13~25 降级路径随内容被圆角统一裁剪（底角弧形贴边正确），
-        // 26+ 圆角由窗口层 NSGlassEffectView 处理，内容层无需重复裁剪
+        // 置于 PanelRoundedClip 之前：随内容被圆角统一裁剪（底角弧形贴边正确）
         .overlay(alignment: .bottom) {
             // 显示条件与旧黑曜石晶体消散动效一致：仅一瞥模式、未展开看板、无速查表时呈现；
             // hover/Toast 期间 glanceProgress 在状态侧自然冻结，进度条随之停住，视图层零额外逻辑
@@ -273,7 +277,7 @@ struct ShortcutGroupCard: View {
 // 贴面板底边、水平居中的细光带：宽度 = 面板宽 × glanceProgress，
 // 随倒计时从满宽由左右两侧向中间对称收拢（消散终点收敛于面板中心）。
 // 宽度数据源与 Hero 时钟缩放同源（AppKit 窗口 frame 逐帧推送的 livePanelSize + 首帧 metrics 兜底），
-// 规避 NSGlassEffectView 内 GeometryReader/PreferenceKey 测量死锁；
+// 规避 NSGlassEffectView 内 GeometryReader/PreferenceKey 测量死锁（整窗 glass 已移除，该 workaround 待观察后清理）；
 // tick 0.04s 足够密（每步约 1/75 宽度）天然连续，无需视图侧 .animation；
 // 重置回满由状态侧 withAnimation(Theme.Motion.progressReset) 事务动画天然驱动
 private struct GlanceProgressBar: View {
@@ -298,14 +302,25 @@ private struct GlanceProgressBar: View {
     }
 }
 
-// MARK: - 面板圆角裁剪（仅降级路径生效）
-// macOS 26+ 的圆角由窗口层 NSGlassEffectView 统一处理，无需在此重复裁剪
+// MARK: - 面板圆角裁剪（统一路径）
+// 整窗 glass 已移除后，两个窗口的窗口层圆角由 PanelHostingConfigurator 在 AppKit 根图层
+// 统一施加；这里再对 SwiftUI 内容做一次同半径裁剪，保证 content 自绘内容不越界。
 private struct PanelRoundedClip: ViewModifier {
     func body(content: Content) -> some View {
-        if #available(macOS 26.0, *) {
-            content
+        content.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+    }
+}
+
+// MARK: - 全局禁用系统键盘焦点环
+// macOS 14+：focusEffectDisabled 对整个视图树传播，面板内所有 Button/可聚焦视图
+// 成为 first responder 时均不再绘制蓝色 focus ring；
+// macOS 13：无此 API，且 plain 按钮默认不绘制焦点环，直接透传
+private struct FocusRingDisabledModifier: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(macOS 14.0, *) {
+            content.focusEffectDisabled(true)
         } else {
-            content.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+            content
         }
     }
 }

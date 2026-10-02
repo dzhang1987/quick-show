@@ -271,9 +271,11 @@ struct StatusBarView: View {
                         // 交互元素对比度下限：静止态 0.60 明确可见，hover 0.95 增强反馈（pinned 态主题强调色）
                         .foregroundColor(appState.mode == .pinned ? Theme.Colors.accent : (isPinHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest))
                         .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
+                        // pinned 态仅 accent 着色 pin.fill 表达状态，不叠高饱和圆块；
+                        // hover 才有轻圆底反馈——与 AI 窗图钉同一克制档，两窗口语言对齐
                         .background(
                             Circle()
-                                .fill(appState.mode == .pinned ? Theme.Colors.accent.opacity(0.18) : (isPinHovered ? Theme.Colors.iconHoverBg : Color.clear))
+                                .fill(isPinHovered ? Theme.Colors.iconHoverBg : Color.clear)
                         )
                 }
                 .buttonStyle(.plain)
@@ -282,6 +284,9 @@ struct StatusBarView: View {
             }
             .fixedSize()
         }
+        // 底部状态栏恢复重构前的整合观感：不套玻璃胶囊、不加额外内边距，
+        // 微标群直接坐在面板内容材质上——与顶部日期徽章同属一层、同一明度策略，
+        // 消除「顶部下沉贴片 vs 底部上浮胶囊」的明度方向撕裂。
     }
     
     private var batteryIconName: String {

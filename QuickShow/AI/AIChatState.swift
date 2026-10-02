@@ -273,6 +273,8 @@ final class AIChatState: ObservableObject {
             // 首轮助手回复完成后，后台生成中文标题（失败静默，不影响主对话流）。
             if didComplete {
                 self.scheduleTitleSummary(sessionId: sessionId)
+                // 成功完成一轮回复：用户没在看对话窗时发系统通知。
+                self.notifyCompletionIfNeeded(sessionId: sessionId)
             }
         }
     }
@@ -621,6 +623,40 @@ final class AIChatState: ObservableObject {
             .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             .trimmingCharacters(in: CharacterSet(charactersIn: "「」\"'“”《》#*·-"))
         return String(cleaned.prefix(12))
+    }
+
+    // MARK: - 流式完成通知
+
+    /// 成功完成一轮回复后触发系统通知（仅在用户没在看对话窗时）。
+    /// 触发条件：窗口不可见（失焦被自动隐藏）或窗口虽在但非 key；
+    /// 仅 didComplete（自然完成）会调用本方法，abort / 请求失败路径不触发。
+    private func notifyCompletionIfNeeded(sessionId: UUID) {
+        let manager = AIWindowManager.shared
+        if manager.isPanelVisible && manager.isPanelKey { return }
+
+        let session = store.session(id: sessionId)
+        let lastAssistant = session?.messages.last(where: { $0.role == .assistant })?.content ?? ""
+        let summary = Self.plainSummary(lastAssistant)
+
+        let sessionTitle = session?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var body = sessionTitle.isEmpty ? "回复已完成" : sessionTitle
+        if !summary.isEmpty {
+            body += "\n" + summary
+        }
+        AICompletionNotifier.shared.notify(title: "QuickShow AI", body: body)
+    }
+
+    /// 通知正文摘要：粗略去 Markdown 标记、折叠空白，截断 ~80 字符。
+    private static func plainSummary(_ text: String) -> String {
+        var result = text
+        for token in ["```", "`", "**", "*", "#", ">", "_", "~"] {
+            result = result.replacingOccurrences(of: token, with: "")
+        }
+        result = result.replacingOccurrences(of: "\n", with: " ")
+        result = result
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .joined(separator: " ")
+        return String(result.prefix(80))
     }
 
     // MARK: - 重试
