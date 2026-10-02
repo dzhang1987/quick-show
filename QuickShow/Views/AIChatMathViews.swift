@@ -231,6 +231,20 @@ enum MathLatexTranspiler {
         result = replaceCommandWithArgs(result, command: "\\mathring", argCount: 1, fallback: "") { args in
             "{\\circ \\atop \(args[0])}"
         }
+        // \genfrac{ld}{rd}{rule}{style}{num}{den}（泛型分式，SwiftMath 无）：
+        // 圆括号定界 → \binom，其余 → \frac（定界符/线宽/样式降级，分子分母保留）
+        result = replaceCommandWithArgs(result, command: "\\genfrac", argCount: 6, fallback: "\\frac") { args in
+            if args[0] == "(" && args[1] == ")" {
+                return "\\binom{\(args[4])}{\(args[5])}"
+            }
+            return "\\frac{\(args[4])}{\(args[5])}"
+        }
+        // \kern 维度（SwiftMath 无；\mkern 仅为序列化输出格式、解析器不收输入）：
+        // 整段删除（间距损失、内容保留）
+        result = result.replacingOccurrences(
+            of: "\\\\kern\\s*-?\\d+(?:\\.\\d+)?[a-zA-Z]+",
+            with: "",
+            options: .regularExpression)
         result = replaceCommandWithArgs(result, command: "\\hspace", argCount: 1, fallback: "\\,") { _ in "\\," }
         result = replaceCommandWithArgs(result, command: "\\boldsymbol", argCount: 1, fallback: "") { args in
             argLeadsWithGreek(args[0]) ? "{\(args[0])}" : "\\mathbf{\(args[0])}"

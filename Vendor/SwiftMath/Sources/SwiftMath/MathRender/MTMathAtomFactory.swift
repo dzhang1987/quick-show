@@ -418,6 +418,19 @@ public class MTMathAtomFactory {
         "Large" : MTMathStyle(style: .text, fontSizeScale: 1.44),
         "huge" : MTMathStyle(style: .text, fontSizeScale: 1.728),
         "Huge" : MTMathStyle(style: .text, fontSizeScale: 2.074),
+        // 角括号/比较组合/近似关系/章节号（上游缺失，QuickShow 补录；字形 Latin Modern Math 内建）
+        "ulcorner" : MTMathAtom(type: .open, value: "\u{231C}"),
+        "urcorner" : MTMathAtom(type: .close, value: "\u{231D}"),
+        "llcorner" : MTMathAtom(type: .open, value: "\u{231E}"),
+        "lrcorner" : MTMathAtom(type: .close, value: "\u{231F}"),
+        "gtrless" : MTMathAtom(type: .relation, value: "\u{2277}"),
+        "lessgtr" : MTMathAtom(type: .relation, value: "\u{2276}"),
+        "lesssim" : MTMathAtom(type: .relation, value: "\u{2272}"),
+        "gtrsim" : MTMathAtom(type: .relation, value: "\u{2273}"),
+        "S" : MTMathAtom(type: .ordinary, value: "\u{00A7}"),
+        "P" : MTMathAtom(type: .ordinary, value: "\u{00B6}"),
+        "dag" : MTMathAtom(type: .ordinary, value: "\u{2020}"),
+        "ddag" : MTMathAtom(type: .ordinary, value: "\u{2021}"),
     ]
 	
 	static var supportedAccentedCharacters: [Character: (String, String)] = [

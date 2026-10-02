@@ -3,8 +3,11 @@
 // 保留 SPM 包结构仅供本地测试包（mttest）路径依赖；App 构建走 project.yml 的静态库 target。
 // 相对上游的本地补丁（QuickShow 项目）：
 //   1. MTMathAtomFactory: atom(forCharacter:) 放行 CJK 字符（上游对 ASCII 外字符静默丢弃）
-//   2. MTTypesetter: addDisplayLine 对 CJK 区间回退系统 CJK 字体（数学字体无 CJK 字形）
-//   3. MathBundle: Bundle.module 双路径定位（SPM / xcodebuild 均可用）
+//   2. MTMathAtomFactory: 命令表补录上游缺失符号（ulcorner/urcorner/llcorner/lrcorner、
+//      gtrless/lessgtr、lesssim/gtrsim、S/P/dag/ddag 等，Unicode 值走字体字形）
+//   3. MTMathList + MTTypesetter: MTMathStyle.fontSizeScale 实现 	iny~\Huge 字号阶梯
+//   4. MTTypesetter: addDisplayLine 对 CJK 区间回退系统 CJK 字体（数学字体无 CJK 字形）
+//   5. MathBundle: Bundle.module 双路径定位（SPM / xcodebuild 均可用）
 
 import PackageDescription
 
