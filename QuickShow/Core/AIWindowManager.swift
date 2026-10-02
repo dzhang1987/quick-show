@@ -388,6 +388,8 @@ final class AIWindowManager {
             glass.style = .regular          // 文字为主 → regular（自适应明暗保可读性）
             glass.cornerRadius = Theme.Radius.panel
             glass.tintColor = nil
+            // 基础项补齐：材质渲染层面尊重圆角（仅此项不够，见容器注释）
+            glass.clipsToBounds = true
             NSAnimationContext.runAnimationGroup({ ctx in
                 ctx.duration = 0
                 ctx.allowsImplicitAnimation = false
@@ -396,7 +398,14 @@ final class AIWindowManager {
             })
             // hosting 填满玻璃 + resize 热区挂载均依赖 autoresizing 跟随
             hostingView.autoresizingMask = [.width, .height]
-            panel.contentView = glass
+            // 窗口级圆角裁剪容器（2026-10 方角残影修复）：WindowServer 在方形窗口矩形上
+            // 合成 behind-window 玻璃材质，拖动/缩放重栅格化后方形玻璃从圆角缺口露出。
+            // 玻璃经 GlassClipContainerView 裁剪后再作 contentView（见 GlassSurface.swift）。
+            let clip = GlassClipContainerView(cornerRadius: Theme.Radius.panel)
+            clip.frame = NSRect(origin: .zero, size: frame.size)
+            glass.autoresizingMask = [.width, .height]
+            clip.addSubview(glass)
+            panel.contentView = clip
         } else {
             PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
             panel.contentView = hostingView
@@ -416,6 +425,9 @@ final class AIWindowManager {
             object: panel,
             queue: .main
         ) { [weak self] _ in
+            // 透明窗口的系统阴影由不透明像素推导，拖动后不自动重算——手动失效，
+            // 否则保留方形轮廓，与圆角缺口处的材质残影叠加成「四个方角」
+            self?.panel?.invalidateShadow()
             self?.scheduleFrameSave()
         })
         frameObservers.append(center.addObserver(
@@ -423,6 +435,8 @@ final class AIWindowManager {
             object: panel,
             queue: .main
         ) { [weak self] _ in
+            // 同上：缩放改变窗口形状后阴影需随圆角轮廓重算
+            self?.panel?.invalidateShadow()
             self?.scheduleFrameSave()
         })
 

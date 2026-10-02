@@ -53,6 +53,16 @@ struct AIChatView: View {
     @State private var hasClipboardImage = false
     /// 流式滚动节流时间戳：token 高频到达时限制滚动频率，避免每 token 触发布局重排。
     @State private var lastAutoScrollAt: Date = .distantPast
+    /// 底部跟随态：true = 贴底跟随流式输出；用户主动上滚离开底部后置 false 停在原地，
+    /// 滚回底部（哨兵重现）自动恢复跟随。
+    @State private var stickToBottom = true
+    /// 最近一次用户滚轮时间戳：区分「用户上滚离开底部」与「流式内容增长把哨兵顶出视口」
+    /// （后者不解除跟随）。macOS 13 无 onScrollPhaseChange，滚轮意图只能走事件监听。
+    @State private var lastUserScrollAt: Date = .distantPast
+    /// 底部哨兵可见性（原始信号，供滚轮方向判定用；跟随决策由 stickToBottom 承担）。
+    @State private var bottomSentinelVisible = true
+    /// AI 窗滚轮监听（不消费事件，只记录滚动意图时间戳/方向上滚时即时解除跟随）。
+    @State private var scrollWheelMonitor = AIChatScrollWheelMonitor()
     /// 会话窄栏显隐（持久化到 UserDefaults，窗口宽度联动见 AIWindowManager）。
     @State private var sidebarVisible = false
     /// ⌘F 聚焦令牌：递增即让侧栏搜索框聚焦。
@@ -145,7 +155,10 @@ struct AIChatView: View {
             pinned = AIWindowManager.shared.isPinned
             windowIsKey = NSApp.keyWindow is AIPanel
         }
-        .onDisappear { keyMonitor.remove() }
+        .onDisappear {
+            keyMonitor.remove()
+            scrollWheelMonitor.remove()
+        }
         // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             refreshEnvironment()
@@ -309,10 +322,30 @@ struct AIChatView: View {
                             }
                         }
                     }
-                    // 底部不可见锚点：滚动目标
+                    // 坞顶留白 + 底部哨兵（一体两段）：
+                    // ① 留白 = 浮岛坞高 + 缝，滚到底时末条消息完整露出坞顶；
+                    // ② 哨兵即滚动锚点且位于内容绝对末尾——scrollTo(.bottom) 恒等于
+                    //    滚到绝对底部（旧实现锚点在留白之前，锚对齐视口底缘后留白被
+                    //    留在屏外，末条消息被浮岛坞遮挡）；
+                    // ③ 哨兵可见性即「用户是否在底部」的探测信号（见 stickToBottom）。
+                    Color.clear
+                        .frame(height: Theme.Layout.chatDockClearance)
                     Color.clear
                         .frame(height: 1)
                         .id(bottomAnchorID)
+                        .onAppear {
+                            bottomSentinelVisible = true
+                            // 到达底部（用户滚回 / 程序滚动）一律恢复跟随
+                            stickToBottom = true
+                        }
+                        .onDisappear {
+                            bottomSentinelVisible = false
+                            // 仅当消失由用户滚轮驱动才解除跟随；
+                            // 流式内容增长顶出哨兵属跟随过程中的瞬时态，忽略
+                            if Date().timeIntervalSince(lastUserScrollAt) < 0.5 {
+                                stickToBottom = false
+                            }
+                        }
                 }
                 // 新消息插入时应用入场过渡（动画只挂 count 变化，流式 mutate 不触发）
                 .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.messages.count)
@@ -320,27 +353,28 @@ struct AIChatView: View {
                 .frame(maxWidth: contentMaxWidth, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.section)
                 .padding(.top, Theme.Spacing.section)
-                // 底部留白 = 浮岛坞高 + 12pt 缝：滚到底时末条消息完整露出坞顶；
-                // 滚动中消息从玻璃坞底下穿过被糊掉透出（坞是 overlay，不占列表布局）
-                .padding(.bottom, Theme.Layout.chatDockClearance)
+                // 底部留白已并入 LazyVStack 末尾的「留白 + 哨兵」两段（坞是 overlay，不占列表布局；
+                // 滚动中消息从玻璃坞底下穿过被糊掉透出）
                 .frame(maxWidth: .infinity)
             }
             .onAppear { scrollToBottom(proxy, animated: false) }
-            // 新消息落定：动画滚到底
+            // 新一轮消息落定（发送/重试/切会话）：用户刚发起动作，强制回底并恢复跟随
             .onChange(of: state.messages.count) { _ in
+                stickToBottom = true
                 scrollToBottom(proxy, animated: true)
             }
-            // 流式增量：内容变化触发，节流 0.12s + 非动画滚动（避免每 token 抖动）
+            // 流式增量：贴底时才跟随（用户上滚阅读历史时停在原地）；
+            // 内容变化触发，节流 0.12s + 非动画滚动（避免每 token 抖动）
             .onChange(of: state.messages.last?.content) { _ in
-                guard state.isStreaming else { return }
+                guard state.isStreaming, stickToBottom else { return }
                 let now = Date()
                 guard now.timeIntervalSince(lastAutoScrollAt) > 0.12 else { return }
                 lastAutoScrollAt = now
                 scrollToBottom(proxy, animated: false)
             }
-            // 流式结束：补一次动画滚动，确保末尾完整可见
+            // 流式结束：贴底时补一次动画滚动，确保末尾完整可见
             .onChange(of: state.isStreaming) { streaming in
-                if !streaming { scrollToBottom(proxy, animated: true) }
+                if !streaming, stickToBottom { scrollToBottom(proxy, animated: true) }
             }
         }
     }
@@ -752,6 +786,16 @@ struct AIChatView: View {
             searchFocusRequest += 1
         }
         keyMonitor.install()
+
+        // 滚轮意图监听：哨兵消失时据此区分用户上滚与内容增长；
+        // 已离底时用户继续上滚即时解除跟随（不等下次哨兵事件，消除一次回拽）
+        scrollWheelMonitor.onUserScroll = { scrollingUp in
+            lastUserScrollAt = Date()
+            if scrollingUp, !bottomSentinelVisible {
+                stickToBottom = false
+            }
+        }
+        scrollWheelMonitor.install()
     }
 
     /// ESC 两阶段语义（输入框聚焦时的兜底路径）：① 流式中先中止生成；② 否则关窗还焦点。
@@ -815,6 +859,38 @@ final class AIChatKeyMonitor {
         case 11: onToggleSidebar(); return nil // B
         case 3: onFocusSearch(); return nil    // F
         default: return event
+        }
+    }
+}
+
+// MARK: - AI 窗滚轮意图监听
+
+/// AI 窗滚轮监听：不消费事件，只把「用户在滚」的意图透传给视图层（时间戳 + 方向）。
+/// 用途：底部哨兵消失时区分「用户上滚离开」（解除跟随）与「流式内容增长顶出」（保持跟随）。
+/// macOS 13 无 ScrollView 滚动相位 API，滚轮/触控板滚动统一走 NSEvent.scrollWheel 本地监听。
+/// scrollingDeltaY 已按用户意图归一化（天然/传统方向一致）：> 0 = 向内容顶部滚。
+/// 非隔离类：本地监听恒在主线程事件派发路径触发，回调直接执行，无跨隔离域开销。
+final class AIChatScrollWheelMonitor {
+    private var monitor: Any?
+
+    /// 用户滚动回调；参数 scrollingUp = 是否朝内容顶部方向滚。
+    var onUserScroll: (_ scrollingUp: Bool) -> Void = { _ in }
+
+    func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            // 只关心 AI 对话窗内的滚动（设置窗等其他窗口不记时间戳）
+            if event.window is AIPanel {
+                self?.onUserScroll(event.scrollingDeltaY > 0)
+            }
+            return event
+        }
+    }
+
+    func remove() {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+            self.monitor = nil
         }
     }
 }

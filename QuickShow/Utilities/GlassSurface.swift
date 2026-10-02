@@ -80,6 +80,46 @@ extension View {
     }
 }
 
+// MARK: - 26+ 整窗玻璃的窗口级圆角裁剪容器
+//
+// NSGlassEffectView 的 cornerRadius 只塑形玻璃本身，WindowServer 的 behind-window
+// 材质按整个方形窗口矩形合成；窗口拖动/缩放触发重栅格化后，方形玻璃会从四个圆角
+// 缺口处露出灰色方角残影（2026-10 修复）。玻璃外再包一层裁剪容器充当 contentView：
+// - layer.masksToBounds 让材质渲染尊重圆角（omi/InkGlass 实证路径）；
+// - CAShapeLayer 路径 mask 参与 CA 渲染，窗口纹理在合成前即被裁成圆角；
+// - 配合窗口 didMove/didResize 后 invalidateShadow()，系统阴影随圆角轮廓重算。
+final class GlassClipContainerView: NSView {
+    private let cornerRadius: CGFloat
+
+    init(cornerRadius: CGFloat) {
+        self.cornerRadius = cornerRadius
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+        layer?.cornerCurve = .continuous
+        layer?.cornerRadius = cornerRadius
+        layer?.masksToBounds = true
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layout() {
+        super.layout()
+        // 路径 mask：抗锯齿平滑，且随 bounds 变化即时更新（resize 后路径同步）
+        let shape = (layer?.mask as? CAShapeLayer) ?? CAShapeLayer()
+        shape.path = CGPath(
+            roundedRect: bounds,
+            cornerWidth: cornerRadius,
+            cornerHeight: cornerRadius,
+            transform: nil
+        )
+        layer?.mask = shape
+    }
+}
+
 // MARK: - 无边框窗口 contentView 统一圆角裁剪
 //
 // 两个窗口（主面板 / AI 窗）共用同一套：整窗 NSGlassEffectView 已移除，

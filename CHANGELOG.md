@@ -4,6 +4,26 @@
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-10-02
+
+### Added
+
+- 数学公式渲染全覆盖（AI 窗，SwiftMath 1.7.3 vendoring + 内核补丁）：
+  - **vendoring**：SwiftMath 从 SPM 远程依赖改为 vendored 静态库（`Vendor/SwiftMath`；`project.yml` 新增静态库 target、`mathFonts.bundle` 以 folder reference 打进 App 资源、字体加载 `Bundle.module` 双路径定位——SPM 构建与 xcodebuild 直编均可用）——换取内核级补丁能力
+  - **内核补丁① CJK 混排**：`atom(forCharacter:)` 放行 CJK 字符（上游对 ASCII 0x21–0x7E 外字符静默丢弃，导致 `\text{中文}` 渲染成 0×0 空白）；排版层 `addDisplayLine` 对行内 CJK 区间回退系统 PingFang SC 字体（Latin Modern Math 无汉字字形，不回退则空白），与数学字体分区混排
+  - **内核补丁② 字号阶梯**：`MTMathStyle` 新增 `fontSizeScale`，命令表收录 `\tiny`~`\Huge` 七档（0.5 / 0.9 / 1.0 / 1.2 / 1.44 / 1.728 / 2.074，LaTeX 10pt 档位比例）；排版器按行消费缩放（`.style` 分支区分字号命令与样式命令，前者不扰动行样式），花括号分组天然隔离作用域；转译层移除七档去壳映射，命令直达内核原生渲染
+  - **转译层（`MathLatexTranspiler`）扩充约 60 条命令映射**：否定关系族（`\nsubseteq`/`\nleq`/`\nsubset` 等裸命令与 `\not` 前缀 → `\lnot` 构造）、`\therefore`/`\because`（`\atop` 三点构造）、`\leqslant`/`\geqslant`/`\preceq`/`\succeq`/`\vdash`（拼接构造）、框圈运算符（`\boxplus`→`\oplus`、`\boxtimes`→`\otimes`、`\circledast`→`\odot`、`\triangledown`→`\nabla`、`\Join`/`\ltimes`/`\rtimes`→`\times`）、钩箭头/弯箭头/双羽箭头族→方向等价的基础箭头、`\mathring`（`\circ` 置顶构造）、`\bmod`/`\mod`→`\mathrm{mod}`、`\dddot`→`\ddot`、`\varkappa`/`\digamma`、`\label`/`\require` 删除等
+  - **验证方法归档**：本地 SPM 测试包（mttest，路径依赖 vendored 包）逐条渲染 + 尺寸 + 像素墨迹三重校验（「图片非 nil」检查会被 0×0 空图骗过，必须查尺寸与墨迹）；用户完整公式手册 213 条（块级 + 行内去重）全部通过、历史会话 435 块零崩溃零渲染失败、七档字号高度 4×3→16×13 单调递增。排障乌龙归档（防再踩）：APFS 大小写不敏感，测试文件 `large.tex` 与 `Large.tex` 是同一文件、后写覆盖前写，「两对档位塌缩」是同一文件测两遍的假象
+
+### Changed
+
+- AI 窗流式输出贴底跟随（`AIChatView`）：消息区底部 sentinel 锚定内容绝对末端（124pt 输入坞留白 + 1pt 锚点）、流式期间自动贴底、用户滚轮上翻暂停跟随 / 回底自动恢复（新增 `AIChatScrollWheelMonitor`，NSEvent 局部 `.scrollWheel` 监听，macOS 13 兼容）、消息数变化强制回底——长输出不再被输入坞遮挡，玻璃穿透效果不变
+
+### Fixed
+
+- App 启动即崩（恢复含 `\textcolor` 公式的会话时）：SwiftMath `MTTypesetter` `.textcolor` display 分支数组越界陷阱（fatal 不可捕获）——转译层把 `\textcolor{c}{X}` 改写为 `{\color{c} X}` 规避，渲染语义等价
+- AI 窗整窗玻璃方角残影（拖动 / 缩放后方形玻璃从圆角缺口露出）：WindowServer 在方形窗口矩形上合成 behind-window 材质，重栅格化后方形玻璃从 `cornerRadius` 缺口处露出灰色方角——新增 `GlassClipContainerView` 窗口级圆角裁剪容器（`layer.masksToBounds` + CAShapeLayer 路径 mask，玻璃经其裁剪后再作 contentView）+ 窗口 `didMove`/`didResize` 后 `invalidateShadow()`（透明窗口系统阴影由不透明像素推导、拖动后不自动重算，保留方形轮廓与残影叠加成「四个方角」）
+
 ## [1.11.0] - 2026-10-02
 
 ### Changed

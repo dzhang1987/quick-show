@@ -20,3 +20,4 @@ xcuserdata/
 
 # 本地截图与诊断图片（不入库）
 images/
+Vendor/SwiftMath/.build/
