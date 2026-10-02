@@ -4,6 +4,33 @@
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-02
+
+### Added
+
+- AI 思考过程（reasoning）展示：
+  - 数据链路：`ChatMessage` 新增 `reasoning` 字段（旧会话 JSON `decodeIfPresent` 兼容，缺失按 nil 恢复）；服务层双协议解析思考增量——Chat Completions 的 `delta.reasoning_content`（DeepSeek 风格）/ `delta.reasoning`（兼容端点）与 Responses 的 `response.reasoning_text.delta` / `response.reasoning_summary_text.delta` 事件，统一汇入既有 `AIStreamEvent` 流式事件通道（新增 `.reasoning(String)` 分支，未另起通道）；State 层经 `pendingReasoning` 合帧缓冲沿 ~50ms 冲刷路径累积到当前助手消息（只 mutate 单条、不改 id，保持 `.equatable()` 跳行性能纪律），落定/中止后保留不清理
+  - UI（`ReasoningDisclosureView`）：流式中在正文上方呈现折叠摘要行（SF Symbol 图标 + 思考文本单行截断 + 展开箭头，contentTertiary 11pt），点击 toggle 展开为限高 160pt 内部滚动区（11.5pt contentSecondaryStrong）；摘要行随增量实时更新（250ms 门控节流，与流式 Markdown 同款时间门），落定后折叠行保留、默认收起
+- 消息落定入场动画：0.16s 淡入 + 2pt 上移（复用 `Motion.contentFade`）
+
+### Changed
+
+- AI 窗视觉重构（用户反馈「窗口低廉、不像 Liquid Glass」；经截图逐像素诊断 + HIG Materials / WWDC25-219 规范交叉定位，根因是层级而非参数）：
+  - **输入坞浮岛化**：从「消息列表 + 输入区」VStack 上下拼接改为 `overlay(.bottom)` 底部悬浮，消息滚动时从玻璃卡底下穿过（真 blur-through）——修复 glass-on-glass 反模式（`.glassEffect` 输入卡压在整窗 `ultraThinMaterial` 基面上，CABackdropLayer 采样不到窗口内真实内容、只能二次磨砂已磨砂层，退化成发灰塑料块）；玻璃折射 / specular 高光 / 自适应明度随真实内容流自动成立（HIG「玻璃浮在内容之上」的正确层级）。列表底部 `chatDockClearance=124` 留白保证末条消息可滚至坞上
+  - **窗口方向性 rim light**：顶缘白 70% → 侧缘 15% → 底缘白 5% 的渐变内描边 + 底缘 1pt 黑 8% 重边（`rimTop/Side/Bottom/DarkEdgeOpacity` 令牌），替换均匀 1px 灰线——受光边缘给出玻璃厚度感，「密封袋压边」塑料感消除
+  - **双层阴影系统**（新 `Theme.Shadow` 令牌）：接触影 r3/y2/12% + 环境影 r16/y12/8%，替换单层 `black 0.28 / r10 / y3` 贴身影；输入卡聚焦态（`isKeyWindow` 驱动）accent rim 提亮 35%，材质对状态有响应
+  - **控件语言统一微胶囊**：⊕ / 模型 chip / 剪贴板按钮统一实底（surfaceTrack 系）+ 0.5pt 白 rim（亮 40% / 暗 20%）+ hover 提亮，告别裸细线图标；「清空会话」入口迁入 ⊕ 菜单（trash 图标）
+  - **用户气泡琥珀实底**：`chatUserBubble` 令牌（亮暖纸 #F6EEDF / 暗深琥珀 #362C14 系 92%），去描边、圆角 12→18——形感靠实底 + 大圆角，半透明琥珀水感块 + 描边语言移除
+  - **间距三级节奏**：轮次组距 26→36（`chatGroupGap`）/ 组内 8→10，行 < 段 < 轮的嵌套节拍，轮次边界凭空隙可辨
+  - **减负**：删底部快捷键提示行（「⏎ 发送 · ⇧⏎ 换行 · ⌘B 会话 · ⌘K 清空 · ESC 关闭」）与其上羽化分割线及左侧「清空」按钮——提示全部由各控件 `.help()` tooltip 承担；删用户消息的复制操作行（操作行仅留 AI 回复，hover 提亮逻辑不变）；输入内边距 9pt→18pt（`textContainerInset` 与 placeholder 同步）
+  - **流式指示器光标化**：删「▌ 生成中…」呼吸整行；无正文无 reasoning 时 = 闪烁块状光标（`Motion.caretBlink` 0.55s）+「思考中…」弱化阶段词；有正文增量后光标跟随文尾（块尾位，未侵入 Markdown 内联）
+  - 发送键改琥珀实心圆 + 深色箭头（黑 0.72）——全图最强图底反转（学 Claude App 主操作语言）；流式红停止态不变
+- 版本号真源 project.yml 1.8.0 → 1.9.0（xcodegen 重写产物）
+
+### Fixed
+
+- 发送按钮禁用态与输入卡底对比度实测 1.04:1 近隐形（用户截图逐像素确认）：禁用底改黑 14%（亮）/ 白 18%（暗）实底（`chatSendDisabledFill`），保持可辨的 disabled 语义同时 ≥1.2:1 对比
+
 ## [1.8.0] - 2026-10-02
 
 ### Added

@@ -79,11 +79,14 @@ struct CompletedToolCall: Equatable {
     let arguments: String
 }
 
-/// 流式事件：文本增量（打字机）或一次完整的工具调用集合。
-/// 文本事件保持与旧 `AsyncStream<String>` 完全一致的行为；工具调用在流结束（[DONE] /
+/// 流式事件：文本增量（打字机）、思考过程增量或一次完整的工具调用集合。
+/// 文本/思考事件保持与旧 `AsyncStream<String>` 一致的逐片行为；工具调用在流结束（[DONE] /
 /// response.completed / 自然关闭）时一次性产出，避免中途回合。
 enum AIStreamEvent {
     case text(String)
+    /// 模型思考过程（reasoning）增量：Chat Completions 的 reasoning_content/reasoning，
+    /// 或 Responses 的 reasoning_text/reasoning_summary_text；与正文分开累积。
+    case reasoning(String)
     case toolCalls([CompletedToolCall])
 }
 
@@ -417,10 +420,21 @@ private struct StreamChunk: Decodable {
         struct Delta: Decodable {
             let content: String?
             let toolCalls: [DeltaToolCall]?
+            /// DeepSeek 风格思考增量字段。
+            let reasoningContent: String?
+            /// 部分 OpenAI 兼容端点的思考增量字段。
+            let reasoning: String?
 
             enum CodingKeys: String, CodingKey {
                 case content
                 case toolCalls = "tool_calls"
+                case reasoningContent = "reasoning_content"
+                case reasoning
+            }
+
+            /// 两种字段名统一到同一累积通道：优先 reasoning_content，回退 reasoning。
+            var resolvedReasoning: String? {
+                reasoningContent ?? reasoning
             }
         }
         let delta: Delta?
@@ -1257,6 +1271,11 @@ final class AIChatService {
                         guard let delta = event.delta, !delta.isEmpty else { continue }
                         markFirstToken()
                         onEvent(.text(delta))
+                    case "response.reasoning_text.delta", "response.reasoning_summary_text.delta":
+                        // Responses 思考增量：正文之外的 reasoning 通道，与 output_text 分开派发。
+                        guard let delta = event.delta, !delta.isEmpty else { continue }
+                        markFirstToken()
+                        onEvent(.reasoning(delta))
                     case "response.output_item.added", "response.output_item.done":
                         // function_call 项登记：added 记 call_id/name，done 时携带最终 arguments。
                         guard let item = event.item, item.type == "function_call" else { continue }
@@ -1309,6 +1328,11 @@ final class AIChatService {
                     if let content = delta.content, !content.isEmpty {
                         markFirstToken()
                         onEvent(.text(content))
+                    }
+                    // 思考增量：reasoning_content（DeepSeek 风格）/ reasoning（兼容端点）同归一通道。
+                    if let reasoning = delta.resolvedReasoning, !reasoning.isEmpty {
+                        markFirstToken()
+                        onEvent(.reasoning(reasoning))
                     }
                     if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
                         chatAccumulator.ingest(toolCalls)

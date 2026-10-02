@@ -54,8 +54,8 @@ struct ToolCallRecord: Codable, Equatable {
 
 // MARK: - 消息模型
 
-/// 单条对话消息。相较于旧版新增 `images` 图片附件与 `toolCalls` 工具调用记录字段，
-/// 旧数据缺失这些字段时分别按空数组 / nil 解码，保证向后兼容。
+/// 单条对话消息。相较于旧版新增 `images` 图片附件、`toolCalls` 工具调用记录与
+/// `reasoning` 思考过程字段，旧数据缺失这些字段时分别按空数组 / nil 解码，保证向后兼容。
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: Role
@@ -65,6 +65,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var images: [ChatImageAttachment]
     /// 助手消息发起的工具调用记录（仅带工具调用的助手消息会携带；普通消息为 nil）。
     var toolCalls: [ToolCallRecord]?
+    /// 助手消息的思考过程（reasoning）增量累积；用户消息恒为 nil。
+    /// 落定（done/aborted）后保留原值，供 UI 折叠行展开查看。
+    var reasoning: String?
 
     /// 消息角色。system 仅用于请求注入，不进入 UI 会话数组。
     enum Role: String, Codable {
@@ -91,7 +94,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         content: String,
         state: MessageState,
         images: [ChatImageAttachment] = [],
-        toolCalls: [ToolCallRecord]? = nil
+        toolCalls: [ToolCallRecord]? = nil,
+        reasoning: String? = nil
     ) {
         self.id = id
         self.role = role
@@ -99,13 +103,14 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.state = state
         self.images = images
         self.toolCalls = toolCalls
+        self.reasoning = reasoning
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, content, state, images, toolCalls
+        case id, role, content, state, images, toolCalls, reasoning
     }
 
-    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls 等新字段）。
+    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning 等新字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -115,6 +120,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         images = try container.decodeIfPresent([ChatImageAttachment].self, forKey: .images) ?? []
         // 旧会话无此字段：decodeIfPresent 保证可正常恢复。
         toolCalls = try container.decodeIfPresent([ToolCallRecord].self, forKey: .toolCalls)
+        // 旧会话无 reasoning 字段：缺失即 nil，不打断解码。
+        reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
     }
 }
 

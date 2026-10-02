@@ -3,13 +3,17 @@ import Combine
 import SwiftUI
 
 /// AI 对话视图（Lane C）：将嵌入 NSHostingView，由 AIWindowManager 管理外窗尺寸与焦点。
-/// 视觉全部走 DesignTokens 既有令牌（本文件严禁新增令牌——Lane B 并行维护 DesignTokens）。
+/// 视觉常量全部走 DesignTokens 令牌（AI 专用令牌集中在 DesignTokens 的 chatXxx 区，本文件不硬编码）。
 ///
-/// Wave 2 结构：
+/// Wave 3 结构（2026-10 视觉质感专项）：
 /// - 左侧会话窄栏（⌘B 显隐，展开时窗口整体加宽，见 AIWindowManager.setSidebarVisible）
-/// - 消息列表：AI 回复无气泡铺底排版；消息下方常驻弱显示操作行（复制；最后一条落定助手消息附「重新生成」）
-/// - 输入卡：⊕ 图片附件菜单 + 模型 chip + 剪贴板附加 + 发送/中止
-/// - 快捷键 ⌘N/⌘B/⌘F 由 AIChatKeyMonitor（本地事件监听）接线；ESC/⌘K 仍走窗口层
+/// - 消息列表铺满窗口主体：AI 回复无气泡铺底排版；落定助手消息下方常驻弱显示操作行（复制/重新生成）
+/// - 输入坞浮岛化：overlay 悬浮于消息列表之上，消息滚动时从玻璃坞底下穿过（真 blur-through，
+///   Liquid Glass 采样到真实内容流后折射/高光/自适应明度自动成立，不再有 fade 遮罩）
+/// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 聚焦态 accent rim
+/// - 控件语言：发送钮实心琥珀图底反转；⊕/剪贴板/chip 实底微胶囊（白 rim + hover 提亮）
+/// - 快捷键 ⌘N/⌘B/⌘F 由 AIChatKeyMonitor（本地事件监听）接线；ESC/⌘K 仍走窗口层；
+///   快捷键提示全部由各控件 .help() tooltip 承担（底部提示条已删）
 ///
 /// 公开接口（接线用）：
 /// - `state`：会话状态（AIChatState.shared）。
@@ -30,7 +34,7 @@ struct AIChatView: View {
         _sidebarVisible = State(initialValue: UserDefaults.standard.bool(forKey: AIWindowManager.sidebarVisibleKey))
     }
 
-    /// 输入框占位文案（⏎/⇧⏎/ESC 语义提示已下沉到底部快捷键条，占位只留一句）。
+    /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
     private let inputPlaceholder = "问点什么…"
     /// 阅读列最大宽度：行长控制（对标 DeepSeek/CC），窗口更宽时整列居中、两侧透出玻璃；
     /// 消息列与输入坞共用同一限宽，保证左缘/右缘对齐。
@@ -66,6 +70,13 @@ struct AIChatView: View {
     @State private var pinned = AIWindowManager.shared.isPinned
     /// 图钉按钮 hover 态。
     @State private var pinHovered = false
+    /// 窗口 key 态：输入卡聚焦 rim 的近似信号（窗口 key 时输入框必被抬为第一响应者，
+    /// 见 ChatInputTextView 的 windowDidBecomeKey 兜底；isKeyWindow 近似足够，不侵入事件链）。
+    @State private var windowIsKey = false
+    /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip 的 hover 提亮）。
+    @State private var attachHovered = false
+    @State private var clipboardHovered = false
+    @State private var chipHovered = false
 
     var body: some View {
         HStack(spacing: 0) {
@@ -106,6 +117,13 @@ struct AIChatView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
                 .fill(.ultraThinMaterial)
         }
+        // 窗口边缘 rim light（方向性内描边：顶 ~70% 白 → 侧 ~15% → 底 ~5%，另底缘 1pt 黑 8% 重边）
+        // 受光方向 = 玻璃厚度感；替代无边框窗口默认的均匀灰边（无受光方向 = 塑料片观感）。
+        // 写在放大层之前：放大覆盖层激活时盖住 rim；allowsHitTesting(false) 防描边层吞点击。
+        .overlay {
+            windowRimLight
+                .allowsHitTesting(false)
+        }
         // 图片点击放大覆盖层（轻量自实现；ESC 由 keyMonitor 先行消费关闭）
         // 注意顺序：overlay 必须写在圆角裁剪之前，否则 13~25 降级路径下覆盖层会是直角
         .overlay {
@@ -122,12 +140,18 @@ struct AIChatView: View {
             refreshEnvironment()
             installKeyMonitor()
             pinned = AIWindowManager.shared.isPinned
+            windowIsKey = NSApp.keyWindow is AIPanel
         }
         .onDisappear { keyMonitor.remove() }
         // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             refreshEnvironment()
             pinned = AIWindowManager.shared.isPinned
+            // 输入卡聚焦 rim：只在 AI 窗自身成为 key 时点亮（其他窗口激活不误触）
+            if note.object is AIPanel { windowIsKey = true }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+            if note.object is AIPanel { windowIsKey = false }
         }
         // 外部清空输入（发送 / ⌘K / 重试）经 state.inputText 变化同步空态。
         // 组字期间 ChatInputNSTextView 的 setMarkedText 回调已实时同步 state.inputText（见 syncInputState），
@@ -137,30 +161,73 @@ struct AIChatView: View {
         }
     }
 
-    // MARK: - 主列（对话区 + 输入区）
+    // MARK: - 窗口边缘 rim light
+
+    /// 方向性内描边：1pt strokeBorder 沿窗口圆角矩形走，垂直多段渐变近似受光模型
+    /// （顶缘受光最强 → 侧缘弱 → 底缘近无）；底缘再叠一条只在末端显形的 1pt 黑 8% 重边，
+    /// 与窗口投影衔接出「厚度」。两层均为纯描边（无填充），不遮挡内容。
+    private var windowRimLight: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .white.opacity(Theme.Colors.rimTopOpacity), location: 0.0),
+                            .init(color: .white.opacity(Theme.Colors.rimSideOpacity), location: 0.30),
+                            .init(color: .white.opacity(Theme.Colors.rimSideOpacity), location: 0.70),
+                            .init(color: .white.opacity(Theme.Colors.rimBottomOpacity), location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+            RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black.opacity(0), location: 0.85),
+                            .init(color: .black.opacity(Theme.Colors.rimDarkEdgeOpacity), location: 1.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 1
+                )
+        }
+    }
+
+    // MARK: - 主列（对话区 + 浮岛输入坞）
 
     private var mainColumn: some View {
         VStack(spacing: 0) {
             windowTopBar
 
-            // 三态：未配置引导 / 空态欢迎页 / 消息列表
+            // 三态：未配置引导 / 空态欢迎页 / 消息列表——铺满窗口主体
+            // （输入坞浮岛 overlay 在底部，欢迎/引导页加底部留白对齐坞上视觉中心）
             if !configured && state.messages.isEmpty {
                 UnconfiguredGuideView(onOpenSettings: onOpenSettings)
+                    .padding(.bottom, Theme.Layout.chatDockClearance)
             } else if state.messages.isEmpty {
                 WelcomeView(
                     hasClipboardText: hasClipboardText,
                     onAttachClipboard: { attachClipboard() }
                 )
+                .padding(.bottom, Theme.Layout.chatDockClearance)
             } else {
                 messageList
             }
-
-            inputArea
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。
+        // 消息滚动时从坞的玻璃底下穿过——glassEffect 采样到真实内容流，
+        // 折射/高光/自适应明度自动成立（glass-on-glass 退化为塑料块的根因即采样不到内容）。
+        // 列表底部留白（chatDockClearance）保证滚到底时末条消息完整露出坞顶。
+        .overlay(alignment: .bottom) {
+            inputArea
+        }
         // 全窗材质两级收敛：根部 ultraThinMaterial 是唯一内容基面（铺满主列与阅读区），
-        // 输入坞 glass 是唯一浮层语言；此处不再叠第二层材质——双层材质叠压曾让内容区
-        // 与快捷键提示条之间出现多余亮度档，单层基面后全窗亮度关系唯一且自洽。
+        // 输入坞 glass 是唯一浮层语言；此处不再叠第二层材质，全窗亮度关系唯一且自洽。
     }
 
     // MARK: - 顶部拖动条（移动窗口 + 图钉）
@@ -211,10 +278,11 @@ struct AIChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                // 连续同角色消息成组：组间距 26 明显大于组内间距 8，形成分组呼吸感
-                LazyVStack(alignment: .leading, spacing: 26) {
+                // 三级间距节奏：轮次组间 36（chatGroupGap）＞ 组内 10（xl）＞ 行内段落档，
+                // 拉开「轮次 ↔ 同轮连续消息」的层级差，形成分组呼吸感
+                LazyVStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
                     ForEach(groupMessages(state.messages)) { group in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
                                 ChatMessageRow(
                                     message: message,
@@ -233,6 +301,8 @@ struct AIChatView: View {
                                 .equatable()
                                 // 以稳定 id 渲染；State 只 mutate content，不改 id
                                 .id(message.id)
+                                // 落定消息入场：0.16s 淡入 + 2pt 上移（offset 是渲染位移，不参与布局，列表不跳动）
+                                .transition(.opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
                             }
                         }
                     }
@@ -241,12 +311,15 @@ struct AIChatView: View {
                         .frame(height: 1)
                         .id(bottomAnchorID)
                 }
+                // 新消息插入时应用入场过渡（动画只挂 count 变化，流式 mutate 不触发）
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.messages.count)
                 // 阅读列限宽 + 居中：先限内容宽，再整体居中于滚动区（窗口加宽时两侧透玻璃）
                 .frame(maxWidth: contentMaxWidth, alignment: .leading)
                 .padding(.horizontal, Theme.Spacing.section)
                 .padding(.top, Theme.Spacing.section)
-                // 底部仅留 4pt：与输入区顶距 12 合成 16pt 浮动缝隙（输入坞浮起，不再堆空隙）
-                .padding(.bottom, Theme.Spacing.sm)
+                // 底部留白 = 浮岛坞高 + 12pt 缝：滚到底时末条消息完整露出坞顶；
+                // 滚动中消息从玻璃坞底下穿过被糊掉透出（坞是 overlay，不占列表布局）
+                .padding(.bottom, Theme.Layout.chatDockClearance)
                 .frame(maxWidth: .infinity)
             }
             .onAppear { scrollToBottom(proxy, animated: false) }
@@ -304,7 +377,7 @@ struct AIChatView: View {
         }
     }
 
-    // MARK: - 输入区
+    // MARK: - 输入区（浮岛输入坞）
 
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
@@ -337,7 +410,8 @@ struct AIChatView: View {
                         Text(inputPlaceholder)
                             .font(Theme.Typography.text(13))
                             .foregroundColor(Theme.Colors.idleText)
-                            .padding(.horizontal, Theme.Spacing.xxl)
+                            // 与 textContainerInset 同步：光标距卡边 18pt（旧 12pt 太贴边）
+                            .padding(.horizontal, Theme.Spacing.section)
                             .padding(.vertical, Theme.Spacing.xl)
                             .allowsHitTesting(false)
                     }
@@ -355,56 +429,31 @@ struct AIChatView: View {
                 .padding(.bottom, Theme.Spacing.lg)
             }
             // 功能层：输入坞是典型控件面（输入条/发送/附件/模型 chip），26+ 官方 Liquid Glass，
-            // <26 退化为 ultraThinMaterial + 0.5pt 描边；内部输入框/按钮/chip 保持原视觉、不叠各自 glass。
+            // <26 退化为 ultraThinMaterial + 0.5pt 描边；坞悬浮于消息流之上，玻璃采样到真实
+            // 内容流（blur-through）。纪律：坞内控件（⊕/chip/发送/剪贴板）绝不再用 glassEffect
+            // （glass-on-glass），一律实底微胶囊。
             .glassSurface(RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous))
-            // 极轻投影托起浮卡感（无框窗口上投影克制，仅拉开前后层级）
-            .shadow(color: .black.opacity(0.28), radius: 10, y: 3)
+            // 聚焦态 rim：窗口 key 时叠加 accent 低透明度环，材质对状态有响应；
+            // allowsHitTesting(false) 防描边层吞掉坞内控件点击
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                    .strokeBorder(
+                        Theme.Colors.accent.opacity(windowIsKey ? Theme.Colors.dockFocusRimOpacity : 0),
+                        lineWidth: 1
+                    )
+                    .allowsHitTesting(false)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: windowIsKey)
+            )
+            // 双层阴影：接触影贴身定锚 + 环境影拉开纵深（旧单层贴身影 = 卡片糊在底板上）
+            .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity), radius: Theme.Shadow.dockContactRadius, y: Theme.Shadow.dockContactY)
+            .shadow(color: .black.opacity(Theme.Shadow.dockAmbientOpacity), radius: Theme.Shadow.dockAmbientRadius, y: Theme.Shadow.dockAmbientY)
             // 拖到输入卡边缘 padding 区也能接住（主路径在 NSTextView 子类）
             .onDrop(of: ["public.image", "public.file-url"], isTargeted: nil) { providers in
                 handleDropProviders(providers)
             }
-
-            // 快捷键提示行：与输入卡之间以羽化 hairline 分隔，整体再弱一档，不与输入卡混为一体
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.primary.opacity(0.0),
-                            Color.primary.opacity(Theme.Colors.dividerOpacity * 0.6),
-                            Color.primary.opacity(0.0)
-                        ],
-                        startPoint: .leading,
-                        endPoint: .trailing
-                    )
-                )
-                .frame(height: Theme.Layout.dividerHeight)
-                .padding(.horizontal, Theme.Spacing.xxl)
-
-            HStack(spacing: Theme.Spacing.lg) {
-                // ⌘K 清空：弱化图标钮（快捷键由窗口层处理，此处提供鼠标入口）
-                Button {
-                    state.clearSession()
-                } label: {
-                    HStack(spacing: Theme.Spacing.sm) {
-                        Image(systemName: "trash")
-                            .font(Theme.Typography.text(11, .medium))
-                        Text("清空")
-                            .font(Theme.Typography.text(11, .medium))
-                    }
-                    .foregroundColor(state.messages.isEmpty ? Theme.Colors.idleText.opacity(0.6) : Theme.Colors.contentTertiary)
-                }
-                .buttonStyle(.plain)
-                .disabled(state.messages.isEmpty)
-                .help("清空当前会话（⌘K 重新开始）")
-
-                Spacer(minLength: 0)
-
-                Text("⏎ 发送 · ⇧⏎ 换行 · ⌘B 会话 · ⌘K 清空 · ESC 关闭")
-                    .font(Theme.Typography.text(10.5))
-                    .foregroundColor(Theme.Colors.idleText.opacity(0.85))
-            }
         }
-        // 输入坞与消息列同限宽、同居中：顶距 12 与列表底 4 合成 16pt 浮动缝隙
+        // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
+        // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部
         .frame(maxWidth: contentMaxWidth, alignment: .leading)
         .padding(.horizontal, Theme.Spacing.section)
         .padding(.top, Theme.Spacing.xxl)
@@ -414,7 +463,8 @@ struct AIChatView: View {
         .onHover { _ in refreshClipboardAvailability() }
     }
 
-    /// ⊕ 附件菜单：剪贴板导入 / 从文件选择…
+    /// ⊕ 附件菜单：剪贴板导入 / 从文件选择… / 清空会话（清空入口自底部提示条迁入）。
+    /// 微胶囊语言：实底 + 0.5pt 白 rim + hover 提亮，告别裸细线图标。
     private var attachMenuButton: some View {
         Menu {
             Button {
@@ -429,21 +479,35 @@ struct AIChatView: View {
             } label: {
                 Label("从文件选择…", systemImage: "folder")
             }
+
+            Divider()
+
+            Button {
+                state.clearSession()
+            } label: {
+                Label("清空会话", systemImage: "trash")
+            }
+            .disabled(state.messages.isEmpty)
         } label: {
-            Image(systemName: "plus.circle")
-                .font(Theme.Typography.text(13, .medium))
-                .foregroundColor(Theme.Colors.iconRest)
+            Image(systemName: "plus")
+                .font(Theme.Typography.text(13, .semibold))
+                .foregroundColor(attachHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                .background(Circle().fill(Theme.Colors.surfaceButton))
+                .background(Circle().fill(attachHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceButton))
+                .overlay(Circle().strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("添加图片附件（也可直接粘贴或拖入）")
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { attachHovered = hovering }
+        }
+        .help("添加图片附件（可粘贴/拖入）· 清空会话（⌘K）")
     }
 
     /// 模型 chip：胶囊显示当前模型，点击弹下拉切换（仅多模型时显示，单模型弱化隐藏）。
+    /// 微胶囊语言：实底 surfaceTrack + 0.5pt 白 rim + hover 提亮。
     @ViewBuilder
     private var modelChip: some View {
         if modelList.count > 1 {
@@ -468,23 +532,26 @@ struct AIChatView: View {
                         .font(Theme.Typography.text(8, .medium))
                         .foregroundColor(Theme.Colors.idleText)
                 }
-                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                .foregroundColor(chipHovered ? Theme.Colors.iconHover : Theme.Colors.contentSecondaryStrong)
                 .padding(.horizontal, Theme.Spacing.xl)
                 .padding(.vertical, Theme.Spacing.xxxs)
                 .frame(height: Theme.Layout.iconButtonSize)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Theme.Colors.surfaceTrack)
+                        .fill(chipHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
                 )
                 .overlay(
                     Capsule(style: .continuous)
-                        .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+                        .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
                 )
             }
             .buttonStyle(.plain)
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { chipHovered = hovering }
+            }
             .help("切换模型（下一轮对话生效）")
         }
     }
@@ -502,12 +569,18 @@ struct AIChatView: View {
         } label: {
             Image(systemName: "doc.on.clipboard")
                 .font(Theme.Typography.text(13, .medium))
-                .foregroundColor(hasClipboardText ? Theme.Colors.iconRest : Theme.Colors.idleText.opacity(0.5))
+                .foregroundColor(hasClipboardText
+                                 ? (clipboardHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
+                                 : Theme.Colors.idleText.opacity(0.5))
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                .background(Circle().fill(Theme.Colors.surfaceButton))
+                .background(Circle().fill(clipboardHovered && hasClipboardText ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceButton))
+                .overlay(Circle().strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5))
         }
         .buttonStyle(.plain)
         .disabled(!hasClipboardText)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { clipboardHovered = hovering }
+        }
         .help("附加剪贴板内容作为上下文")
     }
 
@@ -538,18 +611,19 @@ struct AIChatView: View {
             || !state.imageAttachments.isEmpty   // 纯图片也可发送
     }
 
-    /// 发送键底：可用 = 主题强调色实心（琥珀/青），流式 = 警告红，禁用 = 灰底。
+    /// 发送键底：可用 = 主题强调色实心（琥珀/青，全图最强图底反转），流式 = 警告红，
+    /// 禁用 = 浅灰实底（chatSendDisabledFill，与卡底 ≥1.2:1 对比，修正旧版 1.04:1 隐形事故）。
     private var sendButtonFill: Color {
         if state.isStreaming { return Theme.Colors.statusWarning.opacity(0.9) }
-        return canSend ? Theme.Colors.accent : Theme.Colors.surfaceButton
+        return canSend ? Theme.Colors.accent : Theme.Colors.chatSendDisabledFill
     }
 
     /// 发送键图标：实心强调色底上取深色（琥珀/青均属亮色底，深图标对比最稳），
-    /// 流式红底用白色；禁用态弱化灰。
+    /// 流式红底用白色；禁用态 contentTertiary（≈4.7:1，仍清晰可读，不再隐形）。
     private var sendButtonForeground: Color {
         if state.isStreaming { return .white }
         if canSend { return Color.black.opacity(0.72) }
-        return Theme.Colors.idleText
+        return Theme.Colors.contentTertiary
     }
 
     /// 刷新非 @Published 的外部环境：端点配置、剪贴板可用性、模型列表。
@@ -773,7 +847,8 @@ private struct ChatMessageRow: View, Equatable {
                 content
                 if message.role == .assistant { Spacer(minLength: Theme.Spacing.panel) }
             }
-            if message.role != .system {
+            // 操作行只对助手消息渲染（用户消息操作行已删，给气泡减负）
+            if message.role == .assistant {
                 actionRow
             }
         }
@@ -829,10 +904,11 @@ private struct ChatMessageRow: View, Equatable {
         }
     }
 
-    /// 用户消息：右对齐气泡，琥珀强调色底 + 同系描边（容器感）；图片缩略图排在文本上方（点击放大）。
-    /// 气泡容器保持原样，仅行距与 AI 正文同节奏（13pt + 6 ≈ 1.7 倍行高）。
+    /// 用户消息：右对齐气泡，琥珀实底（chatUserBubble：亮色暖纸 / 暗色深琥珀随玻璃微光），
+    /// 无描边（实底自身即容器，描边是廉价感来源），圆角 18 对话语言；
+    /// 图片缩略图排在文本上方（点击放大），行距与 AI 正文同节奏（13pt + 6 ≈ 1.7 倍行高）。
     private var userBubble: some View {
-        VStack(alignment: .trailing, spacing: Theme.Spacing.lg) {
+        VStack(alignment: .trailing, spacing: Theme.Spacing.xl) {
             if !message.images.isEmpty {
                 MessageImageThumbs(images: message.images, onTap: onTapImage)
             }
@@ -847,20 +923,28 @@ private struct ChatMessageRow: View, Equatable {
         .padding(.horizontal, Theme.Spacing.xxl)
         .padding(.vertical, Theme.Spacing.xl)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.accent.opacity(0.18))
+            RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
+                .fill(Theme.Colors.chatUserBubble)
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.accent.opacity(0.32), lineWidth: 0.5)
-        )
+    }
+
+    /// 是否处于生成中（sending/streaming）：思考折叠区据此做流式节流与收尾全量同步。
+    private var isLive: Bool {
+        switch message.state {
+        case .sending, .streaming: return true
+        default: return false
+        }
     }
 
     @ViewBuilder
     private var assistantContent: some View {
-        // 文本（无气泡铺底）与工具调用卡片纵向排列：一轮助手消息可能兼有文本与工具调用，
-        // 纯工具调用轮（无文本）只渲染卡片、不留空文本段；卡片与正文同宽
-        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+        // 思考折叠区（有 reasoning 时）→ 文本（无气泡铺底）→ 工具调用卡片纵向排列；
+        // 一轮助手消息可能兼有文本与工具调用，纯工具调用轮（无文本）只渲染卡片、不留空文本段；
+        // 卡片与正文同宽
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            if let reasoning = message.reasoning, !reasoning.isEmpty {
+                ReasoningDisclosureView(reasoning: reasoning, isLive: isLive)
+            }
             assistantTextPart
             if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                 AIToolCallCardView(toolCalls: toolCalls)
@@ -876,8 +960,9 @@ private struct ChatMessageRow: View, Equatable {
         let skipsTextPart = message.content.isEmpty && !(message.toolCalls?.isEmpty ?? true)
         switch message.state {
         case .sending, .streaming:
-            // 流式/首 token 等待：纯文本增量 + 呼吸态（流结束后切完整 AST 渲染）
-            StreamingMessageView(content: message.content)
+            // 流式/首 token 等待：纯文本增量 + 块状光标（流结束后切完整 AST 渲染）；
+            // hasReasoning 让空正文态决定是否补「思考中…」阶段词（有 reasoning 时折叠区已承载活性）
+            StreamingMessageView(content: message.content, hasReasoning: !(message.reasoning?.isEmpty ?? true))
         case .failed(let errorText):
             // 失败态保留提示卡片（状态提示，非正文排版）
             FailedMessageView(errorText: errorText, onRetry: onRetry)
@@ -932,19 +1017,122 @@ private struct ChatActionIconButton: View {
     }
 }
 
-/// 流式消息：增量 Markdown 渲染（节流）+ 呼吸态提示。
+/// 流式消息：增量 Markdown 渲染（节流）+ 闪烁块状光标。
 /// 与落定态一致无气泡，流式→定稿不再发生排版/颜色跳变。
+/// 两级表达：① 无正文时 = 光标 + 弱化阶段词「思考中…」（有 reasoning 时阶段词省略，
+/// 活性由上方的思考折叠区摘要行承担）；② 有正文增量后 = 光标跟随文尾，无状态词。
 private struct StreamingMessageView: View {
     let content: String
+    /// 是否已有思考过程（reasoning 折叠区由外层 assistantContent 承载，此处只做状态词取舍）。
+    let hasReasoning: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             if !content.isEmpty {
                 StreamingMarkdownContentView(content: content)
+                // 光标跟随文尾（置于内容块尾行下方左侧，模拟文尾 caret）
+                BlinkingCaret()
+            } else {
+                HStack(spacing: Theme.Spacing.sm) {
+                    BlinkingCaret()
+                    if !hasReasoning {
+                        Text("思考中…")
+                            .font(Theme.Typography.text(Theme.Typography.footnote))
+                            .foregroundColor(Theme.Colors.contentTertiary)
+                    }
+                }
             }
-            StreamingIndicator()
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 闪烁块状光标：▌ 以线性节拍闪烁（近似系统 caret；只闪光标，不呼吸整行，避免视觉噪声）。
+private struct BlinkingCaret: View {
+    @State private var lit = false
+
+    var body: some View {
+        Text("▌")
+            .font(Theme.Typography.text(Theme.Typography.body))
+            .foregroundColor(Theme.Colors.contentSecondaryStrong)
+            .opacity(lit ? 1 : 0)
+            .onAppear {
+                withAnimation(.linear(duration: Theme.Motion.caretBlink).repeatForever(autoreverses: true)) {
+                    lit = true
+                }
+            }
+    }
+}
+
+/// 思考过程（reasoning）折叠区：默认收起为单行摘要（时钟/大脑小图标 + 最近一段思考
+/// 单行截断 + 展开箭头），点击 toggle 展开为限高滚动多行区；落定后同样保留、默认收起。
+/// 流式期间 250ms 时间门控节流刷新（与正文增量渲染同节奏），收尾（isLive 翻 false）全量对账。
+private struct ReasoningDisclosureView: View {
+    let reasoning: String
+    /// 是否仍在生成中：节流门控期间中间帧可丢，收尾帧必须全量（防止末尾增量被门控吞掉）。
+    let isLive: Bool
+
+    @State private var expanded = false
+    @State private var rendered: String = ""
+    @State private var lastRenderAt: Date = .distantPast
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Button {
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "brain")
+                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                    Text(summary)
+                        .font(Theme.Typography.text(Theme.Typography.footnote))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+                }
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(expanded ? "收起思考过程" : "展开思考过程")
+
+            if expanded {
+                ScrollView(.vertical, showsIndicators: false) {
+                    Text(rendered)
+                        .font(Theme.Typography.text(Theme.Typography.label))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
+                .transition(.opacity)
+            }
+        }
+        .onAppear {
+            rendered = reasoning
+            lastRenderAt = Date()
+        }
+        .onChange(of: reasoning) { newValue in
+            let now = Date()
+            guard now.timeIntervalSince(lastRenderAt) >= 0.25 else { return }
+            lastRenderAt = now
+            rendered = newValue
+        }
+        // 收尾对账：生成结束时无论门控窗口如何都渲染全量，防止末尾增量被节流吞掉
+        .onChange(of: isLive) { live in
+            if !live { rendered = reasoning }
+        }
+    }
+
+    /// 摘要：取最近一个非空段落（流式期间摘要行随增量实时更新，单行截断）。
+    private var summary: String {
+        let paragraphs = rendered
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return paragraphs.last ?? "思考中…"
     }
 }
 
@@ -970,25 +1158,6 @@ private struct StreamingMarkdownContentView: View {
                 lastRenderAt = now
                 rendered = newValue
             }
-    }
-}
-
-/// 「生成中…」呼吸态：opacity 呼吸动画（repeatForever + autoreverses）。
-private struct StreamingIndicator: View {
-    @State private var breathing = false
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            Text("▌").font(Theme.Typography.text(12))
-            Text("生成中…").font(Theme.Typography.text(11, .medium))
-        }
-        .foregroundColor(Theme.Colors.contentTertiary)
-        .opacity(breathing ? 1.0 : 0.3)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) {
-                breathing = true
-            }
-        }
     }
 }
 
@@ -1231,9 +1400,9 @@ private struct ChatInputTextView: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [NSView.AutoresizingMask.width]
-        // 内边距与 SwiftUI 占位文案 padding 对齐（复用既有间距令牌）
+        // 内边距与 SwiftUI 占位文案 padding 对齐：左右 18pt（section），光标不再贴卡边
         textView.textContainerInset = NSSize(
-            width: Theme.Spacing.xxl,
+            width: Theme.Spacing.section,
             height: Theme.Spacing.xl
         )
         textView.textContainer?.lineFragmentPadding = 0

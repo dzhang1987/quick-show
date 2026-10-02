@@ -183,6 +183,24 @@ enum Theme {
         /// 表格斑马纹（±4% 白量级，偶数行）
         static let chatTableRowAlternate = Color.primary.opacity(0.035)
 
+        // —— 2026-10 视觉质感专项（浮岛化/控件语言/气泡）——
+        /// 用户消息气泡实底：琥珀语言（亮色低饱和烧琥珀暖纸 #F6EEDF 系 / 暗色深琥珀 #362C14 系，
+        /// 暗色留 8% 透明随玻璃微光）；与主题变体正交——用户气泡恒为琥珀，不随黑曜石/琥珀切换。
+        static let chatUserBubble = aiAdaptive(dark: (0.216, 0.173, 0.098, 0.92), light: (0.965, 0.933, 0.875, 1.0))
+        /// 输入坞微胶囊 0.5pt 白 rim（⊕/剪贴板/模型 chip 的受光边：浅色白 40% / 深色白 20%）
+        static let chatCapsuleRim = aiAdaptive(dark: (1, 1, 1, 0.20), light: (1, 1, 1, 0.40))
+        /// 发送钮禁用态底：浅灰实底，与输入卡底保持 ≥1.2:1 对比（杜绝旧版 1.04:1 隐形事故）
+        static let chatSendDisabledFill = aiAdaptive(dark: (1, 1, 1, 0.18), light: (0, 0, 0, 0.14))
+
+        // 窗口边缘 rim light（方向性内描边：顶部受光最强 → 侧缘弱 → 底缘近无，
+        // 受光方向 = 玻璃厚度感；替代旧版均匀 1px 灰线的无方向感）
+        static let rimTopOpacity: Double = 0.70      // 顶缘白
+        static let rimSideOpacity: Double = 0.15     // 左右侧缘白
+        static let rimBottomOpacity: Double = 0.05   // 底缘白
+        static let rimDarkEdgeOpacity: Double = 0.08 // 底缘内侧 1pt 黑色重边（与窗影衔接）
+        /// 输入卡聚焦态 rim：窗口 key 时叠加的 accent 低透明度环（材质对状态有响应）
+        static let dockFocusRimOpacity: Double = 0.35
+
         /// AI 窗专用自适应色构造（rgba 四元组，解析跟随视图 effectiveAppearance）
         private static func aiAdaptive(
             dark: (Double, Double, Double, Double),
@@ -258,6 +276,7 @@ enum Theme {
         static let section: CGFloat = 18 // 区块边距
         static let divider: CGFloat = 20 // 监控区分割线水平内收
         static let panel: CGFloat = 24   // 面板主水平内边距
+        static let chatGroupGap: CGFloat = 36 // AI 对话消息轮次间距（26 → 36，三级节奏顶层；组内用 xl=10）
     }
     
     // MARK: - 圆角（连续曲率）
@@ -268,6 +287,7 @@ enum Theme {
         static let groupCard: CGFloat = 12  // 速查组卡
         static let insetCard: CGFloat = 10  // 内层卡（番茄钟台/日历卡）
         static let keyCap: CGFloat = 5      // 快捷键键帽
+        static let userBubble: CGFloat = 18 // 用户消息气泡（groupCard 12 → 18，更圆的对话语言）
     }
     
     // MARK: - 布局尺寸（面板尺寸档位的单一来源；ScreenHelper.metrics 引用此处，逻辑不搬）
@@ -318,6 +338,23 @@ enum Theme {
         static let iconButtonSize: CGFloat = 24      // 图钉/箭头按钮
         static let dividerHeight: CGFloat = 0.5      // 微光分割线（严格 0.5pt）
         static let glanceProgressHeight: CGFloat = 2.5  // 一瞥倒计时微光进度条高（细若光丝，2x 屏 5px 清晰可辨）
+
+        // AI 对话浮岛输入坞：消息列表底部留白 = 坞高（卡片 ≈88 + 上下缝隙）+ 12pt 浮动缝，
+        // 保证滚到底时末条消息完整露出坞顶；滚动中消息从玻璃坞底下穿过（真 blur-through）
+        static let chatDockClearance: CGFloat = 124
+        // AI 对话思考过程（reasoning）展开区限高，超出内部滚动
+        static let reasoningMaxHeight: CGFloat = 160
+    }
+
+    // MARK: - 投影档位（浮起层级的值源：接触影贴身定锚 + 环境影拉开纵深，禁止单层贴身影）
+    enum Shadow {
+        // 输入坞双层阴影（SwiftUI shadow radius ≈ blur/2，两次 .shadow 叠加）
+        static let dockContactRadius: CGFloat = 3    // 接触影 blur 6
+        static let dockContactY: CGFloat = 2
+        static let dockContactOpacity: Double = 0.12
+        static let dockAmbientRadius: CGFloat = 16   // 环境影 blur 32
+        static let dockAmbientY: CGFloat = 12
+        static let dockAmbientOpacity: Double = 0.08
     }
     
     // MARK: - 动画时长（窗口尺寸动画是唯一尺寸时钟，其余为显隐/淡入淡出节奏）
@@ -332,5 +369,7 @@ enum Theme {
         static let framePollHz: Double = 60      // 窗口动画期间尺寸轮询频率
         static let toastScale: CGFloat = 0.95    // toast 入场缩放
         static let overlayScale: CGFloat = 0.97  // CheatSheet 入场缩放
+        static let caretBlink: Double = 0.55       // 流式块状光标闪烁节拍（近似系统 caret，只闪光标不呼吸整行）
+        static let messageArriveOffset: CGFloat = 2 // 新消息落定位移（配合 contentFade：0.16s 淡入 + 2pt 上移）
     }
 }

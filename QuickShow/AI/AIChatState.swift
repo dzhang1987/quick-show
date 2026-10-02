@@ -45,6 +45,8 @@ final class AIChatState: ObservableObject {
 
     /// 累积待写入的 token（合帧缓冲区，降低 store/视图失效频率）。
     private var pendingTokens: String = ""
+    /// 累积待写入的思考过程增量（与正文共用合帧定时器，避免 reasoning 逐片写 store）。
+    private var pendingReasoning: String = ""
     /// 合帧缓冲区对应的助手消息 id。
     private var pendingMessageID: UUID?
     /// 合帧缓冲区对应的会话 id。
@@ -165,6 +167,9 @@ final class AIChatState: ObservableObject {
                         case let .text(token):
                             roundText += token
                             self.appendToken(token, to: assistantID, in: sessionId)
+                        case let .reasoning(token):
+                            // 思考增量与正文分开累积，落定后仍保留供折叠查看。
+                            self.appendReasoning(token, to: assistantID, in: sessionId)
                         case let .toolCalls(calls):
                             completedCalls = calls
                         }
@@ -357,6 +362,14 @@ final class AIChatState: ObservableObject {
         scheduleFlushIfNeeded()
     }
 
+    /// 思考过程增量：与正文共用同一合帧缓冲区与定时器，同样避免逐片写 store。
+    private func appendReasoning(_ token: String, to id: UUID, in sessionId: UUID) {
+        pendingReasoning += token
+        pendingMessageID = id
+        pendingSessionID = sessionId
+        scheduleFlushIfNeeded()
+    }
+
     /// 若当前无挂起冲刷，启动一个 ~50ms 的合帧定时任务。
     private func scheduleFlushIfNeeded() {
         guard flushTask == nil else { return }
@@ -371,14 +384,25 @@ final class AIChatState: ObservableObject {
     /// 与定时器、forceFlush 均在 MainActor 串行执行，天然无并发竞态。
     private func flushPendingTokens() {
         flushTask = nil
-        guard !pendingTokens.isEmpty, let id = pendingMessageID, let sessionId = pendingSessionID else { return }
+        guard let id = pendingMessageID, let sessionId = pendingSessionID else { return }
 
-        let chunk = pendingTokens
+        let contentChunk = pendingTokens
+        let reasoningChunk = pendingReasoning
+        guard !contentChunk.isEmpty || !reasoningChunk.isEmpty else { return }
+
         pendingTokens = ""
+        pendingReasoning = ""
         store.updateMessage(id: id, in: sessionId) { message in
-            message.content += chunk
-            if message.state == .sending {
-                message.state = .streaming
+            // reasoning 累积不改消息 id、不触碰其他字段，保持 ChatMessage Equatable 合成语义，
+            // UI 侧 .equatable() 仍可对其余未变行跳过重建。
+            if !reasoningChunk.isEmpty {
+                message.reasoning = (message.reasoning ?? "") + reasoningChunk
+            }
+            if !contentChunk.isEmpty {
+                message.content += contentChunk
+                if message.state == .sending {
+                    message.state = .streaming
+                }
             }
         }
 
