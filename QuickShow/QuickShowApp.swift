@@ -152,7 +152,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.isMovableByWindowBackground = true
             window.title = "QuickShow 设置"
             window.center()
-            window.contentView = NSHostingView(rootView: SettingsView(appState: appState))
+            // 整窗 Liquid Glass（对齐 macOS 27 系统设置「底玻璃、纸实底」）：
+            // titled 标准窗口保留（交通灯/系统圆角/窗口阴影由系统 chrome 管理），
+            // titlebar 透明一体化 = 交通灯坐在玻璃上（系统设置同款无标题条呈现）。
+            // 26+ 玻璃作 contentView 承载设置内容，装载与两窗同款三重死锁规避
+            // （sizingOptions=[] / 零时长动画上下文 / 先组装后挂窗）；设置窗惰性
+            // 创建、创建即上屏（同 AI 窗时机，无挂起期）。sidebar 材质与 grouped
+            // 表单卡片交给系统组件自适应（26 上即系统设置的渲染语言：双层分区
+            // 明度差 + 实底表单卡片）。玻璃不设自绘圆角——titled 窗口形状由系统管理。
+            // <26 保持 hostingView 直接作 contentView（窗口默认背景，观感不变）。
+            window.backgroundColor = .clear
+            window.isOpaque = false
+            let hostingView = NSHostingView(rootView: SettingsView(appState: appState))
+            if #available(macOS 26.0, *) {
+                // 不设 sizingOptions=[]：那是两窗「PreferenceKey 测量链死锁」的规避手段；
+                // 设置窗固定尺寸、无测量链、无动画，不需要禁 hosting 尺寸协商——禁用反而
+                // 引入外层 HostingScrollView 自动滚动包装（溢出 822>506 时包装详情区，
+                // 其滚动指示条退化成常驻宽体）。
+                let glass = NSGlassEffectView()
+                glass.style = .regular
+                glass.tintColor = nil
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0
+                    ctx.allowsImplicitAnimation = false
+                    glass.frame = NSRect(origin: .zero, size: NSMakeSize(720, 500))
+                    glass.contentView = hostingView
+                })
+                hostingView.autoresizingMask = [.width, .height]
+                window.contentView = glass
+            } else {
+                window.backgroundColor = .windowBackgroundColor
+                window.isOpaque = true
+                window.contentView = hostingView
+            }
             window.isReleasedWhenClosed = false
             settingsWindow = window
         }

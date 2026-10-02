@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-02
+
+### Changed
+
+- 设置窗整窗 Liquid Glass（对齐 macOS 27 系统设置「底玻璃、纸实底」观感）：titled 标准窗口保留系统 chrome（交通灯/系统圆角/窗口阴影），titlebar 透明一体化（交通灯坐在玻璃上，系统设置同款无标题条呈现）；26+ `NSGlassEffectView` 作 contentView 承载设置内容（`.regular` 样式、不设自绘圆角——窗口形状由 titled 系统管理），窗口背景 clear；设置窗惰性创建、创建即上屏（无挂起期问题）；**不设 `sizingOptions=[]`**——那是两窗「PreferenceKey 测量链死锁」的规避手段，设置窗固定尺寸、无测量链、无动画，不需要禁 hosting 尺寸协商；sidebar 材质与 grouped 表单卡片交给系统组件自适应（26 上即系统设置的渲染语言：双层明度分区 + 实底表单卡片）
+
+### Fixed
+
+- 设置窗详情区常驻宽体滚动条（~20pt 高亮、thumb 冻结不随滚动、永不淡出）：
+  - 根因（视图树/layer dump + Apple 官方文档交叉定位）：macOS 接鼠标时系统**强制常显**滚动指示条，`.scrollIndicators(.hidden)` 被系统忽略——官方文档明确仅 `.never` 可覆盖（"Use `never` to indicate a stronger preference that can override this behavior"）；thumb 冻结因指示条挂在 SwiftUI 自动包装的 `HostingScrollView`（内容溢出视口时创建）上、内容实际在内层滚动
+  - 修法：detail 详情区显式 `ScrollView` 接管滚动（消除自动包装）+ `.scrollIndicators(.never, axes: .vertical)`；`LegacyScrollerSweeper`（NSViewRepresentable 遍历窗口树关闭 AppKit 桥接层的 legacy 垂直 scroller / 隐藏独立 NSScroller）作防御性兜底保留
+  - 调试记录（防再踩）：macOS 接鼠标时滚动条常显是系统语义而非 bug；overlay 指示条在 Tahoe 上由 `NSScrollerImp` + CALayer 绘制，不挂 `verticalScroller` 属性（遍历 NSView 子树找不到）；unified log 的 `NSLog`/`os_log(info)` 在本机均查不到（`log show` 需 `--info`，且最终也未命中——文件直写 dump 才是可靠诊断通道）
+
 ## [1.10.0] - 2026-10-02
 
 ### Changed

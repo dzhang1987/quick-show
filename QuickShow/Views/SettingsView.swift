@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import os
 import ServiceManagement
 import EventKit
 
@@ -70,27 +71,39 @@ struct SettingsView: View {
                 Spacer().frame(height: 32)
             }
         } detail: {
-            // 右侧详情：纯正的 macOS 原生 .formStyle(.grouped)
-            Group {
-                switch selectedTab ?? .general {
-                case .general:
-                    GeneralSettingsForm(appState: appState, launchAtLogin: $launchAtLogin)
-                case .statusBar:
-                    StatusBarSettingsForm(appState: appState, isLocationAuthorized: $isLocationAuthorized)
-                case .dashboard:
-                    DashboardSettingsForm(appState: appState, isCalendarAuthorized: $isCalendarAuthorized)
-                case .aiService:
-                    AIServiceSettingsForm(appState: appState)
-                case .shortcuts:
-                    ShortcutsSettingsForm(appState: appState)
-                case .about:
-                    AboutSettingsForm()
+            // 右侧详情：纯正的 macOS 原生 .formStyle(.grouped)。
+            // 显式 ScrollView 接管滚动：此前内容（~822pt）溢出 hosting 视口（506pt）时
+            // SwiftUI 自动包了 HostingScrollView，其滚动指示条是 CALayer 自绘——玻璃
+            // 环境下退化成常驻宽体、闲置不淡出，且不挂 verticalScroller（AppKit 清扫
+            // 扑空）、不属 SwiftUI ScrollView 节点（.scrollIndicators 无目标）两侧都
+            // 管不到；显式接管后指示条回到 SwiftUI 管辖，.scrollIndicators 直接生效。
+            ScrollView {
+                Group {
+                    switch selectedTab ?? .general {
+                    case .general:
+                        GeneralSettingsForm(appState: appState, launchAtLogin: $launchAtLogin)
+                    case .statusBar:
+                        StatusBarSettingsForm(appState: appState, isLocationAuthorized: $isLocationAuthorized)
+                    case .dashboard:
+                        DashboardSettingsForm(appState: appState, isCalendarAuthorized: $isCalendarAuthorized)
+                    case .aiService:
+                        AIServiceSettingsForm(appState: appState)
+                    case .shortcuts:
+                        ShortcutsSettingsForm(appState: appState)
+                    case .about:
+                        AboutSettingsForm()
+                    }
                 }
+                .formStyle(.grouped)
             }
-            .formStyle(.grouped)
+            .scrollIndicators(.never, axes: .vertical)
             .navigationTitle(selectedTab?.rawValue ?? "设置")
         }
         .frame(minWidth: 700, minHeight: 480)
+        // AppKit 桥接层 legacy scroller 清扫：Form(.grouped) 底层 NSScrollView 在玻璃
+        // contentView 嵌套环境下挂出 legacy 常驻宽体 NSScroller（thumb 冻结失联的死控件），
+        // SwiftUI .scrollIndicators 管不到 AppKit 层，须遍历窗口树关闭。
+        .background(LegacyScrollerSweeper())
         .onAppear {
             checkLaunchAtLoginStatus()
             checkCalendarStatus()
@@ -920,7 +933,7 @@ struct AIServiceSettingsForm: View {
                         // 末行完整可见：底部留出滚动余量
                         .padding(.bottom, 4)
                     }
-                    .scrollIndicators(.hidden)
+                    .scrollIndicators(.never, axes: .vertical)
                     .frame(height: 220)
 
                     if !filteredAvailableModels.isEmpty || !modelFilter.isEmpty {
@@ -1504,5 +1517,40 @@ struct KeyBadge: View {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .stroke(Color.primary.opacity(0.12), lineWidth: 0.75)
             )
+    }
+}
+
+// MARK: - AppKit 桥接层 legacy scroller 清扫
+//
+// Form(.grouped) 底层桥接的 NSScrollView 在玻璃 contentView（NSGlassEffectView）嵌套
+// 环境下可能挂出 legacy 常驻宽体 scroller（thumb 冻结失联的死控件）——SwiftUI
+// .scrollIndicators 管不到 AppKit 桥接层，此处兜底关闭。根治靠 .scrollIndicators(.never)
+//（Form 层：macOS 接鼠标时系统会忽略 .hidden，仅 .never 可覆盖常显行为）。
+// 时机：视图挂窗与每次 SwiftUI body 重建（覆盖 tab 切换重建 Form 产生新
+// NSScrollView 的场景）；修复动作幂等无副作用。
+private struct LegacyScrollerSweeper: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { Self.sweep(view.window) }
+        return view
+    }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        DispatchQueue.main.async { Self.sweep(view.window) }
+    }
+
+    private static func sweep(_ window: NSWindow?) {
+        guard let root = window?.contentView else { return }
+        walk(root)
+    }
+
+    private static func walk(_ view: NSView) {
+        if let scroll = view as? NSScrollView, scroll.hasVerticalScroller {
+            scroll.hasVerticalScroller = false
+        }
+        if let scroller = view as? NSScroller {
+            scroller.isHidden = true
+        }
+        view.subviews.forEach(walk)
     }
 }
