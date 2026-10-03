@@ -23,6 +23,7 @@
 		2FE8433EC0F02F3317099504 /* mathFonts.bundle in Resources */ = {isa = PBXBuildFile; fileRef = B447A4A50153BE5D3817D655 /* mathFonts.bundle */; };
 		30440526851B6CE2562C8459 /* MTLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E84BDE0348FDAA9E49D752F1 /* MTLabel.swift */; };
 		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
+		39760048DBDB878931394AC3 /* AIModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4270992A33D3DD27F0515539 /* AIModelAdapter.swift */; };
 		3FC1DB5D580A579E2803DF5A /* MTMathAtomFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B220E8199511E133A53FEA /* MTMathAtomFactory.swift */; };
 		45F48861BD508743A0514146 /* MTFontV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */; };
 		48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57013FDF715F8B5844F318F0 /* BuiltInTools.swift */; };
@@ -106,6 +107,7 @@
 		3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebTools.swift; sourceTree = "<group>"; };
 		3B2211C3F2E376A20DB7FE5A /* MTColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTColor.swift; sourceTree = "<group>"; };
 		3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAttachment.swift; sourceTree = "<group>"; };
+		4270992A33D3DD27F0515539 /* AIModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelAdapter.swift; sourceTree = "<group>"; };
 		491F9CCD9C383D8736352FDA /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
 		4CB3F9819E7541B279D9C3FB /* PanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelManager.swift; sourceTree = "<group>"; };
 		57013FDF715F8B5844F318F0 /* BuiltInTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInTools.swift; sourceTree = "<group>"; };
@@ -271,6 +273,7 @@
 				8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */,
 				26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */,
 				D68032BC793ACA6923E904D1 /* AICompletionNotifier.swift */,
+				4270992A33D3DD27F0515539 /* AIModelAdapter.swift */,
 				209D2082B5AB449D9864B03C /* ChatSessionStore.swift */,
 				3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */,
 				FC77F949B43F2F53CE7959C4 /* MarkdownParser.swift */,
@@ -317,7 +320,7 @@
 			path = QuickShow;
 			sourceTree = "<group>";
 		};
-		"TEMP_7F92591E-CA02-42CA-A00A-7287F23600E4" /* Resources */ = {
+		"TEMP_1B2682AF-75AE-47B1-9005-6E75C1572D67" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -444,6 +447,7 @@
 				F13C2D9C4C12EFB1BF2857DA /* AIChatView.swift in Sources */,
 				0C5114982045E735EAE25370 /* AIChatWindowControls.swift in Sources */,
 				134C9389697F7A8589E3C21A /* AICompletionNotifier.swift in Sources */,
+				39760048DBDB878931394AC3 /* AIModelAdapter.swift in Sources */,
 				809266C1C45B4248D7842710 /* AIToolCardView.swift in Sources */,
 				5B5A3E7275818436396E7FAF /* AIToolExecutor.swift in Sources */,
 				C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */,

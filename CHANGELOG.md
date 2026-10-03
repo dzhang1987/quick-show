@@ -6,6 +6,14 @@
 
 ### Added
 
+- 模型会话级绑定 + 思考强度档位 + 上下文水位与自动总结压缩（AI 窗，上下文管理专项）：
+  - **模型适配层**（`AIModelAdapter.swift` 新文件）：`ThinkingLevel`（off/low/medium/high）与 `ContextWatermark` 统一抽象，模型差异全部收敛于此——UI / 会话层零感知：关闭→`enable_thinking:false`、低/中/高→`reasoning_effort`（GLM-5.3 特殊映射 low/high/max，该模型实测被 DashScope 限制必须思考、`canDisableThinking` 门控 UI 自动隐藏「关闭」档）；映射规则基于对阿里云百炼兼容端点的全模型实测探测（7 模型 × 7 字段变体矩阵，含 reasoning_tokens 验证；另经六家协议调研——智谱/DeepSeek/Qwen/OpenAI/OpenRouter/one-api 对比确认 `reasoning_effort:"none"` 仅是中转事实标准、DashScope 不认）
+  - **会话级模型绑定**：`ChatSession` 新增 `modelId`（nil=全局默认，decodeIfPresent 旧 JSON 迁移兼容）；输入区模型胶囊切换只写当前会话并持久化；发送链路模型解析优先级：会话 model → 全局 selectedModel；设置页「当前模型」语义改为「默认模型（新会话）」
+  - **思考强度**：`ChatSession.thinkingLevel` 同样会话级；输入区思考胶囊（默认=不传字段跟随模型自身默认 / 关闭 / 低 / 中 / 高，`ThinkingLevel.allCases` 驱动）；`ChatCompletionRequestBody`/`ResponsesRequestBody` 改自定义编码 + `DynamicCodingKey` 支持顶层注入扩展字段；`AIChatRequestOptions`（modelId + thinkingLevel）贯通流式与非流式路径（`complete` 亦支持 maxTokens）
+  - **上下文水位**：流式请求注入 `stream_options:{include_usage:true}`，usage-only 分片从「被忽略」改为专门解析、Responses 协议 `usage` 归一为 prompt tokens，真实值回写会话 `contextTokens` 持久化；输入区右缘水位指示（SF Mono 等宽数字 `12.3k / 512k` k/M 自适应 + 2.5pt 光丝细条复用 `glanceProgressHeight` 令牌、条宽锚定数字宽、超 80% 仅细条转警示色、无数据完全隐藏）；`AIModel` 新增可选 `contextWindow`（设置页模型编辑可填，缺省 512k）
+  - **截断策略升级**：固定 24000 字符截断改为 token 水位驱动（窗口 × 0.8 预算、2 字符≈1 token 保守换算、条数上限 40→200）；80% 硬截断保留为兜底
+  - **自动总结压缩**：每轮流式回复结束后异步检查（不阻塞输入），水位 ≥ 70% 触发、一次压回 40% 安全世界（自动 ≥6 条才压防碎片化，手动 `compactNow()` 放宽到有未压缩消息即可）；被压缩早期对话交当前会话模型合并为单份累计摘要（旧摘要 + 本批一起合并防滚雪球、max_tokens 2000、能关思考则关）；`ChatSession` 新增 `contextSummary` + `summarizedMessageIDs`（`touch:false` 落盘不改排序语义）；被压缩消息保留在会话流、仅不再发给 API（`buildRequestMessages` 排除 + systemPrompt 后注入摘要 system 消息 + 兜底截断预算扣除摘要占用）；会话流压缩边界折叠卡（「⟲ 已压缩早期对话（N 条）」收起/展开/压缩中三态、行级插入按 beforeMessageID 定位、边界上移数据驱动自然移位）+ 输入区 ⟲ 手动压缩入口（水位旁、isCompacting 禁用弱化）；防并发（`isCompacting` @Published 内存标志 + 生成中会话不压缩防半截消息入摘要）、写回前二次校验防撤回/清空竞态、失败静默下轮重试
+  - 附带修复：Responses 协议 `instructions` 原先只取第一条 system 消息，注入的摘要 system 消息被丢弃，改为合并全部 system 消息
 - 多会话并行生成（AI 窗，2026-10 会话并行专项）：
   - **流式上下文按会话隔离**（`AIChatState.streamContexts` 字典）：每个会话独立的回路任务、中止标记与合帧缓冲（~50ms 合帧定时器 per-session 独立节拍），可各自发起/中止生成互不干扰；网络层去全局 `abort()`（`AIChatService` 不再持有全局任务句柄——新增流局部 `TaskCancellationBox` 取消盒，首 token 看门狗 120s 超时只取消「本流」生产任务，中止语义由消费侧 Task 取消经 `onTermination` 链路传导回网络任务）；切换会话不打断进行中生成；仅约束同一会话不可并发发送
   - **侧栏状态可视化**：生成中会话显示呼吸点（6pt accent 圆 1.2s 呼吸，点击即中止该会话，≥16pt 热区 + pointing hand + tooltip）；后台完成未查看的会话行尾显示静止未读点（切回该会话自动清除）；会话被删除时自动停回路并清理流式/未读标记（从会话 id 集合消失自动检出，防回路空转与 unread 永久残留）

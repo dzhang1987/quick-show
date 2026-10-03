@@ -814,8 +814,8 @@ struct AIServiceSettingsForm: View {
                         .font(.system(size: Theme.Typography.body))
                         .foregroundColor(.secondary)
                 } else {
-                    // 当前使用的模型（我的模型通常仅几条，Picker 不卡）
-                    Picker("当前模型", selection: selectedModelBinding) {
+                    // 默认模型（新会话）：仅作为未绑定会话模型的默认值；已绑定模型的会话不受影响
+                    Picker("默认模型（新会话）", selection: selectedModelBinding) {
                         ForEach(modelList) { item in
                             Text(item.name.isEmpty ? item.modelId : item.name).tag(item.modelId)
                         }
@@ -834,6 +834,9 @@ struct AIServiceSettingsForm: View {
                                         .foregroundColor(.secondary)
                                 }
                             }
+                            // 上下文窗口（tokens）：留空 = 使用默认 512k；仅接受正整数。
+                            TextField("上下文窗口（tokens，留空=512k）", text: contextWindowBinding(at: index))
+                                .textFieldStyle(.roundedBorder)
                             HStack(spacing: 10) {
                                 Button("上移") { moveModel(from: index, to: index - 1) }
                                     .disabled(index == 0)
@@ -1058,6 +1061,28 @@ struct AIServiceSettingsForm: View {
                 modelList[index].modelId = newValue
                 if selectedModelId == oldValue {
                     selectedModelId = newValue
+                }
+                persistModelList()
+            }
+        )
+    }
+
+    /// 上下文窗口（tokens）绑定：空串写回 nil（= 默认 512k）；仅接受正整数，非法输入忽略。
+    private func contextWindowBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                guard index < modelList.count, let value = modelList[index].contextWindow else { return "" }
+                return String(value)
+            },
+            set: { newValue in
+                guard index < modelList.count else { return }
+                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    modelList[index].contextWindow = nil
+                } else if let value = Int(trimmed), value > 0 {
+                    modelList[index].contextWindow = value
+                } else {
+                    return // 非法输入不写回
                 }
                 persistModelList()
             }

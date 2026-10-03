@@ -22,6 +22,19 @@ struct QueuedChatInput: Identifiable, Equatable {
     let images: [ChatImageAttachment]
 }
 
+// MARK: - 上下文压缩信息（UI 契约）
+
+/// 会话上下文压缩信息：供 UI 渲染「已压缩历史」折叠卡。
+/// 定义于 AIChatState.swift。
+struct CompactionInfo {
+    /// 第一条未压缩消息的 id；nil 或找不到时卡片放会话流最顶部。
+    let beforeMessageID: String?
+    /// 已压缩消息条数。
+    let summarizedCount: Int
+    /// 摘要全文（折叠卡展开用）。
+    let summary: String
+}
+
 /// AI 会话门面：串联 ChatSessionStore（多会话数据层）与 AIChatService（网络层），
 /// 负责流式发送、中断、重试、图片/剪贴板附加与 LLM 标题摘要。
 /// 对外保留旧 AIChatView 的调用点（messages / inputText / isStreaming / send 等），
@@ -58,6 +71,10 @@ final class AIChatState: ObservableObject {
     /// 按会话隔离的待注入队列（steering + follow-up 合并存储，元素顺序即入队顺序）。
     /// @Published 供视图/侧栏响应式刷新；对外经 pendingQueue 读取当前会话队列。
     @Published private var pendingQueues: [UUID: [QueuedChatInput]] = [:]
+    /// 上下文压缩进行中（UI loading；同时用于防并发/防重复触发）。
+    @Published private(set) var isCompacting: Bool = false
+    /// 当前会话的压缩摘要信息；nil = 从未压缩过。
+    @Published private(set) var compactionInfo: CompactionInfo?
 
     /// 多会话数据层（Wave 2 侧边栏消费其分组 / 搜索 / 增删改 API）。
     let store = ChatSessionStore.shared
@@ -87,10 +104,20 @@ final class AIChatState: ObservableObject {
 
     /// 剪贴板附加的字符上限（超出静默截断）。
     private let clipboardLimit = 8000
-    /// 上下文截断：最多保留的 user/assistant 消息条数（20 轮）。
-    private let contextMessageLimit = 40
-    /// 上下文截断：累计字符预算。
-    private let contextCharBudget = 24000
+    /// 上下文截断：最多保留的 user/assistant 消息条数（100 轮）。
+    private let contextMessageLimit = 200
+    /// 字符 → token 粗略换算：2 字符 ≈ 1 token（用于水位估算与 token 预算换算）。
+    private let charsPerToken = 2
+    /// 上下文预算占窗口比例：用满窗口的 80% 作为历史预算，留出输出与工具结果余量。
+    private let contextWindowUsageRatio = 0.8
+    /// 自动压缩触发水位（已用/窗口）：流结束后水位 ≥ 此值即异步发起压缩。
+    private let compactionTriggerRatio = 0.70
+    /// 压缩目标水位：一次压到窗口的 40% 以下，避免频繁触发。
+    private let compactionTargetRatio = 0.40
+    /// 自动压缩至少需要纳入的消息条数（避免碎片化摘要）；手动触发不受此限。
+    private let compactionMinMessages = 6
+    /// 压缩摘要请求的输出上限（tokens）。
+    private let compactionMaxTokens = 2000
 
     /// 单会话流式上下文：回路 Task、中止标记与合帧缓冲的完整隔离单元。
     /// 生命周期：send() 创建 → 回路结束（落定/中止/失败）时从字典移除。
@@ -109,7 +136,13 @@ final class AIChatState: ObservableObject {
         var flushTask: Task<Void, Never>?
         /// 发送路径是否已落盘一次（首帧冲刷时落盘，避免发请求前多次写盘）。
         var sendPathPersisted = false
+        /// 本轮服务端上报的真实 prompt token 用量（多轮工具调用时以最后一轮为准）。
+        var usagePromptTokens: Int?
     }
+
+    /// 各会话最近一次 usage 上报时的消息条数：用于估算其后新增未发送消息的 token 增量。
+    /// 仅内存态，重启后缺失不影响真实值读取（此时不再叠加估算）。
+    private var usageBaselines: [UUID: Int] = [:]
 
     // MARK: - 流式状态同步
 
@@ -170,10 +203,19 @@ final class AIChatState: ObservableObject {
                     self.abortStreaming(sessionId: id)   // 取消回路任务（走 didComplete=false 分支）
                     self.streamingSessionIds.remove(id)
                     self.unreadSessionIds.remove(id)
+                    self.usageBaselines[id] = nil
                 }
                 self.knownSessionIds = currentIds
             }
             .store(in: &cancellables)
+
+        // 会话数据/当前会话变化 → 重算压缩信息（摘要写入、切会话、清空/撤回后即时刷新）。
+        Publishers.CombineLatest(store.$sessions, store.$currentSessionId)
+            .sink { [weak self] _, _ in
+                self?.refreshCompactionInfo()
+            }
+            .store(in: &cancellables)
+        refreshCompactionInfo()
     }
 
     // MARK: - 发送 / 中止
@@ -250,6 +292,264 @@ final class AIChatState: ObservableObject {
         )
     }
 
+    // MARK: - 会话级模型 / 思考档位（UI 契约）
+
+    /// 当前会话绑定的模型 id；nil = 跟随全局默认模型。
+    var currentSessionModelId: String? {
+        store.currentSession?.modelId
+    }
+
+    /// 当前会话思考档位；nil = 跟随模型默认。
+    var currentThinkingLevel: ThinkingLevel? {
+        store.currentSession?.thinkingLevel
+    }
+
+    /// 上下文水位；nil = 暂无会话/无数据。
+    /// usedTokens：优先用会话 contextTokens 真实值（叠加其后新增未发送消息的字符/2 估算）；
+    /// 无真实值时对全部消息按字符/2 估算。windowTokens 取当前生效模型的上下文窗口。
+    var contextWatermark: ContextWatermark? {
+        store.currentSession.flatMap { watermark(for: $0) }
+    }
+
+    /// 绑定当前会话模型（空串视为跟随全局默认）；只影响后续请求。
+    func setSessionModel(_ modelId: String) {
+        guard let sessionId = currentSessionId else { return }
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        store.setSessionModel(id: sessionId, modelId: trimmed.isEmpty ? nil : trimmed)
+    }
+
+    /// 设置当前会话思考档位（nil = 跟随模型默认）；只影响后续请求。
+    func setThinkingLevel(_ level: ThinkingLevel?) {
+        guard let sessionId = currentSessionId else { return }
+        store.setThinkingLevel(id: sessionId, level: level)
+    }
+
+    /// 指定模型是否支持关闭思考（UI 据此决定是否展示「关闭」档）。
+    func canDisableThinking(for modelId: String) -> Bool {
+        AIModelAdapter.canDisableThinking(for: modelId)
+    }
+
+    /// 会话内「最近一次 usage 之后新增未发送消息」的 token 估算（字符/2）。
+    /// 无 baseline（如重启后内存缺失）时按 messages.count 兜底，即不叠加估算。
+    private func pendingEstimateTokens(in session: ChatSession) -> Int {
+        let baseline = usageBaselines[session.id] ?? session.messages.count
+        guard session.messages.count > baseline else { return 0 }
+        let tail = session.messages[baseline...]
+        let chars = tail.reduce(0) { $0 + $1.content.count }
+        return chars / charsPerToken
+    }
+
+    /// 全量消息的 token 估算（无真实 usage 时使用）。
+    private func estimatedTokens(for messages: [ChatMessage]) -> Int {
+        messages.reduce(0) { $0 + $1.content.count } / charsPerToken
+    }
+
+    /// 服务层请求选项：会话绑定模型与思考档位（nil 交给服务层回落全局默认）。
+    private func requestOptions(for sessionId: UUID) -> AIChatRequestOptions {
+        let session = store.session(id: sessionId)
+        return AIChatRequestOptions(modelId: session?.modelId, thinkingLevel: session?.thinkingLevel)
+    }
+
+    // MARK: - 上下文自动压缩
+
+    /// 手动触发上下文压缩：isCompacting 时忽略；只要有未压缩消息即执行（放宽水位条件）。
+    func compactNow() {
+        guard !isCompacting else { return }
+        guard let sessionId = currentSessionId, let session = store.session(id: sessionId) else { return }
+        // 生成中不压缩：避免把半截流式消息标记为已压缩，导致后续增量丢失。
+        guard !streamingSessionIds.contains(sessionId) else { return }
+        guard hasUnsummarizedMessages(in: session) else { return }
+        startCompaction(sessionId: sessionId, manual: true, session: session)
+    }
+
+    /// 流结束后异步检查水位：达阈值则发起自动压缩（不阻塞输入）。
+    private func maybeAutoCompact(sessionId: UUID) {
+        guard !isCompacting else { return }
+        guard !streamingSessionIds.contains(sessionId) else { return }
+        guard let session = store.session(id: sessionId) else { return }
+        guard let wm = watermark(for: session),
+              wm.ratio >= compactionTriggerRatio else { return }
+        startCompaction(sessionId: sessionId, manual: false, session: session)
+    }
+
+    /// 该会话是否存在未压缩消息（手动触发的前置条件）。
+    private func hasUnsummarizedMessages(in session: ChatSession) -> Bool {
+        let summarized = Set(session.summarizedMessageIDs ?? [])
+        return session.messages.contains { !summarized.contains($0.id.uuidString) }
+    }
+
+    /// 计算任意会话的水位（contextWatermark 与会话级触发共用）。
+    private func watermark(for session: ChatSession) -> ContextWatermark? {
+        let effectiveModelId = session.modelId ?? service.selectedModel
+        let window = AIModelAdapter.contextWindow(for: effectiveModelId)
+        let used: Int
+        if let real = session.contextTokens {
+            used = real + pendingEstimateTokens(in: session)
+        } else {
+            used = estimatedTokens(for: session.messages)
+        }
+        return ContextWatermark(usedTokens: used, windowTokens: window)
+    }
+
+    /// 压缩执行计划：待纳入摘要的消息 id（前缀语义）与消息本体。
+    private struct CompactionPlan {
+        let messageIDs: [String]
+        let messages: [ChatMessage]
+    }
+
+    /// 计算压缩范围：从最旧未压缩消息起、由旧到新选，直到「剩余未压缩消息（含已有摘要）
+    /// 估算 token ≤ window × 40%」。自动触发要求至少 compactionMinMessages 条；手动不受限。
+    private func compactionPlan(for session: ChatSession, manual: Bool) -> CompactionPlan {
+        let summarized = Set(session.summarizedMessageIDs ?? [])
+        var remaining = session.messages.filter { !summarized.contains($0.id.uuidString) }
+        guard !remaining.isEmpty else { return CompactionPlan(messageIDs: [], messages: []) }
+
+        let effectiveModelId = session.modelId ?? service.selectedModel
+        let window = AIModelAdapter.contextWindow(for: effectiveModelId)
+        let budget = Int(Double(window) * compactionTargetRatio)
+        let summaryTokens = (session.contextSummary?.count ?? 0) / charsPerToken
+
+        // 从旧到新搬入 selected，直到剩余（含摘要）落入目标水位。
+        var selected: [ChatMessage] = []
+        while !remaining.isEmpty {
+            let remainingTokens = summaryTokens + remaining.reduce(0) { $0 + $1.content.count } / charsPerToken
+            if remainingTokens <= budget { break }
+            selected.append(remaining.removeFirst())
+        }
+        // 手动意图优先：若已在目标水位（按目标选择为空），仍压缩最旧一批，兑现「有未压缩消息即可」。
+        if selected.isEmpty, manual, !remaining.isEmpty {
+            selected.append(contentsOf: remaining.prefix(compactionMinMessages))
+        }
+
+        let minimum = manual ? 1 : compactionMinMessages
+        guard selected.count >= minimum else { return CompactionPlan(messageIDs: [], messages: []) }
+        return CompactionPlan(
+            messageIDs: selected.map { $0.id.uuidString },
+            messages: selected
+        )
+    }
+
+    /// 发起压缩任务：置 isCompacting 防并发/重复触发，任务结束后复位。
+    private func startCompaction(sessionId: UUID, manual: Bool, session: ChatSession) {
+        let plan = compactionPlan(for: session, manual: manual)
+        guard !plan.messageIDs.isEmpty else { return }
+        isCompacting = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isCompacting = false }
+            await self.runCompaction(sessionId: sessionId, plan: plan)
+        }
+    }
+
+    /// 执行压缩：旧摘要 + 本批消息 → 合并为单份新摘要；成功写回会话，失败静默忽略。
+    private func runCompaction(sessionId: UUID, plan: CompactionPlan) async {
+        guard let session = store.session(id: sessionId) else { return }
+        let prompt = buildCompactionPrompt(existingSummary: session.contextSummary, messages: plan.messages)
+        let options = compactionRequestOptions(for: session)
+        guard let raw = try? await service.complete(
+            messages: prompt,
+            options: options,
+            maxTokens: compactionMaxTokens
+        ) else { return }
+        let summary = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty else { return }
+
+        // 应用前二次校验：目标消息仍存在（防止压缩期间清空/撤回导致写错）。
+        guard let latest = store.session(id: sessionId) else { return }
+        let existingIDs = Set(latest.messages.map { $0.id.uuidString })
+        guard plan.messageIDs.allSatisfy({ existingIDs.contains($0) }) else { return }
+
+        // 合并 id（保序去重）：旧摘要 id 保留 + 本批新 id。
+        let mergedIDs: [String]
+        if let old = latest.summarizedMessageIDs, !old.isEmpty {
+            var seen = Set(old)
+            var result = old
+            for id in plan.messageIDs where !seen.contains(id) {
+                seen.insert(id)
+                result.append(id)
+            }
+            mergedIDs = result
+        } else {
+            mergedIDs = plan.messageIDs
+        }
+        store.setCompaction(id: sessionId, summary: summary, summarizedMessageIDs: mergedIDs)
+        refreshCompactionInfo()
+        // 注意：不重置 contextTokens —— 下一次请求的真实 usage 会自然回落，水位随之下降。
+    }
+
+    /// 压缩请求选项：优先会话模型；思考尽量关闭，不支持关闭的模型（如 glm-5.3）则跟随默认。
+    private func compactionRequestOptions(for session: ChatSession) -> AIChatRequestOptions {
+        let requested = session.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = (requested?.isEmpty == false ? requested : nil) ?? service.selectedModel
+        let level: ThinkingLevel? = AIModelAdapter.canDisableThinking(for: resolved) ? .off : nil
+        return AIChatRequestOptions(modelId: session.modelId, thinkingLevel: level)
+    }
+
+    /// 构造压缩提示词：中文、要求合并为单份紧凑摘要（关键事实/决定/待办/代码上下文/未解决问题）。
+    private func buildCompactionPrompt(existingSummary: String?, messages: [ChatMessage]) -> [ChatCompletionMessage] {
+        let transcript = messages.map { message -> String in
+            let role = message.role == .user ? "用户" : "助手"
+            var text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty, !message.images.isEmpty { text = "（含 \(message.images.count) 张图片）" }
+            // 工具调用结果常含代码/文件/搜索结果等关键上下文，截断后纳入，避免只留空助手消息。
+            if let calls = message.toolCalls, !calls.isEmpty {
+                let lines = calls.map { call -> String in
+                    let result = (call.result ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    let clipped = result.count > 400 ? String(result.prefix(400)) + "…" : result
+                    return "工具 \(call.name) 结果：\(clipped.isEmpty ? "（无）" : clipped)"
+                }
+                text += (text.isEmpty ? "" : "\n") + lines.joined(separator: "\n")
+            }
+            return "\(role)：\(text)"
+        }.joined(separator: "\n\n")
+
+        let systemText = """
+        你是会话上下文压缩器。请把给定的对话压缩成一份紧凑的中文摘要，供后续对话作为上下文使用。
+        要求：保留关键事实、用户偏好与已定决定、待办事项、代码/文件相关要点、未解决的问题；
+        删除寒暄、重复与冗余内容；不要编造未出现的信息；只输出摘要正文，不要任何前后缀说明。
+        """
+
+        var userText = ""
+        if let existingSummary, !existingSummary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            userText += "已有摘要（需要与新对话合并为一份新摘要，避免重复堆积）：\n\(existingSummary)\n\n"
+        }
+        userText += "需要压缩的新对话：\n\(transcript)\n\n请输出合并后的单份摘要："
+
+        return [
+            ChatCompletionMessage(role: "system", content: systemText),
+            ChatCompletionMessage(role: "user", content: userText)
+        ]
+    }
+
+    /// 重算当前会话的压缩信息并刷新 @Published。
+    private func refreshCompactionInfo() {
+        guard let session = store.currentSession,
+              let info = Self.makeCompactionInfo(for: session) else {
+            if compactionInfo != nil { compactionInfo = nil }
+            return
+        }
+        // 手工比较关键字段，避免无意义重复扇出。
+        if let existing = compactionInfo,
+           existing.beforeMessageID == info.beforeMessageID,
+           existing.summarizedCount == info.summarizedCount,
+           existing.summary == info.summary {
+            return
+        }
+        compactionInfo = info
+    }
+
+    /// 由会话派生压缩信息：摘要为空则 nil；beforeMessageID 取首条未压缩消息。
+    private static func makeCompactionInfo(for session: ChatSession) -> CompactionInfo? {
+        guard let summary = session.contextSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !summary.isEmpty else {
+            return nil
+        }
+        let summarized = Set(session.summarizedMessageIDs ?? [])
+        let beforeMessageID = session.messages.first { !summarized.contains($0.id.uuidString) }?.id.uuidString
+        let count = (session.summarizedMessageIDs ?? []).count
+        return CompactionInfo(beforeMessageID: beforeMessageID, summarizedCount: count, summary: summary)
+    }
+
     /// 工具调用回路：流式请求 → 执行工具 → 结果回传 → 续请求，直到产出文本或达轮数上限。
     /// 整个回路运行在单个 Task 内，取消该任务即可打断包含工具轮在内的全流程。
     /// 回路按会话隔离并行：每会话独立的 Task 与合帧缓冲，互不干扰。
@@ -273,8 +573,11 @@ final class AIChatState: ObservableObject {
                         self.settle(assistantID, state: .aborted, in: sessionId)
                         break roundLoop
                     }
-                    // 每轮独立发起一次流式请求。
-                    let stream = self.service.send(messages: wireMessages)
+                    // 每轮独立发起一次流式请求；模型与思考档位按当前会话绑定解析（nil 回落全局默认）。
+                    let stream = self.service.send(
+                        messages: wireMessages,
+                        options: self.requestOptions(for: sessionId)
+                    )
                     var roundText = ""
                     var completedCalls: [CompletedToolCall] = []
 
@@ -288,6 +591,9 @@ final class AIChatState: ObservableObject {
                             self.appendReasoning(token, to: assistantID, in: sessionId)
                         case let .toolCalls(calls):
                             completedCalls = calls
+                        case let .usage(promptTokens):
+                            // 记录本轮真实 prompt token 用量，流收尾时写入会话（最后一批为准）。
+                            ctx.usagePromptTokens = promptTokens
                         }
                     }
                     // 冲刷本轮尾部缓冲。
@@ -494,6 +800,11 @@ final class AIChatState: ObservableObject {
     /// 回路收尾：清理该会话的流式上下文与流集合，isStreaming 派生刷新；
     /// 成功完成时依次处理未读标记、LLM 标题摘要与完成通知。
     private func finishStream(sessionId: UUID, didComplete: Bool) {
+        // usage 回写：把本轮真实 prompt token 写入会话并持久化（上下文水位真源）。
+        if let tokens = streamContexts[sessionId]?.usagePromptTokens {
+            store.setContextTokens(id: sessionId, tokens: tokens)
+            usageBaselines[sessionId] = store.messages(in: sessionId).count
+        }
         streamContexts[sessionId] = nil
         // 清理该会话残留的待注入队列：正常完成时两队列已在回路内排空；
         // 中止路径由 abortAndRecallQueue 回填后清空；失败/删除兜底清空，
@@ -501,6 +812,8 @@ final class AIChatState: ObservableObject {
         pendingQueues[sessionId] = nil
         streamingSessionIds.remove(sessionId)
         syncStreamingState()
+        // 流结束后异步检查水位：达阈值则自动压缩（不阻塞输入；isCompacting 已天然防重入）。
+        maybeAutoCompact(sessionId: sessionId)
         guard didComplete else { return }
 
         // 后台完成未读：完成时非当前会话 → 标记未读（切回该会话即清除）。
@@ -587,6 +900,7 @@ final class AIChatState: ObservableObject {
         let session = store.ensureCurrentSession()
         store.clearMessages(in: session.id)
         store.resetSessionTitle(id: session.id)
+        resetContextWatermark(for: session.id)
     }
 
     // MARK: - 剪贴板 / 图片附加
@@ -780,6 +1094,15 @@ final class AIChatState: ObservableObject {
 
     // MARK: - 内部：请求组装
 
+    /// 历史被清空/撤回/重编辑时重置真实水位与 baseline：避免旧真实值失真，
+    /// 下一次请求的 usage 上报会重新写入。
+    private func resetContextWatermark(for sessionId: UUID) {
+        store.setContextTokens(id: sessionId, tokens: nil)
+        usageBaselines[sessionId] = store.messages(in: sessionId).count
+        // 同时重算压缩信息（撤回/编辑后 beforeMessageID 可能变化）。
+        refreshCompactionInfo()
+    }
+
     /// 组合用户消息：有剪贴板附件时按约定格式拼接。
     private func composeUserContent(input: String, clipboard: String?) -> String {
         guard let clipboard, !clipboard.isEmpty else { return input }
@@ -794,13 +1117,22 @@ final class AIChatState: ObservableObject {
         """
     }
 
-    /// 构造发往服务端的消息数组：system prompt 在最前，上下文按轮截断（system 不参与丢弃）。
+    /// 构造发往服务端的消息数组：system prompt 在最前，其次为早期对话的压缩摘要，
+    /// 最后是未压缩上下文（按 token 水位截断兜底；system 不参与丢弃）。
     private func buildRequestMessages(for sessionId: UUID) -> [ChatCompletionMessage] {
         var result: [ChatCompletionMessage] = []
 
         let system = service.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if !system.isEmpty {
             result.append(ChatCompletionMessage(role: ChatMessage.Role.system.rawValue, content: system))
+        }
+        // 摘要注入：紧随 systemPrompt，作为压缩后的早期上下文。
+        if let summary = store.session(id: sessionId)?.contextSummary?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
+            result.append(ChatCompletionMessage(
+                role: ChatMessage.Role.system.rawValue,
+                content: "以下是本会话早期对话的压缩摘要：\n\(summary)"
+            ))
         }
         for message in trimmedContextMessages(in: sessionId) {
             result.append(contentsOf: makeRequestMessages(from: message))
@@ -853,11 +1185,16 @@ final class AIChatState: ObservableObject {
         return ChatCompletionMessage(role: role, content: .parts(parts))
     }
 
-    /// 上下文截断：保留最近 20 轮 / 24000 字符，从最旧整轮丢弃（按会话独立）。
+    /// 上下文截断（兜底）：排除已纳入摘要的消息，按当前生效模型的上下文窗口推导 token 预算
+    /// （窗口 × 80% 再扣掉已有摘要占用），从最旧整轮丢弃（按会话独立）；
+    /// 字符→token 按 2 字符≈1 token 换算。
     /// 仅纳入已落定（done）或已中止（aborted）的消息，排除进行中与失败占位。
     private func trimmedContextMessages(in sessionId: UUID) -> [ChatMessage] {
+        let session = store.session(id: sessionId)
+        let summarized = Set(session?.summarizedMessageIDs ?? [])
         let eligible = store.messages(in: sessionId).filter { message in
             guard message.role != .system else { return false }
+            guard !summarized.contains(message.id.uuidString) else { return false }
             switch message.state {
             case .done, .aborted: return true
             default: return false
@@ -878,18 +1215,25 @@ final class AIChatState: ObservableObject {
         }
         if !current.isEmpty { turns.append(current) }
 
+        // token 预算：当前生效模型（会话绑定优先）的窗口 × 80%，扣除摘要占用。
+        let effectiveModelId = session?.modelId ?? service.selectedModel
+        let window = AIModelAdapter.contextWindow(for: effectiveModelId)
+        let summaryTokens = (session?.contextSummary?.count ?? 0) / charsPerToken
+        let tokenBudget = max(0, Int(Double(window) * contextWindowUsageRatio) - summaryTokens)
+
         // 从最新一轮向前累计，超预算或超条数即停；至少保留最后一轮。
         var selected: [[ChatMessage]] = []
         var messageCount = 0
-        var charCount = 0
+        var tokenCount = 0
         for turn in turns.reversed() {
             let turnChars = turn.reduce(0) { $0 + $1.content.count }
+            let turnTokens = turnChars / charsPerToken
             let exceedsCount = messageCount + turn.count > contextMessageLimit
-            let exceedsBudget = !selected.isEmpty && charCount + turnChars > contextCharBudget
+            let exceedsBudget = !selected.isEmpty && tokenCount + turnTokens > tokenBudget
             if exceedsCount || exceedsBudget { break }
             selected.append(turn)
             messageCount += turn.count
-            charCount += turnChars
+            tokenCount += turnTokens
         }
         return selected.reversed().flatMap { $0 }
     }
@@ -1100,6 +1444,7 @@ extension AIChatState {
 
         // 一次变更 + 一次落盘，删轮后 JSON 立即同步。
         store.removeMessages(from: lastUser.id, in: session.id)
+        resetContextWatermark(for: session.id)
 
         // 回填文本与图片附件（含缩略图），UI 可继续显示与编辑；剪贴板附加不在此契约内，保持原状。
         inputText = lastUser.content
@@ -1122,6 +1467,7 @@ extension AIChatState {
         // 删除最后一条 user 消息及其之后的所有消息：随后由 send() 追加全新 user 消息，
         // 等价于「替换该轮并重发」，同时完全复用 send()/appendMessage/startConversationLoop。
         store.removeMessages(from: lastUser.id, in: session.id)
+        resetContextWatermark(for: session.id)
 
         // 放回输入暂存后走同一发送链路；清空剪贴板附加，确保重发内容严格等于 UI 传入的文本+图片。
         inputText = text

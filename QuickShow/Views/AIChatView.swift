@@ -72,9 +72,9 @@ struct AIChatView: View {
     @State private var searchFocusRequest = 0
     /// 点击放大预览的图片附件（非 nil 时显示覆盖层，ESC/点击关闭）。
     @State private var zoomedAttachment: ChatImageAttachment?
-    /// 模型列表与当前选中（AIChatService 非 @Published，随环境刷新主动拉取）。
+    /// 模型列表（AIChatService 非 @Published，随环境刷新主动拉取；
+    /// 当前生效模型改读 state 会话级绑定，此处不再镜像选中态）。
     @State private var modelList: [AIModel] = []
-    @State private var selectedModelId: String = ""
     /// AI 窗快捷键监听（⌘N/⌘B/⌘F + 重命名/放大态下的 ESC 先行消费）。
     @State private var keyMonitor = AIChatKeyMonitor()
     /// 钉住常驻态（窗口层真源在 AIWindowManager，视图侧仅镜像渲染）。
@@ -84,10 +84,22 @@ struct AIChatView: View {
     /// 窗口 key 态：输入卡聚焦 rim 的近似信号（窗口 key 时输入框必被抬为第一响应者，
     /// 见 ChatInputTextView 的 windowDidBecomeKey 兜底；isKeyWindow 近似足够，不侵入事件链）。
     @State private var windowIsKey = false
-    /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip 的 hover 提亮）。
+    /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip / 思考 chip 的 hover 提亮）。
     @State private var attachHovered = false
     @State private var clipboardHovered = false
     @State private var chipHovered = false
+    @State private var thinkingChipHovered = false
+    /// 立即压缩入口 hover 态。
+    @State private var compactHovered = false
+    /// 压缩状态变化戳（"count|boundaryId|isCompacting"）：state 的 compactionInfo/isCompacting
+    /// 是无扇出属性的前提下，与 sessionConfigStamp 同款的触发器——订阅 store.$sessions
+    /// 扇出时读取；removeDuplicates 挡流式冲刷，幂等赋值防重订阅重放循环。
+    @State private var compactionStamp = ""
+    /// 会话配置变化戳（"modelId|level"）：state 的会话级模型/思考档位是读 store 的计算属性，
+    /// 且 state 的消息扇出管线按 messages 去重（只改模型/档位时消息数组不变、不扇出）——
+    /// 此处作 chip 刷新的触发器：订阅当前会话两字段，变化时更新戳驱动 body 重算；
+    /// 赋值幂等（重放同值不写入），防 onReceive 重订阅重放导致的更新循环。
+    @State private var sessionConfigStamp = ""
     /// 「导出对话」成功反馈 toast 可见态。
     @State private var exportToastVisible = false
     /// toast 世代令牌：连续导出时旧定时器不得提前收起新 toast。
@@ -200,6 +212,31 @@ struct AIChatView: View {
                 }
             }
             knownSessionIds = currentIds
+        }
+        // 会话级模型/思考档位变化 → 模型/思考 chip 跟随刷新（触发器为何必要的说明
+        // 见 sessionConfigStamp 注释；切会话路径由上方 messages 扇出管线天然覆盖）。
+        .onReceive(
+            state.store.$sessions
+                .map { sessions -> String in
+                    let current = sessions.first(where: { $0.id == state.store.currentSessionId })
+                    return "\(current?.modelId ?? "")|\(current?.thinkingLevel?.rawValue ?? "")"
+                }
+                .removeDuplicates()
+        ) { stamp in
+            if stamp != sessionConfigStamp { sessionConfigStamp = stamp }
+        }
+        // 压缩状态（compactionInfo / isCompacting）变化 → 压缩边界卡与立即压缩入口刷新。
+        // 触发器模式与 sessionConfigStamp 相同；压缩「结束」伴随 sessions 写入（compactionInfo
+        // 落会话）必然覆盖，压缩「开始」态的即时刷新依赖 isCompacting 自身 @Published 扇出。
+        .onReceive(
+            state.store.$sessions
+                .map { _ -> String in
+                    let info = state.compactionInfo
+                    return "\(info?.summarizedCount ?? -1)|\(info?.beforeMessageID ?? "")|\(state.isCompacting)"
+                }
+                .removeDuplicates()
+        ) { stamp in
+            if stamp != compactionStamp { compactionStamp = stamp }
         }
     }
 
@@ -411,7 +448,7 @@ struct AIChatView: View {
                 }
             }
 
-            // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 剪贴板 / 发送）
+            // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 思考 chip / 上下文水位 / 剪贴板 / 发送）
             VStack(spacing: 0) {
                 // 输入框：NSViewRepresentable 包装 NSTextView（自定义 ⏎/⇧⏎ 与中文 IME 组字语义）
                 ZStack(alignment: .topLeading) {
@@ -438,7 +475,10 @@ struct AIChatView: View {
                 HStack(spacing: Theme.Spacing.lg) {
                     attachMenuButton
                     modelChip
+                    thinkingChip
                     Spacer(minLength: 0)
+                    compactButton
+                    contextWatermarkIndicator
                     clipboardButton
                     sendButton
                 }
@@ -530,7 +570,8 @@ struct AIChatView: View {
         .help("添加图片附件（可粘贴/拖入）· 导出对话 · 清空会话（⌘K）")
     }
 
-    /// 模型 chip：胶囊显示当前模型，点击弹下拉切换（仅多模型时显示，单模型弱化隐藏）。
+    /// 模型 chip：胶囊显示当前会话绑定模型（未绑定时回落全局默认），点击弹下拉切换。
+    /// 选中写入会话级绑定（state.setSessionModel），不再写全局；仅多模型时显示，单模型弱化隐藏。
     /// 微胶囊语言：实底 surfaceTrack + 0.5pt 白 rim + hover 提亮。
     @ViewBuilder
     private var modelChip: some View {
@@ -538,9 +579,9 @@ struct AIChatView: View {
             Menu {
                 ForEach(modelList) { model in
                     Button {
-                        selectModel(model)
+                        state.setSessionModel(model.modelId)
                     } label: {
-                        if model.modelId == selectedModelId {
+                        if model.modelId == effectiveModelId {
                             Label(model.name, systemImage: "checkmark")
                         } else {
                             Text(model.name)
@@ -576,15 +617,183 @@ struct AIChatView: View {
             .onHover { hovering in
                 withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { chipHovered = hovering }
             }
-            .help("切换模型（下一轮对话生效）")
+            .help("切换本会话模型（下一轮对话生效）")
         }
     }
 
+    /// 当前生效模型 id：会话级绑定优先，未绑定（nil）回落全局默认模型。
+    private var effectiveModelId: String {
+        state.currentSessionModelId ?? AIChatService.shared.selectedModel
+    }
+
     private var currentModelName: String {
-        if let matched = modelList.first(where: { $0.modelId == selectedModelId }) {
+        if let matched = modelList.first(where: { $0.modelId == effectiveModelId }) {
             return matched.name
         }
-        return selectedModelId.isEmpty ? "模型" : selectedModelId
+        return effectiveModelId.isEmpty ? "模型" : effectiveModelId
+    }
+
+    /// 思考强度 chip：会话级档位（默认 = 跟随当前模型自身默认），与模型 chip 同微胶囊语言。
+    /// 默认态整枚弱化一档（idleText），选定档位后回到常规对比度——一眼可辨「已覆盖」。
+    /// 「关闭」档仅当当前生效模型允许关闭思考时出现（如 GLM-5.3 不可关则不显示该档）。
+    private var thinkingChip: some View {
+        Menu {
+            Button {
+                state.setThinkingLevel(nil)
+            } label: {
+                if state.currentThinkingLevel == nil {
+                    Label("默认", systemImage: "checkmark")
+                } else {
+                    Text("默认")
+                }
+            }
+            ForEach(ThinkingLevel.allCases, id: \.self) { level in
+                if level != .off || state.canDisableThinking(for: effectiveModelId) {
+                    Button {
+                        state.setThinkingLevel(level)
+                    } label: {
+                        if state.currentThinkingLevel == level {
+                            Label(thinkingLevelTitle(level), systemImage: "checkmark")
+                        } else {
+                            Text(thinkingLevelTitle(level))
+                        }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                Text(thinkingChipTitle)
+                    .font(Theme.Typography.text(11, .medium))
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(Theme.Typography.text(8, .medium))
+                    .foregroundColor(Theme.Colors.idleText)
+            }
+            .foregroundColor(thinkingChipHovered
+                             ? Theme.Colors.iconHover
+                             : (state.currentThinkingLevel == nil
+                                ? Theme.Colors.idleText
+                                : Theme.Colors.contentSecondaryStrong))
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.xxxs)
+            .frame(height: Theme.Layout.iconButtonSize)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(thinkingChipHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { thinkingChipHovered = hovering }
+        }
+        .help("调整思考强度（本会话生效）")
+    }
+
+    /// chip 标题：默认态只露「思考」二字（弱化），选定档位后紧凑显示「思考·高」式后缀。
+    private var thinkingChipTitle: String {
+        guard let level = state.currentThinkingLevel else { return "思考" }
+        switch level {
+        case .off: return "思考·关"
+        case .low: return "思考·低"
+        case .medium: return "思考·中"
+        case .high: return "思考·高"
+        }
+    }
+
+    /// 菜单档位名（中文全字，与 chip 缩略后缀区分场景）。
+    private func thinkingLevelTitle(_ level: ThinkingLevel) -> String {
+        switch level {
+        case .off: return "关闭"
+        case .low: return "低"
+        case .medium: return "中"
+        case .high: return "高"
+        }
+    }
+
+    /// 立即压缩入口：水位左侧的轻量图标钮，pinButton 同款克制语言——静态纯灰图标无底，
+    /// hover 才出圆底提亮（比剪贴板/发送的常驻实底轻一档，与水位的「态势感知」同级）。
+    /// 仅在有上下文数据（水位非 nil）时出现，与水位同生共死，右缘布局不插拔跳动；
+    /// 压缩中禁用弱化（对齐剪贴板禁用态），不换成旋转/进度轮——克制优先。
+    @ViewBuilder
+    private var compactButton: some View {
+        if state.contextWatermark != nil {
+            Button {
+                state.compactNow()
+            } label: {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(Theme.Typography.text(13, .medium))
+                    .foregroundColor(state.isCompacting
+                                     ? Theme.Colors.idleText.opacity(0.5)
+                                     : (compactHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest))
+                    .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
+                    .background(
+                        Circle().fill(compactHovered && !state.isCompacting
+                                      ? Theme.Colors.iconHoverBg : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(state.isCompacting)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { compactHovered = hovering }
+            }
+            .help(state.isCompacting ? "正在压缩早期对话…" : "压缩早期对话（释放上下文）")
+        }
+    }
+
+    /// 上下文水位指示：右缘紧凑数字（已用 / 窗口，自适应 k/M 单位）+ 微光细条
+    /// （与一瞥倒计时同「光丝」语言，2.5pt）。nil 时完全隐藏不占位；
+    /// ratio > 0.8 仅细条进警示红，数字恒保持灰调——警示只交给那根线，不喊。
+    @ViewBuilder
+    private var contextWatermarkIndicator: some View {
+        if let watermark = state.contextWatermark {
+            let label = "\(formatTokenCount(watermark.usedTokens)) / \(formatTokenCount(watermark.windowTokens))"
+            VStack(spacing: Theme.Spacing.xxs) {
+                watermarkText(label)
+                // 细条宽锚定上方数字宽：hidden 文本占位撑出同宽，overlay 内按 ratio 填充
+                watermarkText(label)
+                    .hidden()
+                    .overlay {
+                        GeometryReader { geo in
+                            ZStack(alignment: .leading) {
+                                Capsule(style: .continuous)
+                                    .fill(Theme.Colors.surfaceTrack)
+                                Capsule(style: .continuous)
+                                    .fill(watermark.ratio > 0.8 ? Theme.Colors.statusWarning : Theme.Colors.idleText)
+                                    .frame(width: geo.size.width * min(max(watermark.ratio, 0), 1))
+                            }
+                        }
+                    }
+                    .frame(height: Theme.Layout.glanceProgressHeight)
+            }
+            .fixedSize()
+            .help("上下文用量（已用 tokens / 窗口上限）")
+        }
+    }
+
+    /// 水位数字样式：SF Mono 10pt 三级灰（纯数字走 mono，与全项目字体族策略一致）。
+    private func watermarkText(_ text: String) -> Text {
+        Text(text)
+            .font(Theme.Typography.mono(10))
+            .foregroundColor(Theme.Colors.contentTertiary)
+    }
+
+    /// token 数紧凑格式化：<1k 原样；≥1k 用 k、≥1M 用 M，整倍去小数（512k），否则一位小数（12.3k）。
+    private func formatTokenCount(_ count: Int) -> String {
+        if count < 1_000 { return "\(count)" }
+        if count < 1_000_000 {
+            let k = Double(count) / 1_000
+            return k.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(k))k" : String(format: "%.1fk", k)
+        }
+        let m = Double(count) / 1_000_000
+        return m.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(m))M" : String(format: "%.1fM", m)
     }
 
     private var clipboardButton: some View {
@@ -690,7 +899,6 @@ struct AIChatView: View {
         configured = state.hasConfiguredEndpoint
         refreshClipboardAvailability()
         modelList = AIChatService.shared.modelList
-        selectedModelId = AIChatService.shared.selectedModel
     }
 
     /// 单独刷新剪贴板可用态（轻量，供 hover/窗口激活调用）。
@@ -776,11 +984,6 @@ struct AIChatView: View {
             }
         }
         return handled
-    }
-
-    private func selectModel(_ model: AIModel) {
-        AIChatService.shared.selectedModel = model.modelId
-        selectedModelId = model.modelId
     }
 
     /// 新建会话（⌘N 与侧栏按钮共用）：若正处于行内重命名则先退出。
@@ -1029,6 +1232,21 @@ private struct SessionMessageList: View {
                     ForEach(groupMessages(messages)) { group in
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
+                                // 压缩边界卡：组内行级插入（边界无论落组间/组内都正确；再次压缩
+                                // 边界上移时数据驱动自然移位）。插在边界消息之前；边界 id 为 nil
+                                // （未指定/已不存在/转换失败）时落在首条消息前 = 会话流最顶部。
+                                // id 与边界绑定：边界变化即新视图，展开态不带入新位置（默认收起）。
+                                if showsCompactionCard,
+                                   (message.id == compactionBoundaryMessageId
+                                    || (compactionBoundaryMessageId == nil
+                                        && message.id == messages.first?.id)) {
+                                    CompactionBoundaryCard(
+                                        isCompacting: state.isCompacting,
+                                        summarizedCount: state.compactionInfo?.summarizedCount ?? 0,
+                                        summary: state.compactionInfo?.summary ?? ""
+                                    )
+                                    .id("compaction.\(compactionBoundaryMessageId?.uuidString ?? "top")")
+                                }
                                 ChatMessageRow(
                                     message: message,
                                     canRegenerate: message.id == lastRegeneratableAssistantId,
@@ -1182,6 +1400,21 @@ private struct SessionMessageList: View {
     }
 
     // MARK: - 分组 / 可重生成
+
+    /// 是否渲染压缩边界卡：仅活跃会话（compactionInfo 是「当前会话」门面，隐藏会话树
+    /// 不渲染，防跨会话错位；切回活跃时随重求值自然出现）；有压缩记录或压缩进行中。
+    private var showsCompactionCard: Bool {
+        isActive && (state.isCompacting || state.compactionInfo != nil)
+    }
+
+    /// 压缩边界消息 id：beforeMessageID（String）转 UUID 且在本会话消息里存在时按位插入；
+    /// nil / 转换失败 / 消息已不存在 → nil（卡片落到会话流最顶部，契约语义）。
+    private var compactionBoundaryMessageId: UUID? {
+        guard let raw = state.compactionInfo?.beforeMessageID,
+              let uuid = UUID(uuidString: raw),
+              messages.contains(where: { $0.id == uuid }) else { return nil }
+        return uuid
+    }
 
     /// 连续同角色消息分组（组 id 取首条消息 id，保证 SwiftUI 身份稳定不闪动）。
     private func groupMessages(_ messages: [ChatMessage]) -> [MessageGroup] {
@@ -1719,6 +1952,96 @@ private struct ReasoningDisclosureView: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return paragraphs.last ?? "思考中…"
+    }
+}
+
+// MARK: - 压缩标记折叠卡
+
+/// 上下文压缩边界卡：会话流内的章节标记（不参与消息选中/上下文菜单交互，独立 struct 天然隔离）。
+/// - 收起态：居中弱化胶囊行（⟲ + 「已压缩早期对话（N 条）」+ micro chevron），
+///   surfaceBadge 底 + contentTertiary 灰字，总高 ≈24pt，与「已中止」标记同档弱化；
+/// - 展开态：摘要全文（footnote 正文 + 3pt 行距 + 正常阅读色），上下各一条两端羽化的
+///   0.5pt 细边线收束——ReasoningDisclosureView 的折叠气质，但更轻（不限高不内滚，
+///   摘要语义上远短于原文，纵向让位给外层会话流滚动）；
+/// - 压缩中：「⟲ 正在压缩…」，不可点、无 chevron，仅靠文案表达进行中（不加旋转/脉冲动画）。
+private struct CompactionBoundaryCard: View {
+    let isCompacting: Bool
+    let summarizedCount: Int
+    let summary: String
+
+    @State private var expanded = false
+    @State private var hovered = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                    Text(isCompacting ? "正在压缩…" : "已压缩早期对话（\(summarizedCount) 条）")
+                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                    if !isCompacting {
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+                    }
+                }
+                .foregroundColor(isCompacting
+                                 ? Theme.Colors.idleText
+                                 : (hovered ? Theme.Colors.contentSecondaryStrong : Theme.Colors.contentTertiary))
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.chip)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(!isCompacting && hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceBadge)
+                )
+                .contentShape(Capsule(style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(isCompacting)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+            }
+            .help(isCompacting ? "正在压缩早期对话…" : (expanded ? "收起压缩摘要" : "查看压缩摘要"))
+
+            if expanded, !isCompacting, !summary.isEmpty {
+                VStack(spacing: 0) {
+                    featheredDivider
+                    Text(summary)
+                        .font(Theme.Typography.text(Theme.Typography.footnote))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .lineSpacing(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, Theme.Spacing.lg)
+                    featheredDivider
+                }
+                .padding(.top, Theme.Spacing.lg)
+                .transition(.opacity)
+            }
+        }
+        // 胶囊行随 VStack 居中（章节标记语义，同 iMessage 时间戳）；上下补一点呼吸，
+        // 使组内插入时上下节奏（xl=10 + xs）与组间章节感平衡
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Theme.Spacing.xs)
+    }
+
+    /// 两端羽化的 0.5pt 细边线（窗口分割线同款渐变语言，水平方向）。
+    private var featheredDivider: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color.primary.opacity(0.0),
+                        Color.primary.opacity(Theme.Colors.dividerOpacity),
+                        Color.primary.opacity(0.0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .frame(height: Theme.Layout.dividerHeight)
     }
 }
 

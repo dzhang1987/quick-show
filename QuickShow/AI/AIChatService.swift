@@ -88,6 +88,8 @@ enum AIStreamEvent {
     /// 或 Responses 的 reasoning_text/reasoning_summary_text；与正文分开累积。
     case reasoning(String)
     case toolCalls([CompletedToolCall])
+    /// 本轮真实 prompt token 用量（由服务端 usage 上报，端点在末片/完成事件携带）。
+    case usage(promptTokens: Int)
 }
 
 // MARK: - 模型列表项
@@ -100,11 +102,28 @@ struct AIModel: Identifiable, Codable, Equatable {
     var name: String
     /// 请求体中的 model 字段值。
     var modelId: String
+    /// 模型上下文窗口（tokens）。可选：旧 JSON 缺失时按 nil 解码，运行时回退适配层默认值。
+    var contextWindow: Int?
 
-    init(id: UUID = UUID(), name: String, modelId: String) {
+    init(id: UUID = UUID(), name: String, modelId: String, contextWindow: Int? = nil) {
         self.id = id
         self.name = name
         self.modelId = modelId
+        self.contextWindow = contextWindow
+    }
+}
+
+/// 一次流式请求的会话级选项：会话绑定模型与思考档位。
+/// 两者均可为 nil，表示交给服务层回落到全局默认模型 / 模型默认思考行为。
+struct AIChatRequestOptions {
+    /// 会话绑定模型 id（nil = 使用全局 selectedModel）。
+    var modelId: String?
+    /// 会话思考档位（nil = 不发送思考字段，跟随模型默认）。
+    var thinkingLevel: ThinkingLevel?
+
+    init(modelId: String? = nil, thinkingLevel: ThinkingLevel? = nil) {
+        self.modelId = modelId
+        self.thinkingLevel = thinkingLevel
     }
 }
 
@@ -305,23 +324,90 @@ struct JSONValue: Encodable {
     }
 }
 
+/// 动态顶层编码 key：用于把思考强度、stream_options 等非固定字段注入请求体顶层。
+private struct DynamicCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int? { nil }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init(_ string: String) { self.stringValue = string }
+    init?(intValue: Int) { nil }
+}
+
 /// Chat Completions 请求体。
+/// `extra`：由适配层注入的顶层字段（enable_thinking / reasoning_effort / stream_options 等），
+/// 使用自定义编码合并，避免为每个模型差异新增固定字段。
 private struct ChatCompletionRequestBody: Encodable {
     let model: String
     let messages: [ChatCompletionMessage]
     let stream: Bool
-    /// 启用的工具；为空时由合成编码自动省略该字段，保持旧行为。
+    /// 启用的工具；为空时由自定义编码省略该字段，保持旧行为。
     let tools: [ChatToolDefinition]?
+    let extra: [String: Any]
+
+    init(
+        model: String,
+        messages: [ChatCompletionMessage],
+        stream: Bool,
+        tools: [ChatToolDefinition]?,
+        extra: [String: Any] = [:]
+    ) {
+        self.model = model
+        self.messages = messages
+        self.stream = stream
+        self.tools = tools
+        self.extra = extra
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: DynamicCodingKey.self)
+        try container.encode(model, forKey: DynamicCodingKey("model"))
+        try container.encode(messages, forKey: DynamicCodingKey("messages"))
+        try container.encode(stream, forKey: DynamicCodingKey("stream"))
+        if let tools { try container.encode(tools, forKey: DynamicCodingKey("tools")) }
+        for (key, value) in extra {
+            try container.encode(JSONValue(value), forKey: DynamicCodingKey(key))
+        }
+    }
 }
 
 /// Responses 请求体：system prompt 走 instructions，对话历史走 input。
+/// `extra`：同 Chat，注入适配层顶层字段。
 private struct ResponsesRequestBody: Encodable {
     let model: String
-    /// 可选；nil 时由 Encodable 合成逻辑（encodeIfPresent）自动省略该字段。
+    /// 可选；nil 时省略该字段。
     let instructions: String?
     let input: [ResponsesInputItem]
     let stream: Bool
     let tools: [ResponsesToolDefinition]?
+    let extra: [String: Any]
+
+    init(
+        model: String,
+        instructions: String?,
+        input: [ResponsesInputItem],
+        stream: Bool,
+        tools: [ResponsesToolDefinition]?,
+        extra: [String: Any] = [:]
+    ) {
+        self.model = model
+        self.instructions = instructions
+        self.input = input
+        self.stream = stream
+        self.tools = tools
+        self.extra = extra
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: DynamicCodingKey.self)
+        try container.encode(model, forKey: DynamicCodingKey("model"))
+        if let instructions { try container.encode(instructions, forKey: DynamicCodingKey("instructions")) }
+        try container.encode(input, forKey: DynamicCodingKey("input"))
+        try container.encode(stream, forKey: DynamicCodingKey("stream"))
+        if let tools { try container.encode(tools, forKey: DynamicCodingKey("tools")) }
+        for (key, value) in extra {
+            try container.encode(JSONValue(value), forKey: DynamicCodingKey(key))
+        }
+    }
 }
 
 /// Responses 的 input 项：普通 message / function_call / function_call_output 三种变体。
@@ -414,6 +500,25 @@ struct ResponsesContentPart: Encodable {
     }
 }
 
+/// 服务端 token 用量：Chat Completions 用 prompt_tokens，Responses 用 input_tokens，
+/// 统一归一为 prompt token（上下文水位真源）。
+private struct TokenUsage: Decodable {
+    let promptTokens: Int?
+    let inputTokens: Int?
+    let completionTokens: Int?
+    let totalTokens: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case inputTokens = "input_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+    }
+
+    /// 归一为 prompt token：优先 prompt_tokens（Chat），回退 input_tokens（Responses）。
+    var resolvedPromptTokens: Int? { promptTokens ?? inputTokens }
+}
+
 /// Chat Completions 的 SSE 增量分片：choices[0].delta 的 content 或 tool_calls 分片。
 private struct StreamChunk: Decodable {
     struct Choice: Decodable {
@@ -440,6 +545,8 @@ private struct StreamChunk: Decodable {
         let delta: Delta?
     }
     let choices: [Choice]
+    /// 顶层 usage：`stream_options.include_usage` 时末片携带（此时 choices 为空数组）。
+    let usage: TokenUsage?
 }
 
 /// Chat Completions 的 tool_calls 分片：name/id/type 通常首片给出，arguments 逐片累积。
@@ -504,6 +611,8 @@ private struct ResponsesEvent: Decodable {
 
     struct ResponseBody: Decodable {
         let error: ErrorBody?
+        /// response.completed 的 usage（input_tokens → prompt token）。
+        let usage: TokenUsage?
     }
 
     /// output_item 载荷：type == "function_call" 时携带 call_id/name/arguments。
@@ -529,9 +638,11 @@ private struct ResponsesEvent: Decodable {
     let itemId: String?     // response.function_call_arguments.* 的 item_id
     let outputIndex: Int?   // 无 item_id 时按 output_index 归并
     let arguments: String?  // response.function_call_arguments.done 的完整参数
+    /// 部分端点在独立事件顶层携带的 usage。
+    let usage: TokenUsage?
 
     enum CodingKeys: String, CodingKey {
-        case type, delta, message, error, response, item, arguments
+        case type, delta, message, error, response, item, arguments, usage
         case itemId = "item_id"
         case outputIndex = "output_index"
     }
@@ -631,6 +742,8 @@ private struct ChatCompletionResponse: Decodable {
         let message: Message?
     }
     let choices: [Choice]?
+    /// 非流式 usage（prompt_tokens）。
+    let usage: TokenUsage?
 }
 
 /// 非流式响应中的工具调用项（Chat Completions）。
@@ -663,6 +776,8 @@ private struct ResponsesResponse: Decodable {
         }
     }
     let output: [Output]?
+    /// 非流式 usage（input_tokens）。
+    let usage: TokenUsage?
 }
 
 // MARK: - 服务
@@ -1019,7 +1134,10 @@ final class AIChatService {
     /// - 错误通过 AsyncThrowingStream 抛出，由 State 层呈现。
     /// - 并行流支持（2026-10 会话并行专项）：本层不再持有全局任务句柄、不提供全局 abort——
     ///   多会话各自持有独立流，中止语义由消费侧 Task 取消经 onTermination 链路传导回网络任务。
-    func send(messages: [ChatCompletionMessage]) -> AsyncThrowingStream<AIStreamEvent, Error> {
+    func send(
+        messages: [ChatCompletionMessage],
+        options: AIChatRequestOptions = AIChatRequestOptions()
+    ) -> AsyncThrowingStream<AIStreamEvent, Error> {
         return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
             // 流局部取消盒：看门狗超时经此取消「本流」的生产任务（Task 无法自引用，盒中转）。
             let cancelBox = TaskCancellationBox()
@@ -1031,6 +1149,7 @@ final class AIChatService {
                 do {
                     try await self.performStream(
                         messages: messages,
+                        options: options,
                         cancel: { cancelBox.cancel() }
                     ) { event in
                         continuation.yield(event)
@@ -1082,15 +1201,28 @@ final class AIChatService {
         return ids
     }
 
-    /// 非流式补全（用于 LLM 标题摘要等后台轻量请求），返回纯文本。
-    func complete(messages: [ChatCompletionMessage]) async throws -> String {
+    /// 非流式补全（用于 LLM 标题摘要 / 上下文压缩等后台轻量请求），返回纯文本。
+    /// `options`：会话级模型与思考档位（nil 回落全局默认 / 模型默认）；压缩场景可传 .off 关闭思考。
+    /// `maxTokens`：可选输出上限。
+    func complete(
+        messages: [ChatCompletionMessage],
+        options: AIChatRequestOptions = AIChatRequestOptions(),
+        maxTokens: Int? = nil
+    ) async throws -> String {
         let proto = apiProtocol
         let path = proto == .responses ? "/responses" : "/chat/completions"
         guard let url = endpointURL(path: path) else { throw AIChatError.invalidBaseURL }
         guard let key = apiKey, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AIChatError.missingAPIKey
         }
-        let resolvedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 模型解析优先级与流式一致：会话绑定模型（请求传入且非空）→ 全局 selectedModel。
+        let requestedModel = options.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModel: String
+        if let requestedModel, !requestedModel.isEmpty {
+            resolvedModel = requestedModel
+        } else {
+            resolvedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !resolvedModel.isEmpty else { throw AIChatError.missingModel }
 
         var request = URLRequest(url: url)
@@ -1098,13 +1230,16 @@ final class AIChatService {
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        // 非流式补全用于标题摘要等轻量后台请求：不带工具，避免摘要器误触发工具调用。
+        // 非流式补全用于标题摘要 / 上下文压缩等轻量后台请求：不带工具，避免误触发工具调用。
+        let thinkingFields = AIModelAdapter.thinkingFields(for: resolvedModel, level: options.thinkingLevel)
         request.httpBody = try encodeRequestBody(
             proto: proto,
             model: resolvedModel,
             messages: messages,
             stream: false,
-            includeTools: false
+            includeTools: false,
+            thinkingFields: thinkingFields,
+            maxTokens: maxTokens
         )
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -1198,6 +1333,7 @@ final class AIChatService {
     /// `cancel`：本流生产任务的取消入口（首 token 看门狗超时调用；流局部，不影响其他会话）。
     private func performStream(
         messages: [ChatCompletionMessage],
+        options: AIChatRequestOptions,
         cancel: (() -> Void)?,
         onEvent: (AIStreamEvent) -> Void
     ) async throws {
@@ -1209,7 +1345,14 @@ final class AIChatService {
         guard let key = apiKey, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AIChatError.missingAPIKey
         }
-        let resolvedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        // 模型解析优先级：会话绑定模型（请求传入且非空）→ 全局 selectedModel。
+        let requestedModel = options.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModel: String
+        if let requestedModel, !requestedModel.isEmpty {
+            resolvedModel = requestedModel
+        } else {
+            resolvedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         guard !resolvedModel.isEmpty else { throw AIChatError.missingModel }
 
         var request = URLRequest(url: url)
@@ -1217,12 +1360,15 @@ final class AIChatService {
         request.timeoutInterval = 120 // 与首 token 看门狗一致，避免默认 60s 提前打断
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        // 思考字段由适配层按「模型 + 统一档位」转换，服务层不感知具体模型差异。
+        let thinkingFields = AIModelAdapter.thinkingFields(for: resolvedModel, level: options.thinkingLevel)
         request.httpBody = try encodeRequestBody(
             proto: proto,
             model: resolvedModel,
             messages: messages,
             stream: true,
-            includeTools: true
+            includeTools: true,
+            thinkingFields: thinkingFields
         )
 
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -1283,6 +1429,11 @@ final class AIChatService {
                     guard let event = try? JSONDecoder().decode(ResponsesEvent.self, from: data) else {
                         continue
                     }
+                    // usage 归一：独立事件顶层 usage 或 response.completed 的 response.usage。
+                    if let usage = event.usage ?? event.response?.usage,
+                       let prompt = usage.resolvedPromptTokens {
+                        onEvent(.usage(promptTokens: prompt))
+                    }
                     switch event.type {
                     case "response.output_text.delta":
                         guard let delta = event.delta, !delta.isEmpty else { continue }
@@ -1338,8 +1489,14 @@ final class AIChatService {
                         break streaming
                     }
                     // 个别分片解析失败不中断整段流（如 usage-only chunk）。
-                    guard let chunk = try? JSONDecoder().decode(StreamChunk.self, from: data),
-                          let delta = chunk.choices.first?.delta else {
+                    guard let chunk = try? JSONDecoder().decode(StreamChunk.self, from: data) else {
+                        continue
+                    }
+                    // usage-only 分片：choices 为空数组、顶层携带 usage，先提取再继续。
+                    if let usage = chunk.usage, let prompt = usage.resolvedPromptTokens {
+                        onEvent(.usage(promptTokens: prompt))
+                    }
+                    guard let delta = chunk.choices.first?.delta else {
                         continue
                     }
                     if let content = delta.content, !content.isEmpty {
@@ -1389,29 +1546,43 @@ final class AIChatService {
     /// - chat：`{model, messages:[...], stream, tools?}`（system prompt 维持注入 messages[0]）
     /// - responses：`{model, instructions?, input:[...], stream, tools?}`（system 转 instructions）
     /// `includeTools` 为 false 或无启用工具时不携带 tools 字段（保持旧行为）。
+    /// `thinkingFields`：适配层注入的顶层思考字段；Chat Completions 流式额外注入
+    /// `stream_options.include_usage = true` 以在末片获取 usage。
+    /// `maxTokens`：输出上限；按协议映射为 `max_tokens`（Chat）/`max_output_tokens`（Responses）。
     private func encodeRequestBody(
         proto: APIProtocol,
         model: String,
         messages: [ChatCompletionMessage],
         stream: Bool,
-        includeTools: Bool
+        includeTools: Bool,
+        thinkingFields: [String: Any] = [:],
+        maxTokens: Int? = nil
     ) throws -> Data {
-        // 启用的工具声明：为空时返回 nil，合成编码自动省略该字段。
+        // 启用的工具声明：为空时返回 nil，自定义编码省略该字段。
         let chatTools = includeTools ? chatToolDefinitions() : nil
         let responsesTools = includeTools ? responsesToolDefinitions() : nil
 
+        var extra = thinkingFields
+        if proto == .chatCompletions && stream {
+            extra["stream_options"] = ["include_usage": true] as [String: Any]
+        }
+        if let maxTokens {
+            extra[proto == .responses ? "max_output_tokens" : "max_tokens"] = maxTokens
+        }
+
         guard proto == .responses else {
             return try JSONEncoder().encode(
-                ChatCompletionRequestBody(model: model, messages: messages, stream: stream, tools: chatTools)
+                ChatCompletionRequestBody(model: model, messages: messages, stream: stream, tools: chatTools, extra: extra)
             )
         }
 
-        // 从消息数组提取 system 作为 instructions；缺失时回退配置中的 systemPrompt。
-        var instructions: String?
-        if let system = messages.first(where: { $0.role == "system" })?.content?.plainText {
-            let trimmed = system.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { instructions = trimmed }
-        }
+        // Responses 只支持单个 instructions：合并全部 system 消息（systemPrompt + 压缩摘要等），
+        // 避免除首条外的 system（如摘要）被 responsesInput 跳过而丢失。
+        let systemTexts = messages
+            .filter { $0.role == "system" }
+            .compactMap { $0.content?.plainText?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        var instructions: String? = systemTexts.isEmpty ? nil : systemTexts.joined(separator: "\n\n")
         if instructions == nil {
             let fallback = systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
             if !fallback.isEmpty { instructions = fallback }
@@ -1421,7 +1592,7 @@ final class AIChatService {
         let input = responsesInput(from: messages)
 
         return try JSONEncoder().encode(
-            ResponsesRequestBody(model: model, instructions: instructions, input: input, stream: stream, tools: responsesTools)
+            ResponsesRequestBody(model: model, instructions: instructions, input: input, stream: stream, tools: responsesTools, extra: extra)
         )
     }
 

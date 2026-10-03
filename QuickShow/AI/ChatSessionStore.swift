@@ -138,6 +138,16 @@ struct ChatSession: Identifiable, Equatable, Codable {
     /// 标题是否仍待 LLM 摘要：新会话为 true；用户重命名或摘要完成后置 false。
     var titleNeedsSummary: Bool
     var messages: [ChatMessage]
+    /// 会话绑定的模型 id（nil = 跟随全局默认模型）。
+    var modelId: String?
+    /// 会话思考档位（nil = 跟随模型默认）。
+    var thinkingLevel: ThinkingLevel?
+    /// 最近一次请求的真实 prompt token 用量（上下文水位真源；旧会话缺失即 nil）。
+    var contextTokens: Int?
+    /// 累计上下文摘要文本（多次压缩后仍是合并后的单份；nil = 从未压缩过）。
+    var contextSummary: String?
+    /// 已纳入摘要的消息 id（前缀语义；旧会话缺失即 nil）。
+    var summarizedMessageIDs: [String]?
 
     init(
         id: UUID = UUID(),
@@ -146,7 +156,12 @@ struct ChatSession: Identifiable, Equatable, Codable {
         updatedAt: Date = Date(),
         pinned: Bool = false,
         titleNeedsSummary: Bool = true,
-        messages: [ChatMessage] = []
+        messages: [ChatMessage] = [],
+        modelId: String? = nil,
+        thinkingLevel: ThinkingLevel? = nil,
+        contextTokens: Int? = nil,
+        contextSummary: String? = nil,
+        summarizedMessageIDs: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -155,13 +170,19 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.pinned = pinned
         self.titleNeedsSummary = titleNeedsSummary
         self.messages = messages
+        self.modelId = modelId
+        self.thinkingLevel = thinkingLevel
+        self.contextTokens = contextTokens
+        self.contextSummary = contextSummary
+        self.summarizedMessageIDs = summarizedMessageIDs
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, pinned, titleNeedsSummary, messages
+        case modelId, thinkingLevel, contextTokens, contextSummary, summarizedMessageIDs
     }
 
-    /// 自定义解码：兼容缺省字段（pinned / titleNeedsSummary / messages）。
+    /// 自定义解码：兼容缺省字段（pinned / titleNeedsSummary / messages / 会话级模型、水位与压缩字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -171,6 +192,12 @@ struct ChatSession: Identifiable, Equatable, Codable {
         pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
         titleNeedsSummary = try container.decodeIfPresent(Bool.self, forKey: .titleNeedsSummary) ?? true
         messages = try container.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
+        // 旧 JSON 无这些字段：decodeIfPresent 保证解码不失败。
+        modelId = try container.decodeIfPresent(String.self, forKey: .modelId)
+        thinkingLevel = try container.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
+        contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens)
+        contextSummary = try container.decodeIfPresent(String.self, forKey: .contextSummary)
+        summarizedMessageIDs = try container.decodeIfPresent([String].self, forKey: .summarizedMessageIDs)
     }
 }
 
@@ -304,6 +331,30 @@ final class ChatSessionStore: ObservableObject {
     /// 切换置顶。
     func togglePin(id: UUID) {
         mutate(id, touch: false) { $0.pinned.toggle() }
+    }
+
+    /// 绑定会话模型（nil = 跟随全局默认）。不 touch updatedAt，只影响后续请求。
+    func setSessionModel(id: UUID, modelId: String?) {
+        mutate(id, touch: false) { $0.modelId = modelId }
+    }
+
+    /// 设置会话思考档位（nil = 跟随模型默认）。不 touch updatedAt，只影响后续请求。
+    func setThinkingLevel(id: UUID, level: ThinkingLevel?) {
+        mutate(id, touch: false) { $0.thinkingLevel = level }
+    }
+
+    /// 记录最近一次请求的真实 prompt token 用量（上下文水位真源）；传 nil 表示失效重置。
+    func setContextTokens(id: UUID, tokens: Int?) {
+        mutate(id, touch: false) { $0.contextTokens = tokens }
+    }
+
+    /// 写入上下文压缩结果（累计摘要 + 已纳入摘要的消息 id）。
+    /// 不 touch updatedAt，保持会话列表排序语义不变。
+    func setCompaction(id: UUID, summary: String, summarizedMessageIDs: [String]) {
+        mutate(id, touch: false) { session in
+            session.contextSummary = summary
+            session.summarizedMessageIDs = summarizedMessageIDs
+        }
     }
 
     /// 追加一条消息。`persist` 为 false 时只改内存不落盘（供发送路径合并写盘用）。
