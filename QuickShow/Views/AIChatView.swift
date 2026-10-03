@@ -88,6 +88,10 @@ struct AIChatView: View {
     @State private var attachHovered = false
     @State private var clipboardHovered = false
     @State private var chipHovered = false
+    /// 「导出对话」成功反馈 toast 可见态。
+    @State private var exportToastVisible = false
+    /// toast 世代令牌：连续导出时旧定时器不得提前收起新 toast。
+    @State private var exportToastGeneration = 0
 
     var body: some View {
         HStack(spacing: 0) {
@@ -272,6 +276,20 @@ struct AIChatView: View {
         // 列表底部留白（chatDockClearance）保证滚到底时末条消息完整露出坞顶。
         .overlay(alignment: .bottom) {
             inputArea
+        }
+        // 导出成功轻反馈：输入坞上方浮出胶囊（复用 toast 令牌语言），1.6s 自动淡出
+        .overlay(alignment: .bottom) {
+            if exportToastVisible {
+                Text("已复制对话 Markdown")
+                    .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .padding(.horizontal, Theme.Spacing.card)
+                    .padding(.vertical, Theme.Spacing.md)
+                    .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
+                    .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
+                    .padding(.bottom, Theme.Layout.chatDockClearance + Theme.Spacing.lg)
+                    .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+            }
         }
         // 全窗材质两级收敛：根部 ultraThinMaterial 是唯一内容基面（铺满主列与阅读区），
         // 输入坞 glass 是唯一浮层语言；此处不再叠第二层材质，全窗亮度关系唯一且自洽。
@@ -467,6 +485,13 @@ struct AIChatView: View {
             Divider()
 
             Button {
+                exportConversation()
+            } label: {
+                Label("导出对话", systemImage: "square.and.arrow.up")
+            }
+            .disabled(state.messages.isEmpty)
+
+            Button {
                 state.clearSession()
             } label: {
                 Label("清空会话", systemImage: "trash")
@@ -487,7 +512,7 @@ struct AIChatView: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { attachHovered = hovering }
         }
-        .help("添加图片附件（可粘贴/拖入）· 清空会话（⌘K）")
+        .help("添加图片附件（可粘贴/拖入）· 导出对话 · 清空会话（⌘K）")
     }
 
     /// 模型 chip：胶囊显示当前模型，点击弹下拉切换（仅多模型时显示，单模型弱化隐藏）。
@@ -636,6 +661,22 @@ struct AIChatView: View {
     /// 从剪贴板导入图片附件。
     private func attachImageFromPasteboard() {
         insertImages(PasteboardImageExtractor.images(from: NSPasteboard.general))
+    }
+
+    /// 导出整段对话 Markdown 到剪贴板，浮出轻量成功反馈（不阻塞；世代令牌防连续导出被提前收起）。
+    private func exportConversation() {
+        let markdown = state.exportConversationMarkdown()
+        guard !markdown.isEmpty else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(markdown, forType: .string)
+        exportToastGeneration += 1
+        let generation = exportToastGeneration
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) { exportToastVisible = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.toastDuration) {
+            guard generation == exportToastGeneration else { return }
+            withAnimation(.easeInOut(duration: Theme.Motion.toastOut)) { exportToastVisible = false }
+        }
     }
 
     /// 从文件选择器导入图片附件。
@@ -941,8 +982,13 @@ private struct SessionMessageList: View {
                                 ChatMessageRow(
                                     message: message,
                                     canRegenerate: message.id == lastRegeneratableAssistantId,
+                                    canEditLastRound: message.id == lastEditableUserMessageId,
                                     onRetry: { if isActive { state.retryLast() } },
                                     onRegenerate: { if isActive { state.retryLast() } },
+                                    onWithdraw: { if isActive { state.withdrawLastRound() } },
+                                    onEditResend: { text, images in
+                                        if isActive { state.editAndResendLast(text: text, images: images) }
+                                    },
                                     onTapImage: onTapImage
                                 )
                                 .equatable()
@@ -1112,24 +1158,48 @@ private struct SessionMessageList: View {
             }
         }?.id
     }
+
+    /// 会话内最后一条 user 消息 id：仅活跃会话 + 非生成中时提供
+    /// （撤回/编辑只对当前会话最后一轮有效；隐藏会话与生成中不显示入口）。
+    private var lastEditableUserMessageId: UUID? {
+        guard isActive, !state.isGenerating else { return nil }
+        return messages.last { $0.role == .user }?.id
+    }
 }
 
 private struct ChatMessageRow: View, Equatable {
     let message: ChatMessage
     /// 是否为最后一条可重新生成的助手消息（父视图计算，含流式中禁用语义）。
     let canRegenerate: Bool
+    /// 是否为会话内最后一条 user 消息且可撤回/编辑（父视图计算，含生成中禁用语义）。
+    let canEditLastRound: Bool
     let onRetry: () -> Void
     let onRegenerate: () -> Void
+    /// 撤回最后一轮（数据层删除该轮并把文本+图片回填输入框）。
+    let onWithdraw: () -> Void
+    /// 编辑重发最后一轮（就地编辑确认后回调新文本与图片附件）。
+    let onEditResend: (String, [ChatImageAttachment]) -> Void
     let onTapImage: (ChatImageAttachment) -> Void
 
-    /// 仅按内容与可重生成标记判定相等：闭包语义跨渲染一致，忽略其对 diff 的干扰，
+    /// 仅按内容与可用操作标记判定相等：闭包语义跨渲染一致，忽略其对 diff 的干扰，
     /// 使 .equatable() 能在流式期间跳过未变更行。
+    /// 编辑态/对勾态等瞬态 UI 由 @State 承载（存储于视图值之外），不参与相等判定，
+    /// 既不被流式冲刷重置，也不会导致无关行重绘。
     static func == (lhs: ChatMessageRow, rhs: ChatMessageRow) -> Bool {
-        lhs.message == rhs.message && lhs.canRegenerate == rhs.canRegenerate
+        lhs.message == rhs.message
+            && lhs.canRegenerate == rhs.canRegenerate
+            && lhs.canEditLastRound == rhs.canEditLastRound
     }
 
     @State private var rowHovered = false
     @State private var copied = false
+    /// 就地编辑态（仅 canEditLastRound 的 user 行可进入）。
+    @State private var editing = false
+    /// 编辑草稿：进入编辑时以原消息文本/图片初始化，确认后交给 onEditResend。
+    @State private var editText = ""
+    @State private var editImages: [ChatImageAttachment] = []
+    /// 编辑器内容高度（由 ChatInlineEditTextView 实测回写，驱动编辑气泡自适应生长）。
+    @State private var editHeight: CGFloat = 18
 
     var body: some View {
         // 消息内容 + 下方常驻操作行（与正文底部留 10pt 成组间距；用户消息整体右对齐）
@@ -1139,8 +1209,6 @@ private struct ChatMessageRow: View, Equatable {
                 content
                 if message.role == .assistant { Spacer(minLength: Theme.Spacing.panel) }
             }
-            // 操作行仅对落定终态的助手消息渲染（done/aborted；失败态有独立重试卡片，
-            // 流式期间不提供半截内容的复制入口）（用户消息操作行已删，给气泡减负）
             if showsActionRow {
                 actionRow
             }
@@ -1150,34 +1218,66 @@ private struct ChatMessageRow: View, Equatable {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { rowHovered = hovering }
         }
+        .contextMenu { rowContextMenu }
     }
 
-    /// 操作行渲染条件：助手消息且已落定（done/aborted）。
-    /// 流式/发送中不渲染（复制半截内容无意义且暗示完成）；failed 有独立重试卡片。
+    /// 行级右键菜单：复制整条消息（图片消息复制其文本，若有）；
+    /// 会话内最后一条 user 消息追加「编辑并重发 / 撤回该轮」。
+    @ViewBuilder
+    private var rowContextMenu: some View {
+        if !message.content.isEmpty {
+            Button { copyContent() } label: {
+                Label("复制消息", systemImage: "doc.on.doc")
+            }
+        }
+        if message.role == .user, canEditLastRound {
+            if !message.content.isEmpty { Divider() }
+            Button { beginEdit() } label: {
+                Label("编辑并重发", systemImage: "pencil")
+            }
+            Button { onWithdraw() } label: {
+                Label("撤回该轮", systemImage: "arrow.uturn.backward")
+            }
+        }
+    }
+
+    /// 操作行渲染条件：
+    /// - 助手：落定终态（done/aborted；失败态有独立重试卡片，流式期间不提供半截内容的复制入口）
+    /// - 用户：有文本可复制，或是可撤回/编辑的最后一轮（撤回/编辑按钮随 hover 浮现）
+    /// 就地编辑态一律隐藏（编辑操作由编辑气泡内按钮承担）。
     private var showsActionRow: Bool {
-        guard message.role == .assistant else { return false }
-        switch message.state {
-        case .done, .aborted:
-            return true
-        case .sending, .streaming, .failed:
+        if editing { return false }
+        switch message.role {
+        case .user:
+            return !message.content.isEmpty || canEditLastRound
+        case .assistant:
+            switch message.state {
+            case .done, .aborted:
+                return true
+            case .sending, .streaming, .failed:
+                return false
+            }
+        case .system:
             return false
         }
     }
 
-    /// 常驻操作行：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」。
+    /// 常驻操作行：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」；
+    /// 会话内最后一条 user 消息附「撤回 / 编辑」（随整行 hover 浮现，生成中不显示）。
     /// 弱化常驻：图标静止 38% 灰、整行 hover 提亮 85%；按钮自身 hover 叠 0.08 圆角底，不抢正文层级。
-    /// 仅在落定终态渲染（见 showsActionRow）。
     private var actionRow: some View {
         HStack(spacing: Theme.Spacing.md) {
-            ChatActionIconButton(
-                systemName: copied ? "checkmark" : "doc.on.doc",
-                tint: copied ? Theme.Colors.accent : nil,
-                help: "复制",
-                rowHovered: rowHovered,
-                action: copyContent
-            )
+            if !message.content.isEmpty {
+                ChatActionIconButton(
+                    systemName: copied ? "checkmark" : "doc.on.doc",
+                    tint: copied ? Theme.Colors.accent : nil,
+                    help: "复制",
+                    rowHovered: rowHovered,
+                    action: copyContent
+                )
+            }
 
-            if canRegenerate {
+            if message.role == .assistant, canRegenerate {
                 ChatActionIconButton(
                     systemName: "arrow.clockwise",
                     tint: nil,
@@ -1185,6 +1285,28 @@ private struct ChatMessageRow: View, Equatable {
                     rowHovered: rowHovered,
                     action: onRegenerate
                 )
+            }
+
+            // 撤回/编辑：常驻占位 + opacity 随 hover 显隐（宽度恒占，避免 hover 时整行左右跳动）
+            if message.role == .user, canEditLastRound {
+                Group {
+                    ChatActionIconButton(
+                        systemName: "pencil",
+                        tint: nil,
+                        help: "编辑并重发",
+                        rowHovered: rowHovered,
+                        action: beginEdit
+                    )
+                    ChatActionIconButton(
+                        systemName: "arrow.uturn.backward",
+                        tint: nil,
+                        help: "撤回该轮（内容回填输入框）",
+                        rowHovered: rowHovered,
+                        action: onWithdraw
+                    )
+                }
+                .opacity(rowHovered ? 1 : 0)
+                .allowsHitTesting(rowHovered)
             }
         }
     }
@@ -1202,7 +1324,12 @@ private struct ChatMessageRow: View, Equatable {
     private var content: some View {
         switch message.role {
         case .user:
-            userBubble
+            // 就地编辑态：气泡原地变为编辑器（仅最后一轮 user 消息可进入）
+            if editing {
+                editBubble
+            } else {
+                userBubble
+            }
         case .assistant:
             assistantContent
         case .system:
@@ -1213,6 +1340,7 @@ private struct ChatMessageRow: View, Equatable {
     /// 用户消息：右对齐气泡，琥珀实底（chatUserBubble：亮色暖纸 / 暗色深琥珀随玻璃微光），
     /// 无描边（实底自身即容器，描边是廉价感来源），圆角 18 对话语言；
     /// 图片缩略图排在文本上方（点击放大），行距与 AI 正文同节奏（13pt + 6 ≈ 1.7 倍行高）。
+    /// 文本启用选区复制（textSelection），与助手 Markdown 选区行为对齐。
     private var userBubble: some View {
         VStack(alignment: .trailing, spacing: Theme.Spacing.xl) {
             if !message.images.isEmpty {
@@ -1224,6 +1352,7 @@ private struct ChatMessageRow: View, Equatable {
                     .foregroundColor(Theme.Colors.contentPrimary)
                     .lineSpacing(6)
                     .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
             }
         }
         .padding(.horizontal, Theme.Spacing.xxl)
@@ -1232,6 +1361,97 @@ private struct ChatMessageRow: View, Equatable {
             RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
                 .fill(Theme.Colors.chatUserBubble)
         )
+    }
+
+    /// 就地编辑态：气泡原地「展开」为编辑器——同底色/圆角/内边距，无跳变感。
+    /// 顶部为可单张移除的图片附件条（粘贴可追加）；中间为 IME 安全编辑框
+    /// （⏎ 确认 / ⇧⏎ 换行 / ESC 取消，高度随内容自适应、封顶滚动）；
+    /// 底部为操作钮（快捷键语义由 .help() tooltip 承担，对齐全窗提示纪律）。
+    private var editBubble: some View {
+        VStack(alignment: .trailing, spacing: Theme.Spacing.lg) {
+            if !editImages.isEmpty {
+                ImageAttachmentStrip(attachments: editImages) { id in
+                    editImages.removeAll { $0.id == id }
+                }
+            }
+
+            ChatInlineEditTextView(
+                text: $editText,
+                contentHeight: $editHeight,
+                onSubmit: confirmEdit,
+                onEscape: cancelEdit,
+                onInsertImages: { images in
+                    for image in images {
+                        if let attachment = ImageAttachmentProcessor.makeAttachment(from: image) {
+                            editImages.append(attachment)
+                        }
+                    }
+                }
+            )
+            .frame(maxWidth: .infinity)
+            .frame(height: editHeight)
+
+            HStack(spacing: Theme.Spacing.md) {
+                editBubbleButton(title: "取消", tint: Theme.Colors.contentSecondaryStrong, action: cancelEdit)
+                    .help("取消编辑（ESC）")
+                editBubbleButton(
+                    title: "重发",
+                    tint: canConfirmEdit ? Theme.Colors.accent : Theme.Colors.contentTertiary,
+                    action: confirmEdit
+                )
+                .disabled(!canConfirmEdit)
+                .help("确认并重发（⏎）")
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.xxl)
+        .padding(.vertical, Theme.Spacing.xl)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
+                .fill(Theme.Colors.chatUserBubble)
+        )
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    /// 编辑气泡内的小胶囊钮：与失败卡「重试」同一语言（surfaceButton 实底 + keyCap 圆角）。
+    private func editBubbleButton(title: String, tint: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Typography.text(11, .semibold))
+                .foregroundColor(tint)
+                .padding(.horizontal, Theme.Spacing.xxl)
+                .padding(.vertical, Theme.Spacing.md)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                        .fill(Theme.Colors.surfaceButton)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 可确认重发：文本非空或仍有图片附件（与主输入框 canSend 同规则）。
+    private var canConfirmEdit: Bool {
+        !editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !editImages.isEmpty
+    }
+
+    /// 进入编辑态：以原消息文本/图片初始化草稿，轻量淡入切换。
+    private func beginEdit() {
+        editText = message.content
+        editImages = message.images
+        editHeight = 18
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = true }
+    }
+
+    /// 确认编辑：先退出编辑态（视觉先行），再把新文本/图片交给数据层重发（不阻塞）。
+    private func confirmEdit() {
+        let text = editText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !editImages.isEmpty else { return }
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
+        onEditResend(text, editImages)
+    }
+
+    /// 取消编辑：丢弃草稿，恢复原气泡。
+    private func cancelEdit() {
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
     }
 
     /// 是否处于生成中（sending/streaming）：思考折叠区据此做流式节流与收尾全量同步。
@@ -1278,15 +1498,18 @@ private struct ChatMessageRow: View, Equatable {
             // 失败态保留提示卡片（状态提示，非正文排版）
             FailedMessageView(errorText: errorText, onRetry: onRetry)
         case .done:
-            // 落定态：完整块级 Markdown 渲染（AIChatMarkdownView）
+            // 落定态：完整块级 Markdown 渲染（AIChatMarkdownView）；
+            // textSelection 支持按块选区复制（跨块选择与含公式段落不支持，见 MarkdownInlineText 结构限制）
             if !skipsTextPart {
                 AssistantMarkdownView(content: message.content)
+                    .textSelection(.enabled)
             }
         case .aborted:
             // 中止：保留半截内容的富渲染 + 弱标记
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 if !skipsTextPart {
                     AssistantMarkdownView(content: message.content)
+                        .textSelection(.enabled)
                 }
                 AbortedTag()
             }
@@ -1908,6 +2131,161 @@ private final class ChatInputNSTextView: NSTextView {
             onEscape()
         } else {
             super.cancelOperation(sender)
+        }
+    }
+}
+
+// MARK: - 就地编辑输入框（最后一轮 user 消息）
+
+/// 就地编辑输入框：与主输入框 ChatInputTextView 同源语义——⏎ 确认 / ⇧⏎ 换行 /
+/// 中文 IME 组字放行 / ESC 取消 / 图片粘贴追加附件，复用 ChatInputNSTextView 子类。
+/// 差异：不挂窗口级焦点观察（只在进入编辑态时主动拿一次焦点，避免与主输入框抢响应者）；
+/// 内容高度经 contentHeight 实测回写，驱动编辑气泡随文本自适应生长（封顶后内部滚动）。
+private struct ChatInlineEditTextView: NSViewRepresentable {
+    @Binding var text: String
+    /// 内容高度回写（编辑气泡 frame 高度的唯一来源）。
+    @Binding var contentHeight: CGFloat
+    let onSubmit: () -> Void
+    let onEscape: () -> Void
+    /// 粘贴/拖入图片（NSImage 数组，由调用方转附件）。
+    let onInsertImages: ([NSImage]) -> Void
+
+    /// 高度下限（单行 13pt ≈ 17）与上限（封顶后由内置 scrollView 滚动）。
+    private let minHeight: CGFloat = 18
+    private let maxHeight: CGFloat = 160
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        // 手工搭建文本系统（与主输入框同理：scrollableTextView() 无法插入自定义子类）
+        let textStorage = NSTextStorage()
+        let layoutManager = NSLayoutManager()
+        textStorage.addLayoutManager(layoutManager)
+        let textContainer = NSTextContainer(
+            containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        )
+        textContainer.widthTracksTextView = true
+        layoutManager.addTextContainer(textContainer)
+
+        let textView = ChatInputNSTextView(frame: .zero, textContainer: textContainer)
+        textView.delegate = context.coordinator
+        textView.onEscape = onEscape
+        textView.onInsertImages = onInsertImages
+        // IME 组字（marked text）不触发 textDidChange：靠该回调同步草稿文本与高度
+        textView.onContentStateChanged = { [weak coordinator = context.coordinator] in
+            guard let coordinator, let tv = coordinator.textView else { return }
+            coordinator.syncState(tv)
+        }
+        textView.isRichText = false
+        textView.isEditable = true
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.font = NSFont.systemFont(ofSize: 13)
+        textView.textColor = NSColor.labelColor
+        textView.insertionPointColor = NSColor.labelColor
+        // 关闭各类自动替换/检查（与主输入框同一纪律，避免编辑被系统"纠正"）
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [NSView.AutoresizingMask.width]
+        // 编辑气泡的内边距已由外层 padding 承担，文本系统零内边距（高度回写即纯文本高）
+        textView.textContainerInset = .zero
+        textView.textContainer?.lineFragmentPadding = 0
+        // 追加注册图片拖放类型（与主输入框一致）
+        textView.registerForDraggedTypes([.fileURL, .png, .tiff, NSPasteboard.PasteboardType("public.jpeg")])
+        textView.string = text
+
+        let scrollView = NSScrollView(frame: .zero)
+        scrollView.documentView = textView
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+
+        context.coordinator.textView = textView
+        // 进入编辑态：首帧布局后同步初始高度、聚焦并把光标移到文尾
+        DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
+            guard let textView else { return }
+            coordinator?.syncState(textView)
+            guard let window = textView.window else { return }
+            window.makeFirstResponder(textView)
+            textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+        }
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        context.coordinator.parent = self
+        guard let textView = context.coordinator.textView else { return }
+        textView.onEscape = onEscape
+        textView.onInsertImages = onInsertImages
+        // 外部回写防线与主输入框一致：IME 组字期间绝不程序化改写（防摧毁组字）
+        if textView.string != text, !textView.hasMarkedText() {
+            textView.string = text
+            textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        }
+        context.coordinator.syncHeight(textView)
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: ChatInlineEditTextView
+        weak var textView: ChatInputNSTextView?
+
+        init(_ parent: ChatInlineEditTextView) {
+            self.parent = parent
+        }
+
+        func textDidChange(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            syncState(tv)
+        }
+
+        /// 合并同步草稿文本与高度（textDidChange 与 IME 组字回调共用；仅在不等时写，防回写回路）。
+        func syncState(_ tv: NSTextView) {
+            if parent.text != tv.string {
+                parent.text = tv.string
+            }
+            syncHeight(tv)
+        }
+
+        /// 内容高度对账：usedRect 实测文本高，钳制到 [minHeight, maxHeight] 后回写。
+        func syncHeight(_ tv: NSTextView) {
+            guard let layoutManager = tv.layoutManager, let textContainer = tv.textContainer else { return }
+            layoutManager.ensureLayout(for: textContainer)
+            let fitted = layoutManager.usedRect(for: textContainer).height
+            let clamped = min(max(fitted, parent.minHeight), parent.maxHeight)
+            if abs(parent.contentHeight - clamped) > 0.5 {
+                parent.contentHeight = clamped
+            }
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // ⏎：中文 IME 组字期间 markedRange 非空 → 放行给输入法先提交候选字，绝不触发确认
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                if textView.hasMarkedText() { return false }
+                if NSEvent.modifierFlags.contains(.shift) {
+                    // ⇧⏎ 换行：忽略 field editor 语义，强制插入软换行
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                } else {
+                    parent.onSubmit()
+                }
+                return true
+            }
+            // ⇧⏎ 在部分系统路径下映射为该命令：交给默认实现插入换行
+            if commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+                return false
+            }
+            return false
         }
     }
 }

@@ -341,6 +341,14 @@ final class ChatSessionStore: ObservableObject {
         mutate(sessionId) { $0.messages.removeAll { $0.id == id } }
     }
 
+    /// 删除指定消息及其之后的所有消息（撤回/编辑重发最后一轮用；一次变更 + 一次落盘，保证 JSON 立即同步）。
+    func removeMessages(from messageId: UUID, in sessionId: UUID) {
+        mutate(sessionId) { session in
+            guard let index = session.messages.firstIndex(where: { $0.id == messageId }) else { return }
+            session.messages.removeSubrange(index...)
+        }
+    }
+
     /// 清空指定会话的消息（⌘K 清空语义）。
     func clearMessages(in sessionId: UUID) {
         mutate(sessionId) { $0.messages.removeAll() }
