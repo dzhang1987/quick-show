@@ -2,6 +2,26 @@ import AppKit
 import Combine
 import Foundation
 
+// MARK: - 待注入输入模型（steering / follow-up 双队列）
+
+/// 一条待注入的用户输入（steering / follow-up 双队列元素）。
+/// 仅内存态：不参与会话持久化，注入或中止回填后自然清空。
+/// 队列按会话 id 隔离存储于 AIChatState.pendingQueues。
+struct QueuedChatInput: Identifiable, Equatable {
+    /// 队列类别：决定注入时机与调度优先级。
+    /// - steering：转向，在当前回合工具批次全部跑完、下一次 LLM 调用前注入；
+    /// - followUp：追问，仅在回合将结束（无更多工具调用）且无 steering 待处理时注入。
+    enum Kind: Equatable {
+        case steering
+        case followUp
+    }
+
+    let id: UUID
+    let kind: Kind
+    let text: String
+    let images: [ChatImageAttachment]
+}
+
 /// AI 会话门面：串联 ChatSessionStore（多会话数据层）与 AIChatService（网络层），
 /// 负责流式发送、中断、重试、图片/剪贴板附加与 LLM 标题摘要。
 /// 对外保留旧 AIChatView 的调用点（messages / inputText / isStreaming / send 等），
@@ -35,6 +55,9 @@ final class AIChatState: ObservableObject {
     @Published private(set) var streamingSessionIds: Set<UUID> = []
     /// 后台生成完成但用户尚未查看的会话集合（侧栏未读提示；切回会话即清除）。
     @Published private(set) var unreadSessionIds: Set<UUID> = []
+    /// 按会话隔离的待注入队列（steering + follow-up 合并存储，元素顺序即入队顺序）。
+    /// @Published 供视图/侧栏响应式刷新；对外经 pendingQueue 读取当前会话队列。
+    @Published private var pendingQueues: [UUID: [QueuedChatInput]] = [:]
 
     /// 多会话数据层（Wave 2 侧边栏消费其分组 / 搜索 / 增删改 API）。
     let store = ChatSessionStore.shared
@@ -159,7 +182,13 @@ final class AIChatState: ObservableObject {
     /// 仅约束「当前会话」不可并发发送（同一会话上下文无法承载两轮并发）；
     /// 其他会话的进行中生成不受影响（并行生成核心语义）。
     func send() {
-        guard !isStreaming else { return }
+        // 生成中的 ⏎：不再拦截报错，转为 steering 入当前会话队列（转向当前任务方向），
+        // 待当前回合工具批次全部跑完后、下一次 LLM 调用前注入。⏎=转向的单一收口点。
+        // 输入框/附件清空由 UI 层既有逻辑处理，此处不消费输入框。
+        if isStreaming {
+            enqueueSteering()
+            return
+        }
 
         let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         let clip = clipboardAttachment
@@ -270,8 +299,18 @@ final class AIChatState: ObservableObject {
                         break roundLoop
                     }
 
-                    // 没有工具调用：本助手消息为最终文本，正常结束。
+                    // 没有工具调用：回合将结束。先查 steering，无则查 follow-up；
+                    // 任一存在即注入一条（逐条消费）并续跑一轮，直到两队列皆空才真正 settle
+                    // （steering 优先于 follow-up）。
                     if completedCalls.isEmpty {
+                        let pending = self.dequeuePending(kind: .steering, in: sessionId)
+                            ?? self.dequeuePending(kind: .followUp, in: sessionId)
+                        if let pending {
+                            self.settle(assistantID, state: .done, in: sessionId)
+                            assistantID = self.injectPendingInput(pending, sessionId: sessionId, context: ctx)
+                            wireMessages = self.buildRequestMessages(for: sessionId)
+                            continue roundLoop
+                        }
                         self.settle(assistantID, state: .done, in: sessionId)
                         didComplete = true
                         break roundLoop
@@ -415,14 +454,21 @@ final class AIChatState: ObservableObject {
                         break roundLoop
                     }
 
-                    // 创建下一轮助手占位，继续回路。
-                    assistantID = UUID()
-                    self.store.appendMessage(
-                        ChatMessage(id: assistantID, role: .assistant, content: "", state: .sending),
-                        to: sessionId,
-                        persist: false
-                    )
-                    ctx.sendPathPersisted = false
+                    // 注入点 1：当前回合工具批次已全部跑完、下一次 LLM 调用前，
+                    // 检查 steering 队列（逐条取最早一条注入）；此处不检查 follow-up。
+                    if let pending = self.dequeuePending(kind: .steering, in: sessionId) {
+                        assistantID = self.injectPendingInput(pending, sessionId: sessionId, context: ctx)
+                        wireMessages = self.buildRequestMessages(for: sessionId)
+                    } else {
+                        // 创建下一轮助手占位，继续回路。
+                        assistantID = UUID()
+                        self.store.appendMessage(
+                            ChatMessage(id: assistantID, role: .assistant, content: "", state: .sending),
+                            to: sessionId,
+                            persist: false
+                        )
+                        ctx.sendPathPersisted = false
+                    }
                 }
             } catch is CancellationError {
                 // 用户主动中止：保留半截回复，落定为 .aborted。
@@ -449,6 +495,10 @@ final class AIChatState: ObservableObject {
     /// 成功完成时依次处理未读标记、LLM 标题摘要与完成通知。
     private func finishStream(sessionId: UUID, didComplete: Bool) {
         streamContexts[sessionId] = nil
+        // 清理该会话残留的待注入队列：正常完成时两队列已在回路内排空；
+        // 中止路径由 abortAndRecallQueue 回填后清空；失败/删除兜底清空，
+        // 避免陈旧条目泄漏到下一次会话并意外注入。
+        pendingQueues[sessionId] = nil
         streamingSessionIds.remove(sessionId)
         syncStreamingState()
         guard didComplete else { return }
@@ -479,6 +529,54 @@ final class AIChatState: ObservableObject {
     /// 指定会话是否生成中（侧栏状态可视化查询）。
     func isStreaming(sessionId: UUID) -> Bool {
         streamingSessionIds.contains(sessionId)
+    }
+
+    // MARK: - 待注入队列（steering / follow-up 内部实现）
+
+    /// 生成中 ⏎ 的单一收口：把当前输入（含剪贴板附加与图片）作为 steering 入当前会话队列。
+    /// UI 层负责清空输入框，此处只入队、不消费输入态。
+    private func enqueueSteering() {
+        let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let clip = clipboardAttachment
+        let images = imageAttachments
+        guard !userInput.isEmpty || clip != nil || !images.isEmpty else { return }
+        guard let sessionId = currentSessionId else { return }
+        var content = composeUserContent(input: userInput, clipboard: clip)
+        if content.isEmpty, !images.isEmpty { content = "请查看图片。" }
+        pendingQueues[sessionId, default: []].append(
+            QueuedChatInput(id: UUID(), kind: .steering, text: content, images: images)
+        )
+    }
+
+    /// 逐条消费队列：移除并返回最早一条指定类别的待注入输入；无则返回 nil。
+    /// 以 kind 过滤实现「steering 优先于 follow-up」的调度语义。
+    private func dequeuePending(kind: QueuedChatInput.Kind, in sessionId: UUID) -> QueuedChatInput? {
+        guard var queue = pendingQueues[sessionId],
+              let index = queue.firstIndex(where: { $0.kind == kind }) else { return nil }
+        let item = queue.remove(at: index)
+        pendingQueues[sessionId] = queue.isEmpty ? nil : queue
+        return item
+    }
+
+    /// 注入一条待发送输入：追加 user 消息（走 store 既有 mutate+persist 正常落盘）
+    /// + 新 assistant 占位（.sending），返回新占位 id；
+    /// 后续由调用方以含新消息的上下文发起下一轮请求。
+    private func injectPendingInput(
+        _ item: QueuedChatInput,
+        sessionId: UUID,
+        context ctx: StreamContext
+    ) -> UUID {
+        let userMessage = ChatMessage(role: .user, content: item.text, state: .done, images: item.images)
+        store.appendMessage(userMessage, to: sessionId, persist: true)
+
+        let assistantID = UUID()
+        store.appendMessage(
+            ChatMessage(id: assistantID, role: .assistant, content: "", state: .sending),
+            to: sessionId,
+            persist: false
+        )
+        ctx.sendPathPersisted = false
+        return assistantID
     }
 
     /// ⌘K 清空当前会话消息（保留会话本身，重置标题待重新摘要）。
@@ -912,6 +1010,64 @@ final class AIChatState: ObservableObject {
         for id in staleIDs {
             store.removeMessage(id: id, in: sessionId)
         }
+    }
+}
+
+// MARK: - steering / follow-up 待注入队列（对外契约）
+
+extension AIChatState {
+    /// 当前会话的待注入队列（按入队顺序）；切到其他会话即读到该会话自己的队列，
+    /// 队列严格按会话 id 隔离，A 会话绝不出现在 B 会话。UI 依赖其响应式刷新。
+    var pendingQueue: [QueuedChatInput] {
+        guard let sessionId = currentSessionId else { return [] }
+        return pendingQueues[sessionId] ?? []
+    }
+
+    /// 生成中 ⌥⏎：入当前会话 follow-up 队列（仅生成中有意义；无生成时由 UI 走普通发送）。
+    /// 空文本且无图片时不入队。
+    func enqueueFollowUp(text: String, images: [ChatImageAttachment]) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !images.isEmpty else { return }
+        guard let sessionId = currentSessionId, isStreaming else { return }
+        pendingQueues[sessionId, default: []].append(
+            QueuedChatInput(id: UUID(), kind: .followUp, text: trimmed, images: images)
+        )
+    }
+
+    /// 取回某条到输入框：从当前会话队列移除并回填 inputText + 附件暂存
+    /// （复用 withdrawLastRound 的回填模式：整体替换输入与附件态）。
+    func recallQueuedInput(id: UUID) {
+        guard let sessionId = currentSessionId,
+              var queue = pendingQueues[sessionId],
+              let index = queue.firstIndex(where: { $0.id == id }) else { return }
+        let item = queue.remove(at: index)
+        pendingQueues[sessionId] = queue.isEmpty ? nil : queue
+        inputText = item.text
+        imageAttachments = item.images
+    }
+
+    /// 中止当前会话生成并把该会话队列全部回填输入框：
+    /// 各条 text 以换行拼接进 inputText（保留框内已有文本，接在其后），
+    /// images 取并集入附件暂存；随后走既有中止路径，半截回复保留 .aborted 语义。
+    func abortAndRecallQueue() {
+        let sessionId = currentSessionId
+        if let sessionId, let queue = pendingQueues[sessionId], !queue.isEmpty {
+            let joined = queue.map(\.text).joined(separator: "\n")
+            if inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                inputText = joined
+            } else {
+                inputText = inputText + "\n" + joined
+            }
+            var merged = imageAttachments
+            for item in queue {
+                for image in item.images where !merged.contains(where: { $0.id == image.id }) {
+                    merged.append(image)
+                }
+            }
+            imageAttachments = merged
+            pendingQueues[sessionId] = nil
+        }
+        abortStreaming(sessionId: sessionId)
     }
 }
 

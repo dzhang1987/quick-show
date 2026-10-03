@@ -459,7 +459,9 @@ final class AIWindowManager {
             MainActor.assumeIsolated {
                 let state = AIChatState.shared
                 if state.isStreaming {
-                    state.abortStreaming()
+                    // ESC 中止：除落定 .aborted 外，还需把当前会话待注入队列（steering/follow-up）
+                    // 全部回填输入框，避免用户排队内容随中止丢失。
+                    state.abortAndRecallQueue()
                     return true
                 }
                 return false

@@ -26,6 +26,12 @@
   - **UI 层**（`AIChatView`）：用户消息操作行恢复（复制按钮 + 1.2s 对勾反馈，与助手操作行同构右对齐）；最后一条 user 消息 hover 浮现「编辑并重发 / 撤回该轮」按钮（常驻占位 + opacity 显隐防宽度跳动；生成中或非最后一条不显示，`lastEditableUserMessageId` 父视图计算下传）；就地编辑器 `ChatInlineEditTextView`（NSViewRepresentable，复用 `ChatInputNSTextView` 的 IME 安全 ⏎/⇧⏎/ESC 与图片粘贴；内容高度实测回写 18–160pt 封顶滚动；附件条复用 `ImageAttachmentStrip` 可单张移除；「取消/重发」胶囊钮沿用失败卡「重试」语言）；行级右键 `contextMenu`「复制消息」（图片消息复制其文本，纯工具调用空内容助手消息不显示复制项；最后一轮 user 消息追加编辑/撤回入口）；用户消息与落定/中止助手消息启用 `textSelection` 选区复制（流式中不启用）；⊕ 菜单新增「导出对话」（空会话禁用），成功后 1.6s toast 胶囊（世代令牌防连点提前收起）
   - **已知取舍**：`textSelection` 按单个 Text 生效，跨块选择不支持；公式段落（`MathParagraphView` NSTextField 路径）不可选；启用选区后文本上按下拖动为选择而非滚动列表（对标主流聊天应用）
   - **GUI 全量实测**（AppleScript/System Events 自动化冒烟）：复制按钮 pbpaste 比对原文一致、编辑重发「1+1」→「2+2」轮替换且新回复正确、撤回后落盘消息清零 + 输入框回填、导出 Markdown 格式完整；真实会话数据 diff 备份逐字节一致零破坏
+- 生成中转向 / 追问双队列（AI 窗，消息交互二期，语义对齐 PI Agent 的 steering / follow-up）：
+  - **数据层**（`AIChatState`）：新增 `QueuedChatInput` 与 `pendingQueues: [UUID: [QueuedChatInput]]` 按会话 id 键控的 @Published 字典（steering 与 follow 合并存储、元素顺序即入队顺序，会话间严格隔离）；`send()` 在当前会话生成中不再拒绝而是重定向入队 steering；`dequeuePending()` 消费时 **steering 严格优先于 follow**；`injectPendingInput()` 注入为标准 user 消息 + assistant 占位（与真实发送同构，完整复用工具回路）；注入由各会话回路自身按 sessionId 消费（切走会话不影响注入续跑）；两个注入点对齐 PI 语义——① 工具批结束后（仅查 steering，打断续跑）② 回复 settle 前先 steering 后 follow；`finishStream` 终态清空该会话残留队列防陈旧条目泄漏；`abortAndRecallQueue()` 中止当前会话生成 + 该会话队列换行拼接回填输入框（图片附件按 id 去重合并）；非生成中 `⌥⏎` 退化为普通发送
+  - **键路**（`AIChatView` / `ChatInputNSTextView`）：`doCommandBy` 覆盖 `insertNewline` 与 `insertNewlineIgnoringFieldEditor`——无修饰 ⏎ 生成中转 steering 入队；⌥⏎ 生成中入队 follow、空闲退化为 send；⇧ 优先于 ⌥（⇧⌥⏎ = 纯换行）；IME 组字期守卫（marked text 不触发发送逻辑）；发送钮 tooltip 标注「发送（⏎）· 追问（⌥⏎）」
+  - **队列胶囊 UI**：输入框上方逐条胶囊标注「转向 / 追问」；`QueuedInputCapsule`（Button plain style、hover 提亮、tooltip「点击取回编辑」）——点击即从队列移除并回填输入框；队列消费 / 取回时输入框草稿同步清空
+  - **ESC 接线**（`AIWindowManager`）：生成中 ESC 从 `abortStreaming()` 换为 `abortAndRecallQueue()`（中止 + 队列回填，防排队内容随中止丢失）；侧栏呼吸点 / ⌘K 清空路径**刻意保持不回填**（回填只应写入当前会话的输入框，中止后台会话时回填会串会话）；已知取舍：对当前会话经侧栏呼吸点中止时队列清空不回填（活跃会话的中止主入口是 ESC）
+  - **GUI 全量实测**（computer-use 合成输入 + System Events AX 树断言 + 落盘 JSON 校验）：steering / follow 双队列注入链（6 消息序列与模型语义服从）、生成中 send 重定向、胶囊取回、ESC 中止 + 双队列回填、多轮工具调用与注入共存全部通过；真实会话数据 diff 备份逐字节一致零破坏
 
 ### Fixed
 

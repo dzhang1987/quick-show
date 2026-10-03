@@ -383,6 +383,20 @@ struct AIChatView: View {
 
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            // 待注入队列（steering 转向 / follow-up 追问）：生成中 ⏎/⌥⏎ 的消息在此排队，
+            // 点击胶囊取回编辑；队列区置于坞体顶部、随内容向上生长，宽度与坞一致。
+            if !state.pendingQueue.isEmpty {
+                VStack(spacing: Theme.Spacing.sm) {
+                    ForEach(state.pendingQueue) { item in
+                        QueuedInputCapsule(item: item) {
+                            state.recallQueuedInput(id: item.id)
+                        }
+                        .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+                    }
+                }
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.pendingQueue)
+            }
+
             // 待发送图片附件条：缩略图胶囊横排，可单个移除
             if !state.imageAttachments.isEmpty {
                 ImageAttachmentStrip(attachments: state.imageAttachments) { id in
@@ -404,7 +418,8 @@ struct AIChatView: View {
                     ChatInputTextView(
                         text: $state.inputText,
                         isInputEmpty: $inputEmpty,
-                        onSubmit: { state.send() },
+                        onSubmit: { submitInput() },
+                        onSubmitFollowUp: { submitFollowUp() },
                         onEscape: { handleEscape() },
                         onInsertImages: { images in insertImages(images) }
                     )
@@ -609,7 +624,7 @@ struct AIChatView: View {
         }
         .buttonStyle(.plain)
         .disabled(!state.isStreaming && !canSend)
-        .help(state.isStreaming ? "中止生成" : "发送（⏎）")
+        .help(state.isStreaming ? "中止生成" : "发送（⏎）· 追问（⌥⏎）")
     }
 
     // MARK: - 状态与动作
@@ -618,6 +633,41 @@ struct AIChatView: View {
         !state.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             || state.clipboardAttachment != nil
             || !state.imageAttachments.isEmpty   // 纯图片也可发送
+    }
+
+    /// ⏎ 发送键路（ChatInputNSTextView 回调）：
+    /// - 非生成中：普通发送，清空由 send() 内部完成（含未配置端点时保留输入的语义）；
+    /// - 生成中：数据层把 send() 转入 steering 队列（send 内 isStreaming 分支提前返回，
+    ///   不消费输入态），此处按「入队反馈 = 输入框清空 + 队列胶囊浮现」由 UI 侧补齐清空。
+    private func submitInput() {
+        let wasStreaming = state.isStreaming
+        state.send()
+        if wasStreaming { clearDraft() }
+    }
+
+    /// ⌥⏎ 追问键路（ChatInputNSTextView 回调）：
+    /// - 生成中：入 follow-up 队列（本轮将停时注入再跑一轮），随后按发送同款清空输入
+    ///   （enqueueFollowUp 与 enqueueSteering 同样不消费输入态）；
+    /// - 非生成中：退化为普通发送（与 ⏎ 同路径，send 内自守门控）。
+    private func submitFollowUp() {
+        // 门控信号与数据层 enqueueFollowUp 同源（isStreaming）：
+        // 残留边界（消息态生成中但流集合已清）下入队会被拒，此处退化为普通发送不丢草稿。
+        guard state.isStreaming else {
+            state.send()
+            return
+        }
+        let text = state.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let images = state.imageAttachments
+        guard !text.isEmpty || !images.isEmpty else { return }
+        state.enqueueFollowUp(text: text, images: images)
+        clearDraft()
+    }
+
+    /// 清空草稿态（文本 / 剪贴板附加 / 图片附件）——与 state.send() 正常分支内清空同款。
+    private func clearDraft() {
+        state.inputText = ""
+        state.clipboardAttachment = nil
+        state.imageAttachments = []
     }
 
     /// 发送键底：可用 = 主题强调色实心（琥珀/青，全图最强图底反转），流式 = 警告红，
@@ -1760,6 +1810,70 @@ private struct AbortedTag: View {
     }
 }
 
+// MARK: - 待注入队列胶囊（steering / follow-up）
+
+/// 待注入队列胶囊：类型标签（转向=↪ / 追问=↩ + 中文小字）+ 文本单行截断。
+/// 点击整枚胶囊取回编辑（数据层回填输入框，胶囊随队列移除消失）；hover 提亮。
+/// 视觉沿用坞内微胶囊语言：实底 surfaceTrack + 0.5pt 白 rim，不新增设计令牌。
+private struct QueuedInputCapsule: View {
+    let item: QueuedChatInput
+    let onRecall: () -> Void
+
+    @State private var hovered = false
+
+    private var isSteering: Bool { item.kind == .steering }
+
+    var body: some View {
+        Button(action: onRecall) {
+            HStack(spacing: Theme.Spacing.md) {
+                // 类型标签：转向=即时修正方向（accent 强调）；追问=轮末追加（次级色）
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: isSteering
+                          ? "arrowshape.turn.up.right.fill"
+                          : "arrowshape.turn.up.left.fill")
+                        .font(Theme.Typography.text(10, .semibold))
+                    Text(isSteering ? "转向" : "追问")
+                        .font(Theme.Typography.text(10, .semibold))
+                }
+                .foregroundColor(isSteering ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
+
+                Text(displayText)
+                    .font(Theme.Typography.text(11, .medium))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
+        .help(isSteering
+              ? "转向：本轮生成中即时注入、修正方向 · 点击取回编辑"
+              : "追问：本轮回复完成后自动追加一轮 · 点击取回编辑")
+    }
+
+    /// 展示文本：纯图片队列项给占位文案（对齐 send 的「请查看图片。」兜底语义）。
+    private var displayText: String {
+        if !item.text.isEmpty { return item.text }
+        if !item.images.isEmpty { return "图片 ×\(item.images.count)" }
+        return ""
+    }
+}
+
 // MARK: - 剪贴板胶囊
 
 private struct ClipboardAttachmentCapsule: View {
@@ -1887,6 +2001,8 @@ private struct ChatInputTextView: NSViewRepresentable {
     /// 需由 setMarkedText 回调驱动，避免组字文本与 placeholder 重叠。
     @Binding var isInputEmpty: Bool
     let onSubmit: () -> Void
+    /// ⌥⏎ 追问：生成中入 follow-up 队列 / 非生成中退化普通发送（语义由调用方承载）。
+    let onSubmitFollowUp: () -> Void
     let onEscape: () -> Void
     /// 粘贴/拖入图片（NSImage 数组，由调用方转附件）。
     let onInsertImages: ([NSImage]) -> Void
@@ -2021,15 +2137,24 @@ private struct ChatInputTextView: NSViewRepresentable {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if textView.hasMarkedText() { return false }
                 if NSEvent.modifierFlags.contains(.shift) {
-                    // ⇧⏎ 换行：忽略 field editor 语义，强制插入软换行
+                    // ⇧⏎ 换行：忽略 field editor 语义，强制插入软换行（⌥⇧⏎ 同按 ⇧ 处理）
                     textView.insertNewlineIgnoringFieldEditor(nil)
+                } else if NSEvent.modifierFlags.contains(.option) {
+                    // ⌥⏎ 追问（组字守卫与 ⏎ 一致，上面已先行放行输入法）
+                    parent.onSubmitFollowUp()
                 } else {
                     parent.onSubmit()
                 }
                 return true
             }
-            // ⇧⏎ 在部分系统路径下映射为该命令：交给默认实现插入换行
+            // ⇧⏎ / ⌥⏎ 在默认键绑定（$↩ / ~↩）下多映射为该命令：
+            // ⌥⏎ → 追问（组字守卫同上）；⇧⏎ 及其余 → 交给默认实现插入换行
             if commandSelector == #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)) {
+                if NSEvent.modifierFlags.contains(.option), !NSEvent.modifierFlags.contains(.shift) {
+                    if textView.hasMarkedText() { return false }
+                    parent.onSubmitFollowUp()
+                    return true
+                }
                 return false
             }
             return false
