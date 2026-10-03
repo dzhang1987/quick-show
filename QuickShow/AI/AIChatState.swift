@@ -294,26 +294,104 @@ final class AIChatState: ObservableObject {
                         toolCallId: nil
                     ))
 
-                    // 工具按会话内串行执行，避免同会话并发副作用；不同会话天然并行。
-                    // 每次执行前检查中止。
-                    for call in completedCalls {
+                    // 工具分段执行：连续的 parallelSafe 工具聚成一批并发执行，serial 工具逐个串行执行。
+                    // 无论并行与否，updateToolCallResult 与 wireMessages.append 严格按 completedCalls
+                    // 原始顺序落定，保证工具结果顺序与协议消息顺序不变。
+                    let registry = AIToolRegistry.shared
+                    var callIndex = 0
+                    while callIndex < completedCalls.count {
+                        // 每段开始前检查中止（与旧串行逐次检查语义一致）。
                         if ctx.abortRequested || Task.isCancelled {
                             self.failUnresolvedToolCalls(assistantID, in: sessionId)
                             self.settle(assistantID, state: .aborted, in: sessionId)
                             break roundLoop
                         }
-                        self.updateToolCallStatus(assistantID, callID: call.id, in: sessionId, status: .running)
-                        let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
-                        let result = await AIToolExecutor.shared.execute(call: request)
-                        self.updateToolCallResult(
-                            assistantID,
-                            callID: call.id,
-                            in: sessionId,
-                            result: result.resultJSON,
-                            status: result.status
-                        )
-                        // 工具结果回传模型。
-                        wireMessages.append(ChatCompletionMessage.toolResult(callID: call.id, content: result.resultJSON))
+
+                        let call = completedCalls[callIndex]
+                        guard registry.executionPolicy(for: call.name) == .parallelSafe else {
+                            // serial：保持旧逻辑（执行 → 落定 → 回传 → 下一段顶部再查中止）。
+                            self.updateToolCallStatus(assistantID, callID: call.id, in: sessionId, status: .running)
+                            let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
+                            let result = await AIToolExecutor.shared.execute(call: request)
+                            self.updateToolCallResult(
+                                assistantID,
+                                callID: call.id,
+                                in: sessionId,
+                                result: result.resultJSON,
+                                status: result.status
+                            )
+                            wireMessages.append(ChatCompletionMessage.toolResult(callID: call.id, content: result.resultJSON))
+                            callIndex += 1
+                            continue
+                        }
+
+                        // 收集连续的一段 parallelSafe 调用。
+                        let batchStart = callIndex
+                        var batch: [CompletedToolCall] = []
+                        while callIndex < completedCalls.count,
+                              registry.executionPolicy(for: completedCalls[callIndex].name) == .parallelSafe {
+                            batch.append(completedCalls[callIndex])
+                            callIndex += 1
+                        }
+
+                        // 先在主线程把这批所有卡片批量置为 running。
+                        for item in batch {
+                            self.updateToolCallStatus(assistantID, callID: item.id, in: sessionId, status: .running)
+                        }
+
+                        // 并发执行批内所有调用：子任务只执行并返回结果，绝不触碰 MainActor 状态。
+                        // 中止检查只用 Task.isCancelled（abortStreaming 会同时置 abortRequested 并 cancel 任务），
+                        // 避免在 @Sendable 子任务中捕获非 Sendable 的 ctx；已中止则返回 failed 占位，
+                        // 保证模型侧每条 tool_call 都有配对结果。
+                        let batchResults = await withTaskGroup(of: (Int, ToolExecutionResult).self) { group in
+                            for (offset, item) in batch.enumerated() {
+                                let index = batchStart + offset
+                                group.addTask {
+                                    if Task.isCancelled {
+                                        return (index, ToolExecutionResult(
+                                            callID: item.id,
+                                            name: item.name,
+                                            argumentsJSON: item.arguments,
+                                            resultJSON: AIToolExecutor.encodeJSON(["ok": false, "error": "用户已中止执行"]),
+                                            status: .failed
+                                        ))
+                                    }
+                                    let request = ToolCallRequest(id: item.id, name: item.name, argumentsJSON: item.arguments)
+                                    let result = await AIToolExecutor.shared.execute(call: request)
+                                    return (index, result)
+                                }
+                            }
+                            var collected: [(Int, ToolExecutionResult)] = []
+                            for await item in group {
+                                collected.append(item)
+                            }
+                            return collected
+                        }
+
+                        // 按原始 index 升序落定结果与回传消息，严格保持 completedCalls 顺序。
+                        for (_, result) in batchResults.sorted(by: { $0.0 < $1.0 }) {
+                            self.updateToolCallResult(
+                                assistantID,
+                                callID: result.callID,
+                                in: sessionId,
+                                result: result.resultJSON,
+                                status: result.status
+                            )
+                            wireMessages.append(ChatCompletionMessage.toolResult(callID: result.callID, content: result.resultJSON))
+                        }
+
+                        // 批结束后发生中止：不再处理后续工具段，跳出整个回路。
+                        if ctx.abortRequested || Task.isCancelled {
+                            if callIndex < completedCalls.count {
+                                // 仍有未执行工具：标记失败占位并落定 aborted（等价旧「下一段顶部检查」）。
+                                self.failUnresolvedToolCalls(assistantID, in: sessionId)
+                                self.settle(assistantID, state: .aborted, in: sessionId)
+                            } else {
+                                // 本轮工具已全部落定，不再发起续请求（等价旧「for 循环后的中止检查」）。
+                                self.settle(assistantID, state: .done, in: sessionId)
+                            }
+                            break roundLoop
+                        }
                     }
                     // 工具执行期间发生中止：工具轮已全部落定，不再发起续请求。
                     if ctx.abortRequested || Task.isCancelled {

@@ -77,6 +77,8 @@ private func resolveWhitelistedURL(_ rawPath: String) throws -> URL {
 /// 读取系统剪贴板文本，并检测是否包含图片
 final class ReadClipboardTool: AITool {
     let name = "read_clipboard"
+    /// 纯读剪贴板，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "读取系统剪贴板中的文本内容，并检测剪贴板是否包含图片。"
     var parametersSchema: [String: Any] {
         ["type": "object", "properties": [String: Any](), "required": [String]()]
@@ -207,6 +209,8 @@ final class SystemStatusTool: AITool {
 /// 列出当前以常规方式运行的图形应用
 final class ListRunningAppsTool: AITool {
     let name = "list_running_apps"
+    /// 纯读运行中应用列表，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "列出当前正在运行的常规图形应用（不含后台代理），返回应用名与 Bundle Identifier。"
     var parametersSchema: [String: Any] {
         ["type": "object", "properties": [String: Any](), "required": [String]()]
@@ -287,6 +291,8 @@ final class OpenAppTool: AITool {
 /// 读取白名单目录内的文本文件（≤ 200KB）
 final class ReadFileTool: AITool {
     let name = "read_file"
+    /// 纯读白名单文件，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "读取白名单目录内的 UTF-8 文本文件，文件大小上限 200KB。"
     var parametersSchema: [String: Any] {
         [
@@ -364,6 +370,8 @@ final class WriteFileTool: AITool {
 /// 读取环境变量：优先自定义变量，其次进程环境
 final class GetEnvTool: AITool {
     let name = "get_env"
+    /// 纯读环境变量，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "读取环境变量。先查 QuickShow 自定义变量，未命中再查系统进程环境变量。"
     var parametersSchema: [String: Any] {
         [
@@ -423,6 +431,8 @@ final class SetEnvTool: AITool {
 /// 列出自定义变量名与进程环境变量名（不返回进程变量值，避免泄露敏感信息）
 final class ListEnvTool: AITool {
     let name = "list_env"
+    /// 纯读环境变量名列表，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "列出 QuickShow 自定义环境变量名以及系统进程环境变量名（不返回进程变量的值）。"
     var parametersSchema: [String: Any] {
         ["type": "object", "properties": [String: Any](), "required": [String]()]
@@ -441,6 +451,8 @@ final class ListEnvTool: AITool {
 /// 尽力而为返回宿主状态快照（窗口可见性、侧栏、模型、主题等）
 final class QuickShowStateTool: AITool {
     let name = "get_quickshow_state"
+    /// 纯读宿主状态快照，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "获取 QuickShow 宿主应用的当前状态：面板/AI 窗是否可见、侧栏开关、当前模型、主题与外观等。"
     var parametersSchema: [String: Any] {
         ["type": "object", "properties": [String: Any](), "required": [String]()]

@@ -146,6 +146,8 @@ enum WebToolsConfig {
 /// 联网搜索：调用 Tavily Search API，返回直接答案与相关网页摘要
 final class WebSearchTool: AITool {
     let name = "web_search"
+    /// 纯读联网搜索，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "联网搜索互联网最新信息。输入查询语句，返回 Tavily 生成的直接答案与相关网页摘要列表（含标题、链接、正文片段）。"
 
     var parametersSchema: [String: Any] {
@@ -264,6 +266,8 @@ final class WebSearchTool: AITool {
 /// 抓取并阅读网页：仅支持 text/html 与 text/plain，HTML 手写提取为纯文本
 final class FetchURLTool: AITool {
     let name = "fetch_url"
+    /// 纯读网页抓取，无共享可变状态：并行安全。
+    let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "抓取指定网页并读取其内容，将 HTML 转换为纯文本返回。仅支持 text/html 与 text/plain。"
 
     var parametersSchema: [String: Any] {

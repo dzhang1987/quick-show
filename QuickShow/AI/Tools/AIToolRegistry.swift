@@ -1,6 +1,17 @@
 import AppKit
 import Foundation
 
+// MARK: - 工具执行策略
+
+/// 工具执行策略：决定工具调用在会话回路中可与其他工具并发执行，还是必须逐个串行。
+/// 默认串行（保守）；仅经确认「纯读、无共享可变状态」的工具才标注为 parallelSafe。
+enum ToolExecutionPolicy {
+    /// 纯读、无共享可变状态：可与其他并行安全工具同时执行。
+    case parallelSafe
+    /// 有副作用或共享可变状态：必须逐个串行执行。
+    case serial
+}
+
 // MARK: - AI 工具协议
 
 /// AI 工具协议：内置工具统一实现，由 AIToolExecutor 调度执行
@@ -13,6 +24,8 @@ protocol AITool {
     var parametersSchema: [String: Any] { get }
     /// 危险工具执行前需用户确认
     var isDangerous: Bool { get }
+    /// 执行策略：parallelSafe = 可并行；serial = 必须串行（默认）。
+    var executionPolicy: ToolExecutionPolicy { get }
     /// 执行工具，返回结果 JSON 文本；抛错时由执行器封装为 failed 结果
     func execute(arguments: [String: Any]) async throws -> String
 }
@@ -20,6 +33,8 @@ protocol AITool {
 extension AITool {
     /// 默认非危险：仅明确标注的工具需要用户确认
     var isDangerous: Bool { false }
+    /// 默认串行：未明确标注为并行安全的工具一律保守串行，避免并发副作用。
+    var executionPolicy: ToolExecutionPolicy { .serial }
 }
 
 // MARK: - 协议层模型
@@ -108,5 +123,10 @@ final class AIToolRegistry {
     /// 按名查找（含未启用，用于执行校验时判断“存在但被禁用”）
     func tool(named name: String) -> AITool? {
         tools.first { $0.name == name }
+    }
+
+    /// 查询指定工具名的执行策略；未知工具名返回 .serial（保守处理）。
+    func executionPolicy(for toolName: String) -> ToolExecutionPolicy {
+        tool(named: toolName)?.executionPolicy ?? .serial
     }
 }

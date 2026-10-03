@@ -20,6 +20,13 @@
 - 空态判据单帧空白：空态 overlay 判据直读 store 真源（原经 `state.messages` 的 CombineLatest + removeDuplicates 异步扇出，切换瞬间与 ZStack 直读差一帧出现「ZStack 已空、overlay 仍判非空」）
 - 状态扇出收敛：`$sessions` → `messages` 映射后按值去重（其他会话流式冲刷不再令当前会话视图无效扇出）；会话 id 集合 + removeDuplicates 检测删除，流式冲刷不重复触发
 
+### Performance
+
+- AI 工具调用并行执行（同一轮回复内，AI 窗）：原 `for ... await` 严格串行（3 个 `web_search` 逐个排队）改为分段执行——**连续的 parallelSafe 工具聚批用 `withTaskGroup` 并发执行**，serial 工具逐个串行。新增 `ToolExecutionPolicy`（`AIToolRegistry`）：`parallelSafe` / `serial`，协议默认 `serial`（保守，未知工具名查询亦返回 serial）。逐工具标注：
+  - **parallelSafe（8 个纯读、无共享可变状态）**：`web_search`、`fetch_url`、`read_file`、`read_clipboard`、`list_running_apps`、`get_env`、`list_env`、`get_quickshow_state`
+  - **serial（6 个有副作用或共享状态，绝不并行）**：`run_shell`（任意副作用）、`write_file`（写文件 + 危险确认弹窗）、`write_clipboard`（全局剪贴板互相覆盖）、`set_env`（UserDefaults 非原子读改写、并发丢更新）、`open_app`（启动进程副作用）、`get_system_status`（`SystemStatusProvider.shared` 有可变采样缓存 prevCpuInfo/prevBytes 等，并发数据竞争风险）
+  - 顺序与安全保证：工具结果与 `wireMessages` 严格按 `completedCalls` 原始顺序回填（Chat Completions 协议 tool 结果顺序不变）；批内子任务只执行不触碰 MainActor 状态，store/UI 更新全部回主线程串行落定；abort 语义与旧实现等价（中止时每条 tool_call 都有失败占位配对结果）；危险确认弹窗（`write_file`/`run_shell` 为 serial）天然串行不重叠；`AIToolExecutor` 与各工具 execute 逻辑零改动
+
 ## [1.12.0] - 2026-10-02
 
 ### Added
