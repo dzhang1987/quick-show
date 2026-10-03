@@ -24,6 +24,8 @@
 
 ### Fixed
 
+- AirPods 等蓝牙耳机接入后面板调音量打破系统左右平衡 / 两耳音量不一致 / 音量跳变且「只响应一次就升不上去」：根因是 CoreAudio 读写路径只落单声道——`setVolume`/`toggleMute` 只写 Main element（失败再降级 element 1），而蓝牙耳机在 HAL 层按**左右声道独立 element** 暴露音量，单 element 写入只改到一只耳机；读路径同样只读单声道，读回的可能是未被写入的声道，`adjustVolume` 基于错值迭代即表现为跳变与失效。修法：`StreamConfiguration` 枚举输出声道（Main(0) + 声道 1...N），音量/静音读写统一覆盖全部声道（任一声道失败不影响其余），读取取各声道最大值、静音任一声道为真即视为静音；附带耳机识别改按 `TransportType`（Bluetooth / BluetoothLE）判定，不再只靠设备名匹配
+- 音量状态实时同步：`SystemStatusProvider` 新增 CoreAudio 属性监听（`AudioObjectAddPropertyListener` + `audioChangeSubject`）——系统对象监听默认输出设备切换（AirPods 接入/拔出时音量监听自动迁移到新设备），设备对象监听音量/静音变化；键盘 / 控制中心等外部调音量时面板 ~150ms 内实时刷新（`AppState` 订阅：主线程节流 + 后台队列读值回主线程赋值），不再依赖面板唤起时的周期刷新；自身写音量触发的事件回流读值，天然修正乐观 UI 与实际值的偏差
 - 富卡片静默不渲染（地图工具执行成功但对话中零占位零错误缺失卡片）：两个 SwiftUI 陷阱叠加——① `onChange` 的 action 闭包捕获**旧视图实例**，工具结果落定时读 `self.resultJSON` 恒为旧值空串，解析永远失败静默返回（工具执行中视图即以空 result 插入是常态时序）；② `Group` + 空条件分支会吞掉 `onAppear`（Group 修饰符被转发到不存在的内容上，历史会话回放兜底路径同样失效）。修法：`onChange` 改用传入的 `newValue` 参数解析 + 实体容器 ZStack 替换 Group。定位过程三段式（防再踩的排障范式）：线上会话存档 JSON 证明 `card` 信封数据正常 → 隔离复现实验抓到 `onChange FIRED` 但 `resolveIfNeeded` 被 guard 拦截（action 内读到旧值 count=0）→ 修复对照实验验证渲染成功
 - MKMapView 标注视图未注册崩溃（打开 AI 窗即崩，EXC_BREAKPOINT / SIGTRAP，`_crashOnException` 布局期）：macOS 上 `dequeueReusableAnnotationView(withIdentifier:for:)` 必须先 `mapView.register(MKMarkerAnnotationView.self, forAnnotationViewWithReuseIdentifier:)`，否则标注首次显示（区域变化触发 `viewFor` 回调）抛 `NSInvalidArgumentException` 直接崩溃；此雷在富卡片渲染修复前从未执行过该代码路径故未暴露。修法：`makeNSView` 注册标注视图类 + identifier 提为 Coordinator 共用常量。定位：崩溃报告堆栈全 AppKit 无异常文本（`asi` 为空、Release 二进制 strip 符号）→ 将地图卡视图 + 主题令牌编译成独立 harness 喂真实 payload 稳定复现 SIGTRAP → lldb `-E objc` 异常断点拿到精确 reason
 

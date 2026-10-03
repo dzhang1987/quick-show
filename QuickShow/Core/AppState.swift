@@ -136,6 +136,8 @@ final class AppState: ObservableObject {
     // Now Playing 媒体状态（由 SystemStatusProvider adapter 流桥接，无媒体会话时为 nil）
     @Published var nowPlayingInfo: NowPlayingInfo? = nil
     private var nowPlayingCancellable: AnyCancellable?
+    // CoreAudio 属性监听订阅（外部调音量/切换默认输出设备时实时同步 audioInfo）
+    private var audioChangeCancellable: AnyCancellable?
     
     // 便捷操作与瞬态 Toast 微徽章
     @Published var toastMessage: String? = nil
@@ -334,6 +336,19 @@ final class AppState: ObservableObject {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] info in
                 self?.nowPlayingInfo = info
+            }
+        // CoreAudio 属性监听：键盘/控制中心等外部调音量、切换默认输出设备（AirPods 接入）时
+        // 实时同步音量状态；HAL 事件高频触发，先在主线程节流再去后台队列读值
+        audioChangeCancellable = SystemStatusProvider.shared.audioChangeSubject
+            .throttle(for: .milliseconds(150), scheduler: DispatchQueue.main, latest: true)
+            .sink { [weak self] _ in
+                guard let self = self, self.showAudio else { return }
+                Self.statusRefreshQueue.async {
+                    let info = SystemStatusProvider.shared.getAudioInfo()
+                    DispatchQueue.main.async {
+                        self.audioInfo = info
+                    }
+                }
             }
         refreshAllSystemStatus()
     }
