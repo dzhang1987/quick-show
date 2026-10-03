@@ -4,6 +4,9 @@ import os
 import Security
 import CoreFoundation
 
+// 说明：各工具除协议层 snake_case name 外，另提供中文 displayName 与 category，
+// 仅供设置页/卡片展示；发给模型的 name/schema 与执行链路完全不变。
+
 // MARK: - 联网工具配置
 
 /// web_search 的 Tavily Key 存取（文件存储，敏感信息不落 UserDefaults）+ 环境变量兜底
@@ -146,6 +149,8 @@ enum WebToolsConfig {
 /// 联网搜索：调用 Tavily Search API，返回直接答案与相关网页摘要
 final class WebSearchTool: AITool {
     let name = "web_search"
+    let displayName = "网页搜索"
+    let category: ToolCategory = .web
     /// 纯读联网搜索，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "联网搜索互联网最新信息。输入查询语句，返回 Tavily 生成的直接答案与相关网页摘要列表（含标题、链接、正文片段）。"
@@ -266,6 +271,8 @@ final class WebSearchTool: AITool {
 /// 抓取并阅读网页：仅支持 text/html 与 text/plain，HTML 手写提取为纯文本
 final class FetchURLTool: AITool {
     let name = "fetch_url"
+    let displayName = "抓取网页"
+    let category: ToolCategory = .web
     /// 纯读网页抓取，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "抓取指定网页并读取其内容，将 HTML 转换为纯文本返回。仅支持 text/html 与 text/plain。"

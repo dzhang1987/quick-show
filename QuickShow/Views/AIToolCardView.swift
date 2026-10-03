@@ -86,18 +86,32 @@ private struct ToolCallRow: View {
 
     // MARK: 头部行
 
+    /// 中文展示名：注册表按蛇形名查询；查不到（未知工具 / 旧会话记录）时降级为蛇形名原文。
+    /// 查表为 19 项 first 线性查找，渲染期成本可忽略。
+    private var displayName: String {
+        AIToolRegistry.shared.tool(named: record.name)?.displayName ?? record.name
+    }
+
     private var header: some View {
         Button {
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
         } label: {
             HStack(spacing: Theme.Spacing.lg) {
-                // 工具名：等宽字体，蛇形命名与协议层原文一致
-                Text(record.name)
-                    .font(Theme.Typography.mono(12, .medium))
+                // 主标题：中文展示名（正文常规字族，中文不走等宽）
+                Text(displayName)
+                    .font(Theme.Typography.text(12, .medium))
                     .foregroundColor(Theme.Colors.contentPrimary)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.tail)
                 Spacer(minLength: 0)
+                // 蛇形名降为次要等宽小字：与协议层 / 日志对照用；
+                // 主标题已是蛇形名（降级路径）时不重复展示
+                if displayName != record.name {
+                    Text(record.name)
+                        .font(Theme.Typography.mono(10))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .lineLimit(1)
+                }
                 ToolStatusBadge(status: record.status)
                 Image(systemName: "chevron.right")
                     .font(Theme.Typography.text(9, .semibold))

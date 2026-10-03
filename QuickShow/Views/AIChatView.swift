@@ -1254,6 +1254,11 @@ private struct ChatMessageRow: View, Equatable {
             assistantTextPart
             if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                 AIToolCallCardView(toolCalls: toolCalls)
+                // 富内容卡片：工具结果携带 card 信封（如地图卡）时，紧随工具卡独立成卡渲染（与正文同宽），
+                // 未携带信封的工具调用不产生任何占位
+                ForEach(toolCalls, id: \.id) { record in
+                    RichCardHostView(resultJSON: record.result ?? "")
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

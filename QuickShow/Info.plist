@@ -29,10 +29,10 @@
 	<key>NSCalendarsUsageDescription</key>
 	<string>QuickShow 需要日历权限以在悬浮面板中向您展示即将到来的日程会议。</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-	<string>QuickShow 需要定位权限以读取当前连接的 Wi-Fi 名称 (SSID)。</string>
+	<string>QuickShow 需要定位权限以读取当前 Wi-Fi 名称 (SSID)，并为 AI 地图功能提供当前位置与附近搜索。</string>
 	<key>NSLocationUsageDescription</key>
-	<string>QuickShow 需要定位权限以读取当前连接的 Wi-Fi 名称 (SSID)。</string>
+	<string>QuickShow 需要定位权限以读取当前 Wi-Fi 名称 (SSID)，并为 AI 地图功能提供当前位置与附近搜索。</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>QuickShow 需要定位权限以读取当前连接的 Wi-Fi 名称 (SSID)。</string>
+	<string>QuickShow 需要定位权限以读取当前 Wi-Fi 名称 (SSID)，并为 AI 地图功能提供当前位置与附近搜索。</string>
 </dict>
 </plist>

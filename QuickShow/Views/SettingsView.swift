@@ -1179,48 +1179,70 @@ struct AIServiceSettingsForm: View {
 // 三个配置均直接读写 UserDefaults，后端（AIToolRegistry / BuiltInTools）每次请求 / 执行时直读，
 // 无需通知机制即可即改即生效。本区只做编辑态 + 持久化，不做运行态刷新。
 
-/// 「工具」小节：每个内置工具一行开关（工具名 + 中文简述 + 危险徽标）。
+/// 「工具」小节：内置工具按类别分组（剪贴板/系统状态/文件/环境变量/联网/地图），
+/// 每行开关 = 中文展示名主标题 + 蛇形名次要等宽小字 + 危险徽标 + 中文简述。
 /// 持久化语义：UserDefaults 键 "ai.tools.enabled" 为启用的工具名数组；
 /// 键缺失 = 默认启用（除 run_shell 外全部）——首次进入先按默认值初始化写入，再展示；
 /// 用户翻动任一开关时写入完整启用列表（按注册表顺序）。
+/// 分组纯为渲染层重组，不碰持久化：落盘仍是蛇形名数组，与协议层零耦合。
 private struct AIToolsSettingsSection: View {
-    /// 全部已注册工具（注册表顺序，含默认关闭的 run_shell）。
+    /// 全部已注册工具（注册表顺序，含默认关闭的 run_shell；persistEnabled 落盘顺序的真源）。
     @State private var tools: [AITool] = []
+    /// 分组视图数据（固定组序，组内注册序）。
+    @State private var groups: [(category: ToolCategory, tools: [AITool])] = []
     /// 当前启用的工具名集合（编辑态真源，任何变更即刻写盘）。
     @State private var enabledNames: Set<String> = []
 
     var body: some View {
         Section {
-            ForEach(tools, id: \.name) { tool in
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle(isOn: enabledBinding(for: tool.name)) {
-                        HStack(spacing: 6) {
-                            // 工具名等宽展示（snake_case 与协议层原文一致）
-                            Text(tool.name)
-                                .font(.system(size: Theme.Typography.body, design: .monospaced))
-                            if tool.isDangerous {
-                                dangerousBadge
-                            }
-                        }
-                    }
-                    Text(tool.description)
-                        .font(.system(size: Theme.Typography.footnote))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if tool.name == "run_shell" {
-                        Text("允许 AI 执行任意 shell 命令，有安全风险")
-                            .font(.system(size: Theme.Typography.footnote))
-                            .foregroundColor(Theme.Colors.statusWarning)
-                    }
+            ForEach(Array(groups.enumerated()), id: \.element.category) { index, group in
+                // 组标题：类别中文名（footnote 半重次级色，与工具描述同族但不混——靠字重拉开层级）
+                Text(group.category.label)
+                    .font(.system(size: Theme.Typography.footnote, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.top, index > 0 ? Theme.Spacing.xxl : 0)
+                ForEach(group.tools, id: \.name) { tool in
+                    toolRow(tool)
                 }
-                .padding(.vertical, 2)
             }
         } header: {
             Text("工具")
         } footer: {
-            Text("关闭后 AI 将无法调用对应工具，下一轮对话起生效；危险工具执行前仍会逐个弹窗确认。")
+            Text("按类别分组展示；灰色等宽小字是模型调用的工具标识。关闭后 AI 将无法调用对应工具，下一轮对话起生效；危险工具执行前仍会逐个弹窗确认。")
         }
         .onAppear { loadToolsIfNeeded() }
+    }
+
+    /// 单个工具行：开关（展示名 + 徽标 + 右侧蛇形名）+ 简述 + run_shell 红字警告。
+    private func toolRow(_ tool: AITool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: enabledBinding(for: tool.name)) {
+                HStack(spacing: 6) {
+                    // 中文展示名主标题（正文常规字族，中文不走等宽）
+                    Text(tool.displayName)
+                        .font(.system(size: Theme.Typography.body))
+                    if tool.isDangerous {
+                        dangerousBadge
+                    }
+                    Spacer(minLength: 4)
+                    // 蛇形名降为右侧次要等宽小字（与协议层/日志对照用，不抢主标题）
+                    Text(tool.name)
+                        .font(.system(size: Theme.Typography.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Text(tool.description)
+                .font(.system(size: Theme.Typography.footnote))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if tool.name == "run_shell" {
+                Text("允许 AI 执行任意 shell 命令，有安全风险")
+                    .font(.system(size: Theme.Typography.footnote))
+                    .foregroundColor(Theme.Colors.statusWarning)
+            }
+        }
+        .padding(.vertical, 2)
     }
 
     /// 「危险」徽标：警示红小胶囊。
@@ -1258,6 +1280,7 @@ private struct AIToolsSettingsSection: View {
     private func loadToolsIfNeeded() {
         let registry = AIToolRegistry.shared
         tools = registry.allTools()
+        groups = registry.toolsGroupedByCategory()
         let defaults = UserDefaults.standard
         if let stored = defaults.stringArray(forKey: AIToolRegistry.enabledToolsKey) {
             enabledNames = Set(stored)

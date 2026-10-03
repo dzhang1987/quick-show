@@ -20,6 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 确保在 Dock 程序坞上完全隐藏图标，仅在状态栏与快捷浮动面板常驻
         NSApp.setActivationPolicy(.accessory)
 
+        // 注册内置富卡片（地图卡等）：须在任何聊天视图渲染前完成
+        RichCardRegistry.shared.registerBuiltIns()
+
         // 尽早安装通知代理：通知点击可能在冷启动时先于用户交互到达
         AICompletionNotifier.shared.installDelegateIfNeeded()
 

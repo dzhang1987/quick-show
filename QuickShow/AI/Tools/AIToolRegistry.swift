@@ -12,12 +12,43 @@ enum ToolExecutionPolicy {
     case serial
 }
 
+// MARK: - 工具分类
+
+/// 内置工具分类：设置页分组与展示用。
+/// `rawValue` 稳定，`allCases` 即固定分组顺序（剪贴板/系统状态/文件/环境变量/联网/地图）。
+enum ToolCategory: String, CaseIterable {
+    case clipboard
+    case system
+    case files
+    case environment
+    case web
+    case map
+
+    /// 分组中文名
+    var label: String {
+        switch self {
+        case .clipboard: return "剪贴板"
+        case .system: return "系统状态"
+        case .files: return "文件"
+        case .environment: return "环境变量"
+        case .web: return "联网"
+        case .map: return "地图"
+        }
+    }
+}
+
 // MARK: - AI 工具协议
 
-/// AI 工具协议：内置工具统一实现，由 AIToolExecutor 调度执行
+/// AI 工具协议：内置工具统一实现，由 AIToolExecutor 调度执行。
+/// displayName / category 仅供 UI 展示，不参与模型调用：发给模型的 name/schema
+/// 与执行链路保持 snake_case 原样，`ai.tools.enabled` 落盘仍是蛇形名数组（存量零迁移）。
 protocol AITool {
     /// snake_case 工具名
     var name: String { get }
+    /// 用户界面展示名（中文，如「网页搜索」）；协议层/JSON 仍用蛇形 name
+    var displayName: String { get }
+    /// 工具分类（设置页分组依据）
+    var category: ToolCategory { get }
     /// 给模型看的功能说明（中文）
     var description: String { get }
     /// OpenAI function calling 的 JSON Schema（object 结构）
@@ -103,7 +134,12 @@ final class AIToolRegistry {
             QuickShowStateTool(),
             WebSearchTool(),
             FetchURLTool(),
-            RunShellTool()
+            RunShellTool(),
+            GeocodeTool(),
+            SearchPlacesTool(),
+            PlanRouteTool(),
+            ShowMapTool(),
+            MyLocationTool()
         ]
     }
 
@@ -128,5 +164,15 @@ final class AIToolRegistry {
     /// 查询指定工具名的执行策略；未知工具名返回 .serial（保守处理）。
     func executionPolicy(for toolName: String) -> ToolExecutionPolicy {
         tool(named: toolName)?.executionPolicy ?? .serial
+    }
+
+    /// 全部工具按分类分组：固定组序（ToolCategory.allCases），组内保持注册顺序；
+    /// 空分类不返回。供设置页分组渲染。
+    func toolsGroupedByCategory() -> [(category: ToolCategory, tools: [AITool])] {
+        let grouped = Dictionary(grouping: tools, by: { $0.category })
+        return ToolCategory.allCases.compactMap { category in
+            guard let items = grouped[category], !items.isEmpty else { return nil }
+            return (category, items)
+        }
     }
 }
