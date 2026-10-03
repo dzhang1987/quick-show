@@ -32,6 +32,8 @@ struct AIChatView: View {
         self.onClose = onClose
         // 侧栏显隐偏好与 AIWindowManager 共用同一 UserDefaults 键（窗口首次取尺寸早于视图出现）
         _sidebarVisible = State(initialValue: UserDefaults.standard.bool(forKey: AIWindowManager.sidebarVisibleKey))
+        // LRU 常驻集合以当前会话起步（避免首帧 ZStack 为空导致的闪烁/空窗）。
+        _residentSessionIds = State(initialValue: state.store.currentSessionId.map { [$0] } ?? [])
     }
 
     /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
@@ -39,8 +41,6 @@ struct AIChatView: View {
     /// 阅读列最大宽度：行长控制（对标 DeepSeek/CC），窗口更宽时整列居中、两侧透出玻璃；
     /// 消息列与输入坞共用同一限宽，保证左缘/右缘对齐。
     private let contentMaxWidth: CGFloat = 600
-    /// 滚动到底部的锚点 id。
-    private let bottomAnchorID = "aiChat.bottom"
 
     /// 端点配置可用性：hasConfiguredEndpoint 读 UserDefaults/Keychain，非 @Published，
     /// 故在视图出现与关键窗口激活时主动刷新（避免设置后回到对话窗仍显示引导）。
@@ -51,30 +51,25 @@ struct AIChatView: View {
     @State private var hasClipboardText = false
     /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
     @State private var hasClipboardImage = false
-    /// 流式滚动节流时间戳：token 高频到达时限制滚动频率，避免每 token 触发布局重排。
-    @State private var lastAutoScrollAt: Date = .distantPast
-    /// 底部跟随态：true = 贴底跟随流式输出；用户主动上滚离开底部后置 false 停在原地，
-    /// 滚回底部（哨兵重现）自动恢复跟随。
-    @State private var stickToBottom = true
-    /// 最近一次用户滚轮时间戳：区分「用户上滚离开底部」与「流式内容增长把哨兵顶出视口」
-    /// （后者不解除跟随）。macOS 13 无 onScrollPhaseChange，滚轮意图只能走事件监听。
-    @State private var lastUserScrollAt: Date = .distantPast
-    /// 底部哨兵可见性（原始信号，供滚轮方向判定用；跟随决策由 stickToBottom 承担）。
-    @State private var bottomSentinelVisible = true
-    /// AI 窗滚轮监听（不消费事件，只记录滚动意图时间戳/方向上滚时即时解除跟随）。
+    /// AI 窗滚轮监听（窗口级；意图经 SessionScrollRelay 路由到当前活跃会话视图）。
     @State private var scrollWheelMonitor = AIChatScrollWheelMonitor()
+    /// 活跃会话滚轮意图中继：窗口级滚轮监听只有一个，需路由到「当前活跃会话视图」的
+    /// 跟随状态。class 引用稳定，避免 @State 闭包在事件回调中的捕获时序与兄弟视图注册竞态。
+    @State private var scrollRelay = SessionScrollRelay()
     /// 会话窄栏显隐（持久化到 UserDefaults，窗口宽度联动见 AIWindowManager）。
     @State private var sidebarVisible = false
-    /// C（冷启动白屏修复）：首载装载态。冷启动首帧为 true——消息行入场过渡降为
-    /// .identity、列表动画禁用：冷启动首帧 LazyVStack 惰性实例化与窗口上屏/渲染
-    /// 事务竞态时，opacity 过渡的 CA 动画会卡在近零透明度且永不完成（主内容区呈
-    /// 白屏 + 幽灵残影）；首帧布局完成后的下一 runloop 翻回 false，之后流式新消息
-    /// 恢复入场淡入。切会话是窗口在屏的正常 diff 重渲染，不受此标志影响。
-    @State private var isInitialHistoryLoad = true
+    /// 会话视图树 LRU 常驻集合（0 = 最近使用）。切换会话只改 opacity，视图常驻零重建：
+    /// 滚动位置/贴底跟随/流式状态随视图树天然保留，位置记忆不再依赖 scrollTo 时序。
+    /// 超上限 K 时淘汰尾部会话（其视图卸载，重挂载时用 scrollSnapshots 兜底恢复）。
+    @State private var residentSessionIds: [UUID] = []
+    /// LRU 常驻上限：活跃会话 + 最近 3 个，内存与保活收益的折中。
+    private let residentSessionLimit = 4
+    /// 按会话保存的滚动快照：仅 LRU 驱逐后的重挂载恢复需要（常驻会话靠视图树天然保留位置）。
+    @State private var scrollSnapshots: [UUID: ScrollSnapshot] = [:]
+    /// 上一次观察到的会话 id 集合基线：检测会话被删除，清理快照与常驻集合中的死项。
+    @State private var knownSessionIds: Set<UUID> = []
     /// ⌘F 聚焦令牌：递增即让侧栏搜索框聚焦。
     @State private var searchFocusRequest = 0
-    /// 行内重命名进行中的会话 id（非 nil 时 ESC 优先取消重命名，由按键监听消费）。
-    @State private var renamingSessionId: UUID?
     /// 点击放大预览的图片附件（非 nil 时显示覆盖层，ESC/点击关闭）。
     @State private var zoomedAttachment: ChatImageAttachment?
     /// 模型列表与当前选中（AIChatService 非 @Published，随环境刷新主动拉取）。
@@ -103,7 +98,10 @@ struct AIChatView: View {
             AIChatSidebarView(
                 store: state.store,
                 searchFocusRequest: searchFocusRequest,
-                renamingSessionId: $renamingSessionId,
+                renamingSessionId: $state.renamingSessionId,
+                streamingSessionIds: state.streamingSessionIds,
+                unreadSessionIds: state.unreadSessionIds,
+                onAbortStreaming: { id in state.abortStreaming(sessionId: id) },
                 onSelect: { id in state.selectSession(id: id) },
                 onNewSession: { newSession() }
             )
@@ -181,6 +179,24 @@ struct AIChatView: View {
         .onChange(of: state.inputText) { newValue in
             inputEmpty = newValue.isEmpty
         }
+        // 会话切换检测（根级恒挂载）：把新会话置入 LRU 常驻集合头部，超限淘汰尾部（视图卸载）。
+        // dropFirst 跳过订阅时重放的当前值，避免首挂载误判；常驻集合已由 init 以当前会话起步。
+        .onReceive(state.store.$currentSessionId.dropFirst()) { newId in
+            updateResidency(for: newId)
+        }
+        // 会话删除检测：清理被删会话的滚动快照与 LRU 常驻项，防死项累积。
+        // 以 id 集合 + removeDuplicates 收敛触发频率（流式冲刷不改 id 集合，不重复扇出）；
+        // 初始订阅重放时 knownSessionIds 为空，subtracting 结果为空，不误判。
+        .onReceive(state.store.$sessions.map { Set($0.map { $0.id }) }.removeDuplicates()) { currentIds in
+            let disappeared = knownSessionIds.subtracting(currentIds)
+            if !disappeared.isEmpty {
+                for id in disappeared {
+                    scrollSnapshots.removeValue(forKey: id)
+                    residentSessionIds.removeAll { $0 == id }
+                }
+            }
+            knownSessionIds = currentIds
+        }
     }
 
     // MARK: - 窗口边缘 rim light
@@ -221,24 +237,33 @@ struct AIChatView: View {
 
     // MARK: - 主列（对话区 + 浮岛输入坞）
 
+    /// 空态判据与 ZStack 同源：直读 store 当前会话，而非 `state.messages`（后者经
+    /// CombineLatest + removeDuplicates 异步扇出，切换瞬间可能与 ZStack 直读的 store
+    /// 真源差一帧——出现「ZStack 已空、overlay 判据仍非空」的单帧空白）。
+    private var activeSessionMessagesEmpty: Bool {
+        state.store.currentSession?.messages.isEmpty ?? true
+    }
+
     private var mainColumn: some View {
         VStack(spacing: 0) {
             windowTopBar
 
-            // 三态：未配置引导 / 空态欢迎页 / 消息列表——铺满窗口主体
-            // （输入坞浮岛 overlay 在底部，欢迎/引导页加底部留白对齐坞上视觉中心）
-            if !configured && state.messages.isEmpty {
-                UnconfiguredGuideView(onOpenSettings: onOpenSettings)
-                    .padding(.bottom, Theme.Layout.chatDockClearance)
-            } else if state.messages.isEmpty {
-                WelcomeView(
-                    hasClipboardText: hasClipboardText,
-                    onAttachClipboard: { attachClipboard() }
-                )
-                .padding(.bottom, Theme.Layout.chatDockClearance)
-            } else {
-                messageList
-            }
+            // 消息列表容器常驻（ZStack 多会话树保活，绝不可插拔卸载——否则保活失效）。
+            // 空态（未配置引导 / 欢迎页）以 overlay 盖在其上，视觉布局与原三态分支等价；
+            // 空会话在 ZStack 内渲染 EmptyView，空态由本 overlay 承担。
+            messageList
+                .overlay {
+                    if !configured && activeSessionMessagesEmpty {
+                        UnconfiguredGuideView(onOpenSettings: onOpenSettings)
+                            .padding(.bottom, Theme.Layout.chatDockClearance)
+                    } else if activeSessionMessagesEmpty {
+                        WelcomeView(
+                            hasClipboardText: hasClipboardText,
+                            onAttachClipboard: { attachClipboard() }
+                        )
+                        .padding(.bottom, Theme.Layout.chatDockClearance)
+                    }
+                }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。
@@ -298,135 +323,42 @@ struct AIChatView: View {
     // MARK: - 消息列表
 
     private var messageList: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical, showsIndicators: false) {
-                // 三级间距节奏：轮次组间 36（chatGroupGap）＞ 组内 10（xl）＞ 行内段落档，
-                // 拉开「轮次 ↔ 同轮连续消息」的层级差，形成分组呼吸感
-                LazyVStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
-                    ForEach(groupMessages(state.messages)) { group in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-                            ForEach(group.messages) { message in
-                                ChatMessageRow(
-                                    message: message,
-                                    // 仅最后一条已落定/已中止的助手消息附「重新生成」
-                                    canRegenerate: message.id == lastRegeneratableAssistantId,
-                                    onRetry: { state.retryLast() },
-                                    onRegenerate: { state.retryLast() },
-                                    onTapImage: { attachment in
-                                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                                            zoomedAttachment = attachment
-                                        }
-                                    }
-                                )
-                                // .equatable()：message 未变的历史行直接跳过重建，
-                                // 流式期间仅最后一行 diff（配合 State 单条 mutate，避免全列表重排/重渲染）
-                                .equatable()
-                                // 以稳定 id 渲染；State 只 mutate content，不改 id
-                                .id(message.id)
-                                // 落定消息入场：0.16s 淡入 + 2pt 上移（offset 是渲染位移，不参与布局，列表不跳动）
-                                // 首载装载期间降为 .identity：无 CA 动画可被窗口上屏竞态卡死（见 isInitialHistoryLoad）
-                                .transition(isInitialHistoryLoad
-                                    ? .identity
-                                    : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
-                            }
+        // 多会话视图树保活：每个常驻会话一份完整独立的 ScrollViewReader+ScrollView+LazyVStack
+        // 叠在 ZStack 中，切换只切 opacity/allowsHitTesting——零身份重建、零重新解析。
+        // LRU 顺序由 residentSessionIds 维护；隐藏会话仍随 store 失效重求值，但 .equatable()
+        // 行会跳过未变内容，开销与原单会话同量级。
+        ZStack(alignment: .top) {
+            ForEach(residentSessionIds, id: \.self) { sid in
+                let isActive = sid == state.store.currentSessionId
+                SessionMessageList(
+                    sessionId: sid,
+                    isActive: isActive,
+                    state: state,
+                    messages: state.store.messages(in: sid),
+                    onTapImage: { attachment in
+                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                            zoomedAttachment = attachment
                         }
-                    }
-                    // 坞顶留白 + 底部哨兵（一体两段）：
-                    // ① 留白 = 浮岛坞高 + 缝，滚到底时末条消息完整露出坞顶；
-                    // ② 哨兵即滚动锚点且位于内容绝对末尾——scrollTo(.bottom) 恒等于
-                    //    滚到绝对底部（旧实现锚点在留白之前，锚对齐视口底缘后留白被
-                    //    留在屏外，末条消息被浮岛坞遮挡）；
-                    // ③ 哨兵可见性即「用户是否在底部」的探测信号（见 stickToBottom）。
-                    Color.clear
-                        .frame(height: Theme.Layout.chatDockClearance)
-                    Color.clear
-                        .frame(height: 1)
-                        .id(bottomAnchorID)
-                        .onAppear {
-                            bottomSentinelVisible = true
-                            // 到达底部（用户滚回 / 程序滚动）一律恢复跟随
-                            stickToBottom = true
-                        }
-                        .onDisappear {
-                            bottomSentinelVisible = false
-                            // 仅当消失由用户滚轮驱动才解除跟随；
-                            // 流式内容增长顶出哨兵属跟随过程中的瞬时态，忽略
-                            if Date().timeIntervalSince(lastUserScrollAt) < 0.5 {
-                                stickToBottom = false
-                            }
-                        }
-                }
-                // 新消息插入时应用入场过渡（动画只挂 count 变化，流式 mutate 不触发）；
-                // 首载装载期间禁用（见 isInitialHistoryLoad）
-                .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
-                           value: state.messages.count)
-                // 阅读列限宽 + 居中：先限内容宽，再整体居中于滚动区（窗口加宽时两侧透玻璃）
-                .frame(maxWidth: contentMaxWidth, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.section)
-                .padding(.top, Theme.Spacing.section)
-                // 底部留白已并入 LazyVStack 末尾的「留白 + 哨兵」两段（坞是 overlay，不占列表布局；
-                // 滚动中消息从玻璃坞底下穿过被糊掉透出）
-                .frame(maxWidth: .infinity)
-            }
-            .onAppear {
-                scrollToBottom(proxy, animated: false)
-                // 首帧布局完成后的下一 runloop 解除装载态（此后新消息恢复入场动画）
-                DispatchQueue.main.async { isInitialHistoryLoad = false }
-            }
-            // 新一轮消息落定（发送/重试/切会话）：用户刚发起动作，强制回底并恢复跟随
-            .onChange(of: state.messages.count) { _ in
-                stickToBottom = true
-                scrollToBottom(proxy, animated: true)
-            }
-            // 流式增量：贴底时才跟随（用户上滚阅读历史时停在原地）；
-            // 内容变化触发，节流 0.12s + 非动画滚动（避免每 token 抖动）
-            .onChange(of: state.messages.last?.content) { _ in
-                guard state.isStreaming, stickToBottom else { return }
-                let now = Date()
-                guard now.timeIntervalSince(lastAutoScrollAt) > 0.12 else { return }
-                lastAutoScrollAt = now
-                scrollToBottom(proxy, animated: false)
-            }
-            // 流式结束：贴底时补一次动画滚动，确保末尾完整可见
-            .onChange(of: state.isStreaming) { streaming in
-                if !streaming, stickToBottom { scrollToBottom(proxy, animated: true) }
+                    },
+                    scrollSnapshots: $scrollSnapshots,
+                    scrollRelay: scrollRelay
+                )
+                .opacity(isActive ? 1 : 0)
+                .allowsHitTesting(isActive)
             }
         }
     }
 
-    /// 连续同角色消息分组（组 id 取首条消息 id，保证 SwiftUI 身份稳定不闪动）。
-    private func groupMessages(_ messages: [ChatMessage]) -> [MessageGroup] {
-        var groups: [MessageGroup] = []
-        for message in messages {
-            if let last = groups.last, last.role == message.role, message.role != .system {
-                groups[groups.count - 1].messages.append(message)
-            } else {
-                groups.append(MessageGroup(id: message.id, role: message.role, messages: [message]))
-            }
+    /// LRU 常驻集合更新：新会话移到头部；超出上限淘汰尾部（其视图卸载，重挂载时快照兜底）。
+    private func updateResidency(for newId: UUID?) {
+        guard let newId else { return }
+        var updated = residentSessionIds
+        updated.removeAll { $0 == newId }
+        updated.insert(newId, at: 0)
+        if updated.count > residentSessionLimit {
+            updated.removeLast(updated.count - residentSessionLimit)
         }
-        return groups
-    }
-
-    /// 最后一条可重新生成的助手消息 id（落定或中止态；失败态气泡内已有重试按钮，不重复提供）。
-    private var lastRegeneratableAssistantId: UUID? {
-        guard !state.isStreaming else { return nil }
-        return state.messages.last { message in
-            guard message.role == .assistant else { return false }
-            switch message.state {
-            case .done, .aborted: return true
-            default: return false
-            }
-        }?.id
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        if animated {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-            }
-        } else {
-            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-        }
+        if updated != residentSessionIds { residentSessionIds = updated }
     }
 
     // MARK: - 输入区（浮岛输入坞）
@@ -762,7 +694,7 @@ struct AIChatView: View {
 
     /// 新建会话（⌘N 与侧栏按钮共用）：若正处于行内重命名则先退出。
     private func newSession() {
-        renamingSessionId = nil
+        state.renamingSessionId = nil
         _ = state.newSession()
     }
 
@@ -785,8 +717,8 @@ struct AIChatView: View {
     // MARK: - 快捷键监听（⌘N/⌘B/⌘F + 重命名/放大态 ESC 先行消费）
 
     private func installKeyMonitor() {
-        keyMonitor.isRenaming = { renamingSessionId != nil }
-        keyMonitor.onCancelRename = { renamingSessionId = nil }
+        keyMonitor.isRenaming = { AIChatState.shared.renamingSessionId != nil }
+        keyMonitor.onCancelRename = { AIChatState.shared.renamingSessionId = nil }
         keyMonitor.isZooming = { zoomedAttachment != nil }
         keyMonitor.onDismissZoom = {
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
@@ -802,19 +734,21 @@ struct AIChatView: View {
         }
         keyMonitor.install()
 
-        // 滚轮意图监听：哨兵消失时据此区分用户上滚与内容增长；
-        // 已离底时用户继续上滚即时解除跟随（不等下次哨兵事件，消除一次回拽）
+        // 滚轮意图监听：窗口级只此一份，经 SessionScrollRelay 路由到当前活跃会话视图的
+        // 跟随状态（活跃会话在 isActive 变化时注册/注销自己的处理闭包）。
         scrollWheelMonitor.onUserScroll = { scrollingUp in
-            lastUserScrollAt = Date()
-            if scrollingUp, !bottomSentinelVisible {
-                stickToBottom = false
-            }
+            scrollRelay.relay(scrollingUp: scrollingUp)
         }
         scrollWheelMonitor.install()
     }
 
-    /// ESC 两阶段语义（输入框聚焦时的兜底路径）：① 流式中先中止生成；② 否则关窗还焦点。
+    /// ESC 三阶段语义（输入框聚焦时的兜底路径）：
+    /// ① 行内重命名进行中 → 先取消重命名（不关窗、不中止流）；② 流式中 → 中止生成；③ 否则关窗还焦点。
     private func handleEscape() {
+        if state.renamingSessionId != nil {
+            state.renamingSessionId = nil
+            return
+        }
         if state.isStreaming {
             state.abortStreaming()
         } else {
@@ -917,6 +851,267 @@ private struct MessageGroup: Identifiable {
     let id: UUID
     let role: ChatMessage.Role
     var messages: [ChatMessage]
+}
+
+/// 单会话滚动快照：切走时记录，切回时据此恢复阅读位置。
+private struct ScrollSnapshot {
+    /// 离开时数组序最靠前的可见消息 id（nil 表示当时无可见消息）。
+    var topVisibleMessageID: UUID?
+    /// 离开时是否处于贴底跟随态；true 则切回一律贴底。
+    var stickToBottom: Bool
+}
+
+// MARK: - 活跃会话滚轮意图中继
+
+/// 窗口级滚轮监听只有一个，需路由到「当前活跃会话视图」的跟随状态。
+/// class 引用稳定：避免 @State 闭包在事件回调中的捕获时序问题，也避免兄弟会话
+/// 在 isActive 切换时互相覆盖处理闭包（用 activeSessionId 归属校验）。
+@MainActor
+private final class SessionScrollRelay {
+    private(set) var activeSessionId: UUID?
+    private var handler: ((Bool) -> Void)?
+
+    func register(sessionId: UUID, handler: @escaping (Bool) -> Void) {
+        activeSessionId = sessionId
+        self.handler = handler
+    }
+
+    /// 仅当注销者正是当前注册者时才清除（防旧会话的 onChange(false) 误清新会话的注册）。
+    func unregister(sessionId: UUID) {
+        guard activeSessionId == sessionId else { return }
+        activeSessionId = nil
+        handler = nil
+    }
+
+    func relay(scrollingUp: Bool) { handler?(scrollingUp) }
+}
+
+// MARK: - 单会话消息列表（视图树保活单元）
+
+/// 单会话消息列表：每个常驻会话一份完整独立的 ScrollViewReader+ScrollView+LazyVStack，
+/// 滚动位置/贴底跟随/首挂载态全部私有化随视图树保活——切会话只切 opacity，零身份重建。
+/// 由父级 AIChatView 的 LRU 常驻集合（residentSessionIds）驱动挂载/卸载。
+@MainActor
+private struct SessionMessageList: View {
+    let sessionId: UUID
+    let isActive: Bool
+    /// 会话门面（读取本会话流式状态、发起重试）；更新由父级重渲染驱动。
+    let state: AIChatState
+    /// 本会话消息（父级传入；隐藏会话无需独立订阅 store）。
+    let messages: [ChatMessage]
+    let onTapImage: (ChatImageAttachment) -> Void
+    @Binding var scrollSnapshots: [UUID: ScrollSnapshot]
+    let scrollRelay: SessionScrollRelay
+
+    private let bottomAnchorID = "aiChat.bottom"
+    private let contentMaxWidth: CGFloat = 600
+
+    /// 本会话首载装载态：冷启动与 LRU 重挂载时抑制入场动画，防窗口上屏竞态白屏。
+    @State private var isInitialHistoryLoad = true
+    /// 本会话贴底跟随态（随视图树保活，切走保留）。
+    @State private var stickToBottom = true
+    /// 本会话流式滚动节流时间戳。
+    @State private var lastAutoScrollAt: Date = .distantPast
+    /// 本会话最近一次用户滚轮时间戳。
+    @State private var lastUserScrollAt: Date = .distantPast
+    /// 本会话底部哨兵可见性（用户滚轮方向判定用）。
+    @State private var bottomSentinelVisible = true
+    /// 本会话可见消息 id 集合（切走时取数组序最靠前者作恢复锚点）。
+    @State private var visibleMessageIDs: Set<UUID> = []
+
+    private var isStreamingSession: Bool { state.isStreaming(sessionId: sessionId) }
+
+    var body: some View {
+        if messages.isEmpty {
+            // 空会话在 ZStack 中不渲染内容；空态欢迎页/引导页由外层 overlay 承担。
+            EmptyView()
+        } else {
+            scrollContent
+        }
+    }
+
+    private var scrollContent: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                // 三级间距节奏与原单会话一致
+                LazyVStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
+                    ForEach(groupMessages(messages)) { group in
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                            ForEach(group.messages) { message in
+                                ChatMessageRow(
+                                    message: message,
+                                    canRegenerate: message.id == lastRegeneratableAssistantId,
+                                    onRetry: { if isActive { state.retryLast() } },
+                                    onRegenerate: { if isActive { state.retryLast() } },
+                                    onTapImage: onTapImage
+                                )
+                                .equatable()
+                                .id(message.id)
+                                .onAppear { visibleMessageIDs.insert(message.id) }
+                                .onDisappear { visibleMessageIDs.remove(message.id) }
+                                .transition(isInitialHistoryLoad
+                                    ? .identity
+                                    : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
+                            }
+                        }
+                    }
+                    // 坞顶留白 + 底部哨兵（一体两段，语义同原实现）
+                    Color.clear
+                        .frame(height: Theme.Layout.chatDockClearance)
+                    Color.clear
+                        .frame(height: 1)
+                        .id(bottomAnchorID)
+                        .onAppear {
+                            bottomSentinelVisible = true
+                            stickToBottom = true
+                        }
+                        .onDisappear {
+                            bottomSentinelVisible = false
+                            // 仅当消失由用户滚轮驱动才解除跟随；流式增长顶出属瞬时态，忽略
+                            if Date().timeIntervalSince(lastUserScrollAt) < 0.5 {
+                                stickToBottom = false
+                            }
+                        }
+                }
+                .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
+                           value: messages.count)
+                .frame(maxWidth: contentMaxWidth, alignment: .leading)
+                .padding(.horizontal, Theme.Spacing.section)
+                .padding(.top, Theme.Spacing.section)
+                .frame(maxWidth: .infinity)
+            }
+            .onAppear {
+                registerRelayIfActive()
+                // 首帧布局完成后的下一 runloop：恢复位置（快照优先，否则贴底）+ 解除装载态
+                DispatchQueue.main.async {
+                    restoreScroll(proxy)
+                    isInitialHistoryLoad = false
+                }
+            }
+            // 卸载兜底保存快照：覆盖「同 runloop 连续切换、中间会话以 isActive=false 首次建树
+            // 导致 onChange(of: isActive) 不触发、无快照」的反例（LRU 驱逐后重挂载会被强制贴底）。
+            // 正常失活（非卸载）由 onChange(isActive=false) 保存；saveSnapshot 幂等，重复无害。
+            .onDisappear { saveSnapshot() }
+            // 本会话消息数变化：区分「用户发送/重试」与「切回隐藏期间增长过的会话」——
+            // 前者末尾新增 user 消息，无论此前是否上滚一律回底；后者仅在贴底跟随时回底，
+            // 否则保留用户的阅读位置（避免强拉到底破坏位置记忆）。
+            .onChange(of: messages.count) { _ in
+                guard isActive else { return }
+                if messages.last?.role == .user {
+                    stickToBottom = true
+                    scrollToBottom(proxy, animated: true)
+                } else if stickToBottom {
+                    scrollToBottom(proxy, animated: true)
+                }
+            }
+            // 流式增量：仅活跃 + 本会话生成中 + 贴底时跟随；节流 0.12s 非动画
+            .onChange(of: messages.last?.content) { _ in
+                guard isActive, isStreamingSession, stickToBottom else { return }
+                let now = Date()
+                guard now.timeIntervalSince(lastAutoScrollAt) > 0.12 else { return }
+                lastAutoScrollAt = now
+                scrollToBottom(proxy, animated: false)
+            }
+            // 本会话流式结束：贴底时补一次动画滚动
+            .onChange(of: isStreamingSession) { streaming in
+                if !streaming, isActive, stickToBottom { scrollToBottom(proxy, animated: true) }
+            }
+            // 活跃态切换：注册/注销滚轮路由；切回活跃时补滚（隐藏期间流式未跟随）
+            .onChange(of: isActive) { active in
+                if active {
+                    registerRelayIfActive()
+                    if stickToBottom {
+                        DispatchQueue.main.async { scrollToBottom(proxy, animated: false) }
+                    }
+                } else {
+                    saveSnapshot()
+                    scrollRelay.unregister(sessionId: sessionId)
+                }
+            }
+        }
+    }
+
+    // MARK: - 滚轮路由
+
+    private func registerRelayIfActive() {
+        guard isActive else { return }
+        scrollRelay.register(sessionId: sessionId) { scrollingUp in
+            handleUserScrollIntent(scrollingUp)
+        }
+    }
+
+    /// 用户滚轮意图：记录时间戳；已离底时继续上滚即时解除跟随（消除一次回拽）。
+    private func handleUserScrollIntent(_ scrollingUp: Bool) {
+        lastUserScrollAt = Date()
+        if scrollingUp, !bottomSentinelVisible {
+            stickToBottom = false
+        }
+    }
+
+    // MARK: - 快照
+
+    /// 切走时保存：数组序最靠前的可见消息 id + 当前贴底态（此时视图尚在、可见集合有效）。
+    private func saveSnapshot() {
+        let topVisibleID = messages.first { visibleMessageIDs.contains($0.id) }?.id
+        scrollSnapshots[sessionId] = ScrollSnapshot(
+            topVisibleMessageID: topVisibleID,
+            stickToBottom: stickToBottom
+        )
+    }
+
+    /// 挂载（首次 / LRU 重挂载）时恢复：
+    /// - 有非贴底快照且锚点仍在 → 无动画定位到锚点顶部，保持阅读位置；
+    /// - 否则 → 无动画贴底并恢复跟随（含「切回会话生成中且离开时贴底」自然落此分支）。
+    private func restoreScroll(_ proxy: ScrollViewProxy) {
+        if let snapshot = scrollSnapshots[sessionId],
+           !snapshot.stickToBottom,
+           let topID = snapshot.topVisibleMessageID,
+           messages.contains(where: { $0.id == topID }) {
+            stickToBottom = false
+            proxy.scrollTo(topID, anchor: .top)
+        } else {
+            stickToBottom = true
+            scrollToBottom(proxy, animated: false)
+        }
+    }
+
+    private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) {
+                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
+        } else {
+            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+        }
+    }
+
+    // MARK: - 分组 / 可重生成
+
+    /// 连续同角色消息分组（组 id 取首条消息 id，保证 SwiftUI 身份稳定不闪动）。
+    private func groupMessages(_ messages: [ChatMessage]) -> [MessageGroup] {
+        var groups: [MessageGroup] = []
+        for message in messages {
+            if let last = groups.last, last.role == message.role, message.role != .system {
+                groups[groups.count - 1].messages.append(message)
+            } else {
+                groups.append(MessageGroup(id: message.id, role: message.role, messages: [message]))
+            }
+        }
+        return groups
+    }
+
+    /// 最后一条可重新生成的助手消息 id：仅活跃会话 + 本会话非生成中时提供
+    /// （重试动作只对当前会话有效，隐藏会话不显示按钮）。
+    private var lastRegeneratableAssistantId: UUID? {
+        guard isActive, !isStreamingSession else { return nil }
+        return messages.last { message in
+            guard message.role == .assistant else { return false }
+            switch message.state {
+            case .done, .aborted: return true
+            default: return false
+            }
+        }?.id
+    }
 }
 
 private struct ChatMessageRow: View, Equatable {
@@ -1260,7 +1455,7 @@ private struct StreamingMarkdownContentView: View {
     @State private var lastRenderAt: Date = .distantPast
 
     var body: some View {
-        AssistantMarkdownView(content: rendered)
+        AssistantMarkdownView(content: rendered, useCache: false)
             .onAppear {
                 rendered = content
                 lastRenderAt = Date()
@@ -1532,9 +1727,13 @@ private struct ChatInputTextView: NSViewRepresentable {
 
         context.coordinator.textView = textView
         context.coordinator.startObservingWindow()
-        // 首帧若窗口已就绪则聚焦；窗口后续成为 key 时由观察者兜底聚焦
+        // 首帧若窗口已就绪则聚焦；窗口后续成为 key 时由观察者兜底聚焦。
+        // 若此刻其他 NSTextView（如侧栏重命名 field editor）已持焦点则让位（一致性保险）。
         DispatchQueue.main.async { [weak textView] in
             guard let textView, let window = textView.window else { return }
+            if let responder = window.firstResponder as? NSTextView, responder !== textView {
+                return
+            }
             window.makeFirstResponder(textView)
         }
         return scrollView
@@ -1625,6 +1824,11 @@ private struct ChatInputTextView: NSViewRepresentable {
         @objc private func windowDidBecomeKey(_ note: Notification) {
             guard let window = note.object as? NSWindow,
                   window === textView?.window else { return }
+            // 侧栏行内重命名等文本控件已持焦点时让位，不抢占第一响应者
+            // （重命名 TextField 的 field editor 也是 NSTextView；区别于本输入框）
+            if let responder = window.firstResponder as? NSTextView, responder !== textView {
+                return
+            }
             window.makeFirstResponder(textView)
         }
     }

@@ -7,6 +7,11 @@ import Foundation
 /// 对外保留旧 AIChatView 的调用点（messages / inputText / isStreaming / send 等），
 /// 消息读写全部落到「当前会话」，⌘K 清空语义为清空当前会话消息。
 /// 全程 @MainActor，保证网络回调与 SwiftUI 状态更新都落在主线程。
+///
+/// 并行生成（2026-10 会话并行专项）：流式上下文按会话隔离（streamContexts 字典），
+/// 每个会话可独立发起/中止生成，互不干扰；侧栏经 streamingSessionIds 渲染
+/// 生成中状态，unreadSessionIds 渲染后台完成未读提示。isStreaming 保持
+/// 「当前会话是否生成中」语义（视图层既有调用点不变）。
 @MainActor
 final class AIChatState: ObservableObject {
     static let shared = AIChatState()
@@ -16,11 +21,20 @@ final class AIChatState: ObservableObject {
     /// 当前会话的消息（由 ChatSessionStore 同步而来，供 AIChatView 直接渲染）。
     @Published private(set) var messages: [ChatMessage] = []
     @Published var inputText: String = ""
+    /// 行内重命名进行中的会话 id（侧栏 TextField 与快捷键监听共用的稳定真源；nil = 未在重命名）。
+    /// 置于 state 层：AIChatState.shared 单例引用恒稳定，keyMonitor 闭包不再捕获 View struct 的
+    /// @State 链（结构重构后该捕获链失效导致 ESC 无法消费重命名态）。
+    @Published var renamingSessionId: UUID? = nil
     /// 剪贴板附加上下文（非 nil 表示已附加）。
     @Published var clipboardAttachment: String?
     /// 待发送图片附件（Wave 2 附件 UI 消费；发送后清空）。
     @Published var imageAttachments: [ChatImageAttachment] = []
+    /// 当前会话是否生成中（视图层旧调用点语义不变；由 syncStreamingState 维护）。
     @Published private(set) var isStreaming: Bool = false
+    /// 生成中的会话集合（侧栏状态可视化消费：呼吸点 + 可点击中止）。
+    @Published private(set) var streamingSessionIds: Set<UUID> = []
+    /// 后台生成完成但用户尚未查看的会话集合（侧栏未读提示；切回会话即清除）。
+    @Published private(set) var unreadSessionIds: Set<UUID> = []
 
     /// 多会话数据层（Wave 2 侧边栏消费其分组 / 搜索 / 增删改 API）。
     let store = ChatSessionStore.shared
@@ -35,26 +49,15 @@ final class AIChatState: ObservableObject {
     // MARK: - 私有状态
 
     private let service = AIChatService.shared
-    private var streamTask: Task<Void, Never>?
-    private var titleTask: Task<Void, Never>?
+    /// 按会话隔离的流式上下文：并行生成的真源（含回路任务与合帧缓冲）。
+    private var streamContexts: [UUID: StreamContext] = [:]
+    /// 按会话隔离的标题摘要任务（多会话同时完成首轮回复时各自独立生成）。
+    private var titleTasks: [UUID: Task<Void, Never>] = [:]
     private var cancellables = Set<AnyCancellable>()
-    /// 用户是否已请求中止本轮生成（用于中止与超时错误竞争时优先落定为 .aborted）。
-    private var abortRequested = false
+    /// 上一次观察到的会话 id 集合基线：用于检测「会话被删除」并清理其运行时状态。
+    private var knownSessionIds: Set<UUID> = []
 
-    // MARK: - 流式合帧状态（F1）
-
-    /// 累积待写入的 token（合帧缓冲区，降低 store/视图失效频率）。
-    private var pendingTokens: String = ""
-    /// 累积待写入的思考过程增量（与正文共用合帧定时器，避免 reasoning 逐片写 store）。
-    private var pendingReasoning: String = ""
-    /// 合帧缓冲区对应的助手消息 id。
-    private var pendingMessageID: UUID?
-    /// 合帧缓冲区对应的会话 id。
-    private var pendingSessionID: UUID?
-    /// 合帧冲刷定时任务（~50ms）；nil 表示当前无挂起冲刷。
-    private var flushTask: Task<Void, Never>?
-    /// 发送路径是否已落盘一次（首帧冲刷时落盘，避免发请求前多次写盘）。
-    private var sendPathPersisted = false
+    // MARK: - 合帧间隔常量
 
     /// 合帧间隔：约 50ms，把视图失效频率从 token 速率降到 ≤20 次/秒。
     private let flushInterval: UInt64 = 50_000_000
@@ -66,12 +69,86 @@ final class AIChatState: ObservableObject {
     /// 上下文截断：累计字符预算。
     private let contextCharBudget = 24000
 
+    /// 单会话流式上下文：回路 Task、中止标记与合帧缓冲的完整隔离单元。
+    /// 生命周期：send() 创建 → 回路结束（落定/中止/失败）时从字典移除。
+    private final class StreamContext {
+        /// 会话生成回路任务（含工具轮在内的全流程）；abort 即 cancel 该任务。
+        var task: Task<Void, Never>?
+        /// 用户是否已请求中止本轮生成（中止与超时错误竞争时优先落定为 .aborted）。
+        var abortRequested = false
+        /// 累积待写入的 token（合帧缓冲区，降低 store/视图失效频率）。
+        var pendingTokens = ""
+        /// 累积待写入的思考过程增量（与正文共用合帧定时器）。
+        var pendingReasoning = ""
+        /// 合帧缓冲区对应的助手消息 id。
+        var pendingMessageID: UUID?
+        /// 合帧冲刷定时任务（~50ms）；nil 表示当前无挂起冲刷。
+        var flushTask: Task<Void, Never>?
+        /// 发送路径是否已落盘一次（首帧冲刷时落盘，避免发请求前多次写盘）。
+        var sendPathPersisted = false
+    }
+
+    // MARK: - 流式状态同步
+
+    /// 由 streamingSessionIds 与当前会话派生 isStreaming（视图旧调用点语义保持）。
+    /// 流集合变化、会话切换时统一调用，保证两信号永不脱节。
+    private func syncStreamingState() {
+        let streaming = currentSessionId.map { streamingSessionIds.contains($0) } ?? false
+        if isStreaming != streaming {
+            isStreaming = streaming
+        }
+    }
+
+    /// 当前会话 id（便捷读取，nil 表示尚无会话）。
+    private var currentSessionId: UUID? {
+        store.currentSessionId
+    }
+
     private init() {
         // 会话数据变化 → 同步当前会话消息到 @Published messages，保持旧视图调用点不变。
+        // map 后 removeDuplicates：其他会话的流式冲刷也会令 $sessions 扇出，此处按值去重，
+        // 当前会话消息数组未变（值相等）时不再向视图扇出无效更新
+        // （ChatMessage 数组相等比较对 COW 共享 String 有 O(1) fast path，成本可控）。
+        // 切会话时数组必然不同（消息 id 不同），去重不影响切换同步。
         Publishers.CombineLatest(store.$sessions, store.$currentSessionId)
-            .sink { [weak self] sessions, sessionId in
+            .map { sessions, sessionId in
+                sessions.first(where: { $0.id == sessionId })?.messages ?? []
+            }
+            .removeDuplicates()
+            .sink { [weak self] messages in
                 guard let self else { return }
-                self.messages = sessions.first(where: { $0.id == sessionId })?.messages ?? []
+                self.messages = messages
+            }
+            .store(in: &cancellables)
+
+        // 会话切换：未读清除 + isStreaming 派生刷新（切换不打断流，见 selectSession）。
+        store.$currentSessionId
+            .sink { [weak self] sessionId in
+                guard let self else { return }
+                if let sessionId {
+                    self.unreadSessionIds.remove(sessionId)
+                }
+                self.syncStreamingState()
+            }
+            .store(in: &cancellables)
+
+        // 会话删除：自动清理被删会话的运行时状态（停回路 + 移除流式/未读标记），
+        // 避免回路空转与 unread 永久残留。侧栏 onDelete 直调 store.deleteSession，
+        // 此处从会话集合的消失自动检出。以 id 集合 + removeDuplicates 收敛触发频率
+        // （流式冲刷不改变 id 集合，不重复扇出）；初始订阅重放时 knownSessionIds 为空，
+        // subtracting 结果为空，不会误判为删除。
+        store.$sessions
+            .map { Set($0.map { $0.id }) }
+            .removeDuplicates()
+            .sink { [weak self] currentIds in
+                guard let self else { return }
+                let disappeared = self.knownSessionIds.subtracting(currentIds)
+                for id in disappeared {
+                    self.abortStreaming(sessionId: id)   // 取消回路任务（走 didComplete=false 分支）
+                    self.streamingSessionIds.remove(id)
+                    self.unreadSessionIds.remove(id)
+                }
+                self.knownSessionIds = currentIds
             }
             .store(in: &cancellables)
     }
@@ -79,6 +156,8 @@ final class AIChatState: ObservableObject {
     // MARK: - 发送 / 中止
 
     /// 发送当前输入（含剪贴板上下文与图片附件）。
+    /// 仅约束「当前会话」不可并发发送（同一会话上下文无法承载两轮并发）；
+    /// 其他会话的进行中生成不受影响（并行生成核心语义）。
     func send() {
         guard !isStreaming else { return }
 
@@ -92,12 +171,15 @@ final class AIChatState: ObservableObject {
             return
         }
 
-        abortRequested = false
-        // 清理上一轮可能残留的合帧状态（正常结束时本已清空，此处兜底）。
-        forceFlushPendingTokens()
-
         let session = store.ensureCurrentSession()
         let sessionId = session.id
+
+        // 新建该会话的流式上下文；旧上下文若残留（异常路径兜底）先强制冲刷半截内容再重建。
+        if streamContexts[sessionId] != nil {
+            forceFlushPendingTokens(in: sessionId)
+            streamContexts[sessionId] = nil
+        }
+        let ctx = StreamContext()
 
         // 1) 追加用户消息（含剪贴板附加与图片），清空输入与附件。
         // 落盘合并：三次变更先只改内存（persist: false），首个流式合帧时再统一落盘一次。
@@ -124,26 +206,31 @@ final class AIChatState: ObservableObject {
             to: sessionId,
             persist: false
         )
-        sendPathPersisted = false
-        isStreaming = true
+        ctx.sendPathPersisted = false
+        streamContexts[sessionId] = ctx
+        streamingSessionIds.insert(sessionId)
+        syncStreamingState()
 
         // 3) 组装请求（注入 system prompt + 截断后的上下文），进入工具调用回路。
         let requestMessages = buildRequestMessages(for: sessionId)
         startConversationLoop(
             sessionId: sessionId,
             initialWire: requestMessages,
-            firstAssistantID: assistantID
+            firstAssistantID: assistantID,
+            context: ctx
         )
     }
 
     /// 工具调用回路：流式请求 → 执行工具 → 结果回传 → 续请求，直到产出文本或达轮数上限。
-    /// 整个回路运行在单个 Task 内，`abortStreaming` 取消该任务即可打断包含工具轮在内的全流程。
+    /// 整个回路运行在单个 Task 内，取消该任务即可打断包含工具轮在内的全流程。
+    /// 回路按会话隔离并行：每会话独立的 Task 与合帧缓冲，互不干扰。
     private func startConversationLoop(
         sessionId: UUID,
         initialWire: [ChatCompletionMessage],
-        firstAssistantID: UUID
+        firstAssistantID: UUID,
+        context ctx: StreamContext
     ) {
-        streamTask = Task { [weak self] in
+        ctx.task = Task { [weak self] in
             guard let self else { return }
             var wireMessages = initialWire
             var assistantID = firstAssistantID
@@ -153,7 +240,7 @@ final class AIChatState: ObservableObject {
             do {
                 roundLoop: while true {
                     // 进入新一轮前若已中止则不再发起请求（避免工具轮后继续续请求）。
-                    if self.abortRequested || Task.isCancelled {
+                    if ctx.abortRequested || Task.isCancelled {
                         self.settle(assistantID, state: .aborted, in: sessionId)
                         break roundLoop
                     }
@@ -175,10 +262,10 @@ final class AIChatState: ObservableObject {
                         }
                     }
                     // 冲刷本轮尾部缓冲。
-                    self.forceFlushPendingTokens()
+                    self.forceFlushPendingTokens(in: sessionId)
 
                     // 用户中止：落定为 .aborted 并结束整个回路。
-                    if self.abortRequested {
+                    if ctx.abortRequested {
                         self.settle(assistantID, state: .aborted, in: sessionId)
                         break roundLoop
                     }
@@ -207,9 +294,10 @@ final class AIChatState: ObservableObject {
                         toolCallId: nil
                     ))
 
-                    // 串行执行工具，避免并发副作用；每次执行前检查中止。
+                    // 工具按会话内串行执行，避免同会话并发副作用；不同会话天然并行。
+                    // 每次执行前检查中止。
                     for call in completedCalls {
-                        if self.abortRequested || Task.isCancelled {
+                        if ctx.abortRequested || Task.isCancelled {
                             self.failUnresolvedToolCalls(assistantID, in: sessionId)
                             self.settle(assistantID, state: .aborted, in: sessionId)
                             break roundLoop
@@ -228,7 +316,7 @@ final class AIChatState: ObservableObject {
                         wireMessages.append(ChatCompletionMessage.toolResult(callID: call.id, content: result.resultJSON))
                     }
                     // 工具执行期间发生中止：工具轮已全部落定，不再发起续请求。
-                    if self.abortRequested || Task.isCancelled {
+                    if ctx.abortRequested || Task.isCancelled {
                         self.settle(assistantID, state: .done, in: sessionId)
                         break roundLoop
                     }
@@ -256,17 +344,17 @@ final class AIChatState: ObservableObject {
                         to: sessionId,
                         persist: false
                     )
-                    self.sendPathPersisted = false
+                    ctx.sendPathPersisted = false
                 }
             } catch is CancellationError {
                 // 用户主动中止：保留半截回复，落定为 .aborted。
-                self.forceFlushPendingTokens()
+                self.forceFlushPendingTokens(in: sessionId)
                 self.failUnresolvedToolCalls(assistantID, in: sessionId)
                 self.settle(assistantID, state: .aborted, in: sessionId)
             } catch {
                 // 中止与超时错误竞争时优先落定为用户中止。
-                self.forceFlushPendingTokens()
-                if self.abortRequested {
+                self.forceFlushPendingTokens(in: sessionId)
+                if ctx.abortRequested {
                     self.failUnresolvedToolCalls(assistantID, in: sessionId)
                     self.settle(assistantID, state: .aborted, in: sessionId)
                 } else {
@@ -274,22 +362,45 @@ final class AIChatState: ObservableObject {
                 }
             }
 
-            self.isStreaming = false
-            // 首轮助手回复完成后，后台生成中文标题（失败静默，不影响主对话流）。
-            if didComplete {
-                self.scheduleTitleSummary(sessionId: sessionId)
-                // 成功完成一轮回复：用户没在看对话窗时发系统通知。
-                self.notifyCompletionIfNeeded(sessionId: sessionId)
-            }
+            // 回路统一收尾：移除上下文、刷新流集合（didComplete 的摘要/通知/未读一并处理）。
+            self.finishStream(sessionId: sessionId, didComplete: didComplete)
         }
     }
 
+    /// 回路收尾：清理该会话的流式上下文与流集合，isStreaming 派生刷新；
+    /// 成功完成时依次处理未读标记、LLM 标题摘要与完成通知。
+    private func finishStream(sessionId: UUID, didComplete: Bool) {
+        streamContexts[sessionId] = nil
+        streamingSessionIds.remove(sessionId)
+        syncStreamingState()
+        guard didComplete else { return }
+
+        // 后台完成未读：完成时非当前会话 → 标记未读（切回该会话即清除）。
+        // 会话已被删除时不再标记（否则会在 unreadSessionIds 留下永久死项）。
+        if sessionId != currentSessionId, store.session(id: sessionId) != nil {
+            unreadSessionIds.insert(sessionId)
+        }
+        // 首轮助手回复完成后，后台生成中文标题（失败静默，不影响主对话流）。
+        scheduleTitleSummary(sessionId: sessionId)
+        // 成功完成一轮回复：用户没在看对话窗时发系统通知。
+        notifyCompletionIfNeeded(sessionId: sessionId)
+    }
+
     /// 中止流式生成并落定半截回复为 .aborted。
-    func abortStreaming() {
-        guard isStreaming else { return }
-        abortRequested = true
-        service.abort()       // 立即停止网络回调
-        streamTask?.cancel()  // 触发消费侧 CancellationError，进入 .aborted 分支
+    /// 默认中止「当前会话」；指定 sessionId 时中止目标会话（侧栏中止按钮调用），
+    /// 不影响其他会话的进行中生成。
+    func abortStreaming(sessionId target: UUID? = nil) {
+        let sessionId = target ?? currentSessionId
+        guard let sessionId, let ctx = streamContexts[sessionId] else { return }
+        ctx.abortRequested = true
+        // 取消回路任务触发消费侧 CancellationError，进入 .aborted 分支；
+        // 网络层取消经流的 onTermination 链路自动传导（AIChatService 无全局 abort）。
+        ctx.task?.cancel()
+    }
+
+    /// 指定会话是否生成中（侧栏状态可视化查询）。
+    func isStreaming(sessionId: UUID) -> Bool {
+        streamingSessionIds.contains(sessionId)
     }
 
     /// ⌘K 清空当前会话消息（保留会话本身，重置标题待重新摘要）。
@@ -344,54 +455,55 @@ final class AIChatState: ObservableObject {
         store.createSession()
     }
 
-    /// 切换当前会话。
+    /// 切换当前会话（不打断任何会话的进行中生成——并行生成核心语义）。
+    /// 未读清除与 isStreaming 派生刷新由 $currentSessionId 订阅统一处理（见 init）。
     func selectSession(id: UUID) {
         guard store.session(id: id) != nil else { return }
-        if isStreaming { abortStreaming() }
         store.currentSessionId = id
     }
 
     // MARK: - 内部：消息更新
 
-    /// 流式增量：只累积到合帧缓冲区，由 ~50ms 定时器批量写入 store。
+    /// 流式增量：只累积到该会话的合帧缓冲区，由 ~50ms 定时器批量写入 store。
     /// 直接丢弃每 token 的 store 写入，避免 @Published sessions 整组扇出与侧栏全量重建。
     private func appendToken(_ token: String, to id: UUID, in sessionId: UUID) {
-        pendingTokens += token
-        pendingMessageID = id
-        pendingSessionID = sessionId
-        scheduleFlushIfNeeded()
+        guard let ctx = streamContexts[sessionId] else { return }
+        ctx.pendingTokens += token
+        ctx.pendingMessageID = id
+        scheduleFlushIfNeeded(for: sessionId)
     }
 
     /// 思考过程增量：与正文共用同一合帧缓冲区与定时器，同样避免逐片写 store。
     private func appendReasoning(_ token: String, to id: UUID, in sessionId: UUID) {
-        pendingReasoning += token
-        pendingMessageID = id
-        pendingSessionID = sessionId
-        scheduleFlushIfNeeded()
+        guard let ctx = streamContexts[sessionId] else { return }
+        ctx.pendingReasoning += token
+        ctx.pendingMessageID = id
+        scheduleFlushIfNeeded(for: sessionId)
     }
 
-    /// 若当前无挂起冲刷，启动一个 ~50ms 的合帧定时任务。
-    private func scheduleFlushIfNeeded() {
-        guard flushTask == nil else { return }
-        flushTask = Task { [weak self] in
+    /// 若该会话无挂起冲刷，启动一个 ~50ms 的合帧定时任务（per-session 独立节拍）。
+    private func scheduleFlushIfNeeded(for sessionId: UUID) {
+        guard let ctx = streamContexts[sessionId], ctx.flushTask == nil else { return }
+        ctx.flushTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: self?.flushInterval ?? 50_000_000)
             guard !Task.isCancelled else { return }
-            self?.flushPendingTokens()
+            self?.flushPendingTokens(in: sessionId)
         }
     }
 
-    /// 把合帧缓冲一次性写入 store（不落盘；落盘由单独的持久化点负责）。
+    /// 把该会话的合帧缓冲一次性写入 store（不落盘；落盘由单独的持久化点负责）。
     /// 与定时器、forceFlush 均在 MainActor 串行执行，天然无并发竞态。
-    private func flushPendingTokens() {
-        flushTask = nil
-        guard let id = pendingMessageID, let sessionId = pendingSessionID else { return }
+    private func flushPendingTokens(in sessionId: UUID) {
+        guard let ctx = streamContexts[sessionId] else { return }
+        ctx.flushTask = nil
+        guard let id = ctx.pendingMessageID else { return }
 
-        let contentChunk = pendingTokens
-        let reasoningChunk = pendingReasoning
+        let contentChunk = ctx.pendingTokens
+        let reasoningChunk = ctx.pendingReasoning
         guard !contentChunk.isEmpty || !reasoningChunk.isEmpty else { return }
 
-        pendingTokens = ""
-        pendingReasoning = ""
+        ctx.pendingTokens = ""
+        ctx.pendingReasoning = ""
         store.updateMessage(id: id, in: sessionId) { message in
             // reasoning 累积不改消息 id、不触碰其他字段，保持 ChatMessage Equatable 合成语义，
             // UI 侧 .equatable() 仍可对其余未变行跳过重建。
@@ -407,18 +519,19 @@ final class AIChatState: ObservableObject {
         }
 
         // 发送路径合并落盘：首个合帧时统一写盘一次（此时请求已在途，避开首 token 关键路径）。
-        if !sendPathPersisted {
-            sendPathPersisted = true
+        if !ctx.sendPathPersisted {
+            ctx.sendPathPersisted = true
             store.persist(sessionId: sessionId)
         }
     }
 
-    /// 强制冲刷：取消挂起定时器并立即写入缓冲。流结束 / 中止 / 失败三条路径在 settle 前调用，
+    /// 强制冲刷：取消该会话挂起定时器并立即写入缓冲。流结束 / 中止 / 失败三条路径在 settle 前调用，
     /// 保证尾部内容不丢；取消后定时任务的 isCancelled 检查确保不会重复冲刷。
-    private func forceFlushPendingTokens() {
-        flushTask?.cancel()
-        flushTask = nil
-        flushPendingTokens()
+    private func forceFlushPendingTokens(in sessionId: UUID) {
+        guard let ctx = streamContexts[sessionId] else { return }
+        ctx.flushTask?.cancel()
+        ctx.flushTask = nil
+        flushPendingTokens(in: sessionId)
     }
 
     /// 落定消息状态；仅当仍处于发送中才覆盖，避免覆盖已有失败态。落盘在此单点完成（F4）。
@@ -619,7 +732,8 @@ final class AIChatState: ObservableObject {
         let seedUser = String(firstUser.content.prefix(500))
         let seedAssistant = String(firstAssistant.content.prefix(500))
 
-        titleTask = Task { [weak self] in
+        titleTasks[sessionId] = Task { [weak self] in
+            defer { self?.titleTasks[sessionId] = nil }
             guard let self else { return }
             let messages = [
                 ChatCompletionMessage(

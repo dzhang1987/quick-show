@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- 多会话并行生成（AI 窗，2026-10 会话并行专项）：
+  - **流式上下文按会话隔离**（`AIChatState.streamContexts` 字典）：每个会话独立的回路任务、中止标记与合帧缓冲（~50ms 合帧定时器 per-session 独立节拍），可各自发起/中止生成互不干扰；网络层去全局 `abort()`（`AIChatService` 不再持有全局任务句柄——新增流局部 `TaskCancellationBox` 取消盒，首 token 看门狗 120s 超时只取消「本流」生产任务，中止语义由消费侧 Task 取消经 `onTermination` 链路传导回网络任务）；切换会话不打断进行中生成；仅约束同一会话不可并发发送
+  - **侧栏状态可视化**：生成中会话显示呼吸点（6pt accent 圆 1.2s 呼吸，点击即中止该会话，≥16pt 热区 + pointing hand + tooltip）；后台完成未查看的会话行尾显示静止未读点（切回该会话自动清除）；会话被删除时自动停回路并清理流式/未读标记（从会话 id 集合消失自动检出，防回路空转与 unread 永久残留）
+  - **会话视图树 LRU 保活**（`AIChatView`）：每个常驻会话一份完整独立的 `SessionMessageList`（ScrollViewReader+ScrollView+LazyVStack）叠在 ZStack 中，切换只切 `opacity`/`allowsHitTesting`——零身份重建、零重新解析，滚动位置/贴底跟随/流式状态随视图树天然保留；LRU 上限 4（活跃 + 最近 3 个），超限驱逐尾部（视图卸载），重挂载时用 `ScrollSnapshot`（顶部可见消息 id + 贴底态）恢复阅读位置；窗口级滚轮监听经 `SessionScrollRelay` 路由到当前活跃会话视图的跟随状态
+  - **Markdown AST 解析缓存**（`AssistantMarkdownView`）：以 content 为 key 缓存 `MarkdownParser.parse` 结果（FIFO 淘汰，64 条 / 60 万字符预算）——切会话不再重新解析历史消息的 Markdown（含 LaTeX），根治超长会话切换卡死；流式中间态（内容每 250ms 增长）完全旁路缓存，防中间态挤掉落定消息的有用缓存
+  - 侧栏 hover 语言改为「仅文字提亮不铺背景」（与选中 accent 色块拉开层级，避免双选中误读）；全局单悬停令牌（父级 `hoveredSessionId` 覆盖式置位）防流式重排/行销毁时 `onHover(exit)` 丢失导致的双高亮残留
+- 行内重命名（侧栏会话行）：⏎ 提交、ESC 取消（优先于中止流/关窗的 ESC 三阶段语义）；`renamingSessionId` 提升至 `AIChatState`（keyMonitor 闭包不再捕获 View struct 的 @State 链）；重命名 TextField 挂载即请求焦点；主输入框对已持焦点的其他文本控件（重命名 field editor）让位不抢占第一响应者（首帧与窗口 become key 双路径）
+
+### Fixed
+
+- web_search 冷启动后首次使用弹钥匙串密码授权：Tavily Key 存储从 Keychain 改为文件（`~/Library/Application Support/QuickShow/tavily_apikey`，0600 权限、原子写、读取时顺手收紧过宽权限），与 LLM API Key 同方案。根因：本地开发频繁重编译导致签名变化，Keychain 条目 ACL 每次读取都弹密码授权（`kSecAttrAccessibleWhenUnlocked` 只管设备锁屏、解决不了 ACL 问题，「先删后建」只在写入时有效）。首次读取时一次性迁移旧 Keychain 条目（可能弹最后一次授权，用户拒绝则静默走环境变量）→ 落盘 → 删除条目，此后零 Keychain 调用；`QUICKSHOW_TAVILY_API_KEY` 环境变量兜底保留；保存/清除密钥时顺手清理遗留 Keychain 条目
+- 空态判据单帧空白：空态 overlay 判据直读 store 真源（原经 `state.messages` 的 CombineLatest + removeDuplicates 异步扇出，切换瞬间与 ZStack 直读差一帧出现「ZStack 已空、overlay 仍判非空」）
+- 状态扇出收敛：`$sessions` → `messages` 映射后按值去重（其他会话流式冲刷不再令当前会话视图无效扇出）；会话 id 集合 + removeDuplicates 检测删除，流式冲刷不重复触发
+
 ## [1.12.0] - 2026-10-02
 
 ### Added

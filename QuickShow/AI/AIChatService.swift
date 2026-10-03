@@ -1014,24 +1014,25 @@ final class AIChatService {
 
     // MARK: SSE 流式请求
 
-    /// 当前进行中的生产任务，供 abort() 取消。
-    private var currentTask: Task<Void, Never>?
-
     /// 发起一次流式对话，产出文本增量或完整工具调用事件。
     /// - 文本事件行为与旧 `AsyncThrowingStream<String>` 完全一致；工具调用在流结束时整批产出。
     /// - 错误通过 AsyncThrowingStream 抛出，由 State 层呈现。
+    /// - 并行流支持（2026-10 会话并行专项）：本层不再持有全局任务句柄、不提供全局 abort——
+    ///   多会话各自持有独立流，中止语义由消费侧 Task 取消经 onTermination 链路传导回网络任务。
     func send(messages: [ChatCompletionMessage]) -> AsyncThrowingStream<AIStreamEvent, Error> {
-        // 重复发送前先中止上一次请求，避免并发流交叉。
-        abort()
-
         return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
+            // 流局部取消盒：看门狗超时经此取消「本流」的生产任务（Task 无法自引用，盒中转）。
+            let cancelBox = TaskCancellationBox()
             let task = Task { [weak self] in
                 guard let self else {
                     continuation.finish()
                     return
                 }
                 do {
-                    try await self.performStream(messages: messages) { event in
+                    try await self.performStream(
+                        messages: messages,
+                        cancel: { cancelBox.cancel() }
+                    ) { event in
                         continuation.yield(event)
                     }
                     continuation.finish()
@@ -1042,18 +1043,12 @@ final class AIChatService {
                     continuation.finish(throwing: error)
                 }
             }
-            self.currentTask = task
+            cancelBox.set(task)
             // 下游提前终止（消费任务被取消）时同步取消网络请求。
             continuation.onTermination = { _ in
                 task.cancel()
             }
         }
-    }
-
-    /// 立即中止当前流式请求。取消生产任务会触发 bytes 序列抛 CancellationError，停止回调。
-    func abort() {
-        currentTask?.cancel()
-        currentTask = nil
     }
 
     // MARK: 模型列表 / 非流式补全
@@ -1179,9 +1174,31 @@ final class AIChatService {
         var received = false
     }
 
+    /// 流局部任务取消盒：生产 Task 无法在自身闭包内自引用，经盒中转供看门狗超时取消。
+    /// set 在 Task 创建后立即执行（微秒级），watchdog 最早 120s 后才触发，无竞态窗口。
+    /// @unchecked Sendable：NSLock 保护唯一可变状态 task。
+    private final class TaskCancellationBox: @unchecked Sendable {
+        private let lock = NSLock()
+        private var task: Task<Void, Never>?
+
+        func set(_ task: Task<Void, Never>) {
+            lock.lock()
+            defer { lock.unlock() }
+            self.task = task
+        }
+
+        func cancel() {
+            lock.lock()
+            defer { lock.unlock() }
+            task?.cancel()
+        }
+    }
+
     /// 执行一次 SSE 请求并逐事件回调（MainActor 上下文）。
+    /// `cancel`：本流生产任务的取消入口（首 token 看门狗超时调用；流局部，不影响其他会话）。
     private func performStream(
         messages: [ChatCompletionMessage],
+        cancel: (() -> Void)?,
         onEvent: (AIStreamEvent) -> Void
     ) async throws {
         // 协议在请求发起时一次性快照，避免流进行中被设置变更影响分流。
@@ -1227,13 +1244,13 @@ final class AIChatService {
             )
         }
 
-        // 首 token 看门狗：120s 内无任何增量即判超时并取消请求。
+        // 首 token 看门狗：120s 内无任何增量即判超时并取消本流生产任务（流局部取消）。
         let firstTokenFlag = FirstTokenFlag()
-        let watchdog = Task { [weak self] in
+        let watchdog = Task {
             try? await Task.sleep(nanoseconds: 120 * 1_000_000_000)
             guard !Task.isCancelled else { return }
             if !firstTokenFlag.received {
-                self?.abort()
+                cancel?()
             }
         }
         defer { watchdog.cancel() }

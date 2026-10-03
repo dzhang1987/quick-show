@@ -11,11 +11,53 @@ import SwiftUI
 ///   标题前 26/20/16（与上文拉开成组），标题后 8（与紧随内容成组），内容块之间 16，首块无顶距
 /// - 行高：正文/列表/代码 lineSpacing 6（13pt ≈ 1.7 倍）；列表项间 8、嵌套子项间 6
 /// - 引号归一：成对 ASCII 直引号显示为「」（仅 text token，代码/链接不受影响）
-struct AssistantMarkdownView: View {
+struct AssistantMarkdownView: View, Equatable {
     let content: String
+    /// 是否读写解析缓存。落定态（done/aborted）恒为 true；流式中间态（内容每 250ms 增长）
+    /// 传 false 完全旁路缓存——否则每个中间态都成为新 key 写入并 FIFO 逐出落定消息的有用缓存。
+    var useCache: Bool = true
+
+    // MARK: - 解析缓存（落定态重渲染加速）
+
+    // MarkdownParser.parse 是无状态纯函数（同输入同输出）。切会话会使 LazyVStack 身份
+    // 全量重建，历史消息的 Markdown（含 LaTeX）被重新解析——超长会话即卡死。以 content
+    // 为 key 缓存 AST，命中直接复用；落定态 content 稳定，key 高频命中。
+    //
+    // 线程安全说明：SwiftUI 视图 body 恒在主线程渲染（本视图不跨隔离域传递），静态缓存的
+    // 读写全部发生在主线程串行渲染路径上，无需加锁。若未来改为 off-main 渲染或开启严格
+    // 并发检查，可整体替换为 NSCache<NSString, NSArray>（其线程安全由 Foundation 保证）。
+    private static var cache: [String: [MarkdownBlock]] = [:]
+    /// FIFO 插入序：Markdown 落定后 key 稳定，命中即复用，无需真 LRU 的复杂度。
+    private static var cacheOrder: [String] = []
+    /// 条目数上限。
+    private static let cacheEntryLimit = 64
+    /// 内容总字符预算，防内存无界膨胀。
+    private static let cacheCharBudget = 600_000
+    /// 当前缓存内容的总字符数（预算淘汰用）。
+    private static var cacheCharTotal = 0
+
+    /// 取 content 的块级 AST。
+    /// - useCache == false：完全旁路缓存直接解析（不读不写），供流式中间态使用。
+    /// - useCache == true：命中读缓存；未命中解析后写入，并按 FIFO 做条数/字符预算淘汰。
+    private static func parsedBlocks(for content: String, useCache: Bool) -> [MarkdownBlock] {
+        guard useCache else { return MarkdownParser.parse(content) }
+        if let cached = cache[content] { return cached }
+        let blocks = MarkdownParser.parse(content)
+        cache[content] = blocks
+        cacheOrder.append(content)
+        cacheCharTotal += content.count
+        while cacheOrder.count > cacheEntryLimit || cacheCharTotal > cacheCharBudget {
+            guard !cacheOrder.isEmpty else { break }
+            let oldest = cacheOrder.removeFirst()
+            if cache.removeValue(forKey: oldest) != nil {
+                cacheCharTotal -= oldest.count
+            }
+        }
+        return blocks
+    }
 
     var body: some View {
-        let blocks = MarkdownParser.parse(content)
+        let blocks = Self.parsedBlocks(for: content, useCache: useCache)
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { index, block in
                 MarkdownBlockView(block: block)
