@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -320,7 +320,7 @@
 			path = QuickShow;
 			sourceTree = "<group>";
 		};
-		"TEMP_1B2682AF-75AE-47B1-9005-6E75C1572D67" /* Resources */ = {
+		"TEMP_BDDD5505-3C2A-4915-8A02-F64FE0CD2FB0" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -342,6 +342,8 @@
 			dependencies = (
 			);
 			name = SwiftMath;
+			packageProductDependencies = (
+			);
 			productName = SwiftMath;
 			productReference = 0E743B480470624A4287B53E /* libSwiftMath.a */;
 			productType = "com.apple.product-type.library.static";
@@ -360,6 +362,8 @@
 				34D67F92FEB3526B34B140A1 /* PBXTargetDependency */,
 			);
 			name = QuickShow;
+			packageProductDependencies = (
+			);
 			productName = QuickShow;
 			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
 			productType = "com.apple.product-type.application";
@@ -383,7 +387,6 @@
 				};
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -391,6 +394,9 @@
 				en,
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9B0F05138AE231E7D18DDCA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (

@@ -402,6 +402,11 @@ struct AIChatView: View {
                 .allowsHitTesting(isActive)
             }
         }
+        // 空态布局兜底：常驻会话全空时 SessionMessageList 均为 EmptyView，
+        // ZStack 高度塌缩为 0 会令 mainColumn 的 VStack 垂直居中——顶栏（图钉+拖动热区）
+        // 整体掉到窗口中部（冷启动全空常驻集合时偶现）。此处令列表容器永远占据
+        // 顶栏以下全部剩余高度，顶栏恒定钉在顶部，空态欢迎页由外层 overlay 承担。
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     /// LRU 常驻集合更新：新会话移到头部；超出上限淘汰尾部（其视图卸载，重挂载时快照兜底）。
