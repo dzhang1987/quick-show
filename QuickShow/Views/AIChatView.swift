@@ -40,9 +40,6 @@ struct AIChatView: View {
 
     /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
     private let inputPlaceholder = "问点什么…"
-    /// 阅读列最大宽度：行长控制（对标 DeepSeek/CC），窗口更宽时整列居中、两侧透出玻璃；
-    /// 消息列与输入坞共用同一限宽，保证左缘/右缘对齐。
-    private let contentMaxWidth: CGFloat = 600
 
     /// 端点配置可用性：hasConfiguredEndpoint 读 UserDefaults/Keychain，非 @Published，
     /// 故在视图出现与关键窗口激活时主动刷新（避免设置后回到对话窗仍显示引导）。
@@ -639,11 +636,9 @@ struct AIChatView: View {
         }
         // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
         // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部
-        .frame(maxWidth: contentMaxWidth, alignment: .leading)
-        .padding(.horizontal, Theme.Spacing.section)
         .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xxl)
-        .frame(maxWidth: .infinity)
+        .chatReadingColumn()
         // 坞区 hover：进入时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径），
         // 同时驱动坞体安静→激活切换（低频工具组淡入、accent rim 点亮）
         .onHover { hovering in
@@ -1426,7 +1421,6 @@ private struct SessionMessageList: View {
     let scrollRelay: SessionScrollRelay
 
     private let bottomAnchorID = "aiChat.bottom"
-    private let contentMaxWidth: CGFloat = 600
 
     /// 本会话首载装载态：冷启动与 LRU 重挂载时抑制入场动画，防窗口上屏竞态白屏。
     @State private var isInitialHistoryLoad = true
@@ -1559,10 +1553,8 @@ private struct SessionMessageList: View {
                 }
                 .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
                            value: messages.count)
-                .frame(maxWidth: contentMaxWidth, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.section)
                 .padding(.top, Theme.Spacing.section)
-                .frame(maxWidth: .infinity)
+                .chatReadingColumn()
                 // AppKit 滚动桥：必须挂在 ScrollView 内容闭包内部（此处是内容根视图），
                 // 才能经 enclosingScrollView 解析到本会话底层 NSScrollView（见 NSScrollBridgeView）。
                 .background(NSScrollBridgeView(sessionId: sessionId, relay: scrollRelay))
@@ -1835,10 +1827,8 @@ private struct SessionMessageList: View {
                 withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(nextID, anchor: .top) }
             }
         )
-        .frame(maxWidth: contentMaxWidth, alignment: .trailing)
-        .padding(.horizontal, Theme.Spacing.section)
         .padding(.bottom, Theme.Layout.chatDockClearance + Theme.Spacing.lg)
-        .frame(maxWidth: .infinity)
+        .chatReadingColumn(alignment: .trailing)
     }
 
     // MARK: - 分组 / 可重生成
@@ -3259,5 +3249,56 @@ private struct ChatInlineEditTextView: NSViewRepresentable {
 private struct AIChatRoundedClip: ViewModifier {
     func body(content: Content) -> some View {
         content.clipShape(RoundedRectangle(cornerRadius: Theme.Radius.panel, style: .continuous))
+    }
+}
+
+// MARK: - 阅读列约束（消息列 / 输入坞 / 浮动导航簇共用）
+
+/// 内容区宽度上报键（阅读列水平边距分级的输入信号）。
+private struct ChatReadingColumnWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// 阅读列统一约束：限宽 `Theme.Layout.chatContentMaxWidth` 居中 + 水平边距分级
+/// （内容区 <720pt 用 `Spacing.section`=18 即默认窗现状；≥720pt 升为 28，宽窗保留玻璃呼吸边）。
+/// 三处应用点共用本修饰器，列左缘/右缘对齐逻辑单一来源、永不漂移。
+///
+/// 宽度读取走 background GeometryReader + preference：部署目标 macOS 13 不可用
+/// onGeometryChange（14+）；GeometryReader 挂 background 内尺寸被前景约束（最外层撑满帧），
+/// 无 ScrollView 内直接嵌 GeometryReader 的高度提议风险。padding 跳变不回读最外层宽度
+/// （maxWidth: .infinity 层宽度只取决于父级提议），无反馈环。
+/// 已知行为：冷启动首帧 preference 尚未上报时按窄档 18 上屏，次帧修正为宽档（仅窗口
+/// ≥720pt 首建时发生一次 ~1 帧的列定锚；面板复用/LRU 常驻路径 @State 已持正确值，不跳变）。
+private struct ChatReadingColumn: ViewModifier {
+    /// 列内内容对齐：消息列/输入坞 leading，浮动导航簇 trailing（贴列右缘）。
+    let alignment: Alignment
+    /// 内容区实测宽度（最外层撑满帧的几何读数），驱动水平边距分级。
+    @State private var containerWidth: CGFloat = 0
+
+    private var horizontalPadding: CGFloat {
+        containerWidth >= Theme.Layout.chatReadingWideBreakpoint
+            ? Theme.Layout.chatReadingWidePadding
+            : Theme.Spacing.section
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: Theme.Layout.chatContentMaxWidth, alignment: alignment)
+            .padding(.horizontal, horizontalPadding)
+            .frame(maxWidth: .infinity)
+            .background(
+                GeometryReader { geo in
+                    Color.clear.preference(key: ChatReadingColumnWidthKey.self, value: geo.size.width)
+                }
+            )
+            .onPreferenceChange(ChatReadingColumnWidthKey.self) { containerWidth = $0 }
+    }
+}
+
+private extension View {
+    /// 阅读列统一约束（限宽居中 + 水平边距分级），详见 `ChatReadingColumn`。
+    func chatReadingColumn(alignment: Alignment = .leading) -> some View {
+        modifier(ChatReadingColumn(alignment: alignment))
     }
 }

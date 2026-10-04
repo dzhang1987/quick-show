@@ -812,19 +812,26 @@ private struct CodeBlockText: View {
 
     var body: some View {
         // 高亮版优先、否则降级为纯色等宽文本（现状行为）。
-        // 代码块内不转 Markdown，纯等宽显示（长行自然换行，避免嵌套横向滚动）
-        Group {
-            if let highlighted {
-                Text(highlighted)
-            } else {
-                Text(code)
-                    .font(Theme.Typography.mono(12.5))
-                    .foregroundColor(Theme.Colors.contentPrimary)
+        // 代码块内不转 Markdown，纯等宽显示。
+        // 长行不折行：横向滚动承载超长行——折行会破坏缩进结构、复制粘贴混入换行符。
+        // 嵌套滚动安全：底层 NSScrollView 不消费垂直滚轮 delta（沿 responder chain 上传
+        // 外层垂直滚动，滚轮鼠标体验与现状一致），仅消费水平 delta（shift+滚轮/双指横滑）；
+        // 内容短于视口时贴 scroll origin（leading），与旧 frame(alignment: .leading) 等价。
+        // fixedSize(horizontal: true)：水平按固有宽度布局（ScrollView 提议无限宽，双保险防
+        // 折行）；vertical: false 服从容器高度（= 内容固有行高，无循环依赖）。
+        ScrollView(.horizontal, showsIndicators: true) {
+            Group {
+                if let highlighted {
+                    Text(highlighted)
+                } else {
+                    Text(code)
+                        .font(Theme.Typography.mono(12.5))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                }
             }
+            .lineSpacing(6)
+            .fixedSize(horizontal: true, vertical: false)
         }
-        .lineSpacing(6)
-        .fixedSize(horizontal: false, vertical: true)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .task(id: HighlightTask(code: code, language: language, darkMode: colorScheme == .dark)) {
             // 首帧保持纯色等宽（highlighted == nil）；后台计算高亮后替换。
             highlighted = nil

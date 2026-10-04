@@ -54,6 +54,7 @@
 
 ### Changed
 
+- 阅读体验优化（AI 窗，内容列宽 + 代码块折行专项）：对话阅读列最大宽度 600 → 760（`Theme.Layout.chatContentMaxWidth` 单源 token，替换 `AIChatView` / `SessionMessageList` 内两份硬编码副本），消息列 / 输入坞 / 浮动导航簇三处收敛到统一 `.chatReadingColumn()` ViewModifier（限宽居中 + 水平边距分级：内容区 <720pt 沿用 `Spacing.section`=18 即默认窗铺满现状、≥720pt 升 28——宽窗留白随窗成比例生长保留玻璃呼吸边；宽度读取 background GeometryReader + preference，macOS 13 部署目标不可用 onGeometryChange(14+)）；宽窗下等宽 12.5pt 代码可用列 ~72 → ~93 列；代码块长行从软换行改为横向滚动（`ScrollView(.horizontal)` + `fixedSize(horizontal: true, vertical: false)`）——折行破坏缩进结构、复制粘贴混入换行符；嵌套滚动安全：内层 NSScrollView 不消费垂直滚轮 delta（沿 responder chain 冒泡回外层消息列表，滚轮鼠标体验不变），仅消费水平 delta（shift+滚轮 / 双指横滑）；高亮 task / 流式渐进渲染 / 一屏块数估算（保守偏大的 estimatedBlockHeight）不受影响
 - 滚动跟随语义重构（AI 窗，用户滚动主权最高）：用户向上滚动立即脱离贴底（几何信号判定，滚动条拖拽 / 键盘 / 触控板通吃），此后切会话 / 新消息到达 / 流式输出一律不再自动滚动；流式仅在贴底时跟随（节流 0.12s）；贴底期间内容异步长高由几何信号持续纠偏至布局静止——根治「假底部」（此前 scrollTo 按过时内容高度落点，末条消息与输入栏间恒留 200~375px 空白且每次不同、切换后 1 秒内视图连跳 5 次）
 
 ### Fixed

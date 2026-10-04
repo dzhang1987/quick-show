@@ -341,6 +341,15 @@ enum Theme {
         static let dividerHeight: CGFloat = 0.5      // 微光分割线（严格 0.5pt）
         static let glanceProgressHeight: CGFloat = 2.5  // 一瞥倒计时微光进度条高（细若光丝，2x 屏 5px 清晰可辨）
 
+        // AI 对话阅读列限宽（消息列/输入坞/浮动导航簇三处共用，经 .chatReadingColumn() 应用）：
+        // 行长控制——760 ≈ 正文 ~95 字符、等宽 12.5pt 代码 ~93 列（扣除列边距与代码卡内边距）；
+        // 窗口更宽时整列居中、两侧透出玻璃呼吸。原 600 在宽窗下留白占比失衡、长代码行折行严重
+        static let chatContentMaxWidth: CGFloat = 760
+        // 阅读列水平边距宽档：内容区 ≥720pt 时由 Spacing.section(18) 升为 28——
+        // 宽窗列几近铺满时仍保留玻璃呼吸边（28 = 18×1.56，感知可辨而不突兀）。
+        // 720~816pt 区间列宽 = 内容宽 − 56；≥816pt 列锁 760，两侧留白随窗自然生长
+        static let chatReadingWideBreakpoint: CGFloat = 720
+        static let chatReadingWidePadding: CGFloat = 28
         // AI 对话浮岛输入坞：消息列表底部留白 = 坞高（卡片 ≈88 + 上下缝隙）+ 12pt 浮动缝，
         // 保证滚到底时末条消息完整露出坞顶；滚动中消息从玻璃坞底下穿过（真 blur-through）
         static let chatDockClearance: CGFloat = 124
