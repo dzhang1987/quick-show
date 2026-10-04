@@ -235,6 +235,13 @@ final class ChatSessionStore: ObservableObject {
     private let migrationMarkerURL: URL
     /// 当前会话 id 的 UserDefaults 键。
     private let currentIdKey = "ai.currentSessionId"
+    /// 草稿文件名：与真实会话文件同目录（`AIChats/drafts.json`），内容为 `[会话UUID字符串: 草稿文本]`。
+    /// load() 必须显式跳过，避免被当作会话文件解码。
+    static let draftsFileName = "drafts.json"
+    /// 草稿文件路径。
+    private var draftsFileURL: URL {
+        directoryURL.appendingPathComponent(Self.draftsFileName)
+    }
 
     private init() {
         let support = fileManager
@@ -523,6 +530,37 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
+    // MARK: - 会话草稿落盘
+
+    /// 读取全部会话草稿。key 非法或 value 为空的条目直接丢弃；文件不存在 / 解码失败返回空。
+    func loadSessionDrafts() -> [UUID: String] {
+        guard let data = try? Data(contentsOf: draftsFileURL),
+              let raw = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        var result: [UUID: String] = [:]
+        for (key, value) in raw {
+            guard !value.isEmpty, let id = UUID(uuidString: key) else { continue }
+            result[id] = value
+        }
+        return result
+    }
+
+    /// 原子写全部会话草稿（空 value 的条目不下盘，等价于该会话无草稿）。
+    /// 与 persist(_:) 同款：createDirectory + JSONEncoder + `.atomic`。
+    func persistSessionDrafts(_ drafts: [UUID: String]) {
+        do {
+            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            let raw = Dictionary(uniqueKeysWithValues: drafts.compactMap { entry -> (String, String)? in
+                entry.value.isEmpty ? nil : (entry.key.uuidString, entry.value)
+            })
+            let data = try JSONEncoder().encode(raw)
+            try data.write(to: draftsFileURL, options: .atomic)
+        } catch {
+            // 静默失败：草稿非关键数据，不阻塞输入。
+        }
+    }
+
     // MARK: - 内部：加载与迁移
 
     /// 启动加载：先迁移旧单会话，再读取全部会话文件并恢复当前会话。
@@ -535,8 +573,10 @@ final class ChatSessionStore: ObservableObject {
             includingPropertiesForKeys: nil
         )) ?? []
 
+        // 显式跳过草稿文件：drafts.json 与真实会话同目录，若不排除会被尝试解码为 ChatSession
+        // （当前靠解码失败静默跳过，属隐式依赖）。显式排除更确定，也为草稿数据语义正名。
         var loaded: [ChatSession] = files
-            .filter { $0.pathExtension == "json" }
+            .filter { $0.pathExtension == "json" && $0.lastPathComponent != Self.draftsFileName }
             .compactMap { url -> ChatSession? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? JSONDecoder().decode(ChatSession.self, from: data)

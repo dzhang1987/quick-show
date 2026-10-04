@@ -101,6 +101,14 @@ final class AIChatState: ObservableObject {
     /// 上一次观察到的会话 id 集合基线：用于检测「会话被删除」并清理其运行时状态。
     private var knownSessionIds: Set<UUID> = []
 
+    /// 按会话隔离的输入草稿（key = 会话 id，value = 未发送文本）；非 @Published，
+    /// 不参与视图刷新。真源在磁盘 `AIChats/drafts.json`，此处为内存镜像。
+    private var drafts: [UUID: String] = [:]
+    /// 当前 inputText 归属的会话 id（切换会话时据此把旧会话草稿落回 drafts）。
+    private var draftOwnerSessionId: UUID?
+    /// 草稿防抖间隔（Combine debounce）。
+    private let draftDebounceInterval: TimeInterval = 0.5
+
     // MARK: - 合帧间隔常量
 
     /// 合帧间隔：约 50ms，把视图失效频率从 token 速率降到 ≤20 次/秒。
@@ -165,6 +173,15 @@ final class AIChatState: ObservableObject {
     }
 
     private init() {
+        // 草稿恢复：store 已在属性初始化阶段完成 load()，此处先读草稿文件、建立
+        // 「当前 inputText 归属会话」基线并回填，再挂订阅——初始 inputText 已就位，
+        // 配合下方 inputText 订阅的 dropFirst，避免初始空值被防抖回写覆盖磁盘草稿。
+        drafts = store.loadSessionDrafts()
+        draftOwnerSessionId = store.currentSessionId
+        if let id = store.currentSessionId, let text = drafts[id] {
+            inputText = text
+        }
+
         // 会话数据变化 → 同步当前会话消息到 @Published messages，保持旧视图调用点不变。
         // map 后 removeDuplicates：其他会话的流式冲刷也会令 $sessions 扇出，此处按值去重，
         // 当前会话消息数组未变（值相等）时不再向视图扇出无效更新
@@ -181,10 +198,13 @@ final class AIChatState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // 会话切换：未读清除 + isStreaming 派生刷新（切换不打断流，见 selectSession）。
+        // 会话切换：草稿隔离 + 未读清除 + isStreaming 派生刷新（切换不打断流，见 selectSession）。
+        // 草稿切换收口在此单一订阅：selectSession / newSession / deleteSession 自动切会话 /
+        // ensureCurrentSession 兜底建会话等所有 currentSessionId 变更路径都会经过这里。
         store.$currentSessionId
             .sink { [weak self] sessionId in
                 guard let self else { return }
+                self.switchDraft(to: sessionId)
                 if let sessionId {
                     self.unreadSessionIds.remove(sessionId)
                 }
@@ -203,13 +223,17 @@ final class AIChatState: ObservableObject {
             .sink { [weak self] currentIds in
                 guard let self else { return }
                 let disappeared = self.knownSessionIds.subtracting(currentIds)
+                var draftsChanged = false
                 for id in disappeared {
                     self.abortStreaming(sessionId: id)   // 取消回路任务（走 didComplete=false 分支）
                     self.streamingSessionIds.remove(id)
                     self.unreadSessionIds.remove(id)
                     self.usageBaselines[id] = nil
+                    // 会话被删 → 同步清理其草稿（内存 + 磁盘），避免 drafts.json 残留孤儿键。
+                    if self.drafts.removeValue(forKey: id) != nil { draftsChanged = true }
                 }
                 self.knownSessionIds = currentIds
+                if draftsChanged { self.store.persistSessionDrafts(self.drafts) }
             }
             .store(in: &cancellables)
 
@@ -219,6 +243,25 @@ final class AIChatState: ObservableObject {
                 self?.refreshCompactionInfo()
             }
             .store(in: &cancellables)
+
+        // 草稿防抖落盘：inputText 变化后 ~0.5s 写盘。dropFirst 跳过订阅重放的初始值
+        // （恢复阶段已在 init 顶部就位，无需回写）；回调只落内存字典 + 磁盘，不回写
+        // inputText、不触碰 firstResponder，杜绝与 NSTextView 输入链互相干扰。
+        $inputText
+            .dropFirst()
+            .debounce(for: .seconds(draftDebounceInterval), scheduler: DispatchQueue.main)
+            .sink { [weak self] text in
+                self?.saveDraftText(text)
+            }
+            .store(in: &cancellables)
+
+        // App 退出：立即 flush 当前草稿，避免防抖窗口内的最后编辑丢失。
+        NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
+            .sink { [weak self] _ in
+                self?.flushDraft()
+            }
+            .store(in: &cancellables)
+
         refreshCompactionInfo()
     }
 
@@ -273,6 +316,8 @@ final class AIChatState: ObservableObject {
         inputText = ""
         clipboardAttachment = nil
         imageAttachments = []
+        // 发送即消费草稿：立即从内存与磁盘移除该会话草稿，不留残留。
+        discardCurrentDraft()
 
         // 2) 追加助手占位（.sending），进入流式态。
         let assistantID = UUID()
@@ -947,16 +992,69 @@ final class AIChatState: ObservableObject {
     // MARK: - 会话操作（Wave 2 侧边栏调用）
 
     /// 新建会话并切换为当前。
+    /// 先 flush 旧会话草稿，再交由 createSession → $currentSessionId 订阅完成新会话草稿隔离。
     @discardableResult
     func newSession() -> ChatSession {
-        store.createSession()
+        flushDraft()
+        return store.createSession()
     }
 
     /// 切换当前会话（不打断任何会话的进行中生成——并行生成核心语义）。
-    /// 未读清除与 isStreaming 派生刷新由 $currentSessionId 订阅统一处理（见 init）。
+    /// 未读清除、isStreaming 派生刷新与草稿隔离由 $currentSessionId 订阅统一处理（见 init）。
     func selectSession(id: UUID) {
         guard store.session(id: id) != nil else { return }
+        // 切走前立即落盘旧会话草稿（不等防抖），随后订阅以 switchDraft 载入新会话草稿。
+        flushDraft()
         store.currentSessionId = id
+    }
+
+    // MARK: - 会话草稿（输入框按会话持久化）
+
+    /// 会话切换的草稿隔离：把 inputText 归属从旧会话迁移到新会话。
+    /// 仅在所有 currentSessionId 变更路径（selectSession / newSession / 删会话自动切 / 初始恢复）
+    /// 汇合的 $currentSessionId 订阅中调用，保证单点、无遗漏。
+    private func switchDraft(to newId: UUID?) {
+        let oldId = draftOwnerSessionId
+        guard oldId != newId else { return }
+        // 旧会话仍存在才回写：会话已删时由 $sessions 订阅负责清理，避免此处复活孤儿草稿。
+        if let oldId, !inputText.isEmpty, store.session(id: oldId) != nil {
+            drafts[oldId] = inputText
+        }
+        draftOwnerSessionId = newId
+        inputText = newId.flatMap { drafts[$0] } ?? ""
+    }
+
+    /// 防抖回调：把当前 inputText 写回其归属会话的内存草稿并落盘。
+    /// 仅操作 drafts 字典与磁盘，绝不回写 inputText / firstResponder。
+    private func saveDraftText(_ text: String) {
+        guard let owner = draftOwnerSessionId else { return }
+        if text.isEmpty {
+            drafts[owner] = nil
+        } else {
+            drafts[owner] = text
+        }
+        store.persistSessionDrafts(drafts)
+    }
+
+    /// 立即把当前 inputText flush 到内存字典与磁盘（不等防抖）。
+    /// 触发点：切换会话 / 新建会话 / App 退出。切换后 switchDraft 会改动 inputText，
+    /// 从而重置 Combine 防抖计时（pending 的旧值被新值取代，不会串写新会话）。
+    private func flushDraft() {
+        guard let owner = draftOwnerSessionId else { return }
+        if inputText.isEmpty {
+            drafts[owner] = nil
+        } else {
+            drafts[owner] = inputText
+        }
+        store.persistSessionDrafts(drafts)
+    }
+
+    /// 发送 / 追问清空时丢弃当前会话草稿：内存移除 + 磁盘立即同步（不等防抖）。
+    /// 由 AIChatState.send() 与视图 clearDraft() 调用，覆盖所有输入消费路径。
+    func discardCurrentDraft() {
+        guard let owner = draftOwnerSessionId else { return }
+        drafts[owner] = nil
+        store.persistSessionDrafts(drafts)
     }
 
     // MARK: - 内部：消息更新

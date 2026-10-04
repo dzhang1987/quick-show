@@ -51,6 +51,12 @@
   - **队列胶囊 UI**：输入框上方逐条胶囊标注「转向 / 追问」；`QueuedInputCapsule`（Button plain style、hover 提亮、tooltip「点击取回编辑」）——点击即从队列移除并回填输入框；队列消费 / 取回时输入框草稿同步清空
   - **ESC 接线**（`AIWindowManager`）：生成中 ESC 从 `abortStreaming()` 换为 `abortAndRecallQueue()`（中止 + 队列回填，防排队内容随中止丢失）；侧栏呼吸点 / ⌘K 清空路径**刻意保持不回填**（回填只应写入当前会话的输入框，中止后台会话时回填会串会话）；已知取舍：对当前会话经侧栏呼吸点中止时队列清空不回填（活跃会话的中止主入口是 ESC）
   - **GUI 全量实测**（computer-use 合成输入 + System Events AX 树断言 + 落盘 JSON 校验）：steering / follow 双队列注入链（6 消息序列与模型语义服从）、生成中 send 重定向、胶囊取回、ESC 中止 + 双队列回填、多轮工具调用与注入共存全部通过；真实会话数据 diff 备份逐字节一致零破坏
+- 会话草稿持久化（AI 窗，输入框按会话保存未发送文字）：
+  - **存储**：独立 `AIChats/drafts.json`（`[会话 id: 草稿文本]`，JSONEncoder 原子写、空值不下盘、与既有 `persist(_:)` 同款模式）；`ChatSessionStore.load()` 显式跳过该文件名（不依赖「解码失败静默跳过」的隐式行为），新增 `loadSessionDrafts()` / `persistSessionDrafts(_:)` 配套接口
+  - **内存真源与归属**：`AIChatState.drafts` 字典（非 @Published，不参与视图刷新）+ `draftOwnerSessionId` 追踪当前输入归属；草稿切换收口在 `$currentSessionId` 订阅单点 `switchDraft(to:)`——selectSession / newSession / 删会话自动切 / ensureCurrentSession 兜底建会话全部路径无遗漏；旧会话文本落回字典、新会话草稿载入输入框；被删会话有守卫不复活孤儿草稿
+  - **保存时机**：输入防抖 0.5s 落盘（Combine debounce，仅写盘不回写输入框、不触碰 firstResponder）；切换 / 新建会话前与 `NSApplication.willTerminate` 立即 flush；启动时 `init` 顶部回填当前会话草稿（先于订阅挂载 + `$inputText.dropFirst()` 防初始空值覆盖磁盘草稿）；切换后改写 inputText 自动重置防抖计时，pending 旧值被新值取代不串写
+  - **清理**：发送（`send()`）与转向/追问入队（视图 `clearDraft()`）即删当前会话草稿并同步落盘；删除会话从 `$sessions` 消失集合同步清理孤儿键
+  - **输入体验红线**：`ChatInputNSTextView` 组字（setMarkedText/unmarkText）与按键链路（doCommandBy / performKeyEquivalent / cancelOperation）零改动
 
 ### Changed
 
@@ -79,6 +85,7 @@
 - 发送消息后不自动跳到底部（在上方阅读历史时发送，视图停在原地）：三重叠加——① 消息数变化的贴底跟随被 `guard isActive, isPinned` 拦截（用户上滚解除跟随后发送即不跳）；② 消息数组 diff 判定失效：`send()` 同一 runloop 连续 append 用户消息与助手占位，SwiftUI 合并帧后 `onChange(of: messages.count)` 触发时 `messages.last` 已是占位、role 判定不命中；③ 最终的 `proxy.scrollTo(bottomAnchorID)` 在「视口远离底部 + 新行刚插入」场景下对 LazyVStack 尾部锚点无声失败（前两版修调用时序均实测无效，坐实该路径不可靠）。修法 = 三层：发送事件信号（`AIChatState.scrollJumpRequests` 按会话发布时间戳，视图层 `onChange` 无条件置 pinned 并跳底）→ NSScrollView 直滚桥（`NSScrollBridgeView` 零尺寸 NSView 挂在 ScrollView 内容树内部、经 `enclosingScrollView` 捕获本会话底层 NSScrollView 弱引用存入 `SessionScrollRelay`，`scrollToBottom` 直接设置 clip view 偏移——与用户滚轮同一条 AppKit 路径零竞态，桥未就绪回退 proxy 路径）→ 下一 runloop 无动画补滚兜底；`messages.count` 的 user 分支保留为非合并帧路径兜底
 - 流式落定（思考完成后最终渲染）内容闪现后整片白屏（历史气泡一并消失、token 计数正常，切会话才恢复）：两处防御——① 常驻集合兜底：`residentSessionIds` 若在 sessions 扇出中被误删当前会话，ZStack 所有层 `opacity=0` 即整片白、而侧栏选中（读 `currentSessionId`）与 token（输入坞 overlay）照常显示，现每次扇出后恒定保证 currentSessionId 常驻（幂等 LRU 补齐）；② 落定替换禁动画：`.done`/`.aborted` 的 `AssistantMarkdownView` 从流式视图结构性替换时加 `.transaction { $0.animation = nil }`，阻断 messageList 的 `.animation(value: messages.count)` 与行级 transition 在替换瞬间传入的隐式动画，防 CA 事务竞态把内容层卡在近零透明度（与既有白屏防线同族）
 - 会话加载后侧栏出现两条同时高亮的选中行：`load()` 按 updatedAt 降序排序后按 id 去重（保留最新）——磁盘上存在重复 id 会话文件时 ForEach 身份域冲突会同时命中两行选中态；仅加载期收敛，运行时 mutate 路径不变
+- 重启恢复草稿后输入框 placeholder 与草稿文字重影（双层文字叠绘）：`inputEmpty` @State 初值固定 true，而首挂载无变化事件可同步它——`onChange(of: inputText)` 不响应初始值，`updateNSView` 程序化回写（`textView.string = text`）生效但同期写 `isInputEmpty` 属「视图更新周期内修改 state」被 SwiftUI 丢弃（AppKit 层生效、SwiftUI 层不生效即重影）。修法 = placeholder 显隐与 `dockQuiet` 安静态判据改为 `inputEmpty && state.inputText.isEmpty` 双通道取与——派生条件首帧求值即正确、零时序依赖；IME 组字期防重影语义保留（组字文本经 setMarkedText 回调实时同步 `inputEmpty` 通道）
 
 ### Fixed
 

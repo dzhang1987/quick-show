@@ -44,7 +44,10 @@ struct AIChatView: View {
     /// 端点配置可用性：hasConfiguredEndpoint 读 UserDefaults/Keychain，非 @Published，
     /// 故在视图出现与关键窗口激活时主动刷新（避免设置后回到对话窗仍显示引导）。
     @State private var configured = false
-    /// 输入内容空态：独立于 state.inputText（IME 组字期间绑定不更新），驱动 placeholder 显隐。
+    /// 输入内容空态：独立于 state.inputText 的回写通道（IME 组字期间由 setMarkedText 回调驱动）。
+    /// 显隐判据须与 state.inputText.isEmpty 取与：@State 初值固定为 true 且首挂载无变化事件
+    /// （onChange 不响应初始值、updateNSView 周期内写 state 不可靠），单通道会在草稿恢复
+    /// （重启载入 / 程序化填充）时与既有文字重影；派生条件首帧求值即正确，零时序依赖。
     @State private var inputEmpty = true
     /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
     @State private var hasClipboardText = false
@@ -508,7 +511,10 @@ struct AIChatView: View {
     /// 无实心色块、低频工具隐去，空态视觉重心让回中部引导区；
     /// 悬停坞区 / 开始输入 / 附加内容 / 生成开始即切换激活态（0.16s 淡入，contentFade）。
     private var dockQuiet: Bool {
+        // 空态判据双通道与：草稿恢复期 inputEmpty 可能滞后（@State 初值 true、首帧无变化事件），
+        // state.inputText 非空即有草稿，首帧即正确（见 inputEmpty 声明处注释）。
         inputEmpty
+            && state.inputText.isEmpty
             && state.clipboardAttachment == nil
             && state.imageAttachments.isEmpty
             && state.pendingQueue.isEmpty
@@ -573,7 +579,9 @@ struct AIChatView: View {
                         onEscape: { handleEscape() },
                         onInsertImages: { images in insertImages(images) }
                     )
-                    if inputEmpty {
+                    // 双通道与：草稿恢复期 inputEmpty 滞后为 true（@State 初值、首帧无变化事件），
+                    // state.inputText 非空即有文字，placeholder 不显示——防重影（见 inputEmpty 声明处注释）。
+                    if inputEmpty && state.inputText.isEmpty {
                         Text(inputPlaceholder)
                             .font(Theme.Typography.text(13))
                             .foregroundColor(Theme.Colors.idleText)
@@ -993,7 +1001,9 @@ struct AIChatView: View {
     }
 
     /// 清空草稿态（文本 / 剪贴板附加 / 图片附件）——与 state.send() 正常分支内清空同款。
+    /// 同时丢弃已持久化的会话草稿（steering / follow-up 入队不会经 state.send() 消费输入态）。
     private func clearDraft() {
+        state.discardCurrentDraft()
         state.inputText = ""
         state.clipboardAttachment = nil
         state.imageAttachments = []
