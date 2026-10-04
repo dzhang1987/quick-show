@@ -229,6 +229,12 @@ struct AIChatView: View {
                 }
             }
             knownSessionIds = currentIds
+            // 恒定保证：当前会话必须常驻（residency 误删/竞态兜底；丢失则全部层 opacity=0 → 整片白屏）。
+            // 侧栏选中只读 currentSessionId、与 residency 无关：residency 丢失时侧栏看似正常，
+            // 但消息区全白，切一次会话才恢复——故此处每次扇出后无条件补齐。
+            if let current = state.store.currentSessionId, !residentSessionIds.contains(current) {
+                updateResidency(for: current)
+            }
         }
         // 会话级模型/思考档位变化 → 模型/思考 chip 跟随刷新（触发器为何必要的说明
         // 见 sessionConfigStamp 注释；切会话路径由上方 messages 扇出管线天然覆盖）。
@@ -1360,6 +1366,17 @@ private final class SessionScrollRelay {
     private(set) var activeSessionId: UUID?
     private var handler: ((Bool) -> Void)?
 
+    /// AppKit 滚动桥：按会话持有底层 NSScrollView 弱引用（跳底直滚用，见 NSScrollBridgeView）。
+    private struct WeakScrollViewBox { weak var view: NSScrollView? }
+    private var scrollBridges: [UUID: WeakScrollViewBox] = [:]
+
+    func attachScrollView(sessionId: UUID, scrollView: NSScrollView) {
+        scrollBridges[sessionId] = WeakScrollViewBox(view: scrollView)
+    }
+    func scrollView(for sessionId: UUID) -> NSScrollView? {
+        scrollBridges[sessionId]?.view
+    }
+
     func register(sessionId: UUID, handler: @escaping (Bool) -> Void) {
         activeSessionId = sessionId
         self.handler = handler
@@ -1373,6 +1390,22 @@ private final class SessionScrollRelay {
     }
 
     func relay(scrollingUp: Bool) { handler?(scrollingUp) }
+}
+
+/// AppKit 桥：零尺寸 NSView 挂在 ScrollView **内容树内部**（必须在内——挂在 ScrollView
+/// 外层时是兄弟节点，enclosingScrollView 解析不到）。捕获本会话底层 NSScrollView 存入
+/// relay，供跳底直滚；视图若被 SwiftUI 重建，updateNSView 会用 !== 检测并重挂。
+private struct NSScrollBridgeView: NSViewRepresentable {
+    let sessionId: UUID
+    let relay: SessionScrollRelay
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let sv = nsView.enclosingScrollView, relay.scrollView(for: sessionId) !== sv {
+                relay.attachScrollView(sessionId: sessionId, scrollView: sv)
+            }
+        }
+    }
 }
 
 // MARK: - 单会话消息列表（视图树保活单元）
@@ -1530,6 +1563,9 @@ private struct SessionMessageList: View {
                 .padding(.horizontal, Theme.Spacing.section)
                 .padding(.top, Theme.Spacing.section)
                 .frame(maxWidth: .infinity)
+                // AppKit 滚动桥：必须挂在 ScrollView 内容闭包内部（此处是内容根视图），
+                // 才能经 enclosingScrollView 解析到本会话底层 NSScrollView（见 NSScrollBridgeView）。
+                .background(NSScrollBridgeView(sessionId: sessionId, relay: scrollRelay))
             }
             .coordinateSpace(name: scrollSpaceName)
             // 首帧视口自适应：把视口高度注入环境，供消息内 AssistantMarkdownView 估算「一屏块数」。
@@ -1559,11 +1595,32 @@ private struct SessionMessageList: View {
             // 导致 onChange(of: isActive) 不触发、无快照」的反例（LRU 驱逐后重挂载会被强制贴底）。
             // 正常失活（非卸载）由 onChange(isActive=false) 保存；saveSnapshot 幂等，重复无害。
             .onDisappear { saveSnapshot() }
-            // 消息数变化：仅 pinned 时跟随贴底（新消息/重试/发送）；同时记录内容增长事件。
+            // 消息数变化：同时记录内容增长事件。
+            // 用户发送 → 无条件跳底并恢复跟随（pinned）：即便此前用户上滚解除了跟随，
+            // 自己发出的消息也必须回到最新；其余情况（AI 流式/助手占位追加）仍走原 pinned 跟随规则。
             .onChange(of: messages.count) { _ in
                 lastContentGrowthAt = Date()
+                if isActive, messages.last?.role == .user {
+                    isPinned = true
+                    scrollToBottom(proxy, animated: true)
+                    return
+                }
                 guard isActive, isPinned else { return }
                 scrollToBottom(proxy, animated: true)
+            }
+            // 用户发送 → 无条件跳底并恢复跟随：监听 AIChatState 的跳底事件信号（见其注释），
+            // 不依赖消息数组 diff（send() 同帧连续 append 用户消息与助手占位，合并帧下 role 判定失效）。
+            // onChange 值类型为 Date?（字典下标返回可选，Equatable 合法）；值未变化不触发，
+            // LRU 重挂载时字典里的旧时间戳与当前值相等，不会误触发跳底，既有 restoreScroll 逻辑不受影响。
+            .onChange(of: state.scrollJumpRequests[sessionId]) { _ in
+                guard isActive else { return }
+                lastContentGrowthAt = Date()   // 延长 growth 窗口，防 handleGeometry 把 isPinned 翻回 false
+                isPinned = true
+                scrollToBottom(proxy, animated: true)
+                // 保险补滚：信号触发时新插入行可能尚未完成布局，下一 runloop 布局落定后再无动画贴底一次。
+                DispatchQueue.main.async {
+                    if isActive, isPinned { scrollToBottom(proxy, animated: false) }
+                }
             }
             // 流式/工具/思考增量：以整条 last 消息为增长信号，仅 pinned + 生成中 + 用户未滚动
             // 时跟随；节流 0.12s 非动画。
@@ -1709,10 +1766,29 @@ private struct SessionMessageList: View {
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        if animated {
-            withAnimation(.easeOut(duration: 0.18)) {
-                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+        // AppKit 直滚：SwiftUI proxy.scrollTo 对 LazyVStack 尾部锚点不可靠（视口远离底部时
+        // 锚点未实例化/新行布局竞态，scrollTo 无声失败）；用户滚轮本就直达此 NSScrollView，
+        // 程序化设置 clip view 偏移与滚轮同路径，零竞态。
+        if let sv = scrollRelay.scrollView(for: sessionId), let doc = sv.contentView.documentView {
+            let bottomY = doc.isFlipped
+                ? max(0, doc.bounds.height - sv.contentView.bounds.height)
+                : 0
+            let target = NSPoint(x: 0, y: bottomY)
+            if animated {
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.18
+                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                    sv.contentView.animator().setBoundsOrigin(target)
+                })
+            } else {
+                sv.contentView.scroll(to: target)
+                sv.reflectScrolledClipView(sv.contentView)
             }
+            return
+        }
+        // 桥未就绪回退（旧实现保留）
+        if animated {
+            withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
         } else {
             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
@@ -2218,6 +2294,10 @@ private struct ChatMessageRow: View, Equatable {
                     // 显式绑定消息身份：message.id 变化即重建视图，分批渲染游标随之重置。
                     .id(message.id)
                     .textSelection(.enabled)
+                    // 白屏防线（勿动族）：落定态从流式视图结构性替换为完整渲染时，禁用从祖先
+                    // （messageList 的 .animation(value: messages.count) 与行级 transition）传入的
+                    // 隐式动画，防止 CA 事务竞态把内容层卡在近零透明度；无动画瞬时替换。
+                    .transaction { $0.animation = nil }
             }
         case .aborted:
             // 中止：保留半截内容的富渲染 + 弱标记
@@ -2226,6 +2306,8 @@ private struct ChatMessageRow: View, Equatable {
                     AssistantMarkdownView(content: message.content)
                         .id(message.id)
                         .textSelection(.enabled)
+                        // 白屏防线（勿动族）：同 .done 分支，结构性替换禁用祖先隐式动画，防 CA 事务竞态。
+                        .transaction { $0.animation = nil }
                 }
                 AbortedTag()
             }

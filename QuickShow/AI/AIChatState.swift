@@ -68,6 +68,10 @@ final class AIChatState: ObservableObject {
     @Published private(set) var streamingSessionIds: Set<UUID> = []
     /// 后台生成完成但用户尚未查看的会话集合（侧栏未读提示；切回会话即清除）。
     @Published private(set) var unreadSessionIds: Set<UUID> = []
+    /// 会话级跳底请求（发送时刻）：视图层监听本会话时间戳变化 → 无条件贴底并恢复跟随。
+    /// 必须用事件信号而非消息数组 diff：send() 在同一 runloop 连续 append 用户消息与助手占位，
+    /// onChange(of: messages.count) 合并为一次渲染帧触发时 last 已是占位，role 判定不可靠。
+    @Published var scrollJumpRequests: [UUID: Date] = [:]
     /// 按会话隔离的待注入队列（steering + follow-up 合并存储，元素顺序即入队顺序）。
     /// @Published 供视图/侧栏响应式刷新；对外经 pendingQueue 读取当前会话队列。
     @Published private var pendingQueues: [UUID: [QueuedChatInput]] = [:]
@@ -277,6 +281,9 @@ final class AIChatState: ObservableObject {
             to: sessionId,
             persist: false
         )
+        // 跳底事件信号（发送时刻，主线程 @MainActor 同步发布）：视图层据此无条件贴底并恢复跟随，
+        // 不依赖合并帧下的消息数组 diff（见 scrollJumpRequests 注释）。
+        scrollJumpRequests[sessionId] = Date()
         ctx.sendPathPersisted = false
         streamContexts[sessionId] = ctx
         streamingSessionIds.insert(sessionId)

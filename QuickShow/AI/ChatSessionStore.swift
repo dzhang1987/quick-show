@@ -542,6 +542,10 @@ final class ChatSessionStore: ObservableObject {
                 return try? JSONDecoder().decode(ChatSession.self, from: data)
             }
         loaded.sort { $0.updatedAt > $1.updatedAt }
+        // 按 id 去重：重复 id 会使侧栏 ForEach 身份域冲突（两条行同时呈选中态）并扰乱右侧常驻层渲染。
+        // 仅加载时收敛——已按 updatedAt 降序排序，取首次出现即保留最新那条；运行时 mutate 路径不变。
+        var seenIds = Set<UUID>()
+        loaded = loaded.filter { seenIds.insert($0.id).inserted }
         sessions = loaded
 
         let stored = UserDefaults.standard.string(forKey: currentIdKey).flatMap(UUID.init(uuidString:))
