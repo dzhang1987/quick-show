@@ -6,6 +6,10 @@
 
 ### Added
 
+- 排队消息撤回 + 转向注入弱标记（AI 窗，消息交互三期，补齐「生成中排队后没机会反悔」的缺口）：
+  - **键路**（`ChatInputNSTextView.performKeyEquivalent`）：`⌘⌫`（keyCode 51）撤回队首排队消息——三重守卫：输入框非空放行（保留系统「删到行首」编辑语义）、IME 组字期（hasMarkedText）放行不吞组字编辑、空队列由 state 层静默返回 false；空输入时一律消费 return true（此场景系统删行首本就是 no-op，无损失）；回调经 `ChatInputTextView` 新增 `onRecallFirst` 通道挂接（照 onEscape 模式，makeNSView / updateNSView 双挂）
+  - **数据层**（`AIChatState` 对外契约）：新增 `recallFirstQueuedInput() -> Bool`（撤回当前会话队列最早一条，不区分 steering / follow，整体替换回填 inputText + imageAttachments——与 recallQueuedInput 同一模式，未发明合并逻辑；空队列返回 false）；`ChatMessage` 新增 `isSteered: Bool?` 字段（CodingKeys + `decodeIfPresent` 旧 JSON 兼容，沿用 images / toolCalls / reasoning 既有兼容模式）；打标在 `injectPendingInput` 单点收口（`item.kind == .steering` → true，follow-up 不标——追问是普通追加语义；两个注入点零改动）
+  - **UI**（`AIChatView`）：队列胶囊右侧 `✕` 常驻占位、hover 显形（opacity 渐变 + allowsHitTesting(hovered)，布局零跳动，同输入坞低频工具组纪律；点击 ✕ 与点击胶囊本体完全同语义——撤回并回填输入框，嵌套命中无歧义）；胶囊 tooltip 固定文案后附完整文本（补偿单行截断）；转向注入的 user 消息在气泡外上方右对齐「↪ 已转向」纯图文弱标记（10pt semibold + contentTertiary、无底色——与 AbortedTag「状态记号在内容体外」同构但更轻；图标选非 fill 版 `arrowshape.turn.up.right`，与队列胶囊 fill 版形成「排队中强调 → 注入后弱化」的语义连续；follow-up 消息不标记）；胶囊保持全宽结构、注入时机与调度语义零改动
 - Markdown 渲染全量升级（AI 窗，Markdown 渲染专项）：
   - **语法覆盖补全**：一至六级标题（ATX + Setext 下划线式）、删除线 `~~`、任务列表 `- [ ]` / `- [x]`、脚注（行内引用上标 + 文末注释区聚合渲染）、表格列对齐（`:` 分隔行解析）、多反引号行内代码（N 个开启 N 个闭合）、缩进式代码块（4 空格）、任意层级递归嵌套列表（有序保留起始序号）、自动链接（裸 URL / `www.` 补全 https / 尖括号形式）、链接 title、硬换行（行尾双空格 / 反斜杠）
   - **图片渲染**：`![]()` 与行内 `<img>`；网络 URL（异步加载 + NSCache 内存缓存）、本地路径（`~` 展开）、data URI（base64）三种来源；加载 / 失败 / 成功三态（等比缩放、圆角描边复用 insetCard 体系）；`[![alt](img)](link)` 链接内嵌图片渲染为可点击图片（手型光标 + hover 提亮 + 点击跳转外层链接）；含图片段落自动拆段混排（图片与文本交替成行，纯结构操作不阻塞流式渲染）

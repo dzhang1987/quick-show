@@ -926,12 +926,20 @@ final class AIChatState: ObservableObject {
     /// 注入一条待发送输入：追加 user 消息（走 store 既有 mutate+persist 正常落盘）
     /// + 新 assistant 占位（.sending），返回新占位 id；
     /// 后续由调用方以含新消息的上下文发起下一轮请求。
+    /// 转向标记在此收口：steering 注入的 user 消息打 isSteered（UI 弱标记用），
+    /// followUp 是普通追加语义不打标；两个注入点共用本函数，无需各自感知。
     private func injectPendingInput(
         _ item: QueuedChatInput,
         sessionId: UUID,
         context ctx: StreamContext
     ) -> UUID {
-        let userMessage = ChatMessage(role: .user, content: item.text, state: .done, images: item.images)
+        let userMessage = ChatMessage(
+            role: .user,
+            content: item.text,
+            state: .done,
+            images: item.images,
+            isSteered: item.kind == .steering ? true : nil
+        )
         store.appendMessage(userMessage, to: sessionId, persist: true)
 
         let assistantID = UUID()
@@ -1493,6 +1501,21 @@ extension AIChatState {
         pendingQueues[sessionId] = queue.isEmpty ? nil : queue
         inputText = item.text
         imageAttachments = item.images
+    }
+
+    /// ⌘⌫ 撤回当前会话队列最早一条（不区分 kind）：移除并回填 inputText + 附件暂存，
+    /// 与 recallQueuedInput 同一回填模式（整体替换输入与附件态，输入框已有草稿时直接覆盖）。
+    /// 键路仅在输入框为空时触发：撤回后文字回填进输入框，心智自洽。空队列返回 false。
+    @discardableResult
+    func recallFirstQueuedInput() -> Bool {
+        guard let sessionId = currentSessionId,
+              var queue = pendingQueues[sessionId],
+              !queue.isEmpty else { return false }
+        let item = queue.removeFirst()
+        pendingQueues[sessionId] = queue.isEmpty ? nil : queue
+        inputText = item.text
+        imageAttachments = item.images
+        return true
     }
 
     /// 中止当前会话生成并把该会话队列全部回填输入框：

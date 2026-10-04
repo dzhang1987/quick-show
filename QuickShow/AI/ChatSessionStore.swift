@@ -54,8 +54,9 @@ struct ToolCallRecord: Codable, Equatable {
 
 // MARK: - 消息模型
 
-/// 单条对话消息。相较于旧版新增 `images` 图片附件、`toolCalls` 工具调用记录与
-/// `reasoning` 思考过程字段，旧数据缺失这些字段时分别按空数组 / nil 解码，保证向后兼容。
+/// 单条对话消息。相较于旧版新增 `images` 图片附件、`toolCalls` 工具调用记录、
+/// `reasoning` 思考过程与 `isSteered` 转向标记字段，旧数据缺失这些字段时分别按
+/// 空数组 / nil 解码，保证向后兼容。
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: UUID
     let role: Role
@@ -68,6 +69,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     /// 助手消息的思考过程（reasoning）增量累积；用户消息恒为 nil。
     /// 落定（done/aborted）后保留原值，供 UI 折叠行展开查看。
     var reasoning: String?
+    /// 转向注入弱标记：仅经 steering 队列注入的 user 消息为 true（普通发送与
+    /// follow-up 注入均为 nil），供 UI 在气泡上方渲染「已转向」弱记号。
+    var isSteered: Bool?
 
     /// 消息角色。system 仅用于请求注入，不进入 UI 会话数组。
     enum Role: String, Codable {
@@ -95,7 +99,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         state: MessageState,
         images: [ChatImageAttachment] = [],
         toolCalls: [ToolCallRecord]? = nil,
-        reasoning: String? = nil
+        reasoning: String? = nil,
+        isSteered: Bool? = nil
     ) {
         self.id = id
         self.role = role
@@ -104,13 +109,14 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.images = images
         self.toolCalls = toolCalls
         self.reasoning = reasoning
+        self.isSteered = isSteered
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, content, state, images, toolCalls, reasoning
+        case id, role, content, state, images, toolCalls, reasoning, isSteered
     }
 
-    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning 等新字段）。
+    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning / isSteered 等新字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -122,6 +128,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         toolCalls = try container.decodeIfPresent([ToolCallRecord].self, forKey: .toolCalls)
         // 旧会话无 reasoning 字段：缺失即 nil，不打断解码。
         reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
+        // 旧会话无 isSteered 字段：缺失即 nil（非转向消息，无弱标记），不打断解码。
+        isSteered = try container.decodeIfPresent(Bool.self, forKey: .isSteered)
     }
 }
 

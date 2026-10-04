@@ -577,7 +577,8 @@ struct AIChatView: View {
                         onSubmit: { submitInput() },
                         onSubmitFollowUp: { submitFollowUp() },
                         onEscape: { handleEscape() },
-                        onInsertImages: { images in insertImages(images) }
+                        onInsertImages: { images in insertImages(images) },
+                        onRecallFirst: { state.recallFirstQueuedInput() }
                     )
                     // 双通道与：草稿恢复期 inputEmpty 滞后为 true（@State 初值、首帧无变化事件），
                     // state.inputText 非空即有文字，placeholder 不显示——防重影（见 inputEmpty 声明处注释）。
@@ -2126,26 +2127,39 @@ private struct ChatMessageRow: View, Equatable {
     /// 无描边（实底自身即容器，描边是廉价感来源），圆角 18 对话语言；
     /// 图片缩略图排在文本上方（点击放大），行距与 AI 正文同节奏（13pt + 6 ≈ 1.7 倍行高）。
     /// 文本启用选区复制（textSelection），与助手 Markdown 选区行为对齐。
+    /// steering 注入的消息在气泡上方带「已转向」弱标记：纯图文无底色（比「已中止」标签更轻），
+    /// 不抢气泡视觉重心，仅作来源可辨识记号。
     private var userBubble: some View {
-        VStack(alignment: .trailing, spacing: Theme.Spacing.xl) {
-            if !message.images.isEmpty {
-                MessageImageThumbs(images: message.images, onTap: onTapImage)
+        VStack(alignment: .trailing, spacing: Theme.Spacing.xs) {
+            if message.isSteered == true {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: "arrowshape.turn.up.right")
+                        .font(Theme.Typography.text(10, .semibold))
+                    Text("已转向")
+                        .font(Theme.Typography.text(10, .semibold))
+                }
+                .foregroundColor(Theme.Colors.contentTertiary)
             }
-            if !message.content.isEmpty {
-                Text(message.content)
-                    .font(Theme.Typography.text(13))
-                    .foregroundColor(Theme.Colors.contentPrimary)
-                    .lineSpacing(6)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .textSelection(.enabled)
+            VStack(alignment: .trailing, spacing: Theme.Spacing.xl) {
+                if !message.images.isEmpty {
+                    MessageImageThumbs(images: message.images, onTap: onTapImage)
+                }
+                if !message.content.isEmpty {
+                    Text(message.content)
+                        .font(Theme.Typography.text(13))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                        .lineSpacing(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
             }
+            .padding(.horizontal, Theme.Spacing.xxl)
+            .padding(.vertical, Theme.Spacing.xl)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
+                    .fill(Theme.Colors.chatUserBubble)
+            )
         }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.vertical, Theme.Spacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
-                .fill(Theme.Colors.chatUserBubble)
-        )
     }
 
     /// 就地编辑态：气泡原地「展开」为编辑器——同底色/圆角/内边距，无跳变感。
@@ -2646,8 +2660,10 @@ private struct AbortedTag: View {
 
 // MARK: - 待注入队列胶囊（steering / follow-up）
 
-/// 待注入队列胶囊：类型标签（转向=↪ / 追问=↩ + 中文小字）+ 文本单行截断。
+/// 待注入队列胶囊：类型标签（转向=↪ / 追问=↩ + 中文小字）+ 文本单行截断 + hover 露出 ✕。
 /// 点击整枚胶囊取回编辑（数据层回填输入框，胶囊随队列移除消失）；hover 提亮。
+/// ✕ 与整枚同语义（撤回该条回填输入框），始终占位、hover 才显形——opacity 渐变、
+/// 布局零跳动（同 showDockSecondaryTools 纪律）。
 /// 视觉沿用坞内微胶囊语言：实底 surfaceTrack + 0.5pt 白 rim，不新增设计令牌。
 private struct QueuedInputCapsule: View {
     let item: QueuedChatInput
@@ -2678,6 +2694,20 @@ private struct QueuedInputCapsule: View {
                     .truncationMode(.tail)
 
                 Spacer(minLength: 0)
+
+                // ✕ 撤回钮：与点击整枚同动作（撤回回填），嵌套命中无歧义；
+                // 非 hover 时禁命中，点击穿透到整枚胶囊。
+                Button(action: onRecall) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Theme.Typography.text(12))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .opacity(hovered ? 1 : 0)
+                .allowsHitTesting(hovered)
+                .accessibilityHidden(!hovered)
+                .help("撤回该条到输入框")
             }
             .padding(.horizontal, Theme.Spacing.xl)
             .padding(.vertical, Theme.Spacing.md)
@@ -2695,9 +2725,11 @@ private struct QueuedInputCapsule: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
-        .help(isSteering
+        // 固定文案后附队列项完整文本（单行截断的补偿：多行长文经 tooltip 全量可读）
+        .help((isSteering
               ? "转向：本轮生成中即时注入、修正方向 · 点击取回编辑"
               : "追问：本轮回复完成后自动追加一轮 · 点击取回编辑")
+              + "\n" + displayText)
     }
 
     /// 展示文本：纯图片队列项给占位文案（对齐 send 的「请查看图片。」兜底语义）。
@@ -2840,6 +2872,8 @@ private struct ChatInputTextView: NSViewRepresentable {
     let onEscape: () -> Void
     /// 粘贴/拖入图片（NSImage 数组，由调用方转附件）。
     let onInsertImages: ([NSImage]) -> Void
+    /// ⌘⌫ 撤回队首（仅空输入框时由 NSTextView 触发；空队列时调用方静默不动作）。
+    let onRecallFirst: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -2858,6 +2892,7 @@ private struct ChatInputTextView: NSViewRepresentable {
         textView.delegate = context.coordinator
         textView.onEscape = onEscape
         textView.onInsertImages = onInsertImages
+        textView.onRecallFirst = onRecallFirst
         // IME 组字（marked text）不触发 textDidChange：靠该回调同步组字文本与空态，
         // 避免 placeholder 重叠，并让绑定不滞后于组字内容（防止 updateNSView 误回写）。
         textView.onContentStateChanged = { [weak coordinator = context.coordinator] in
@@ -2922,6 +2957,7 @@ private struct ChatInputTextView: NSViewRepresentable {
         guard let textView = context.coordinator.textView else { return }
         textView.onEscape = onEscape
         textView.onInsertImages = onInsertImages
+        textView.onRecallFirst = onRecallFirst
         // 外部（发送清空 / ⌘K / 重试）修改文本时回写；仅在内容不一致时写。
         // 关键防线：IME 组字期间（markedRange 非空）绝不做程序化回写——textDidChange 在组字时不触发，
         // 绑定必然滞后于组字文本（如首键 "a" 尚未进绑定），此时回写会摧毁组字导致首字母闪失。
@@ -3028,6 +3064,8 @@ private struct ChatInputTextView: NSViewRepresentable {
 private final class ChatInputNSTextView: NSTextView {
     var onEscape: (() -> Void)?
     var onInsertImages: (([NSImage]) -> Void)?
+    /// ⌘⌫ 撤回队首回调（仅输入框为空且非组字时触发；有文字时 ⌘⌫ 保留系统「删到行首」语义）。
+    var onRecallFirst: (() -> Void)?
     /// 内容状态变化回调（IME 组字/取消组字时 textDidChange 不触发，需单独通知 placeholder）。
     var onContentStateChanged: (() -> Void)?
 
@@ -3052,6 +3090,13 @@ private final class ChatInputNSTextView: NSTextView {
             case 8: copy(nil); return true        // C
             case 7: cut(nil); return true         // X
             case 0: selectAll(nil); return true   // A
+            case 51:                              // ⌫
+                // ⌘⌫：仅空输入框（且非 IME 组字中）消费为「撤回队首」——撤回后文字回填进
+                // 输入框，心智自洽；有文字时放行，保留系统 ⌘⌫「删到行首」语义，不吞正常编辑。
+                if string.isEmpty, !hasMarkedText(), let onRecallFirst {
+                    onRecallFirst()
+                    return true
+                }
             default: break
             }
         }
