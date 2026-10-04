@@ -32,6 +32,7 @@ targets:
     platform: macOS
     dependencies:
       - target: SwiftMath
+      - target: HighlightrKit
     sources:
       - path: QuickShow
         excludes:
@@ -44,6 +45,13 @@ targets:
       # SwiftMath vendoring：数学字体包以 folder reference 打进 App 资源
       - path: Vendor/SwiftMath/Sources/SwiftMath/mathFonts.bundle
         type: folder
+        buildPhase: resources
+      # Highlightr 资源：highlight.min.js 与主题 CSS 必须扁平压入 bundle 根
+      # （无 type 的目录默认为 group，XcodeGen 会将目录内文件逐个加入 Copy Bundle
+      #  Resources；Highlightr 运行期按 bundle 根扁平名查找 highlight.min.js 与 *.min.css）
+      - path: Vendor/Highlightr/Resources/highlight.min.js
+        buildPhase: resources
+      - path: Vendor/Highlightr/Resources/styles
         buildPhase: resources
     info:
       path: QuickShow/Info.plist
@@ -104,5 +112,18 @@ targets:
       PRODUCT_BUNDLE_IDENTIFIER: cn.chiproad.SwiftMath
       PRODUCT_NAME: SwiftMath
       PRODUCT_MODULE_NAME: SwiftMath
+      SWIFT_VERSION: "5.9"
+      MACOSX_DEPLOYMENT_TARGET: "13.0"
+
+  # Highlightr 2.x vendored 静态库（源码见 Vendor/Highlightr/，仅提供代码高亮能力）
+  HighlightrKit:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: Vendor/Highlightr/Sources/Highlightr
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: cn.chiproad.HighlightrKit
+      PRODUCT_NAME: HighlightrKit
+      PRODUCT_MODULE_NAME: HighlightrKit
       SWIFT_VERSION: "5.9"
       MACOSX_DEPLOYMENT_TARGET: "13.0"

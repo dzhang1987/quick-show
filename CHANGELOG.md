@@ -6,6 +6,14 @@
 
 ### Added
 
+- Markdown 渲染全量升级（AI 窗，Markdown 渲染专项）：
+  - **语法覆盖补全**：一至六级标题（ATX + Setext 下划线式）、删除线 `~~`、任务列表 `- [ ]` / `- [x]`、脚注（行内引用上标 + 文末注释区聚合渲染）、表格列对齐（`:` 分隔行解析）、多反引号行内代码（N 个开启 N 个闭合）、缩进式代码块（4 空格）、任意层级递归嵌套列表（有序保留起始序号）、自动链接（裸 URL / `www.` 补全 https / 尖括号形式）、链接 title、硬换行（行尾双空格 / 反斜杠）
+  - **图片渲染**：`![]()` 与行内 `<img>`；网络 URL（异步加载 + NSCache 内存缓存）、本地路径（`~` 展开）、data URI（base64）三种来源；加载 / 失败 / 成功三态（等比缩放、圆角描边复用 insetCard 体系）；`[![alt](img)](link)` 链接内嵌图片渲染为可点击图片（手型光标 + hover 提亮 + 点击跳转外层链接）；含图片段落自动拆段混排（图片与文本交替成行，纯结构操作不阻塞流式渲染）
+  - **代码块语法高亮**：vendored Highlightr（highlight.js v11.11.1，192 语言，源文件 blob SHA 锁定）以独立静态库 target `HighlightrKit` 集成（模块名与主工程 `Theme` 类命名隔离；pojoaque 默认主题硬依赖随包；highlight.min.js 与主题 CSS 扁平压入主 bundle）；`MarkdownHighlighter` 服务封装：深 / 浅双 Highlightr 实例（github-dark / atom-one-light，专用串行队列互不切换主题）、语言别名归一化（objective-c / py / sh / yml 等 17 条）、(语言, 代码, 外观) 三维 LRU 96 条、token 背景剥离 + bold trait → semibold 字重映射、后台线程高亮（fastRender 自研 HTML 扫描器，绝不走强制主线程的 WebKit 导入路径）；渲染侧首帧纯色立即上屏 + 后台高亮完成后替换，外观切换随 task id 自动重高亮
+  - **内嵌 HTML**：行内标签子集映射样式（`<b>`/`<strong>`→粗体、`<i>`/`<em>`→斜体、`<u>`→下划线、`<s>`/`<del>`→删除线、`<mark>`→半透明高亮、`<sub>`/`<sup>`→上下标、`<br>`→硬换行、`<code>`/`<kbd>`/`<samp>`→行内代码、`<a href>`→链接、`<img src alt>`→图片，未知标签剥壳保留内容）；40+ 常见块级标签同名深度计数剥壳后递归块级解析（整行 `<hr>` → 水平分隔线，无闭合降级段落文本）；HTML 实体解码（named 40+ 常用表 + 十进制 `&#NNN;` + 十六进制 `&#xHHHH;`）
+  - **引用式链接（CommonMark 全形态）**：`[text][label]` / collapsed `[text][]` / 速记 `[label]` 及图片的 `![alt][label]` / `![alt][]` / `![alt]` 对应形式；定义行 `[label]: destination "title"` 文档级预扫描收集（跳过 fenced code 区域、label 大小写不敏感 + 内部空白折叠归一、destination 容忍 `<>` 包裹与平衡括号、title 支持 `"` / `'` / `(...)` 三种）并从正文块流移除不渲染；未命中 label 按原文显示零误伤
+  - **渲染双路径同步**：SwiftUI（`AttributedString`）与 AppKit 公式路径（`NSAttributedString` + NSTextAttachment）对全部新行内 token 语义镜像（删除线 / 下划线 / 高亮 / 上下标 / 脚注引用上标 / 硬换行 / 图片降级占位）；公式检测递归穿透新包装 token；`MathLayoutCache` 哈希覆盖全部 14 个行内 case 防段落高度缓存碰撞
+  - **已知取舍**：公式段落（NSTextField 路径）中的行内图片降级为 `[图片: alt]` 链接文本（异步图片与公式 attachment 混排暂不支持）；块级 HTML 复杂表格按剥壳文本处理
 - 消息滚动导航簇（AI 窗，滚动交互专项）：阅读历史（非贴底态）时内容区右下角浮动浮现三键小簇——`⤓` 跳回最新（点击回底并恢复贴底跟随）、`↑` / `↓` 在用户消息间快速跳转（目标消息对齐视口顶部逐轮回顾提问，到头 / 尾对应按钮禁用）；贴底自动隐藏（0.15s 淡入淡出、hover 提亮、不遮挡消息）
 - 会话级阅读位置记忆：切走会话时保存真实视口锚点（行级几何感知，与滚动方式无关），切回原位续读；首次打开定位到最新消息；LRU 逐出后重挂载同样按锚点恢复
 
@@ -50,6 +58,11 @@
 
 ### Fixed
 
+- 浅色模式下代码块语法高亮完全单色无着色：初版浅色主题选了 github light，其实测（CLI 独立驱动 Highlightr 对比多主题的 token 颜色产出）发现 github light 的 CSS 写法（多选择器共享声明）在 Highlightr 的主题解析管线下几乎不被识别——全串仅 3 色、绝大多数 run 是基色近黑；换用实测 6 色均衡的 atom-one-light（紫关键字 / 绿字符串 / 红数字 / 灰注释）后浅色高亮正常
+- `[![alt](img)](link)` 链接内嵌图片解析拆坏（`!` 与 `]` 字面残留、alt 与外层 URL 变成两个断链）：行内链接 / 图片的闭合 `]` 查找未处理内层 `![...]` / `[...]` 嵌套；修法 = bracket 配对计数（遇 `[` 深度 +1、`]` 深度归零才闭合，跳过反斜杠转义）+ `(...)` 目标同样平衡括号扫描
+- 引用式链接 `[text][label]` 与定义行 `[label]: url` 完全不支持（引用处方括号原样显示、定义行被当正文渲染且 URL 部分被裸链接逻辑上色）：见 Added 引用式链接条目
+- 代码块复制按钮 hover 显隐导致块高度跳变（hover 时 header 行从 ~14pt 撑到 ~17pt，滚动时整个对话区域反复重排）：按钮由条件渲染改为常驻布局 + opacity 切换（header 行高度恒定）
+- 代码块滚动时相邻双复制按钮残留：中版滚动期吞 hover 事件的 guard 实为吞 enter 同时也吞 exit（`hovering || !isScrollActive` 在 exit 分支等价于 `!isScrollActive`），状态与 AppKit tracking 失同步即残留双亮；该补丁连同 `ChatScrollClock` 整体移除，改由 CodeBlockText 状态半径重构根治（见 Performance）；按钮显隐改由 hovered 单独驱动，copied 仅改按钮内容（对勾 / 已复制）——复制后鼠标离开反馈随 hover 消失，悬空按钮语义上不可能
 - 数学公式会话点击后 ≥1.4 秒纯白屏（其他会话均下一帧出内容）：块级公式早已异步化但**行内公式从未接入异步路径**——首帧可见区数百个行内公式在主线程同步光栅化（`InlineMathAttachment.make → rasterize` 同步路径），同时选中会话触发的后台预热队列持 `renderLock` 逐个渲染数百公式，主线程同步路径在 NSLock 不公平调度下排成 lock convoy 被钉死，第一个 CA 事务不提交、连纯文本与占位符都无法上屏；修法 = 行内公式接入与块级同款两段式（缓存命中同步装配 / 未命中等宽 LaTeX 占位 + `rasterizeAsync` 批量后台光栅化、世代令牌 + 段级计数器防竞态、回填无动画直换）+ 预热统一 `inFlight` 去重与逐公式 1.5ms 让路 + 失败负缓存防请求风暴
 - 切回会话跳到最底部、阅读位置丢失（滚轮 / 滚动条 / 触控板全部复现）：三重叠加——① macOS 13 LazyVStack 的 `onAppear`/`onDisappear` 不可靠，底部哨兵 `onDisappear` 从未触发导致 `isPinned` 恒为 true（唯一脱锚感知源死亡，浮动导航簇也因此从未出现）；② 行级可见性集合只增不减，快照锚点退化为「史上最早可见消息」（LRU 重挂载后表现为置顶）；③ 常驻视图（ZStack opacity 切换）的 NSScrollView 偏移本天然保留，而激活时无条件的 `restoreScroll` 是唯一破坏源、且因 ① 恒走贴底分支。修法 = 切除激活路径滚动调用 + `PreferenceKey` 几何感知重建（底部锚点 + 行级帧双通道，`atBottom`/`isPinned`/视口锚点全部由连续几何信号驱动）
 - 底部留白过大（~2 倍输入坞高度的纯背景空隙）：静态尾部 124pt 坞区留白被 LazyVStack 36pt 组间距对 4 个尾部子视图叠加（实际 270pt）+ scrollTo 过时落点短缺（200~370px 逐次漂移）；修法 = 尾部收敛为单个 `VStack(spacing: 0)` 子视图（视觉间距钉回 ~13pt）+ 几何信号驱动的持续贴底纠偏
@@ -71,6 +84,7 @@
 
 ### Performance
 
+- 代码块 hover 性能架构重构（状态半径原则，AI 窗）：根因——hover 一个 17pt 复制按钮的显隐触发**整个代码块 body 重算**，`Text(highlighted)`（大段 AttributedString，构造需解析整段 runs，成本高一个数量级）是 body 内联属性每次全量重建；滚动中指针不动、内容在指针下移动，AppKit 对每个代码块 tracking 区域派发 enter/exit 风暴 × 全块重算 = 掉帧（录屏 87 帧逐帧分析证实：3 次单帧冻结 + 94~98px 追赶跳变，每次精确伴随新代码块复制按钮渐显；鼠标在空白区滚动无 hover 目标故丝滑）。修法 = `CodeBlockText` 独立子视图：高亮 `@State` / 高亮 task / `Text` 渲染全部内聚，父级 hover 变化被 SwiftUI 子视图值 diff 短路——大段高亮文本永不重建，hover 重算半径从整块压缩到 header 一行（语言标签 + 小按钮）；高亮 task id 由字符串拼接改 Equatable struct（内容 / 语言 / 外观三维键控）
 - 会话秒开专项（AI 窗，对齐微信「只渲染视口 + 布局查表」模型，任意数量 / 体量 / 打开时间的会话切换即开）：**首帧块数视口自适应**（按视口高度 8~16 块起步、批大小 12、16ms/批摊销推进，首帧成本与屏幕大小挂钩、与会话体量彻底解耦）；**全局 `MathLayoutCache`**（段落高度 + 块级公式高度两张 LRU 4096 表、线程安全、内容 hash+宽度+外观+字号键控）——跨会话切换 / 跨 LRU 逐出重建 / 跨重启免重测量，公式占位首帧即锁定真实高度零跳变；`MarkdownASTCache` 64 条/60 万字符 FIFO → 256 条/400 万字符 LRU（多会话切换不互相驱逐）；常驻会话 LRU 上限 4 → 12（≤12 会话切换零重建纯 opacity 直切）
 - 数学公式渲染全链路异步化（AI 窗）：块级公式 `AsyncMathBlockView`（占位 → 后台光栅化 → 直换回填）；行内公式两段式（锁内快速查缓存 → 命中同步装配 NSTextAttachment / 未命中等宽 LaTeX 占位 + 批量 `rasterizeAsync` 回填）；超长消息分批渐进渲染；`MathRasterizer` 统一 `renderLock` 串行化 + `inFlight` 飞行去重（预热与按需共用）+ 预热让路（utility 队列逐公式 1.5ms 释放锁）+ 失败负缓存 + LRU 512 位图缓存；选中会话后台预热全部公式（收集移出主线程、会话签名去重）；主线程首帧 / 切换路径不再存在未命中缓存的同步 SwiftMath 光栅化
 - 会话消息分组缓存（`MessageGroupingCache`）：`groupMessages` 每次 body O(n) 全量分组 → messages 引用相同（COW 同缓冲区）即复用分组结果，O(1)

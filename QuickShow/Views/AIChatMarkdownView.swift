@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 // MARK: - 视口高度环境值（首帧视口自适应分批）
@@ -85,7 +86,7 @@ enum MarkdownASTCache {
 /// 助手落定消息：消费 MarkdownParser 的完整块级 AST。
 /// 视觉层次原则（2026-10 排版专项，对标 DeepSeek / Claude Code 对话排版）：
 /// - 无气泡：正文直接铺在玻璃材质上左对齐、无内边距，层级全靠字号/字重/留白表达
-/// - 三级排版：h1 18 bold（附减弱底部分隔线）/ h2 16 semibold / h3 14 semibold，均 contentPrimary；
+/// - 六级排版：h1 18 bold（附减弱底部分隔线）/ h2 16 / h3 14 / h4 13 / h5 12.5 / h6 12 semibold，均 contentPrimary；
 ///   正文与列表降两档（primary 0.80），与加粗档（contentPrimary semibold）肉眼可分
 /// - 间距节奏：块间距不由 VStack 统一值承担，改为每块自带顶距——
 ///   标题前 26/20/16（与上文拉开成组），标题后 8（与紧随内容成组），内容块之间 16，首块无顶距
@@ -108,6 +109,27 @@ struct AssistantMarkdownView: View, Equatable {
     /// `nonisolated`：允许后台预热线程调用（缓存自身线程安全）。
     nonisolated static func parsedBlocksForPrefetch(_ content: String) -> [MarkdownBlock] {
         MarkdownASTCache.blocks(for: content, useCache: true)
+    }
+
+    /// 脚注条目：定义 id 与行内内容。
+    struct FootnoteEntry: Equatable {
+        let id: String
+        let inlines: [InlineToken]
+    }
+
+    /// 把顶层 footnoteDefinition 从块流中抽出，其余块保持原顺序与相对位置。
+    static func splitFootnotes(_ blocks: [MarkdownBlock]) -> (main: [MarkdownBlock], footnotes: [FootnoteEntry]) {
+        var main: [MarkdownBlock] = []
+        var footnotes: [FootnoteEntry] = []
+        main.reserveCapacity(blocks.count)
+        for block in blocks {
+            if case let .footnoteDefinition(id, inlines) = block {
+                footnotes.append(FootnoteEntry(id: id, inlines: inlines))
+            } else {
+                main.append(block)
+            }
+        }
+        return (main, footnotes)
     }
 
     // MARK: - 单条消息内渐进渲染（首帧视口自适应）
@@ -145,7 +167,11 @@ struct AssistantMarkdownView: View, Equatable {
     }
 
     var body: some View {
-        let blocks = Self.parsedBlocks(for: content, useCache: useCache)
+        let allBlocks = Self.parsedBlocks(for: content, useCache: useCache)
+        // 脚注定义从正常块流中抽出（不在原位置渲染），聚合到文档末尾统一成脚注区。
+        let split = Self.splitFootnotes(allBlocks)
+        let blocks = split.main
+        let footnotes = split.footnotes
         let seededInitial = Self.initialBlockCount(viewportHeight: viewportHeight, total: blocks.count)
         let visibleCount = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
         VStack(alignment: .leading, spacing: 0) {
@@ -169,6 +195,12 @@ struct AssistantMarkdownView: View, Equatable {
                             visibleBlockCount = min(current + Self.blockBatchSize, blocks.count)
                         }
                     }
+            }
+            // 脚注区：所有 footnoteDefinition 聚合到文档末尾（细分隔线 + 小字号编号列表），
+            // 待正文块全部分批落地后再显示，避免脚注抢在后续正文之前出现。
+            if visibleCount >= blocks.count, !footnotes.isEmpty {
+                MarkdownFootnoteSection(footnotes: footnotes)
+                    .padding(.top, Theme.Spacing.divider)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -228,15 +260,19 @@ enum MathLatexCollector {
             for token in tokens {
                 switch token {
                 case let .math(latex): addInline(latex)
-                case let .bold(inner), let .italic(inner): walkInlineTokens(inner)
-                case let .link(text, _): walkInlineTokens(text)
-                case .text, .code: break
+                case let .bold(inner), let .italic(inner),
+                     let .strikethrough(inner), let .underline(inner),
+                     let .highlight(inner), let .subscript(inner),
+                     let .superscript(inner):
+                    walkInlineTokens(inner)
+                case let .link(text, _, _): walkInlineTokens(text)
+                case .text, .code, .image, .lineBreak, .footnoteRef: break
                 }
             }
         }
+        /// 列表项内容已改为块数组，嵌套子列表以块形式出现，递归交给 walkBlocks。
         func walkItem(_ item: MarkdownListItem) {
-            walkInlineTokens(item.inlines)
-            item.children.forEach(walkItem)
+            walkBlocks(item.blocks)
         }
         func walkBlocks(_ blocks: [MarkdownBlock]) {
             for block in blocks {
@@ -252,6 +288,8 @@ enum MathLatexCollector {
                 case let .table(table):
                     table.headers.forEach(walkInlineTokens)
                     for row in table.rows { row.forEach(walkInlineTokens) }
+                case let .footnoteDefinition(_, inlines):
+                    walkInlineTokens(inlines)
                 case .codeBlock, .horizontalRule:
                     break
                 }
@@ -377,10 +415,14 @@ private extension MarkdownBlock {
         if case .heading = previous { return Theme.Spacing.lg }      // 8：标题后收紧成组
         switch self {
         case let .heading(level, _):
+            // 标题前间距随层级递减成组锚点：26 / 20 / 16 / 14 / 12 / 10
             switch level {
             case 1: return Theme.Spacing.section + Theme.Spacing.lg  // 26：一级标题成组锚点
             case 2: return Theme.Spacing.divider                     // 20
-            default: return Theme.Spacing.card                       // 16
+            case 3: return Theme.Spacing.card                        // 16
+            case 4: return Theme.Spacing.xxxl                        // 14
+            case 5: return Theme.Spacing.xxl                         // 12
+            default: return Theme.Spacing.xl                         // 10：h6
             }
         default:
             return Theme.Spacing.card                                // 16：段落/列表/引用/表格/代码块
@@ -415,10 +457,10 @@ private struct MarkdownBlockView: View {
                 .frame(height: Theme.Layout.dividerHeight)
 
         case let .orderedList(items):
-            MarkdownListView(items: items)
+            MarkdownListView(items: items, ordered: true)
 
         case let .unorderedList(items):
-            MarkdownListView(items: items)
+            MarkdownListView(items: items, ordered: false)
 
         case let .blockquote(inner):
             MarkdownBlockquoteView(blocks: inner)
@@ -428,52 +470,52 @@ private struct MarkdownBlockView: View {
 
         case let .codeBlock(language, code):
             CodeBlockView(language: language, code: code)
+
+        case let .footnoteDefinition(_, _):
+            // 顶层脚注定义已由 AssistantMarkdownView 抽出到文档末尾统一渲染；
+            // 嵌套（如引用块内）定义在此跳过，不在原位置留下占位。
+            EmptyView()
         }
     }
 
-    /// 标题：h1 18 bold + 减弱底部分隔线；h2 16 semibold；h3 14 semibold；均 contentPrimary。
+    /// 标题：h1 18 bold + 减弱底部分隔线；h2 16 / h3 14 / h4 13 / h5 12.5 / h6 12 semibold；均 contentPrimary。
+    /// h4 与正文同号（13）：靠 semibold + contentPrimary 与正文（regular / primary 0.80）区分，对齐 GitHub 语义。
     @ViewBuilder
     private func headingView(level: Int, inlines: [InlineToken]) -> some View {
         switch level {
         case 1:
             VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                MarkdownInlineText(
-                    inlines: inlines,
-                    bodyColor: Theme.Colors.contentPrimary,
-                    baseSize: 18,
-                    weight: .bold,
-                    explicitColor: Theme.Colors.contentPrimary
-                )
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
+                headingText(inlines: inlines, size: 18, weight: .bold)
                 Rectangle()
                     .fill(Theme.Colors.cardStroke)
                     .frame(height: Theme.Layout.dividerHeight)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         case 2:
-            MarkdownInlineText(
-                inlines: inlines,
-                bodyColor: Theme.Colors.contentPrimary,
-                baseSize: 16,
-                weight: .semibold,
-                explicitColor: Theme.Colors.contentPrimary
-            )
-            .lineSpacing(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            headingText(inlines: inlines, size: 16, weight: .semibold)
+        case 3:
+            headingText(inlines: inlines, size: 14, weight: .semibold)
+        case 4:
+            headingText(inlines: inlines, size: 13, weight: .semibold)
+        case 5:
+            headingText(inlines: inlines, size: 12.5, weight: .semibold)
         default:
-            MarkdownInlineText(
-                inlines: inlines,
-                bodyColor: Theme.Colors.contentPrimary,
-                baseSize: 14,
-                weight: .semibold,
-                explicitColor: Theme.Colors.contentPrimary
-            )
-            .lineSpacing(2)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            headingText(inlines: inlines, size: 12, weight: .semibold)
         }
+    }
+
+    /// 统一标题排版：contentPrimary + 显式字号字重、行距 2、自适应高度。
+    private func headingText(inlines: [InlineToken], size: CGFloat, weight: Font.Weight) -> some View {
+        MarkdownInlineText(
+            inlines: inlines,
+            bodyColor: Theme.Colors.contentPrimary,
+            baseSize: size,
+            weight: weight,
+            explicitColor: Theme.Colors.contentPrimary
+        )
+        .lineSpacing(2)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 块级公式：异步视图（首帧占位 + 后台光栅化淡入），居中展示（display 模式 14pt）。
@@ -486,12 +528,16 @@ private struct MarkdownBlockView: View {
 
 private struct MarkdownListView: View {
     let items: [MarkdownListItem]
+    /// 本级有序性：由容器块（orderedList / unorderedList）决定。
+    let ordered: Bool
+    /// 嵌套深度：0 为顶层，用于切换无序圆点样式（• / ◦）。
+    var depth: Int = 0
 
     var body: some View {
         // 列表项间 8：大间距节奏，提升扫读性（对标 CC 列表呼吸感）
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                MarkdownListItemRow(item: item)
+                MarkdownListItemRow(item: item, ordered: ordered, depth: depth)
             }
         }
     }
@@ -499,42 +545,60 @@ private struct MarkdownListView: View {
 
 private struct MarkdownListItemRow: View {
     let item: MarkdownListItem
+    let ordered: Bool
+    var depth: Int = 0
+
+    /// 嵌套子列表缩进：对齐到父项文本起点（标记列 14 + 间距 8）。
+    private static let nestedIndent: CGFloat = 22
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.lg) {
-                // 标记列：无序圆点 / 有序序号，等宽右对齐保持多行对齐
-                Text(item.ordered ? "\(item.number ?? 1)." : "•")
-                    .font(item.ordered
-                          ? Theme.Typography.mono(12)
-                          : Theme.Typography.text(13, .medium))
-                    .foregroundColor(Theme.Colors.contentTertiary)
-                    .frame(minWidth: 14, alignment: .trailing)
-                MarkdownInlineText(inlines: item.inlines)
-                    .lineSpacing(6)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            // 一层嵌套子项：缩进对齐到父项文本起点；子项间 6（略小于顶层 8）
-            if !item.children.isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                    ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
-                        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.lg) {
-                            Text(child.ordered ? "\(child.number ?? 1)." : "◦")
-                                .font(child.ordered
-                                      ? Theme.Typography.mono(12)
-                                      : Theme.Typography.text(13))
-                                .foregroundColor(Theme.Colors.contentTertiary)
-                                .frame(minWidth: 14, alignment: .trailing)
-                            MarkdownInlineText(inlines: child.inlines)
-                                .lineSpacing(6)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.lg) {
+            marker
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                ForEach(Array(item.blocks.enumerated()), id: \.offset) { _, block in
+                    itemBlock(block)
                 }
-                .padding(.leading, 22)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // 已勾选任务：内容整体弱化一档（AttributedString 显式前景色无法被外层
+            // foregroundColor 覆盖，故用 opacity 做颜色弱化）。
+            .opacity(item.taskState == true ? 0.55 : 1)
+        }
+    }
+
+    /// 行首标记列：任务勾选框 / 有序序号 / 无序圆点（等宽右对齐保持多行对齐）。
+    @ViewBuilder
+    private var marker: some View {
+        if let state = item.taskState {
+            Image(systemName: state ? "checkmark.circle.fill" : "circle")
+                .font(Theme.Typography.text(12.5, .medium))
+                .foregroundColor(state ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                .frame(minWidth: 14, alignment: .trailing)
+        } else if ordered {
+            Text("\(item.number ?? 1).")
+                .font(Theme.Typography.mono(12))
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .frame(minWidth: 14, alignment: .trailing)
+        } else {
+            Text(depth == 0 ? "•" : "◦")
+                .font(Theme.Typography.text(13, .medium))
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .frame(minWidth: 14, alignment: .trailing)
+        }
+    }
+
+    /// 列表项块内容：嵌套子列表缩进一级并携带深度递归；其余块沿用统一块渲染。
+    @ViewBuilder
+    private func itemBlock(_ block: MarkdownBlock) -> some View {
+        switch block {
+        case let .orderedList(items):
+            MarkdownListView(items: items, ordered: true, depth: depth + 1)
+                .padding(.leading, Self.nestedIndent)
+        case let .unorderedList(items):
+            MarkdownListView(items: items, ordered: false, depth: depth + 1)
+                .padding(.leading, Self.nestedIndent)
+        default:
+            MarkdownBlockView(block: block)
         }
     }
 }
@@ -577,9 +641,9 @@ private struct MarkdownTableView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 表头：加粗 + 整行底色
+            // 表头：加粗 + 整行底色；每列按 alignments 设置对齐
             HStack(spacing: Theme.Spacing.card) {
-                ForEach(Array(table.headers.enumerated()), id: \.offset) { _, header in
+                ForEach(Array(table.headers.enumerated()), id: \.offset) { column, header in
                     MarkdownInlineText(
                         inlines: header,
                         bodyColor: Theme.Colors.contentPrimary,
@@ -587,8 +651,9 @@ private struct MarkdownTableView: View {
                         weight: .semibold,
                         explicitColor: Theme.Colors.contentPrimary
                     )
+                    .multilineTextAlignment(textAlignment(at: column))
                     .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, alignment: frameAlignment(at: column))
                 }
             }
             .padding(.horizontal, Theme.Spacing.xl)
@@ -603,15 +668,16 @@ private struct MarkdownTableView: View {
             // 数据行：偶数行斑马纹
             ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
                 HStack(spacing: Theme.Spacing.card) {
-                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                    ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
                         MarkdownInlineText(
                             inlines: cell,
                             bodyColor: Theme.Colors.contentPrimary,
                             baseSize: 12.5,
                             explicitColor: Theme.Colors.contentPrimary
                         )
+                        .multilineTextAlignment(textAlignment(at: column))
                         .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: frameAlignment(at: column))
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
@@ -626,11 +692,36 @@ private struct MarkdownTableView: View {
                 .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
     }
+
+    /// 列对齐 → SwiftUI Frame Alignment（越界回退 leading）。
+    private func frameAlignment(at column: Int) -> Alignment {
+        switch alignment(at: column) {
+        case .center: return .center
+        case .right: return .trailing
+        default: return .leading
+        }
+    }
+
+    /// 列对齐 → 多行文本对齐。
+    private func textAlignment(at column: Int) -> TextAlignment {
+        switch alignment(at: column) {
+        case .center: return .center
+        case .right: return .trailing
+        default: return .leading
+        }
+    }
+
+    private func alignment(at column: Int) -> MarkdownTableAlignment? {
+        guard column >= 0, column < table.alignments.count else { return nil }
+        return table.alignments[column]
+    }
 }
 
 // MARK: - 代码块
 
 /// 围栏代码块：语言标签 + 等宽内容；hover 右上角渐显复制钮（成功变对勾轻反馈）。
+/// 语法高亮：首帧立即纯色等宽渲染，同时后台计算高亮 AttributedString，完成后替换
+/// （失败/不支持语言保持纯色）。高亮计算全程异步，绝不阻塞流式渲染。
 struct CodeBlockView: View {
     let language: String?
     let code: String
@@ -647,35 +738,36 @@ struct CodeBlockView: View {
                         .foregroundColor(Theme.Colors.contentTertiary)
                 }
                 Spacer(minLength: 0)
-                if hovered || copied {
-                    Button(action: copyCode) {
-                        HStack(spacing: Theme.Spacing.xs) {
-                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                                .font(Theme.Typography.text(9.5, .medium))
-                            Text(copied ? "已复制" : "复制")
-                                .font(Theme.Typography.text(9.5, .medium))
-                        }
-                        .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.vertical, Theme.Spacing.xxs)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                                .fill(Theme.Colors.surfaceButton)
-                        )
+                // 布局稳定化：按钮常驻布局（header 行高度恒定），hover 仅切换透明度，
+                // 不触发布局变化。
+                // 显隐由 hovered 单独驱动；copied 仅是复制成功的瞬时内容反馈
+                // （鼠标离开时按钮随 hovered 隐去，不会残留悬空的第二按钮）。
+                Button(action: copyCode) {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(Theme.Typography.text(9.5, .medium))
+                        Text(copied ? "已复制" : "复制")
+                            .font(Theme.Typography.text(9.5, .medium))
                     }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
+                    .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.xxs)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                            .fill(Theme.Colors.surfaceButton)
+                    )
                 }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .opacity(hovered ? 1 : 0)
+                .allowsHitTesting(hovered)
+                .accessibilityHidden(!hovered)
             }
             .frame(minHeight: 14)
 
-            // 代码块内不转 Markdown，纯等宽显示（长行自然换行，避免嵌套横向滚动）
-            Text(code)
-                .font(Theme.Typography.mono(12.5))
-                .foregroundColor(Theme.Colors.contentPrimary)
-                .lineSpacing(6)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            // 高亮状态与渲染内聚于子视图（见 CodeBlockText）：hover 变化引起的
+            // 父 body 重算会被 SwiftUI 子视图值 diff 短路，大段高亮文本永不重建。
+            CodeBlockText(code: code, language: language)
         }
         .padding(.horizontal, Theme.Spacing.xxl)
         .padding(.vertical, Theme.Spacing.xl)
@@ -703,6 +795,338 @@ struct CodeBlockView: View {
     }
 }
 
+/// 代码内容子视图：高亮状态（`highlighted`）与高亮渲染、高亮 task 全部内聚于此。
+///
+/// 状态半径原则：hover（复制按钮显隐）是 CodeBlockView 的状态，其变化触发父 body
+/// 重算；本视图作为参数化子视图，参数（code/language）不变时 SwiftUI 值 diff 会
+/// 短路父重算——本视图 body 不重跑，`Text(highlighted)`（大段 AttributedString，
+/// 构造需解析 runs，成本高一个数量级）永不重建。滚动中 hover 进出风暴的重算成本
+/// 由此被压缩到 header 一行（语言标签 + 小按钮）。
+private struct CodeBlockText: View {
+    let code: String
+    let language: String?
+
+    @Environment(\.colorScheme) private var colorScheme
+    /// 后台高亮结果；nil = 尚未完成 / 不可用 / 降级纯色。
+    @State private var highlighted: AttributedString?
+
+    var body: some View {
+        // 高亮版优先、否则降级为纯色等宽文本（现状行为）。
+        // 代码块内不转 Markdown，纯等宽显示（长行自然换行，避免嵌套横向滚动）
+        Group {
+            if let highlighted {
+                Text(highlighted)
+            } else {
+                Text(code)
+                    .font(Theme.Typography.mono(12.5))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+            }
+        }
+        .lineSpacing(6)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: HighlightTask(code: code, language: language, darkMode: colorScheme == .dark)) {
+            // 首帧保持纯色等宽（highlighted == nil）；后台计算高亮后替换。
+            highlighted = nil
+            let code = self.code
+            let language = self.language
+            let result = await Task.detached(priority: .utility) {
+                MarkdownHighlighter.highlightSwiftUI(code, language: language, darkMode: colorScheme == .dark)
+            }.value
+            guard !Task.isCancelled else { return }
+            highlighted = result
+        }
+    }
+
+    /// 高亮 task 键：内容 / 语言 / 外观任一变化即重高亮（外观切换换主题，
+    /// 流式期间 code 增长重算）。
+    private struct HighlightTask: Equatable {
+        let code: String
+        let language: String?
+        let darkMode: Bool
+    }
+}
+
+// MARK: - 脚注区
+
+/// 文档末尾脚注区：细分隔线 + 小字号（11）编号列表（序号 + 定义内容行内渲染）。
+/// 由 `AssistantMarkdownView` 聚合顶层 footnoteDefinition 后统一渲染。
+private struct MarkdownFootnoteSection: View {
+    let footnotes: [AssistantMarkdownView.FootnoteEntry]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Rectangle()
+                .fill(Theme.Colors.cardStroke)
+                .frame(height: Theme.Layout.dividerHeight)
+            ForEach(Array(footnotes.enumerated()), id: \.offset) { _, note in
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.lg) {
+                    Text(note.id)
+                        .font(Theme.Typography.text(11, .semibold))
+                        .foregroundColor(Theme.Colors.accent)
+                        .frame(minWidth: 16, alignment: .trailing)
+                    MarkdownInlineText(
+                        inlines: note.inlines,
+                        bodyColor: Theme.Colors.contentTertiary,
+                        baseSize: 11
+                    )
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - 图片
+
+/// 图片内存缓存（按地址键，避免滚动/重渲染反复下载与解码）。
+/// `NSCache` 自身线程安全，可跨后台解码任务读写。
+private enum MarkdownImageCache {
+    static let cache = NSCache<NSURL, NSImage>()
+
+    static func key(for url: String) -> NSURL? {
+        if let parsed = URL(string: url), parsed.scheme != nil {
+            return parsed as NSURL
+        }
+        let expanded = (url as NSString).expandingTildeInPath
+        guard !expanded.isEmpty else { return nil }
+        return URL(fileURLWithPath: expanded) as NSURL
+    }
+}
+
+/// 远程 / 本地 / data URI 图片视图：异步加载 + 内存缓存，绝不阻塞流式渲染。
+/// 三态：加载中（等高占位 + ProgressView）/ 失败（弱化块 + alt + url）/ 成功（等比缩放 + 圆角 + 描边）。
+/// 对外契约：`MarkdownImageView(alt:url:title:linkURL:)`（`linkURL` 默认 nil，被 MarkdownInlineText 拆段路径引用）。
+/// 当图片来自 `[![alt](img)](link)` 这类链接内嵌图片时，`linkURL` 非 nil：成功态图片可点击打开链接。
+struct MarkdownImageView: View {
+    let alt: String
+    let url: String
+    let title: String?
+    /// 外层链接地址（链接内嵌图片）；nil = 普通图片，不可点击。
+    let linkURL: String?
+
+    /// 显式 init：保证 `alt:url:title:` 旧调用与 `alt:url:title:linkURL:` 新调用都可用。
+    init(alt: String, url: String, title: String?, linkURL: String? = nil) {
+        self.alt = alt
+        self.url = url
+        self.title = title
+        self.linkURL = linkURL
+    }
+
+    private enum LoadState {
+        case loading
+        case success(NSImage)
+        case failure
+    }
+
+    @State private var state: LoadState = .loading
+    /// 成功态是否处于 hover（可点击时用于手型光标与轻微提亮）。
+    @State private var hovering = false
+    /// 手型光标是否已 push（保证与 pop 严格配对，避免光标栈失衡）。
+    @State private var cursorPushed = false
+
+    var body: some View {
+        Group {
+            switch state {
+            case .loading:
+                loadingView
+            case let .success(image):
+                successView(image)
+            case .failure:
+                failureView
+            }
+        }
+        .task(id: url) { await load() }
+        .onDisappear {
+            // 视图消失时兜底弹出手型光标，避免离开后光标残留。
+            if cursorPushed {
+                NSCursor.pop()
+                cursorPushed = false
+            }
+        }
+    }
+
+    /// 可点击链接 URL；`linkURL` 为 nil 或无法构造 URL 时为 nil（图片退化为不可点击）。
+    private var clickableURL: URL? {
+        guard let linkURL, let url = URL(string: linkURL) else { return nil }
+        return url
+    }
+
+    // MARK: 三态视图
+
+    /// 加载中：低饱和等高占位块（高度 120）+ 居中 ProgressView。
+    private var loadingView: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+            .fill(Theme.Colors.surfaceTrack)
+            .frame(maxWidth: .infinity)
+            .frame(height: 120)
+            .overlay(ProgressView().controlSize(.small))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+            )
+    }
+
+    /// 成功：按原始宽高比、容器宽自适应（限制向上采样）、圆角 insetCard、轻描边。
+    /// 链接内嵌图片（linkURL 有效）时可点击打开，hover 手型光标 + 轻微提亮。
+    private func successView(_ image: NSImage) -> some View {
+        let clickable = clickableURL != nil
+        return Image(nsImage: image)
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            // 先钉住不超过原始像素宽（向上采样限制）；圆角/描边跟随图片本身。
+            .frame(maxWidth: max(image.size.width, 1))
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+            )
+            // 命中区 = 图片本身（避免外层满宽 frame 把透明区也纳入点击/hover）。
+            .contentShape(Rectangle())
+            .brightness(clickable && hovering ? 0.05 : 0)
+            .onTapGesture {
+                guard let target = clickableURL else { return }
+                NSWorkspace.shared.open(target)
+            }
+            .onHover { isHovering in
+                handleHover(isHovering, clickable: clickable)
+            }
+            // 再在容器内左对齐铺排（图片窄时不拉伸容器视觉）。
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// hover 状态与手型光标维护：仅在可点击时 push/pop，且 push 与 pop 严格配对。
+    private func handleHover(_ isHovering: Bool, clickable: Bool) {
+        hovering = isHovering
+        guard clickable else {
+            if cursorPushed {
+                NSCursor.pop()
+                cursorPushed = false
+            }
+            return
+        }
+        if isHovering, !cursorPushed {
+            NSCursor.pointingHand.push()
+            cursorPushed = true
+        } else if !isHovering, cursorPushed {
+            NSCursor.pop()
+            cursorPushed = false
+        }
+    }
+
+    /// 失败：弱化色圆角块内显示 alt 文本 + url 小字链接。
+    private var failureView: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+            Text(alt.isEmpty ? "图片无法加载" : alt)
+                .font(Theme.Typography.text(12))
+                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                .fixedSize(horizontal: false, vertical: true)
+            if let linkURL = URL(string: url),
+               let scheme = linkURL.scheme?.lowercased(),
+               scheme == "http" || scheme == "https" {
+                Link(destination: linkURL) {
+                    Text(url)
+                        .font(Theme.Typography.text(10))
+                        .foregroundColor(Theme.Colors.accent)
+                }
+            } else {
+                Text(url)
+                    .font(Theme.Typography.text(10))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .fill(Theme.Colors.surfaceTrack)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+        )
+    }
+
+    // MARK: 加载
+
+    /// 仅做状态编排（网络/解码均已异步外移），故固定在主 actor 上执行，@State 写入安全。
+    @MainActor
+    private func load() async {
+        state = .loading
+        guard let key = MarkdownImageCache.key(for: url) else {
+            state = .failure
+            return
+        }
+        if let cached = MarkdownImageCache.cache.object(forKey: key) {
+            state = .success(cached)
+            return
+        }
+
+        let decoded: NSImage?
+        if let parsed = URL(string: url),
+           let scheme = parsed.scheme?.lowercased(),
+           scheme == "http" || scheme == "https" {
+            decoded = await Self.loadRemote(parsed)
+        } else {
+            let raw = url
+            decoded = await Task.detached(priority: .utility) {
+                Self.decodeLocalOrData(raw)
+            }.value
+        }
+
+        guard !Task.isCancelled else { return }
+        if let decoded {
+            MarkdownImageCache.cache.setObject(decoded, forKey: key)
+            state = .success(decoded)
+        } else {
+            state = .failure
+        }
+    }
+
+    /// 远程图片：URLSession 异步取数据，解码放到后台线程。
+    private static func loadRemote(_ url: URL) async -> NSImage? {
+        do {
+            let (data, response) = try await URLSession.shared.data(from: url)
+            if let http = response as? HTTPURLResponse,
+               !(200..<300).contains(http.statusCode) {
+                return nil
+            }
+            return await Task.detached(priority: .utility) { NSImage(data: data) }.value
+        } catch {
+            return nil
+        }
+    }
+
+    /// 本地绝对路径（支持 ~ 展开 / file://）与 `data:` URI 解码；已在后台线程调用。
+    private static func decodeLocalOrData(_ raw: String) -> NSImage? {
+        if raw.hasPrefix("data:") {
+            return decodeDataURI(raw)
+        }
+        if raw.hasPrefix("file://"), let fileURL = URL(string: raw) {
+            return NSImage(contentsOf: fileURL)
+        }
+        let expanded = (raw as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expanded) else { return nil }
+        return NSImage(contentsOfFile: expanded)
+    }
+
+    /// `data:image/...;base64,<payload>` 解码。
+    private static func decodeDataURI(_ uri: String) -> NSImage? {
+        guard let comma = uri.firstIndex(of: ",") else { return nil }
+        let header = uri[uri.startIndex..<comma].lowercased()
+        guard header.contains(";base64") else { return nil }
+        let payload = String(uri[uri.index(after: comma)...])
+        guard let data = Data(base64Encoded: payload, options: .ignoreUnknownCharacters) else { return nil }
+        return NSImage(data: data)
+    }
+}
+
 // MARK: - 行内渲染
 
 /// 行内 token → AttributedString（粗体 / 斜体 / 行内代码 / 可点击链接 / 纯文本）。
@@ -711,39 +1135,144 @@ enum MarkdownInline {
     /// 正文基准字号。
     static let baseSize: CGFloat = 13
 
+    /// 需要在「统一基础字体」之后回填样式的运行区间（上下标 / 脚注引用等新 token：
+    /// 字号必须晚于 `result.font` 整体赋值，否则会被基础字体覆盖）。
+    private struct StyledRun {
+        let range: Range<AttributedString.Index>
+        let font: Font
+        var baselineOffset: CGFloat?
+        var color: Color?
+    }
+
     /// bodyColor：纯文本/行内代码的颜色——正文与列表降两档（primary 0.80），
     /// 与加粗档（contentPrimary 纯白/纯黑）肉眼可分区分开；标题、表格等调用处显式传 contentPrimary。
     /// 加粗递归时把基色提为 contentPrimary（而非事后整段覆盖），嵌套链接的 accent 得以保留。
-    static func render(_ tokens: [InlineToken], bodyColor: Color = Color.primary.opacity(0.80)) -> AttributedString {
+    /// - size：当前行内基准字号（递归时上下标会下调；外部默认正文 13）。
+    static func render(
+        _ tokens: [InlineToken],
+        bodyColor: Color = Color.primary.opacity(0.80),
+        size: CGFloat = baseSize
+    ) -> AttributedString {
         var result = AttributedString()
+        var styledRuns: [StyledRun] = []
+        append(tokens, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
+
+        // 统一基础字体（行内覆盖（代码/加粗等）已在上面设定，这里只设默认值）
+        result.font = Theme.Typography.text(size)
+        // 上下标 / 脚注引用字号回填（必须晚于基础字体赋值才能生效）。
+        for styled in styledRuns {
+            result[styled.range].font = styled.font
+            if let baseline = styled.baselineOffset {
+                result[styled.range].baselineOffset = baseline
+            }
+            if let color = styled.color {
+                result[styled.range].foregroundColor = color
+            }
+        }
+        return result
+    }
+
+    /// 递归构建：所有 token 直接追加进共享 result，新 token 的字体样式登记为 StyledRun，
+    /// 待整段基础字体设置完毕后统一回填。语义与 AppKit 路径 `MarkdownInlineNS` 镜像。
+    private static func append(
+        _ tokens: [InlineToken],
+        into result: inout AttributedString,
+        styledRuns: inout [StyledRun],
+        bodyColor: Color,
+        size: CGFloat
+    ) {
         for token in tokens {
             switch token {
             case let .text(value):
                 var piece = AttributedString(normalizeQuotes(value))
                 piece.foregroundColor = bodyColor
                 result.append(piece)
+
             case let .code(value):
                 var piece = AttributedString(value)
                 piece.font = Theme.Typography.mono(12.5)
                 piece.foregroundColor = bodyColor
                 piece.backgroundColor = Theme.Colors.surfaceTrack
                 result.append(piece)
+
             case let .bold(inner):
-                var piece = render(inner, bodyColor: Theme.Colors.contentPrimary)
-                piece.font = Theme.Typography.text(baseSize, .semibold)
-                result.append(piece)
+                append(inner, into: &result, styledRuns: &styledRuns,
+                       bodyColor: Theme.Colors.contentPrimary, size: size)
+
             case let .italic(inner):
-                var piece = render(inner, bodyColor: bodyColor)
-                piece.font = Theme.Typography.text(baseSize).italic()
-                result.append(piece)
-            case let .link(label, url):
-                var piece = render(label, bodyColor: bodyColor)
-                piece.foregroundColor = Theme.Colors.accent
-                piece.underlineStyle = .single
+                append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
+
+            case let .strikethrough(inner):
+                let start = result.endIndex
+                append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
+                result[start..<result.endIndex].strikethroughStyle = .single
+
+            case let .underline(inner):
+                let start = result.endIndex
+                append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
+                result[start..<result.endIndex].underlineStyle = .single
+
+            case let .highlight(inner):
+                let start = result.endIndex
+                append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
+                // 半透明强调色高亮（alpha 0.18 与 AppKit 路径 MarkdownInlineNS 对齐）。
+                result[start..<result.endIndex].backgroundColor = Theme.Colors.accent.opacity(0.18)
+
+            case let .subscript(inner):
+                let subSize = max(size - 2, 9)
+                let start = result.endIndex
+                append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: subSize)
+                styledRuns.append(StyledRun(
+                    range: start..<result.endIndex,
+                    font: Theme.Typography.text(subSize),
+                    baselineOffset: -3,
+                    color: nil
+                ))
+
+            case let .superscript(inner):
+                // 镜像 AppKit 路径 MarkdownInlineNS：上标小字号 -2、baseline +3。
+                let superSize = max(size - 2, 9)
+                let start = result.endIndex
+                append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: superSize)
+                styledRuns.append(StyledRun(
+                    range: start..<result.endIndex,
+                    font: Theme.Typography.text(superSize),
+                    baselineOffset: 3,
+                    color: nil
+                ))
+
+            case let .link(label, url, _):
+                // title 无视觉变化，忽略。
+                let start = result.endIndex
+                append(label, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
+                let range = start..<result.endIndex
+                result[range].foregroundColor = Theme.Colors.accent
+                result[range].underlineStyle = .single
                 if let linkURL = URL(string: url) {
-                    piece.link = linkURL
+                    result[range].link = linkURL
                 }
+
+            case let .image(alt, _, _):
+                // 防御性兜底：正常情况下含图片段落会在 MarkdownInlineText 层被拆段，
+                // 不会进入此处；以纯文本渲染 alt 保险。
+                var piece = AttributedString(alt)
+                piece.foregroundColor = bodyColor
                 result.append(piece)
+
+            case .lineBreak:
+                result.append(AttributedString("\n"))
+
+            case let .footnoteRef(identifier):
+                let refSize = max(size - 3, 9)
+                let start = result.endIndex
+                result.append(AttributedString(identifier))
+                styledRuns.append(StyledRun(
+                    range: start..<result.endIndex,
+                    font: Theme.Typography.text(refSize),
+                    baselineOffset: 4,
+                    color: Theme.Colors.accent
+                ))
+
             case let .math(value):
                 // SwiftUI AttributedString 无法内嵌图片；含公式的路径统一改走 MarkdownInlineNS。
                 // 此处仅作兜底：以等宽文本显示原始 LaTeX（正常渲染不会触达）。
@@ -753,9 +1282,6 @@ enum MarkdownInline {
                 result.append(piece)
             }
         }
-        // 统一基础字体（行内覆盖（代码/加粗等）已在上面设定，这里只设默认值）
-        result.font = Theme.Typography.text(baseSize)
-        return result
     }
 
     /// 成对 ASCII 直引号归一为中文引号「」（未配对的单个 " 保留原样）。
