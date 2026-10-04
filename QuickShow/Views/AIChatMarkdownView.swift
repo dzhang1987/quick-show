@@ -142,7 +142,10 @@ struct AssistantMarkdownView: View, Equatable {
     private static let maxInitialBlocks = 16
     /// 后续每批块数（16ms 逐批：摊销更平滑）。
     private static let blockBatchSize = 12
-    /// 已构建块数游标；-1 = 未种子化（首帧按视口高度算初始值）。消息身份变化时随视图重建重置。
+    /// 已构建块数游标；-1 = 未种子化（首帧按视口高度算初始值，或从进度缓存恢复）。
+    /// 消息身份变化时随视图重建重置——但 LazyVStack **滚动中的反实例化**也会静默重置
+    /// 本游标（长消息塌回首批 → document 高度骤减 → 视口被 clamp 拽走），恢复见
+    /// MarkdownRenderProgressCache。
     @State private var visibleBlockCount = -1
 
     /// 视口高度（由 `SessionMessageList` 注入）：首帧成本只与屏幕大小成正比，与会话体量无关。
@@ -160,10 +163,22 @@ struct AssistantMarkdownView: View, Equatable {
         return min(total, max(minInitialBlocks, min(byViewport, maxInitialBlocks)))
     }
 
-    /// 当前有效可见块数（读取 live @State；未种子化时用首帧初始值）。供哨兵/task 实时读取。
+    /// 当前有效可见块数。**落定态（useCache=true）一律全量渲染**——滚动稳定优先于
+    /// 渲染速度（用户决策）：渐进渲染的逐批高度增长（16ms/批）会让 doc 高度持续
+    /// 震荡，视口在上方时 LazyVStack 的偏移补偿不可靠 → 「上滚跳消息」；流式中间态
+    /// （useCache=false）保持游标渐进（流式增量渲染性能不受影响，内容持续增长时
+    /// 视口在底部跟随，高度增长不破坏阅读位置）。LazyVStack 惰性实例化保证挂载/
+    /// 切会话只构建视口附近几条消息——全量渲染的成本仅作用于视口附近长消息
+    /// （每条 ~50-150ms 一次性布局）。
     private func effectiveVisibleCount(seededInitial: Int, total: Int) -> Int {
+        if useCache { return total }
         let base = visibleBlockCount < 0 ? seededInitial : visibleBlockCount
         return min(base, total)
+    }
+
+    /// 游标推进落点（仅流式中间态使用：落定态 effective 恒为全量，哨兵/task 短路）。
+    private func advanceVisibleCount(to value: Int) {
+        visibleBlockCount = value
     }
 
     var body: some View {
@@ -192,7 +207,7 @@ struct AssistantMarkdownView: View, Equatable {
                     .onAppear {
                         DispatchQueue.main.async {
                             let current = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
-                            visibleBlockCount = min(current + Self.blockBatchSize, blocks.count)
+                            advanceVisibleCount(to: min(current + Self.blockBatchSize, blocks.count))
                         }
                     }
             }
@@ -212,7 +227,7 @@ struct AssistantMarkdownView: View, Equatable {
             try? await Task.sleep(nanoseconds: 16_000_000)
             let after = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
             guard !Task.isCancelled, after < blocks.count else { return }
-            visibleBlockCount = min(after + Self.blockBatchSize, blocks.count)
+            advanceVisibleCount(to: min(after + Self.blockBatchSize, blocks.count))
         }
     }
 }
@@ -894,6 +909,21 @@ private struct MarkdownFootnoteSection: View {
 private enum MarkdownImageCache {
     static let cache = NSCache<NSURL, NSImage>()
 
+    /// 渲染高度记忆（url 字符串 → 上次渲染高度）：**反实例化高度回退防线**——
+    /// 图片本体被 NSCache 逐出后，滚动回收重建的 loading 态用记忆高度作
+    /// minHeight，不再回落 120 固定占位（连环塌缩雪崩的主力源：每图塌
+    /// 80~600pt × 行内多图同步重建 → doc 骤塌 → LazyVStack 底部锚定逐批拖视口）。
+    /// 主线程读写（视图 init / 渲染回写），图片数量级小、无上限必要。
+    private static var renderedHeights: [String: CGFloat] = [:]
+
+    static func rememberedHeight(for url: String) -> CGFloat? {
+        renderedHeights[url]
+    }
+
+    static func noteRenderedHeight(url: String, height: CGFloat) {
+        renderedHeights[url] = height
+    }
+
     static func key(for url: String) -> NSURL? {
         if let parsed = URL(string: url), parsed.scheme != nil {
             return parsed as NSURL
@@ -916,11 +946,18 @@ struct MarkdownImageView: View {
     let linkURL: String?
 
     /// 显式 init：保证 `alt:url:title:` 旧调用与 `alt:url:title:linkURL:` 新调用都可用。
+    /// **图片缓存命中直接以 success 态种子化**：反实例化重建（滚动回收）不再回落
+    /// 120 占位——连环塌缩雪崩的主力源（每图塌 80~600pt × 行内多图同步重建 →
+    /// doc 骤塌 → LazyVStack 底部锚定逐批拖视口 = 「上滚跳过数条消息」）。
     init(alt: String, url: String, title: String?, linkURL: String? = nil) {
         self.alt = alt
         self.url = url
         self.title = title
         self.linkURL = linkURL
+        if let key = MarkdownImageCache.key(for: url),
+           let cached = MarkdownImageCache.cache.object(forKey: key) {
+            _state = State(initialValue: .success(cached))
+        }
     }
 
     private enum LoadState {
@@ -964,12 +1001,14 @@ struct MarkdownImageView: View {
 
     // MARK: 三态视图
 
-    /// 加载中：低饱和等高占位块（高度 120）+ 居中 ProgressView。
+    /// 加载中：等高占位块 + 居中 ProgressView。**高度下限 = 渲染高度记忆**——
+    /// 图片本体被 NSCache 逐出、反实例化重建走 loading 态时，占位不再回落固定
+    /// 120（真实图常见 200~700pt，回落即 doc 塌缩）；无记忆（首见）才用 120。
     private var loadingView: some View {
         RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
             .fill(Theme.Colors.surfaceTrack)
             .frame(maxWidth: .infinity)
-            .frame(height: 120)
+            .frame(minHeight: max(120, MarkdownImageCache.rememberedHeight(for: url) ?? 120))
             .overlay(ProgressView().controlSize(.small))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
@@ -1003,6 +1042,16 @@ struct MarkdownImageView: View {
             }
             // 再在容器内左对齐铺排（图片窄时不拉伸容器视觉）。
             .frame(maxWidth: .infinity, alignment: .leading)
+            // 渲染高度回写记忆：供 loading 态 minHeight 种子（反实例化重建不塌缩）。
+            // task(id: height) 高度变化（窗口宽度联动）时刷新记录。
+            .background(
+                GeometryReader { geo in
+                    Color.clear
+                        .task(id: geo.size.height) {
+                            MarkdownImageCache.noteRenderedHeight(url: url, height: geo.size.height)
+                        }
+                }
+            )
     }
 
     /// hover 状态与手型光标维护：仅在可点击时 push/pop，且 push 与 pop 严格配对。
@@ -1063,9 +1112,10 @@ struct MarkdownImageView: View {
     // MARK: 加载
 
     /// 仅做状态编排（网络/解码均已异步外移），故固定在主 actor 上执行，@State 写入安全。
+    /// 顺序契约：**缓存命中路径不置 loading**——init 已种子的 success（反实例化重建
+    /// 恢复）不被拉回占位态闪变；只有确认要走异步加载才置 loading。
     @MainActor
     private func load() async {
-        state = .loading
         guard let key = MarkdownImageCache.key(for: url) else {
             state = .failure
             return
@@ -1074,6 +1124,7 @@ struct MarkdownImageView: View {
             state = .success(cached)
             return
         }
+        state = .loading
 
         let decoded: NSImage?
         if let parsed = URL(string: url),

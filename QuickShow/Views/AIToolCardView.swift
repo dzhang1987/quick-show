@@ -46,13 +46,28 @@ struct AIToolCallCardView: View {
 
 // MARK: - 单个工具调用条目
 
+/// 工具行展开态记忆（record.id 键控）：LazyVStack 反实例化重建（滚动回收）时恢复
+/// 上次展开态，不回折叠——用户展开过的行高度 300~500pt，回落即 doc 塌缩（连环
+/// 塌缩雪崩的贡献源，见 MarkdownImageCache 渲染高度记忆注释）。主线程读写。
+private enum ToolCallExpansionMemory {
+    private static var expandedById: [String: Bool] = [:]
+
+    static func expanded(for record: ToolCallRecord) -> Bool? {
+        expandedById[record.id]
+    }
+
+    static func note(_ expanded: Bool, for record: ToolCallRecord) {
+        expandedById[record.id] = expanded
+    }
+}
+
 /// 一条工具调用：头部行（工具名 + 状态徽标 + 展开箭头）常驻，点击展开参数与结果。
 /// 默认折叠策略：失败 / 已拒绝默认展开（错误详情直接可见），其余默认折叠保持紧凑；
 /// 运行中的条目状态落定到 failed/denied 时自动展开一次，暴露错误。
 private struct ToolCallRow: View {
     let record: ToolCallRecord
 
-    /// 展开 / 折叠（参数与结果区）。
+    /// 展开 / 折叠（参数与结果区）。反实例化重建经 ToolCallExpansionMemory 恢复。
     @State private var expanded: Bool
     /// 长结果（>2000 字符）是否已展开完整内容。
     @State private var showFullResult = false
@@ -64,8 +79,10 @@ private struct ToolCallRow: View {
 
     init(record: ToolCallRecord) {
         self.record = record
-        // 失败 / 已拒绝默认展开，其余默认折叠
-        _expanded = State(initialValue: record.status == .failed || record.status == .denied)
+        // 展开态记忆优先（反实例化重建恢复）；无记忆（首见）用默认策略
+        let remembered = ToolCallExpansionMemory.expanded(for: record)
+        _expanded = State(initialValue: remembered
+            ?? (record.status == .failed || record.status == .denied))
     }
 
     var body: some View {
@@ -78,10 +95,16 @@ private struct ToolCallRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         // 状态落定到失败 / 拒绝时自动展开（用户无需多点一次才能看到错误）
         .onChange(of: record.status) { status in
-            if status == .failed || status == .denied {
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded = true }
+            if status == .failed || status == .denied, !expanded {
+                setExpanded(true)
             }
         }
+    }
+
+    /// 展开态写入口（@State + 外置记忆同步，反实例化重建恢复用）。
+    private func setExpanded(_ value: Bool) {
+        ToolCallExpansionMemory.note(value, for: record)
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded = value }
     }
 
     // MARK: 头部行
@@ -94,7 +117,7 @@ private struct ToolCallRow: View {
 
     private var header: some View {
         Button {
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
+            setExpanded(!expanded)
         } label: {
             HStack(spacing: Theme.Spacing.lg) {
                 // 主标题：中文展示名（正文常规字族，中文不走等宽）

@@ -1360,6 +1360,7 @@ struct MathParagraphView: NSViewRepresentable {
         coordinator.measuredWidth = -1
         // 全局高度缓存 key 的内容部分（updateNSView 时算一次；sizeThatFits 只补宽度/字号/字重）。
         coordinator.contentHash = MathLayoutCache.contentHash(inlines)
+        // 诊断埋点（临时）：段落重建时刻 + pending 公式数——定位 doc 大塌缩的子视图来源。
         // 稳定性：本帧无待回填公式（全部命中缓存或已知失败）→ 测得的高度才写入全局缓存。
         coordinator.measurementStable = renderResult.pendingMath.isEmpty
 
@@ -1443,6 +1444,8 @@ struct MathParagraphView: NSViewRepresentable {
             // 仅稳定测量（无待回填公式）写入全局缓存，避免占位文本高度污染持久缓存。
             if context.coordinator.measurementStable {
                 MathLayoutCache.storeParagraphHeight(height, for: globalKey)
+            } else {
+                // 诊断埋点（临时）：占位测量（pending 段落）——大塌缩的直接形态。
             }
         }
         return CGSize(width: width, height: height)

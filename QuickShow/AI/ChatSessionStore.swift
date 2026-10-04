@@ -250,6 +250,20 @@ final class ChatSessionStore: ObservableObject {
     private var draftsFileURL: URL {
         directoryURL.appendingPathComponent(Self.draftsFileName)
     }
+    /// 滚动位置文件名（`AIChats/scroll_positions.json`）：`[会话UUID字符串: {top, pinned}]`。
+    /// 会话级阅读位置记忆的跨重启持久层（与草稿同款模式）；load() 显式跳过。
+    static let scrollPositionsFileName = "scroll_positions.json"
+    /// 滚动位置文件路径。
+    private var scrollPositionsFileURL: URL {
+        directoryURL.appendingPathComponent(Self.scrollPositionsFileName)
+    }
+    /// 滚动位置的磁盘形态（内存形态 ScrollSnapshot 是视图层私有类型，此处独立 Codable）。
+    struct PersistedScrollPosition: Codable {
+        /// 离开时视口顶部消息 id（nil = 无锚点，恢复贴底）。
+        var topMessageID: UUID?
+        /// 离开时是否贴底跟随（true = 恢复贴底，false = 回到锚点）。
+        var isPinned: Bool
+    }
 
     private init() {
         let support = fileManager
@@ -569,6 +583,35 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
+    // MARK: - 会话滚动位置落盘
+
+    /// 读取全部会话滚动位置。key 非法条目丢弃；文件不存在 / 解码失败返回空。
+    func loadScrollPositions() -> [UUID: PersistedScrollPosition] {
+        guard let data = try? Data(contentsOf: scrollPositionsFileURL),
+              let raw = try? JSONDecoder().decode([String: PersistedScrollPosition].self, from: data) else {
+            return [:]
+        }
+        var result: [UUID: PersistedScrollPosition] = [:]
+        for (key, value) in raw {
+            guard let id = UUID(uuidString: key) else { continue }
+            result[id] = value
+        }
+        return result
+    }
+
+    /// 原子写全部会话滚动位置（视图层在切走/卸载等低频时机调用）。
+    /// 静默失败：位置记忆非关键数据，恢复路径有贴底兜底。
+    func persistScrollPositions(_ positions: [UUID: PersistedScrollPosition]) {
+        do {
+            try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            let raw = Dictionary(uniqueKeysWithValues: positions.map { ($0.key.uuidString, $0.value) })
+            let data = try JSONEncoder().encode(raw)
+            try data.write(to: scrollPositionsFileURL, options: .atomic)
+        } catch {
+            // 静默失败。
+        }
+    }
+
     // MARK: - 内部：加载与迁移
 
     /// 启动加载：先迁移旧单会话，再读取全部会话文件并恢复当前会话。
@@ -583,8 +626,11 @@ final class ChatSessionStore: ObservableObject {
 
         // 显式跳过草稿文件：drafts.json 与真实会话同目录，若不排除会被尝试解码为 ChatSession
         // （当前靠解码失败静默跳过，属隐式依赖）。显式排除更确定，也为草稿数据语义正名。
+        // scroll_positions.json 同理（滚动位置持久层）。
         var loaded: [ChatSession] = files
-            .filter { $0.pathExtension == "json" && $0.lastPathComponent != Self.draftsFileName }
+            .filter { $0.pathExtension == "json"
+                && $0.lastPathComponent != Self.draftsFileName
+                && $0.lastPathComponent != Self.scrollPositionsFileName }
             .compactMap { url -> ChatSession? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? JSONDecoder().decode(ChatSession.self, from: data)

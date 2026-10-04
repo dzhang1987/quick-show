@@ -36,6 +36,11 @@ struct AIChatView: View {
         _sidebarVisible = State(initialValue: UserDefaults.standard.bool(forKey: AIWindowManager.sidebarVisibleKey))
         // LRU 常驻集合以当前会话起步（避免首帧 ZStack 为空导致的闪烁/空窗）。
         _residentSessionIds = State(initialValue: state.store.currentSessionId.map { [$0] } ?? [])
+        // 会话级阅读位置冷启动装载（跨重启记忆）：磁盘持久层 → 内存快照真源，
+        // 重挂载/首次切回走 restoreScroll 恢复到上次阅读位置（无快照才贴底）。
+        _scrollSnapshots = State(initialValue: state.store.loadScrollPositions().mapValues {
+            ScrollSnapshot(topVisibleMessageID: $0.topMessageID, isPinned: $0.isPinned)
+        })
     }
 
     /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
@@ -49,15 +54,19 @@ struct AIChatView: View {
     /// （onChange 不响应初始值、updateNSView 周期内写 state 不可靠），单通道会在草稿恢复
     /// （重启载入 / 程序化填充）时与既有文字重影；派生条件首帧求值即正确，零时序依赖。
     @State private var inputEmpty = true
+    /// 输入坞「生长区」实测高度（队列胶囊 + 图片附件条 + 剪贴板胶囊，输入卡上方段）：
+    /// 由生长区 background 内 GeometryReader 经 preference 回写（macOS 13 无 onGeometryChange），
+    /// 供消息列表尾部留白 / 空态 overlay / 导出 toast / 浮动导航簇四处统一叠加——
+    /// 遮挡带随生长区动态跟随，末条消息永远完整露出坞顶。值单向流入留白计算，
+    /// 绝不反向影响生长区布局（无反馈环）；生长区三段全空时容器移除，preference 回退 0。
+    @State private var dockGrowthHeight: CGFloat = 0
     /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
     @State private var hasClipboardText = false
     /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
     @State private var hasClipboardImage = false
-    /// AI 窗滚轮监听（窗口级；意图经 SessionScrollRelay 路由到当前活跃会话视图）。
-    @State private var scrollWheelMonitor = AIChatScrollWheelMonitor()
-    /// 活跃会话滚轮意图中继：窗口级滚轮监听只有一个，需路由到「当前活跃会话视图」的
-    /// 跟随状态。class 引用稳定，避免 @State 闭包在事件回调中的捕获时序与兄弟视图注册竞态。
-    @State private var scrollRelay = SessionScrollRelay()
+    /// 会话滚动控制中枢：每会话滚动事件「来源判定」（用户输入 vs 程序化/内容变化）+
+    /// 程序化滚动仲裁。class 引用稳定，常驻会话经 bind/unbind 注册各自的处理闭包。
+    @State private var scrollCoordinator = ChatScrollCoordinator()
     /// 会话窄栏显隐（持久化到 UserDefaults，窗口宽度联动见 AIWindowManager）。
     @State private var sidebarVisible = false
     /// 会话视图树 LRU 常驻集合（0 = 最近使用）。切换会话只改 opacity，视图常驻零重建：
@@ -194,7 +203,6 @@ struct AIChatView: View {
         }
         .onDisappear {
             keyMonitor.remove()
-            scrollWheelMonitor.remove()
         }
         // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
@@ -222,12 +230,20 @@ struct AIChatView: View {
         // 初始订阅重放时 knownSessionIds 为空，subtracting 结果为空，不误判。
         .onReceive(state.store.$sessions.map { Set($0.map { $0.id }) }.removeDuplicates()) { currentIds in
             let disappeared = knownSessionIds.subtracting(currentIds)
-            if !disappeared.isEmpty {
-                for id in disappeared {
-                    scrollSnapshots.removeValue(forKey: id)
-                    residentSessionIds.removeAll { $0 == id }
+                if !disappeared.isEmpty {
+                    for id in disappeared {
+                        scrollSnapshots.removeValue(forKey: id)
+                        residentSessionIds.removeAll { $0 == id }
+                    }
+                    // 同步清理磁盘持久层，防死会话的位置记录残留（重挂载锚点已失效）。
+                    state.store.persistScrollPositions(
+                        scrollSnapshots.mapValues {
+                            ChatSessionStore.PersistedScrollPosition(
+                                topMessageID: $0.topVisibleMessageID, isPinned: $0.isPinned
+                            )
+                        }
+                    )
                 }
-            }
             knownSessionIds = currentIds
             // 恒定保证：当前会话必须常驻（residency 误删/竞态兜底；丢失则全部层 opacity=0 → 整片白屏）。
             // 侧栏选中只读 currentSessionId、与 residency 无关：residency 丢失时侧栏看似正常，
@@ -317,15 +333,19 @@ struct AIChatView: View {
             // 空会话在 ZStack 内渲染 EmptyView，空态由本 overlay 承担。
             messageList
                 .overlay {
+                    // 底部 padding 叠加生长区实测高度：附件草稿可在空态出现（附件条会挡
+                    // 欢迎页/引导页），遮挡带随坞体生长动态抬高
                     if !configured && activeSessionMessagesEmpty {
                         UnconfiguredGuideView(onOpenSettings: onOpenSettings)
-                            .padding(.bottom, Theme.Layout.chatDockClearance)
+                            .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight)
+                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
                     } else if activeSessionMessagesEmpty {
                         WelcomeView(
                             hasClipboardText: hasClipboardText,
                             onAttachClipboard: { attachClipboard() }
                         )
-                        .padding(.bottom, Theme.Layout.chatDockClearance)
+                        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
                     }
                 }
         }
@@ -333,11 +353,13 @@ struct AIChatView: View {
         // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。
         // 消息滚动时从坞的玻璃底下穿过——glassEffect 采样到真实内容流，
         // 折射/高光/自适应明度自动成立（glass-on-glass 退化为塑料块的根因即采样不到内容）。
-        // 列表底部留白（chatDockClearance）保证滚到底时末条消息完整露出坞顶。
+        // 列表底部留白（chatDockClearance + 生长区实测高度）保证滚到底时末条消息完整露出
+        // 坞顶——生长区（队列胶囊等）在坞顶向上生长，遮挡带随之动态跟随。
         .overlay(alignment: .bottom) {
             inputArea
         }
-        // 导出成功轻反馈：输入坞上方浮出胶囊（复用 toast 令牌语言），1.6s 自动淡出
+        // 导出成功轻反馈：输入坞上方浮出胶囊（复用 toast 令牌语言），1.6s 自动淡出；
+        // 底部 padding 叠加生长区高度——生成中导出时队列胶囊在场，toast 须抬到生长区之上
         .overlay(alignment: .bottom) {
             if exportToastVisible {
                 Text("已复制对话 Markdown")
@@ -347,7 +369,8 @@ struct AIChatView: View {
                     .padding(.vertical, Theme.Spacing.md)
                     .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
                     .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
-                    .padding(.bottom, Theme.Layout.chatDockClearance + Theme.Spacing.lg)
+                    .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight + Theme.Spacing.lg)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
                     .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
             }
         }
@@ -419,7 +442,8 @@ struct AIChatView: View {
                         }
                     },
                     scrollSnapshots: $scrollSnapshots,
-                    scrollRelay: scrollRelay
+                    scrollCoordinator: scrollCoordinator,
+                    dockGrowthHeight: dockGrowthHeight
                 )
                 .opacity(isActive ? 1 : 0)
                 .allowsHitTesting(isActive)
@@ -536,34 +560,55 @@ struct AIChatView: View {
     /// 发送钮实心态判据：可发送或生成中（驱动 禁用灰箭头 ⇄ 实心强调色 的淡变）。
     private var sendButtonSolid: Bool { state.isStreaming || canSend }
 
+    /// 生长区是否在场（队列/附件/剪贴板任一非空）：与 inputArea 生长区容器的 if 判据同源。
+    private var hasDockGrowth: Bool {
+        !state.pendingQueue.isEmpty
+            || !state.imageAttachments.isEmpty
+            || state.clipboardAttachment != nil
+    }
+
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-            // 待注入队列（steering 转向 / follow-up 追问）：生成中 ⏎/⌥⏎ 的消息在此排队，
-            // 点击胶囊取回编辑；队列区置于坞体顶部、随内容向上生长，宽度与坞一致。
-            if !state.pendingQueue.isEmpty {
-                VStack(spacing: Theme.Spacing.sm) {
-                    ForEach(state.pendingQueue) { item in
-                        QueuedInputCapsule(item: item) {
-                            state.recallQueuedInput(id: item.id)
+            // 生长区（输入卡上方：队列胶囊 / 附件条 / 剪贴板胶囊）：容器化以便整段实测高度
+            // （background 内 GeometryReader + preference，macOS 13 无 onGeometryChange；
+            // 先例见 ChatReadingColumn 的宽度读取）。间距语义与三段直接并列完全等价——
+            // 段间 lg 收进内层，末段与输入卡的 lg 仍由外层承担，三段全空时容器整体缺席，
+            // 布局与展开前逐点一致。
+            if hasDockGrowth {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    // 待注入队列（steering 转向 / follow-up 追问）：生成中 ⏎/⌥⏎ 的消息在此排队，
+                    // 点击胶囊取回编辑；队列区置于坞体顶部、随内容向上生长，宽度与坞一致。
+                    if !state.pendingQueue.isEmpty {
+                        VStack(spacing: Theme.Spacing.sm) {
+                            ForEach(state.pendingQueue) { item in
+                                QueuedInputCapsule(item: item) {
+                                    state.recallQueuedInput(id: item.id)
+                                }
+                                .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+                            }
                         }
-                        .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.pendingQueue)
+                    }
+
+                    // 待发送图片附件条：缩略图胶囊横排，可单个移除
+                    if !state.imageAttachments.isEmpty {
+                        ImageAttachmentStrip(attachments: state.imageAttachments) { id in
+                            state.removeImageAttachment(id: id)
+                        }
+                    }
+
+                    // 剪贴板附加胶囊：非 nil 时显示，可一键移除
+                    if let clip = state.clipboardAttachment {
+                        ClipboardAttachmentCapsule(charCount: clip.count) {
+                            state.removeClipboardAttachment()
+                        }
                     }
                 }
-                .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.pendingQueue)
-            }
-
-            // 待发送图片附件条：缩略图胶囊横排，可单个移除
-            if !state.imageAttachments.isEmpty {
-                ImageAttachmentStrip(attachments: state.imageAttachments) { id in
-                    state.removeImageAttachment(id: id)
-                }
-            }
-
-            // 剪贴板附加胶囊：非 nil 时显示，可一键移除
-            if let clip = state.clipboardAttachment {
-                ClipboardAttachmentCapsule(charCount: clip.count) {
-                    state.removeClipboardAttachment()
-                }
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: ChatDockGrowthHeightKey.self, value: geo.size.height)
+                    }
+                )
             }
 
             // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 思考 chip ║ 低频工具组 / 发送）；
@@ -653,6 +698,10 @@ struct AIChatView: View {
         .onHover { hovering in
             if hovering { refreshClipboardAvailability() }
             dockHovered = hovering
+        }
+        // 生长区高度回写：单向流入尾部留白等四处消费点，绝不反向影响生长区布局。
+        .onPreferenceChange(ChatDockGrowthHeightKey.self) { height in
+            dockGrowthHeight = height
         }
     }
 
@@ -1158,13 +1207,6 @@ struct AIChatView: View {
             searchFocusRequest += 1
         }
         keyMonitor.install()
-
-        // 滚轮意图监听：窗口级只此一份，经 SessionScrollRelay 路由到当前活跃会话视图的
-        // 跟随状态（活跃会话在 isActive 变化时注册/注销自己的处理闭包）。
-        scrollWheelMonitor.onUserScroll = { scrollingUp in
-            scrollRelay.relay(scrollingUp: scrollingUp)
-        }
-        scrollWheelMonitor.install()
     }
 
     /// ESC 三阶段语义（输入框聚焦时的兜底路径）：
@@ -1237,34 +1279,309 @@ final class AIChatKeyMonitor {
     }
 }
 
-// MARK: - AI 窗滚轮意图监听
+// MARK: - 会话滚动控制中枢（来源判定 + 程序化仲裁）
 
-/// AI 窗滚轮监听：不消费事件，只把「用户在滚」的意图透传给视图层（时间戳 + 方向）。
-/// 用途：底部哨兵消失时区分「用户上滚离开」（解除跟随）与「流式内容增长顶出」（保持跟随）。
-/// macOS 13 无 ScrollView 滚动相位 API，滚轮/触控板滚动统一走 NSEvent.scrollWheel 本地监听。
-/// scrollingDeltaY 已按用户意图归一化（天然/传统方向一致）：> 0 = 向内容顶部滚。
-/// 非隔离类：本地监听恒在主线程事件派发路径触发，回调直接执行，无跨隔离域开销。
-final class AIChatScrollWheelMonitor {
-    private var monitor: Any?
+/// 滚动跟随的单一判定中枢（AI 窗一个，按会话路由）。
+///
+/// 第一性原理：视口偏移的变化只有两个来源——**用户输入**（滚轮/惯性/滚动条/键盘，最终都
+/// 表现为 clipView bounds 的 origin 变化）与**非用户变化**（我们发起的程序化滚动、内容
+/// 布局增长/塌缩引发的被动调整）。由「变化来源」直接判定 pinned 态，取代旧架构用
+/// 0.5s/0.4s/0.12s 三个时间窗对「哨兵消失是谁干的」的猜测——时间窗没有时间上界语义
+/// （异步渲染的 settling 可达秒级），猜测必错，这正是历次补丁反复复发的根源。
+///
+/// 判定规则（单一写路径）：
+/// - pinned = true 只来自两处：用户输入把视口带回底部容差区 / 发送消息强制跳底；
+/// - pinned = false 只来自一处：用户输入把视口推离底部容差区；
+/// - 内容高度变化（documentView frame 变化）**永不**直接改 pin 态——pinned 时程序化
+///   保持贴底（跟随的唯一执行点），unpinned 时绝不干预（用户阅读位置主权最高）；
+/// - 程序化滚动经 `beginProgrammatic` 遮蔽窗排除在「用户输入」之外（同步滚动短窗、
+///   动画滚动按动画时长 + 兜底）。
+///
+/// 非隔离类：全部回调恒在主线程（NSNotification 主队列 + SwiftUI 主线程回调），
+/// 先例见 AIChatKeyMonitor；避免跨隔离域开销。
+final class ChatScrollCoordinator {
+    /// pin 态真源（按会话）。**必须放 class 内直接读写**：日志实证 @State 经通知回调写入后，
+    /// 同帧读取闭包拿到的仍是旧值（写入对非渲染上下文的读取至少延迟一帧可见）——
+    /// 判定路径读旧值 = 用户已解除跟随仍被逐帧贴底拽回（「走走停停被间歇拉回」根因）。
+    /// 视图层的 isPinned @State 降级为纯 UI 镜像（导航簇显隐），由 onPinnedChange 同步。
+    private var pinStates: [UUID: Bool] = [:]
+    /// pin 态变化通知（每会话一个，视图挂载时注册）：coordinator 真源变化 → 回调写回
+    /// 视图 @State 驱动 UI 刷新。UI 镜像延迟一帧无妨——它不在判定路径上。
+    private var pinnedChangeHandlers: [UUID: (Bool) -> Void] = [:]
 
-    /// 用户滚动回调；参数 scrollingUp = 是否朝内容顶部方向滚。
-    var onUserScroll: (_ scrollingUp: Bool) -> Void = { _ in }
+    /// 程序化滚动遮蔽——两种机制，按路径选用：
+    /// - **同步作用域**（`programmaticDepths`）：`clipView.scroll(to:)` 的 bounds 通知在
+    ///   调用栈内**同步**发出，进出作用域即可精确遮蔽，**零时间窗**——流式逐帧贴底
+    ///   （~50ms 合帧节拍）的高频路径必须走此机制：若用时间窗，50ms 窗口背靠背覆盖
+    ///   时间线，用户的滚轮输入几乎必然落在窗内被吞——pin 态永远无法解除，表现为
+    ///   「流式输出中滚不上去」（被贴底循环持续拽回）。
+    /// - **时间窗**（`programmaticUntil`）：仅用于动画滚动（animator 的 bounds 变化由
+    ///   CA 逐帧异步驱动，作用域罩不住）与 proxy 回退路径（布局异步落定）。动画只
+    ///   发生在低频路径（流结束收尾/导航跳转），不会饿死用户输入。
+    /// - 兜底：无论哪种遮蔽生效中，若 origin 向**远离底部**方向移动（用户逆着程序化
+    ///   滚动向上滚），立即解除遮蔽并按用户输入处理（用户主权最高，见 handleBoundsChanged）。
+    private var programmaticDepths: [UUID: Int] = [:]
+    private var programmaticUntil: [UUID: Date] = [:]
+    /// 各会话上一次观察到的 clipView bounds origin：区分「滚动」（origin 变）与
+    /// 「视口尺寸变化」（origin 不变，窗口 resize/工具条收展）——后者绝不能当作用户滚动。
+    private var lastOrigins: [UUID: CGPoint] = [:]
+    /// 各会话 documentView 上一次高度（frame 变化时算 delta）。
+    private var lastDocHeights: [UUID: CGFloat] = [:]
 
-    func install() {
-        guard monitor == nil else { return }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            // 只关心 AI 对话窗内的滚动（设置窗等其他窗口不记时间戳）
-            if event.window is AIPanel {
-                self?.onUserScroll(event.scrollingDeltaY > 0)
-            }
-            return event
+    /// 底部容差区高度（pt）：与视图层 bottomTolerance 同源——判定「视口在底部」的容差。
+    private let bottomTolerance: CGFloat = 18
+
+    private struct WeakBox { weak var view: NSScrollView? }
+    private var attached: [UUID: WeakBox] = [:]
+    /// 各会话的通知监听 token（attach 时安装，重复 attach 先拆旧——SwiftUI 重建桥时换
+    /// ScrollView 重装；会话视图销毁后 scrollView 随之释放，通知源消失，token 空转无害）。
+    private var observers: [UUID: (bounds: NSObjectProtocol, frame: NSObjectProtocol)] = [:]
+
+    // MARK: - 会话注册与 pin 真源
+
+    /// 挂载时注册：pin 变化通知（同步视图的 isPinned UI 镜像）。常驻期间保持。
+    func bind(sessionId: UUID, onPinnedChange: @escaping (Bool) -> Void) {
+        pinnedChangeHandlers[sessionId] = onPinnedChange
+    }
+
+    /// 卸载时注销并清理真源。
+    func unbind(sessionId: UUID) {
+        pinnedChangeHandlers[sessionId] = nil
+        pinStates[sessionId] = nil
+    }
+
+    /// pin 态唯一写入口：class 真源即时生效（判定路径同帧可读，零延迟），
+    /// 变化时通知视图刷新 UI 镜像（导航簇显隐等，延迟一帧无妨）。
+    func setPinned(_ sessionId: UUID, _ pinned: Bool) {
+        let old = pinStates[sessionId] ?? true
+        guard old != pinned else { return }
+        pinStates[sessionId] = pinned
+        pinnedChangeHandlers[sessionId]?(pinned)
+    }
+
+    /// pin 真源公开读取（视图层快照等路径必须读真源——@State 镜像写入对读取
+    /// 延迟一帧可见，读镜像会存到旧值导致恢复路径走错分支）。
+    func isPinnedState(of sessionId: UUID) -> Bool {
+        pinStates[sessionId] ?? true
+    }
+
+    // MARK: - AppKit 桥挂载（通知安装）
+
+    /// 桥视图解析到本会话底层 NSScrollView 后调用：安装 clipView bounds 变化与
+    /// documentView frame 变化两类通知（posts 开关显式开启——两者默认都不发通知）。
+    func attach(sessionId: UUID, scrollView: NSScrollView) {
+        if attached[sessionId]?.view === scrollView, observers[sessionId] != nil { return }
+        if let old = observers[sessionId] {
+            NotificationCenter.default.removeObserver(old.bounds)
+            NotificationCenter.default.removeObserver(old.frame)
+            observers[sessionId] = nil
+        }
+        attached[sessionId] = WeakBox(view: scrollView)
+        let clipView = scrollView.contentView
+        clipView.postsBoundsChangedNotifications = true
+        if let doc = clipView.documentView {
+            doc.postsFrameChangedNotifications = true
+            lastDocHeights[sessionId] = lastDocHeights[sessionId] ?? doc.frame.height
+        }
+        lastOrigins[sessionId] = lastOrigins[sessionId] ?? clipView.bounds.origin
+        let boundsToken = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification, object: clipView, queue: .main
+        ) { [weak self] _ in
+            self?.handleBoundsChanged(sessionId: sessionId, scrollView: scrollView)
+        }
+        let frameToken = NotificationCenter.default.addObserver(
+            forName: NSView.frameDidChangeNotification, object: clipView.documentView, queue: .main
+        ) { [weak self] _ in
+            self?.handleDocumentFrameChanged(sessionId: sessionId, scrollView: scrollView)
+        }
+        observers[sessionId] = (boundsToken, frameToken)
+    }
+
+    /// 底层 NSScrollView 弱引用读取（跳底直滚 / 桥可用性判定）。
+    func scrollView(for sessionId: UUID) -> NSScrollView? {
+        attached[sessionId]?.view
+    }
+
+    // MARK: - 程序化滚动仲裁
+
+    /// 开程序化时间窗：窗口内的 bounds origin 变化不计为用户输入（仅动画/proxy 路径用）。
+    private func beginProgrammatic(sessionId: UUID, window: TimeInterval) {
+        let until = Date().addingTimeInterval(window)
+        if (programmaticUntil[sessionId] ?? .distantPast) < until {
+            programmaticUntil[sessionId] = until
         }
     }
 
-    func remove() {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-            self.monitor = nil
+    /// 解除该会话全部程序化遮蔽（作用域 + 时间窗）：用户逆程序化方向滚动的兜底。
+    private func endProgrammatic(sessionId: UUID) {
+        programmaticDepths[sessionId] = 0
+        programmaticUntil[sessionId] = .distantPast
+    }
+
+    private func isProgrammaticActive(sessionId: UUID) -> Bool {
+        (programmaticDepths[sessionId] ?? 0) > 0
+            || Date() < (programmaticUntil[sessionId] ?? .distantPast)
+    }
+
+    /// 同步程序化作用域：闭包内 `clipView.scroll(to:)` 触发的 bounds 通知在调用栈内
+    /// 同步发出，进出配对遮蔽——零时间窗，流式逐帧贴底（高频）的安全路径。
+    private func withSyncProgrammaticScope<T>(_ sessionId: UUID, _ body: () -> T) -> T {
+        programmaticDepths[sessionId, default: 0] += 1
+        let result = body()
+        programmaticDepths[sessionId, default: 0] -= 1
+        return result
+    }
+
+    /// 程序化作用域（proxy 路径）：proxy.scrollTo 的布局/动画异步落定，作用域罩不住
+    /// bounds 变化，用时间窗兜——短窗覆盖非动画落定，动画路径（0.18~0.2s）调用方传
+    /// 0.28~0.35 覆盖逐帧变化。仅低频路径使用（导航/恢复定位），不构成用户输入饥饿。
+    func withProgrammaticScope<T>(_ sessionId: UUID, window: TimeInterval = 0.05, _ body: () -> T) -> T {
+        beginProgrammatic(sessionId: sessionId, window: window)
+        return body()
+    }
+
+    // MARK: - 通知处理（判定核心）
+
+    /// clipView bounds 变化：origin 变 = 滚动（用户，或未被遮蔽的程序化）；origin 不变
+    /// = 纯视口尺寸变化（resize），pinned 会话程序化重新贴底，绝不当用户滚动。
+    /// 遮蔽中的兜底：程序化贴底只会让 origin 向底部方向移动（或持平）；origin 向**远离
+    /// 底部**方向移动必然来自用户输入（用户逆着程序化滚动向上滚）——立即解除遮蔽并
+    /// 按用户输入处理（用户主权最高）。这保证流式逐帧贴底期间用户上滚**立即**生效
+    /// （历史缺陷：贴底开 0.05s 时间窗 × 50ms 合帧节拍背靠背覆盖时间线，用户滚轮
+    /// 全部被吞——「转向消息后滚不上去」的根因）。
+    private func handleBoundsChanged(sessionId: UUID, scrollView: NSScrollView) {
+        let origin = scrollView.contentView.bounds.origin
+        let last = lastOrigins[sessionId] ?? origin
+        lastOrigins[sessionId] = origin
+        let originChanged = abs(origin.x - last.x) > 0.1 || abs(origin.y - last.y) > 0.1
+        guard originChanged else {
+            // 视口尺寸变化（非滚动）：pinned 会话保持贴底（窗口缩小会让底部内容沉下去）。
+            if isPinned(sessionId) { scrollPinnedToBottom(sessionId: sessionId, animated: false) }
+            return
+        }
+        let flipped = scrollView.contentView.documentView?.isFlipped ?? true
+        // flipped 文档：向上滚 = origin.y 减小；非 flipped：origin.y 增大。
+        let movedUp = flipped ? (origin.y < last.y - 0.1) : (origin.y > last.y + 0.1)
+        let masked = isProgrammaticActive(sessionId: sessionId)
+        if masked {
+            // 兜底仅对「贴底跟随中的逆向上滚」生效（isPinned=true）；unpinned 时的
+            // movedUp 可能是内容塌缩后的被动 clamp（flipped 下 offset 被压小、方向同
+            // 向上），若触发兜底会把 clamp 误判为用户输入、在底部误恢复 pin——
+            // 历史「塌缩瞬移」根因的复活路径，必须排除。
+            guard movedUp, isPinned(sessionId) else {
+                return
+            }
+            endProgrammatic(sessionId: sessionId)
+        }
+        let atBottom = isAtBottom(scrollView)
+        // 方向守卫（塌缩瞬移特征排除）：用户回底必然是**向下滚**（origin 向底部移动）；
+        // 「向上滚却判定在底部」（movedUp && atBottom）的矛盾组合只来自内容塌缩后
+        // SwiftUI/AppKit 把 origin 压到新 maxOffset 的被动调整——日志实证的
+        // 「瞬移 13915px 回底 + pin 误恢复 → 回填期间逐帧 scrollToBottom 拽回」根因。
+        // 矛盾组合一律吞掉（不写 pin）；内容不满一屏区（maxOffset=0 恒 atBottom）的
+        // 向上橡皮筋微滚同被吞，写同值 1 亦无语义损失。
+        if movedUp, atBottom {
+            return
+        }
+        setPinned(sessionId, atBottom)
+    }
+
+    /// documentView frame 变化（内容高度增长/塌缩）：跟随的唯一执行点。
+    /// - pinned：程序化贴底（非动画，与内容布局同步，流式增量即逐帧跟随）；
+    /// - unpinned：不干预——但**塌缩时必须把偏移预先 clamp 到新最大值**（等价 AppKit
+    ///   即将做的调整，但由我们在遮蔽窗内完成）：否则随后 AppKit 自己 clamp 的 bounds
+    ///   变化会被误判为用户滚动，把 pin 态错误翻转（历史「瞬移到底 + 回弹错位」根因）。
+    private func handleDocumentFrameChanged(sessionId: UUID, scrollView: NSScrollView) {
+        guard let doc = scrollView.contentView.documentView else { return }
+        let newHeight = doc.frame.height
+        let oldHeight = lastDocHeights[sessionId] ?? newHeight
+        lastDocHeights[sessionId] = newHeight
+        let delta = newHeight - oldHeight
+        guard abs(delta) > 0.5 else { return }
+        let pinned = isPinned(sessionId)
+        if pinned {
+            scrollPinnedToBottom(sessionId: sessionId, animated: false)
+        } else if delta < 0 {
+            // 塌缩：程序化执行 clamp 等价（同步作用域遮蔽），视觉与 AppKit 自然行为一致。
+            // 额外保留 0.15s 时间窗：AppKit 在布局 pass 的后续自然 clamp（若发生）不在
+            // 我们的调用栈内，同步作用域罩不住——它的 bounds 变化方向与向上滚相同
+            // （offset 被压小），不遮蔽会被判定为用户输入、在底部误恢复 pin。
+            let clip = scrollView.contentView
+            let maxOffset = max(0, newHeight - clip.bounds.height)
+            let current = doc.isFlipped ? clip.bounds.origin.y : -clip.bounds.origin.y
+            if current > maxOffset {
+                beginProgrammatic(sessionId: sessionId, window: 0.15)
+                let target = NSPoint(x: 0, y: doc.isFlipped ? maxOffset : -maxOffset)
+                withSyncProgrammaticScope(sessionId) {
+                    clip.scroll(to: target)
+                    scrollView.reflectScrolledClipView(clip)
+                }
+            }
+        }
+    }
+
+    /// 视口是否在底部容差区（flipped 文档：距底溢出 ≤ 容差；内容不满一屏恒在底部）。
+    private func isAtBottom(_ scrollView: NSScrollView) -> Bool {
+        guard let doc = scrollView.contentView.documentView else { return true }
+        let clip = scrollView.contentView
+        guard doc.isFlipped else {
+            return clip.bounds.origin.y <= bottomTolerance
+        }
+        let maxOffset = max(0, doc.bounds.height - clip.bounds.height)
+        return (maxOffset - clip.bounds.origin.y) <= bottomTolerance
+    }
+
+    private func isPinned(_ sessionId: UUID) -> Bool {
+        pinStates[sessionId] ?? true
+    }
+
+    // MARK: - 跳底直滚（AppKit 路径，程序化仲裁内）
+
+    /// 程序化滚动到本会话底部。返回 false = 桥未就绪（无底层 NSScrollView 可控）。
+    /// - 非动画（流式逐帧跟随的高频路径）：同步作用域遮蔽——`scroll(to:)` 的 bounds
+    ///   通知在调用栈内同步发出，进出配对即可精确遮蔽，**零时间窗**（用时间窗会被
+    ///   50ms 合帧节拍背靠背铺满时间线、吞掉全部用户滚轮输入）；
+    /// - 动画（低频：流结束收尾/导航回底）：时间窗 = 动画时长 + 兜底（CA 逐帧异步
+    ///   驱动的 bounds 变化作用域罩不住；低频路径不构成输入饥饿，且有 movedUp 兜底）。
+    @discardableResult
+    func scrollPinnedToBottom(sessionId: UUID, animated: Bool) -> Bool {
+        guard let sv = attached[sessionId]?.view, let doc = sv.contentView.documentView else {
+            return false
+        }
+        let bottomY = doc.isFlipped
+            ? max(0, doc.bounds.height - sv.contentView.bounds.height)
+            : 0
+        let target = NSPoint(x: 0, y: bottomY)
+        if animated {
+            beginProgrammatic(sessionId: sessionId, window: 0.34)
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.18
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                sv.contentView.animator().setBoundsOrigin(target)
+            })
+        } else {
+            withSyncProgrammaticScope(sessionId) {
+                sv.contentView.scroll(to: target)
+                sv.reflectScrolledClipView(sv.contentView)
+            }
+        }
+        return true
+    }
+}
+
+/// AppKit 滚动桥：零尺寸 NSView 挂在 ScrollView **内容树内部**（必须在内——挂在 ScrollView
+/// 外层时是兄弟节点，enclosingScrollView 解析不到）。解析到本会话底层 NSScrollView 后
+/// 交 coordinator 安装通知；视图若被 SwiftUI 重建，updateNSView 以 !== 检测并重挂。
+private struct ChatScrollBridgeView: NSViewRepresentable {
+    let sessionId: UUID
+    let coordinator: ChatScrollCoordinator
+    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async {
+            if let sv = nsView.enclosingScrollView,
+               coordinator.scrollView(for: sessionId) !== sv {
+                coordinator.attach(sessionId: sessionId, scrollView: sv)
+            }
         }
     }
 }
@@ -1328,19 +1645,6 @@ private struct ScrollSnapshot {
     var isPinned: Bool
 }
 
-// MARK: - 底部锚点几何信号
-
-/// 底部锚点在滚动视口坐标系中的底边 Y（`frame(in: .named(<该实例坐标空间>)).maxY`）。
-/// 每个 `SessionMessageList` 在自己的子树内消费该 preference（`onPreferenceChange` 挂在
-/// 该实例的 ScrollView 上），且坐标系名称按 sessionId 隔离，多个常驻实例互不串扰。
-private struct BottomAnchorYKey: PreferenceKey {
-    static var defaultValue: CGFloat = .greatestFiniteMagnitude
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        // 单实例内只有尾部锚点一处发射；取最新值即可。
-        value = nextValue()
-    }
-}
-
 // MARK: - 消息行几何信号（诚实视口锚点）
 
 /// 每个已实现化消息行上报其在本实例滚动视口坐标系中的 frame（`[messageID: CGRect]`）。
@@ -1362,58 +1666,6 @@ private struct LatexPrefetchSignature: Equatable {
     var lastMessageID: UUID?
 }
 
-// MARK: - 活跃会话滚轮意图中继
-
-/// 窗口级滚轮监听只有一个，需路由到「当前活跃会话视图」的跟随状态。
-/// class 引用稳定：避免 @State 闭包在事件回调中的捕获时序问题，也避免兄弟会话
-/// 在 isActive 切换时互相覆盖处理闭包（用 activeSessionId 归属校验）。
-@MainActor
-private final class SessionScrollRelay {
-    private(set) var activeSessionId: UUID?
-    private var handler: ((Bool) -> Void)?
-
-    /// AppKit 滚动桥：按会话持有底层 NSScrollView 弱引用（跳底直滚用，见 NSScrollBridgeView）。
-    private struct WeakScrollViewBox { weak var view: NSScrollView? }
-    private var scrollBridges: [UUID: WeakScrollViewBox] = [:]
-
-    func attachScrollView(sessionId: UUID, scrollView: NSScrollView) {
-        scrollBridges[sessionId] = WeakScrollViewBox(view: scrollView)
-    }
-    func scrollView(for sessionId: UUID) -> NSScrollView? {
-        scrollBridges[sessionId]?.view
-    }
-
-    func register(sessionId: UUID, handler: @escaping (Bool) -> Void) {
-        activeSessionId = sessionId
-        self.handler = handler
-    }
-
-    /// 仅当注销者正是当前注册者时才清除（防旧会话的 onChange(false) 误清新会话的注册）。
-    func unregister(sessionId: UUID) {
-        guard activeSessionId == sessionId else { return }
-        activeSessionId = nil
-        handler = nil
-    }
-
-    func relay(scrollingUp: Bool) { handler?(scrollingUp) }
-}
-
-/// AppKit 桥：零尺寸 NSView 挂在 ScrollView **内容树内部**（必须在内——挂在 ScrollView
-/// 外层时是兄弟节点，enclosingScrollView 解析不到）。捕获本会话底层 NSScrollView 存入
-/// relay，供跳底直滚；视图若被 SwiftUI 重建，updateNSView 会用 !== 检测并重挂。
-private struct NSScrollBridgeView: NSViewRepresentable {
-    let sessionId: UUID
-    let relay: SessionScrollRelay
-    func makeNSView(context: Context) -> NSView { NSView(frame: .zero) }
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async {
-            if let sv = nsView.enclosingScrollView, relay.scrollView(for: sessionId) !== sv {
-                relay.attachScrollView(sessionId: sessionId, scrollView: sv)
-            }
-        }
-    }
-}
-
 // MARK: - 单会话消息列表（视图树保活单元）
 
 /// 单会话消息列表：每个常驻会话一份完整独立的 ScrollViewReader+ScrollView+LazyVStack，
@@ -1429,38 +1681,48 @@ private struct SessionMessageList: View {
     let messages: [ChatMessage]
     let onTapImage: (ChatImageAttachment) -> Void
     @Binding var scrollSnapshots: [UUID: ScrollSnapshot]
-    let scrollRelay: SessionScrollRelay
+    let scrollCoordinator: ChatScrollCoordinator
+    /// 输入坞生长区实测高度（父级统一传入）：尾部留白与浮动导航簇的底部预算同步叠加，
+    /// 遮挡带随坞体向上生长动态跟随。生长区只属于当前活跃会话的输入坞，但 pendingQueue
+    /// 本就按会话隔离读取，高度值对全部常驻实例统一应用（非活跃会话 opacity=0 不可见）。
+    let dockGrowthHeight: CGFloat
 
     private let bottomAnchorID = "aiChat.bottom"
 
     /// 本会话首载装载态：冷启动与 LRU 重挂载时抑制入场动画，防窗口上屏竞态白屏。
     @State private var isInitialHistoryLoad = true
     /// 贴底跟随态（pinned）：true = 自动跟随最新内容，false = 用户自由浏览。
-    /// 用户滚动主权最高——一旦 unpinned，任何事件（切换/新消息/流式/渐进扩展）都不自动滚动，
-    /// 直到用户主动回底（容差哨兵重新可见）。
+    /// 写路径单一（见 ChatScrollCoordinator）：用户输入回底/发送跳底 → true；
+    /// 用户输入离底 → false。内容高度变化永不直接改写本态。
     @State private var isPinned = true
-    /// 本会话流式滚动节流时间戳。
-    @State private var lastAutoScrollAt: Date = .distantPast
-    /// 本会话最近一次用户滚轮时间戳（判定「哨兵消失是否由用户滚动驱动」）。
-    @State private var lastUserScrollAt: Date = .distantPast
-    /// 是否处于底部容差区（几何感知层驱动：锚点底边距视口底 ≤ bottomTolerance）。
-    @State private var atBottom = true
     /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
-/// 切走时作为恢复锚点，浮动簇 ↑/↓ 导航也据此定位。
+    /// 切走时作为恢复锚点，浮动簇 ↑/↓ 导航也据此定位。
     @State private var topVisibleMessageID: UUID?
     /// 消息分组缓存（messages 未变则复用上次分组；见 MessageGroupingCache）。
     @State private var groupingCache = MessageGroupingCache()
-    /// 用户滚轮短窗：用于「即时脱锚加速」与自动跟随的让位守卫（不再是脱锚的唯一证据）。
-    private let userScrollWindow: TimeInterval = 0.5
-    /// 内容增长窗口：仅在此窗口内确有增长事件（新消息/流式增量/渐进批次）时，
-    /// 哨兵消失才保持 pinned；否则一律默认脱锚（覆盖滚动条拖拽/键盘等无滚轮事件的滚动方式）。
-    private let contentGrowthWindow: TimeInterval = 0.4
-    /// 底部容差区高度（pt）：容差哨兵嵌在原有坞区留白内部，置于真正底部上方此距离，
-    /// 不额外叠加底部空隙（防弹性抖动误判只需 ~16-20pt）。
+    /// 已消费的跳底信号时间戳（消费式标记）：挂载/重建时对照 state.scrollJumpRequests，
+    /// 存在「新于挂载时刻」的未消费信号即补跳——瞬时发布-订阅事件在视图不在场（空会话
+    /// EmptyView / 发送白屏重建窗口）时不再丢失。
+    @State private var lastConsumedJumpRequest: Date?
+    /// 本实例挂载时刻：补消费跳底信号的时效判据（LRU 重挂载时字典里的旧信号早于挂载，
+    /// 不补跳，走快照恢复）。
+    @State private var mountedAt = Date()
+    /// 行级实测高度缓存（message.id → 行高）：**手动虚拟化的高度真源**——行离开视口
+    /// 窗口时切换为等高占位（高度 = 本缓存），回窗口时切实渲染（高度 = 实测），
+    /// 两者恒等 → document 高度恒稳。替换 LazyVStack 的黑盒行估算（macOS 13 上
+    /// 回收远行的估算归零/失准，每次实例化-回收结算出 ~14000pt 的 doc 骤变 =
+    /// 「上滚跳过数条消息」的最终根因，日志定证：塌缩瞬间零子视图回退事件）。
+    /// 由行级几何信号（updateRowFrames）回写；@State 写入在 preference 回调
+    /// （渲染周期合法路径），首帧 nil = 全实渲染（首见全量，秒开诉求已按用户决策放弃）。
+    @State private var rowHeights: [UUID: CGFloat] = [:]
+    /// 虚拟化窗口（实渲染行集合）：视口 ±2 屏内的行实渲染，窗口外等高占位。
+    /// 由行级几何信号每帧维护；切换高度恒等（占位 = 缓存 = 实测）。
+    @State private var virtualWindowIds: Set<UUID> = []
+    /// 虚拟化窗口半径（屏数）：视口上方 2 屏 + 下方 2 屏——滚动惯性预热带。
+    private let virtualWindowScreens: CGFloat = 2
+    /// 底部容差区高度（pt）：与 ChatScrollCoordinator.bottomTolerance 同源——容差哨兵
+    /// 嵌在坞区留白内部，置于真正底部上方此距离。
     private let bottomTolerance: CGFloat = 18
-    /// 最近一次内容增长时间戳（messages.count 变化 / 流式消息更新 / 几何纠偏期间）。
-    /// 初始为当前时间：让挂载/重挂载首帧的几何 settling（锚点尚在下方）不被误判为用户脱锚。
-    @State private var lastContentGrowthAt: Date = Date()
 
     private var isStreamingSession: Bool { state.isStreaming(sessionId: sessionId) }
 
@@ -1486,8 +1748,12 @@ private struct SessionMessageList: View {
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
-                // 三级间距节奏与原单会话一致
-                LazyVStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
+                // 手动虚拟化容器（VStack 全行常驻）：LazyVStack 在 macOS 13 上回收远行
+                // 的高度估算归零/失准，实例化-回收的「估算↔真实」差一次性结算成 doc 骤变
+                // （日志定证 -14306 → 视口瞬移 14053 = 上滚跳消息的最终根因）。改为
+                // VStack + 行内「实渲染 ↔ 等高占位」切换（ChatVirtualRow）：占位高度 =
+                // 实测缓存高度，切换高度恒等 → doc 恒稳。间距语义与 LazyVStack 一致。
+                VStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
                     ForEach(groupingCache.groups(for: messages)) { group in
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
@@ -1506,22 +1772,31 @@ private struct SessionMessageList: View {
                                     )
                                     .id("compaction.\(compactionBoundaryMessageId?.uuidString ?? "top")")
                                 }
-                                ChatMessageRow(
-                                    message: message,
-                                    canRegenerate: message.id == lastRegeneratableAssistantId,
-                                    canEditLastRound: message.id == lastEditableUserMessageId,
-                                    onRetry: { if isActive { state.retryLast() } },
-                                    onRegenerate: { if isActive { state.retryLast() } },
-                                    onWithdraw: { if isActive { state.withdrawLastRound() } },
-                                    onEditResend: { text, images in
-                                        if isActive { state.editAndResendLast(text: text, images: images) }
-                                    },
-                                    onTapImage: onTapImage
-                                )
-                                .equatable()
-                                // 行级几何信号：上报本行在滚动视口坐标系的 frame，供父级算出
-                                // 真实「视口首个可见消息」。preference 每帧全量重算，诚实地反映
-                                // 当前已实现行集合（修复行级 onAppear/onDisappear 只增不减导致的置顶）。
+                                ChatVirtualRow(
+                                    messageId: message.id,
+                                    rowHeights: $rowHeights,
+                                    inWindow: virtualWindowIds.contains(message.id)
+                                ) {
+                                    ChatMessageRow(
+                                        message: message,
+                                        canRegenerate: message.id == lastRegeneratableAssistantId,
+                                        canEditLastRound: message.id == lastEditableUserMessageId,
+                                        onRetry: { if isActive { state.retryLast() } },
+                                        onRegenerate: { if isActive { state.retryLast() } },
+                                        onWithdraw: { if isActive { state.withdrawLastRound() } },
+                                        onEditResend: { text, images in
+                                            if isActive { state.editAndResendLast(text: text, images: images) }
+                                        },
+                                        onTapImage: onTapImage
+                                    )
+                                    .equatable()
+                                    .transition(isInitialHistoryLoad
+                                        ? .identity
+                                        : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
+                                }
+                                // 行级几何信号：挂在外层（实渲染/占位统一上报本行 frame）——
+                                // 供父级算出真实「视口首个可见消息」+ 虚拟化窗口判定 + 行高回写。
+                                // preference 每帧全量重算，诚实反映当前行集合。
                                 .background(
                                     GeometryReader { rowGeo in
                                         Color.clear.preference(
@@ -1531,9 +1806,6 @@ private struct SessionMessageList: View {
                                     }
                                 )
                                 .id(message.id)
-                                .transition(isInitialHistoryLoad
-                                    ? .identity
-                                    : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
                             }
                         }
                     }
@@ -1544,22 +1816,23 @@ private struct SessionMessageList: View {
                     // 之间仍有 1×chatGroupGap(36)。为让「末条消息 → 视口底」回到重构前 124pt 量级，
                     // 坞区留白扣掉该 36 与内嵌容差：36 + (124−18−36) + 18 + 1 = 125pt。
                     VStack(spacing: 0) {
-                        // 坞区留白（有效值 = 组间距 36 + 此 spacer + 容差 18 ≈ 124）
+                        // 坞区留白（有效值 = 组间距 36 + 此 spacer + 容差 18 ≈ 124）：
+                        // 基础预算 124pt 只覆盖输入卡本体；队列胶囊等生长区在坞顶向上生长，
+                        // 此处叠加其实测高度（dockGrowthHeight），滚到底时末条消息永远完整
+                        // 露出遮挡带顶。留白随胶囊增删平滑过渡（与生长区动画同时长）；
+                        // pinned 时由 coordinator 的内容高度路径自动保持贴底，unpinned
+                        // 不受干扰（用户阅读位置主权最高）。
                         Color.clear
-                            .frame(height: max(Theme.Layout.chatDockClearance - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
+                            .frame(height: max(Theme.Layout.chatDockClearance + dockGrowthHeight - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
+                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
                         // 容差带（18pt，嵌入坞区留白内部）
                         Color.clear
                             .frame(height: bottomTolerance)
-                        // 底部锚点 + 几何读数：底边相对本实例滚动视口的 maxY。
-                        // 替代不可靠的 onAppear/onDisappear 哨兵，作为 atBottom 的唯一信号源。
-                        GeometryReader { anchorGeo in
-                            Color.clear.preference(
-                                key: BottomAnchorYKey.self,
-                                value: anchorGeo.frame(in: .named(scrollSpaceName)).maxY
-                            )
-                        }
-                        .frame(height: 1)
-                        .id(bottomAnchorID)
+                        // 底部锚点：仅供 scrollToBottom 的 proxy 回退路径定位
+                        // （LazyVStack 尾部锚点；AppKit 直滚为主路径）。
+                        Color.clear
+                            .frame(height: 1)
+                            .id(bottomAnchorID)
                     }
                 }
                 .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
@@ -1567,89 +1840,63 @@ private struct SessionMessageList: View {
                 .padding(.top, Theme.Spacing.section)
                 .chatReadingColumn()
                 // AppKit 滚动桥：必须挂在 ScrollView 内容闭包内部（此处是内容根视图），
-                // 才能经 enclosingScrollView 解析到本会话底层 NSScrollView（见 NSScrollBridgeView）。
-                .background(NSScrollBridgeView(sessionId: sessionId, relay: scrollRelay))
+                // 才能经 enclosingScrollView 解析到本会话底层 NSScrollView（见 ChatScrollBridgeView）。
+                .background(ChatScrollBridgeView(sessionId: sessionId, coordinator: scrollCoordinator))
             }
             .coordinateSpace(name: scrollSpaceName)
             // 首帧视口自适应：把视口高度注入环境，供消息内 AssistantMarkdownView 估算「一屏块数」。
             .environment(\.chatViewportHeight, viewport.size.height)
-            // 几何信号 → atBottom：底部锚点在视口中的底边 maxY 减去视口高度即「距底溢出」，
-            // ≤ 容差（18pt）判定在底部。onPreferenceChange 仅在数值变化时触发；状态只在
-            // atBottom 布尔跳变时写入，避免每帧 setState 风暴。
-            .onPreferenceChange(BottomAnchorYKey.self) { anchorY in
-                handleGeometry(anchorY, viewportHeight: viewport.size.height, proxy: proxy)
-            }
             // 行级几何 → 真实视口顶部消息：每帧全量上报已实现行 frame，算出与视口相交且
             // minY 最靠上（最贴近视口顶）的行；仅在结果变化时写状态（去抖，避免每帧 setState）。
             .onPreferenceChange(MessageRowFramePreference.self) { frames in
                 updateRowFrames(frames, viewportHeight: viewport.size.height)
             }
             .onAppear {
-                registerRelayIfActive()
-                // 首帧布局完成后的下一 runloop：恢复位置（snapshot 锚点 / 贴底）+ 解除装载态。
+                bindScrollCoordinator()
+                // 首帧布局完成后的下一 runloop：补消费跳底信号（空会话首建/重建窗口期
+                // 发布的瞬时信号不再丢失）→ 恢复位置（snapshot 锚点 / 贴底）→ 解除装载态。
                 // 解除装载态走显式空动画事务（历史白屏防线，勿动）。此路径仅在
                 // 挂载 / LRU 重挂载时执行；常驻切回不再联动 restoreScroll（见 onChange(isActive)）。
                 DispatchQueue.main.async {
+                    consumePendingJumpRequest(proxy)
                     restoreScroll(proxy)
                     withAnimation(nil) { isInitialHistoryLoad = false }
                 }
             }
-            // 卸载兜底保存快照：覆盖「同 runloop 连续切换、中间会话以 isActive=false 首次建树
-            // 导致 onChange(of: isActive) 不触发、无快照」的反例（LRU 驱逐后重挂载会被强制贴底）。
+            // 卸载：兜底保存快照 + 注销 coordinator 注册。覆盖「同 runloop 连续切换、中间会话
+            // 以 isActive=false 首次建树导致 onChange(of: isActive) 不触发、无快照」的反例。
             // 正常失活（非卸载）由 onChange(isActive=false) 保存；saveSnapshot 幂等，重复无害。
-            .onDisappear { saveSnapshot() }
-            // 消息数变化：同时记录内容增长事件。
-            // 用户发送 → 无条件跳底并恢复跟随（pinned）：即便此前用户上滚解除了跟随，
-            // 自己发出的消息也必须回到最新；其余情况（AI 流式/助手占位追加）仍走原 pinned 跟随规则。
-            .onChange(of: messages.count) { _ in
-                lastContentGrowthAt = Date()
-                if isActive, messages.last?.role == .user {
-                    isPinned = true
-                    scrollToBottom(proxy, animated: true)
-                    return
-                }
-                guard isActive, isPinned else { return }
-                scrollToBottom(proxy, animated: true)
+            .onDisappear {
+                saveSnapshot()
+                scrollCoordinator.unbind(sessionId: sessionId)
             }
-            // 用户发送 → 无条件跳底并恢复跟随：监听 AIChatState 的跳底事件信号（见其注释），
-            // 不依赖消息数组 diff（send() 同帧连续 append 用户消息与助手占位，合并帧下 role 判定失效）。
-            // onChange 值类型为 Date?（字典下标返回可选，Equatable 合法）；值未变化不触发，
-            // LRU 重挂载时字典里的旧时间戳与当前值相等，不会误触发跳底，既有 restoreScroll 逻辑不受影响。
+            // 用户发送 → 无条件跳底并恢复跟随（消费式跳底信号，见 send()/scrollJumpRequests）：
+            // **非动画**——发送帧已有 LazyVStack 行入场 transition + count 动画并发，再叠加
+            // AppKit animator 滚动动画会重现历史「CA 事务竞态卡近零透明度」白屏（发送后
+            // 整屏白屏直到首 token 才恢复的根因）。跳底发生在内容插入前的瞬间，无感无动画。
+            // onChange 值类型为 Date?（字典下标返回可选，Equatable 合法）；值未变化不触发。
             .onChange(of: state.scrollJumpRequests[sessionId]) { _ in
                 guard isActive else { return }
-                lastContentGrowthAt = Date()   // 延长 growth 窗口，防 handleGeometry 把 isPinned 翻回 false
-                isPinned = true
-                scrollToBottom(proxy, animated: true)
-                // 保险补滚：信号触发时新插入行可能尚未完成布局，下一 runloop 布局落定后再无动画贴底一次。
+                lastConsumedJumpRequest = state.scrollJumpRequests[sessionId]
+                scrollCoordinator.setPinned(sessionId, true)
+                scrollToBottom(proxy, animated: false)
+                // 保险补滚：信号触发时新插入行可能尚未完成布局，下一 runloop 布局落定后再贴底一次。
                 DispatchQueue.main.async {
                     if isActive, isPinned { scrollToBottom(proxy, animated: false) }
                 }
             }
-            // 流式/工具/思考增量：以整条 last 消息为增长信号，仅 pinned + 生成中 + 用户未滚动
-            // 时跟随；节流 0.12s 非动画。
-            .onChange(of: messages.last) { _ in
-                lastContentGrowthAt = Date()
-                guard isActive, isStreamingSession, isPinned, !recentlyUserScrolled else { return }
-                let now = Date()
-                guard now.timeIntervalSince(lastAutoScrollAt) > 0.12 else { return }
-                lastAutoScrollAt = now
-                scrollToBottom(proxy, animated: false)
-            }
-            // 流式结束：pinned 时补一次动画贴底。
+            // 流式/渐进增量的跟随不再走本层（无 0.12s 节流路径）：documentView 高度变化由
+            // ChatScrollCoordinator 的 frame 通知路径逐帧程序化贴底（pinned 时），与布局
+            // 同步、零追赶误差——本层只保留流式结束的收尾动画（无插入动画并发，安全）。
             .onChange(of: isStreamingSession) { streaming in
                 if !streaming, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
-            // 活跃态切换：只注册/注销滚轮中继，**不做任何 restoreScroll**。
+            // 活跃态切换：只保存快照，**不做任何 restoreScroll、不注销注册**。
             // 常驻视图的 NSScrollView 偏移天然保留；激活时无条件 restoreScroll 是唯一破坏源
             // （会把用户强制拉走）。位置恢复只发生在挂载/LRU 重挂载的 onAppear。
-            // pinned 会话若在隐藏期间增长，几何纠偏会在其自身菜单内保持贴底（见 handleGeometry）。
+            // pinned 会话若在隐藏期间并行生成，coordinator 的 frame 路径持续贴底。
             .onChange(of: isActive) { active in
-                if active {
-                    registerRelayIfActive()
-                } else {
-                    saveSnapshot()
-                    scrollRelay.unregister(sessionId: sessionId)
-                }
+                if !active { saveSnapshot() }
             }
             // 浮动导航簇：unpinned 且活跃时于内容区右下角浮现，0.15s 淡入淡出。
             .overlay(alignment: .bottom) {
@@ -1663,39 +1910,61 @@ private struct SessionMessageList: View {
         }
     }
 
-    // MARK: - 滚轮路由
+    // MARK: - 滚动协调器接线
 
-    private func registerRelayIfActive() {
-        guard isActive else { return }
-        scrollRelay.register(sessionId: sessionId) { scrollingUp in
-            handleUserScrollIntent(scrollingUp)
+    /// 挂载时注册（常驻期间保持，不随 isActive 切换注销——隐藏会话并行流式时
+    /// coordinator 的 frame 路径仍需读 pin 真源保持贴底）：
+    /// pin 真源在 coordinator（class 内即时读写）——@State isPinned 降级为纯 UI 镜像
+    /// （导航簇显隐），由本闭包同步。日志实证：@State 经通知回调写入后同帧读取拿到
+    /// 旧值（「解除跟随后仍被逐帧贴底拽回」根因），判定路径必须读 class 真源。
+    private func bindScrollCoordinator() {
+        scrollCoordinator.bind(sessionId: sessionId) { pinned in
+            isPinned = pinned
         }
     }
 
-    /// 用户滚轮意图：记录时间戳；已离开底部容差区时向上滚动即时脱锚（消除一次回拽）。
-    private func handleUserScrollIntent(_ scrollingUp: Bool) {
-        lastUserScrollAt = Date()
-        if scrollingUp, !atBottom {
-            isPinned = false
-        }
+    /// 消费式跳底信号补消费：挂载/重建时 state.scrollJumpRequests 里存在「新于挂载时刻」
+    /// 的未消费信号即补跳底（瞬时发布-订阅事件在视图不在场的窗口期不再丢失——空会话
+    /// 首条发送时 EmptyView 无挂载点、发送白屏重建期间同理）。旧于挂载时刻的信号
+    /// （LRU 重挂载）跳过，走快照恢复。
+    private func consumePendingJumpRequest(_ proxy: ScrollViewProxy) {
+        guard let pending = state.scrollJumpRequests[sessionId],
+              pending != lastConsumedJumpRequest,
+              pending > mountedAt else { return }
+        lastConsumedJumpRequest = pending
+        scrollCoordinator.setPinned(sessionId, true)
+        scrollToBottom(proxy, animated: false)
     }
 
     // MARK: - 快照
 
-    /// 切走时保存：真实视口顶部消息 id（几何信号维护）+ 当前 pinned 态。
+    /// 切走/卸载时保存：真实视口顶部消息 id（几何信号维护）+ 当前 pinned 态。
     /// 防御：无锚点时保留上一份有效锚点，避免 restoreScroll 因 topID=nil 退回贴底。
+    /// **pinned 必须读 coordinator 真源**——@State 镜像写入延迟一帧可见，读镜像会
+    /// 存到旧值（实测：切走时存 isPinned=true → 切回走贴底分支 = 位置记忆失效）。
+    /// 同时落盘（跨重启记忆，低频写）。
     private func saveSnapshot() {
         // 诚实锚点：由行级几何信号维护的真实视口顶部消息；无则保留上一份有效锚点。
         let previousAnchor = scrollSnapshots[sessionId]?.topVisibleMessageID
         scrollSnapshots[sessionId] = ScrollSnapshot(
             topVisibleMessageID: topVisibleMessageID ?? previousAnchor,
-            isPinned: isPinned
+            isPinned: scrollCoordinator.isPinnedState(of: sessionId)
+        )
+        state.store.persistScrollPositions(
+            scrollSnapshots.mapValues {
+                ChatSessionStore.PersistedScrollPosition(
+                    topMessageID: $0.topVisibleMessageID, isPinned: $0.isPinned
+                )
+            }
         )
     }
 
-    /// 行级几何 → 真实视口顶部消息：取与视口相交（maxY>0 且 minY<viewportHeight）且 minY
-    /// 最小（最贴近/高于视口顶）的行；无相交行（极端：视口落在尾部留白内）时退化为最靠近
-    /// 视口顶的行（maxY 最大者）。仅在结果变化时写 @State（去抖）。
+    /// 行级几何 → 真实视口顶部消息 + 手动虚拟化窗口维护：
+    /// - 顶部消息：取与视口相交（maxY>0 且 minY<viewportHeight）且 minY 最小（最贴近视口顶）
+    ///   的行；无相交行（极端：视口落在尾部留白内）时退化为最靠近视口顶的行（maxY 最大者）。
+    /// - 虚拟化：视口 ±N 屏内的行进窗口（实渲染集合，变化时写 state 触发行切换）；
+    ///   窗口内行（= 实渲染行）高度回写缓存（变化 >0.5pt 才写，去抖）——占位行的
+    ///   frame.height 即缓存值本身，天然无变化。
     private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
         guard viewportHeight > 0, !frames.isEmpty else { return }
         var bestID: UUID?
@@ -1709,91 +1978,61 @@ private struct SessionMessageList: View {
         // 无相交行（极端：视口落在尾部留白内）：退化为最靠近视口顶的行（maxY 最大者）。
         let resolved = bestID ?? frames.max(by: { $0.value.maxY < $1.value.maxY })?.key
         if resolved != topVisibleMessageID { topVisibleMessageID = resolved }
+
+        // 虚拟化窗口：视口 ±N 屏（滚动惯性预热带）。
+        let lowerBound = -virtualWindowScreens * viewportHeight
+        let upperBound = (1 + virtualWindowScreens) * viewportHeight
+        var ids: Set<UUID> = []
+        ids.reserveCapacity(frames.count)
+        for (id, frame) in frames where frame.maxY >= lowerBound && frame.minY <= upperBound {
+            ids.insert(id)
+            if abs((rowHeights[id] ?? -1) - frame.height) > 0.5 {
+                rowHeights[id] = frame.height
+            }
+        }
+        if ids != virtualWindowIds { virtualWindowIds = ids }
     }
 
     /// 挂载（首次 / LRU 重挂载）时恢复（唯一调用点：ScrollView.onAppear）：
     /// - 有非贴底快照且锚点仍在 → 无动画定位到锚点顶部，保持阅读位置；
     /// - 否则 → 无动画贴底并恢复跟随（含「离开时贴底」与「首次打开无快照」）。
+    /// proxy.scrollTo 的定位在程序化遮蔽窗内执行：若桥的 observer 已装，随后的
+    /// bounds 变化不会被误判为用户滚动（防 pin 态被 restore 误翻转）。
     private func restoreScroll(_ proxy: ScrollViewProxy) {
-        // 标记为一次「内容settling」：让首帧几何信号（锚点仍在下方）不误判为用户脱锚。
-        lastContentGrowthAt = Date()
         if let snapshot = scrollSnapshots[sessionId],
            !snapshot.isPinned,
            let topID = snapshot.topVisibleMessageID,
            messages.contains(where: { $0.id == topID }) {
-            isPinned = false
-            proxy.scrollTo(topID, anchor: .top)
+            scrollCoordinator.setPinned(sessionId, false)
+            scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
+                proxy.scrollTo(topID, anchor: .top)
+            }
         } else {
-            isPinned = true
+            scrollCoordinator.setPinned(sessionId, true)
             scrollToBottom(proxy, animated: false)
         }
-    }
-
-    /// 用户滚轮短窗内视为「正在滚动」：任何自动跟随都应让位（用户主权优先）。
-    private var recentlyUserScrolled: Bool {
-        Date().timeIntervalSince(lastUserScrollAt) < userScrollWindow
     }
 
     /// 本实例的滚动坐标空间名：按 sessionId 隔离，多个常驻会话并存时不互相污染。
     private var scrollSpaceName: String { "chatScroll.\(sessionId.uuidString)" }
 
-    /// 几何感知层核心（替代不可靠的 onAppear/onDisappear 哨兵）：
-    /// - 溢距 `overflow = anchorBottomY - viewportHeight`：>0 表示锚点在视口下方（已上滚）；
-    ///   内容短于视口时为负 → 天然判定在底部。
-    /// - `atBottom = overflow ≤ 容差`；仅在布尔跳变时写状态（去抖，避免每帧 setState 风暴）。
-    /// - atBottom→true：重新贴底跟随；atBottom→false：内容增长（0.4s 内）且 pinned 且
-    ///   用户未滚动 → 保持 pinned；其余（含滚动条/键盘等无滚轮事件的滚动）→ 脱锚。
-    /// - 持续纠偏：pinned 且 overflow>容差且用户未滚动 → 非动画贴底；布局静止后 overflow
-    ///   落入容差内自然停止（scrollTo 到最大偏移不过冲，故不振荡、不死循环）。
-    private func handleGeometry(_ anchorBottomY: CGFloat, viewportHeight: CGFloat, proxy: ScrollViewProxy) {
-        guard anchorBottomY != .greatestFiniteMagnitude, viewportHeight > 0 else { return }
-        let overflow = anchorBottomY - viewportHeight
-        let nowAtBottom = overflow <= bottomTolerance
-        if nowAtBottom != atBottom {
-            atBottom = nowAtBottom
-            if nowAtBottom {
-                isPinned = true
-            } else {
-                let growthRecent = Date().timeIntervalSince(lastContentGrowthAt) < contentGrowthWindow
-                if !(growthRecent && isPinned && !recentlyUserScrolled) {
-                    isPinned = false
-                }
-            }
-        }
-        // 持续纠偏（Fix 3）：初始装载期间让位给 restoreScroll，避免与锚点恢复竞争。
-        if !isInitialHistoryLoad, isPinned, !recentlyUserScrolled, overflow > bottomTolerance {
-            // 内容增长把锚点推走：刷新增长时间戳（豁免下一帧离底判定）并非动画重申贴底。
-            lastContentGrowthAt = Date()
-            scrollToBottom(proxy, animated: false)
-        }
-    }
-
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool) {
-        // AppKit 直滚：SwiftUI proxy.scrollTo 对 LazyVStack 尾部锚点不可靠（视口远离底部时
-        // 锚点未实例化/新行布局竞态，scrollTo 无声失败）；用户滚轮本就直达此 NSScrollView，
-        // 程序化设置 clip view 偏移与滚轮同路径，零竞态。
-        if let sv = scrollRelay.scrollView(for: sessionId), let doc = sv.contentView.documentView {
-            let bottomY = doc.isFlipped
-                ? max(0, doc.bounds.height - sv.contentView.bounds.height)
-                : 0
-            let target = NSPoint(x: 0, y: bottomY)
-            if animated {
-                NSAnimationContext.runAnimationGroup({ ctx in
-                    ctx.duration = 0.18
-                    ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-                    sv.contentView.animator().setBoundsOrigin(target)
-                })
-            } else {
-                sv.contentView.scroll(to: target)
-                sv.reflectScrolledClipView(sv.contentView)
-            }
+        // AppKit 直滚（coordinator 程序化仲裁内，遮蔽窗覆盖动画时长）：SwiftUI proxy.scrollTo
+        // 对 LazyVStack 尾部锚点不可靠（视口远离底部时锚点未实例化/新行布局竞态，scrollTo
+        // 无声失败）；程序化设置 clip view 偏移与用户滚轮同一条 AppKit 路径，且被 coordinator
+        // 遮蔽窗排除在「用户输入」之外。
+        if scrollCoordinator.scrollPinnedToBottom(sessionId: sessionId, animated: animated) {
             return
         }
-        // 桥未就绪回退（旧实现保留）
+        // 桥未就绪回退：proxy 路径同样开程序化遮蔽窗（observer 可能已随桥挂载）。
         if animated {
-            withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
+            scrollCoordinator.withProgrammaticScope(sessionId, window: 0.28) {
+                withAnimation(.easeOut(duration: 0.18)) { proxy.scrollTo(bottomAnchorID, anchor: .bottom) }
+            }
         } else {
-            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            scrollCoordinator.withProgrammaticScope(sessionId) {
+                proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+            }
         }
     }
 
@@ -1826,19 +2065,28 @@ private struct SessionMessageList: View {
             canGoPrevious: previousID != nil,
             canGoNext: nextID != nil,
             onLatest: {
-                isPinned = true
+                scrollCoordinator.setPinned(sessionId, true)
                 scrollToBottom(proxy, animated: true)
             },
             onPrevious: {
                 guard let previousID else { return }
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(previousID, anchor: .top) }
+                // 程序化遮蔽：0.2s 动画期间的逐帧 bounds 变化不计为用户滚动
+                //（用户点导航跳转属于「浏览」而非「滚动」，pin 态由落点几何自然决定）。
+                scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(previousID, anchor: .top) }
+                }
             },
             onNext: {
                 guard let nextID else { return }
-                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(nextID, anchor: .top) }
+                scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(nextID, anchor: .top) }
+                }
             }
         )
-        .padding(.bottom, Theme.Layout.chatDockClearance + Theme.Spacing.lg)
+        // 底部预算叠加生长区高度：unpinned 浏览历史时簇与队列胶囊同在，避免叠压；
+        // 高度随生长区增删平滑过渡
+        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight + Theme.Spacing.lg)
+        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
         .chatReadingColumn(alignment: .trailing)
     }
 
@@ -1877,6 +2125,37 @@ private struct SessionMessageList: View {
     private var lastEditableUserMessageId: UUID? {
         guard isActive, !state.isGenerating else { return nil }
         return messages.last { $0.role == .user }?.id
+    }
+}
+
+// MARK: - 手动虚拟化行容器
+
+/// 行级「实渲染 ↔ 等高占位」切换容器：窗口内（或首见无缓存）实渲染；窗口外用缓存
+/// 高度的**等高占位**。占位高度 = 实测缓存高度 → 切换零位移 → document 高度恒稳。
+/// 这是 LazyVStack 黑盒行估算的替代：macOS 13 上 LazyVStack 回收远行的估算归零/
+/// 失准，实例化-回收的「估算↔真实」差一次性结算成万级 pt 的 doc 骤变（日志定证
+/// -14306 → 视口瞬移 14053 = 「上滚跳过数条消息」的最终根因，塌缩瞬间零子视图
+/// 回退事件、视频无占位闪现——纯行级估算结算）。窗口集合与高度缓存由
+/// SessionMessageList.updateRowFrames 的行级几何信号维护。
+@MainActor
+private struct ChatVirtualRow<Content: View>: View {
+    let messageId: UUID
+    @Binding var rowHeights: [UUID: CGFloat]
+    let inWindow: Bool
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        Group {
+            // 首见（无缓存）恒实渲染：几何信号测得高度回写缓存后，离开窗口才切占位。
+            if inWindow || rowHeights[messageId] == nil {
+                content()
+            } else if let height = rowHeights[messageId] {
+                Color.clear.frame(height: height)
+            }
+        }
+        // 实渲染 ↔ 占位是内容等效替换：禁动画防闪烁与 CA 事务竞态（历史白屏族防线）。
+        // 行 id（message.id）恒定；消息入场 transition 保留在 content 内部。
+        .transaction { $0.animation = nil }
     }
 }
 
@@ -3307,6 +3586,14 @@ private struct AIChatRoundedClip: ViewModifier {
 
 /// 内容区宽度上报键（阅读列水平边距分级的输入信号）。
 private struct ChatReadingColumnWidthKey: PreferenceKey {
+    static var defaultValue: CGFloat { 0 }
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
+}
+
+/// 坞生长区（队列胶囊 + 图片附件条 + 剪贴板胶囊，输入卡上方段）实测高度上报键。
+/// 全树仅生长区容器一处发射，取最新值即可；容器随三段全空移除后 preference 回退
+/// 默认值 0，消费方（onPreferenceChange）随之收到归零事件，无需额外归零通道。
+private struct ChatDockGrowthHeightKey: PreferenceKey {
     static var defaultValue: CGFloat { 0 }
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
