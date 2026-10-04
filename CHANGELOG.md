@@ -6,6 +6,9 @@
 
 ### Added
 
+- 消息滚动导航簇（AI 窗，滚动交互专项）：阅读历史（非贴底态）时内容区右下角浮动浮现三键小簇——`⤓` 跳回最新（点击回底并恢复贴底跟随）、`↑` / `↓` 在用户消息间快速跳转（目标消息对齐视口顶部逐轮回顾提问，到头 / 尾对应按钮禁用）；贴底自动隐藏（0.15s 淡入淡出、hover 提亮、不遮挡消息）
+- 会话级阅读位置记忆：切走会话时保存真实视口锚点（行级几何感知，与滚动方式无关），切回原位续读；首次打开定位到最新消息；LRU 逐出后重挂载同样按锚点恢复
+
 - 模型会话级绑定 + 思考强度档位 + 上下文水位与自动总结压缩（AI 窗，上下文管理专项）：
   - **模型适配层**（`AIModelAdapter.swift` 新文件）：`ThinkingLevel`（off/low/medium/high）与 `ContextWatermark` 统一抽象，模型差异全部收敛于此——UI / 会话层零感知：关闭→`enable_thinking:false`、低/中/高→`reasoning_effort`（GLM-5.3 特殊映射 low/high/max，该模型实测被 DashScope 限制必须思考、`canDisableThinking` 门控 UI 自动隐藏「关闭」档）；映射规则基于对阿里云百炼兼容端点的全模型实测探测（7 模型 × 7 字段变体矩阵，含 reasoning_tokens 验证；另经六家协议调研——智谱/DeepSeek/Qwen/OpenAI/OpenRouter/one-api 对比确认 `reasoning_effort:"none"` 仅是中转事实标准、DashScope 不认）
   - **会话级模型绑定**：`ChatSession` 新增 `modelId`（nil=全局默认，decodeIfPresent 旧 JSON 迁移兼容）；输入区模型胶囊切换只写当前会话并持久化；发送链路模型解析优先级：会话 model → 全局 selectedModel；设置页「当前模型」语义改为「默认模型（新会话）」
@@ -41,8 +44,19 @@
   - **ESC 接线**（`AIWindowManager`）：生成中 ESC 从 `abortStreaming()` 换为 `abortAndRecallQueue()`（中止 + 队列回填，防排队内容随中止丢失）；侧栏呼吸点 / ⌘K 清空路径**刻意保持不回填**（回填只应写入当前会话的输入框，中止后台会话时回填会串会话）；已知取舍：对当前会话经侧栏呼吸点中止时队列清空不回填（活跃会话的中止主入口是 ESC）
   - **GUI 全量实测**（computer-use 合成输入 + System Events AX 树断言 + 落盘 JSON 校验）：steering / follow 双队列注入链（6 消息序列与模型语义服从）、生成中 send 重定向、胶囊取回、ESC 中止 + 双队列回填、多轮工具调用与注入共存全部通过；真实会话数据 diff 备份逐字节一致零破坏
 
+### Changed
+
+- 滚动跟随语义重构（AI 窗，用户滚动主权最高）：用户向上滚动立即脱离贴底（几何信号判定，滚动条拖拽 / 键盘 / 触控板通吃），此后切会话 / 新消息到达 / 流式输出一律不再自动滚动；流式仅在贴底时跟随（节流 0.12s）；贴底期间内容异步长高由几何信号持续纠偏至布局静止——根治「假底部」（此前 scrollTo 按过时内容高度落点，末条消息与输入栏间恒留 200~375px 空白且每次不同、切换后 1 秒内视图连跳 5 次）
+
 ### Fixed
 
+- 数学公式会话点击后 ≥1.4 秒纯白屏（其他会话均下一帧出内容）：块级公式早已异步化但**行内公式从未接入异步路径**——首帧可见区数百个行内公式在主线程同步光栅化（`InlineMathAttachment.make → rasterize` 同步路径），同时选中会话触发的后台预热队列持 `renderLock` 逐个渲染数百公式，主线程同步路径在 NSLock 不公平调度下排成 lock convoy 被钉死，第一个 CA 事务不提交、连纯文本与占位符都无法上屏；修法 = 行内公式接入与块级同款两段式（缓存命中同步装配 / 未命中等宽 LaTeX 占位 + `rasterizeAsync` 批量后台光栅化、世代令牌 + 段级计数器防竞态、回填无动画直换）+ 预热统一 `inFlight` 去重与逐公式 1.5ms 让路 + 失败负缓存防请求风暴
+- 切回会话跳到最底部、阅读位置丢失（滚轮 / 滚动条 / 触控板全部复现）：三重叠加——① macOS 13 LazyVStack 的 `onAppear`/`onDisappear` 不可靠，底部哨兵 `onDisappear` 从未触发导致 `isPinned` 恒为 true（唯一脱锚感知源死亡，浮动导航簇也因此从未出现）；② 行级可见性集合只增不减，快照锚点退化为「史上最早可见消息」（LRU 重挂载后表现为置顶）；③ 常驻视图（ZStack opacity 切换）的 NSScrollView 偏移本天然保留，而激活时无条件的 `restoreScroll` 是唯一破坏源、且因 ① 恒走贴底分支。修法 = 切除激活路径滚动调用 + `PreferenceKey` 几何感知重建（底部锚点 + 行级帧双通道，`atBottom`/`isPinned`/视口锚点全部由连续几何信号驱动）
+- 底部留白过大（~2 倍输入坞高度的纯背景空隙）：静态尾部 124pt 坞区留白被 LazyVStack 36pt 组间距对 4 个尾部子视图叠加（实际 270pt）+ scrollTo 过时落点短缺（200~370px 逐次漂移）；修法 = 尾部收敛为单个 `VStack(spacing: 0)` 子视图（视觉间距钉回 ~13pt）+ 几何信号驱动的持续贴底纠偏
+- 超长消息渲染停在第 48 块（157 块消息中下部永久空白）：渐进渲染哨兵的结构身份在批次扩展时不变，`onAppear` 只触发一次、`visibleBlockCount` 停在 24→48；修法 = 哨兵 `.id(visibleCount)` 强制逐批重建 + 容器 `.task(id:)` 逐批推进兜底
+- 冷启动白屏复发（内容闪现后转为近零透明度持续、多次点击仍白屏）：首帧骨架两段式切换把真实内容推迟到第二个独立 CA 事务、重新触发历史冷启动白屏的窗口淡入动画竞态，且 83+ 个块级公式 opacity 回填动画放大竞态；修法 = 移除骨架两段式（渐进首批 + 公式异步已保证首帧轻量）、去除公式占位→位图过渡动画、`isInitialHistoryLoad` 解除改 `withAnimation(nil)`、`sizeThatFits` 缓存加 `hasContent` 守卫防空测量写死
+- 空白圆角卡片 / 230pt 空白块（「自适应大小」小节下方）：纯 LaTeX / 畸形公式占位无高度封顶，叠加未构建批次区域；修法 = 空 LaTeX 零尺寸不渲染 + 占位 `maxHeight: 96` 封顶 `clipped`
+- 会话切换明显卡顿：LRU 常驻上限 4 对 ~8 会话必然每次切换逐出整树重建（超长会话重建含大量 NSTextField 段落 + 测量）+ 预热 latex 收集在主线程同步执行；修法 = 上限提至 12（≤12 会话零重建纯 opacity 切换）+ 收集移后台（解析缓存抽线程安全 `MarkdownASTCache`）+ 会话签名去重
 - AirPods 等蓝牙耳机接入后面板调音量打破系统左右平衡 / 两耳音量不一致 / 音量跳变且「只响应一次就升不上去」：根因是 CoreAudio 读写路径只落单声道——`setVolume`/`toggleMute` 只写 Main element（失败再降级 element 1），而蓝牙耳机在 HAL 层按**左右声道独立 element** 暴露音量，单 element 写入只改到一只耳机；读路径同样只读单声道，读回的可能是未被写入的声道，`adjustVolume` 基于错值迭代即表现为跳变与失效。修法：`StreamConfiguration` 枚举输出声道（Main(0) + 声道 1...N），音量/静音读写统一覆盖全部声道（任一声道失败不影响其余），读取取各声道最大值、静音任一声道为真即视为静音；附带耳机识别改按 `TransportType`（Bluetooth / BluetoothLE）判定，不再只靠设备名匹配
 - 音量状态实时同步：`SystemStatusProvider` 新增 CoreAudio 属性监听（`AudioObjectAddPropertyListener` + `audioChangeSubject`）——系统对象监听默认输出设备切换（AirPods 接入/拔出时音量监听自动迁移到新设备），设备对象监听音量/静音变化；键盘 / 控制中心等外部调音量时面板 ~150ms 内实时刷新（`AppState` 订阅：主线程节流 + 后台队列读值回主线程赋值），不再依赖面板唤起时的周期刷新；自身写音量触发的事件回流读值，天然修正乐观 UI 与实际值的偏差
 - 富卡片静默不渲染（地图工具执行成功但对话中零占位零错误缺失卡片）：两个 SwiftUI 陷阱叠加——① `onChange` 的 action 闭包捕获**旧视图实例**，工具结果落定时读 `self.resultJSON` 恒为旧值空串，解析永远失败静默返回（工具执行中视图即以空 result 插入是常态时序）；② `Group` + 空条件分支会吞掉 `onAppear`（Group 修饰符被转发到不存在的内容上，历史会话回放兜底路径同样失效）。修法：`onChange` 改用传入的 `newValue` 参数解析 + 实体容器 ZStack 替换 Group。定位过程三段式（防再踩的排障范式）：线上会话存档 JSON 证明 `card` 信封数据正常 → 隔离复现实验抓到 `onChange FIRED` 但 `resolveIfNeeded` 被 guard 拦截（action 内读到旧值 count=0）→ 修复对照实验验证渲染成功
@@ -57,6 +71,9 @@
 
 ### Performance
 
+- 会话秒开专项（AI 窗，对齐微信「只渲染视口 + 布局查表」模型，任意数量 / 体量 / 打开时间的会话切换即开）：**首帧块数视口自适应**（按视口高度 8~16 块起步、批大小 12、16ms/批摊销推进，首帧成本与屏幕大小挂钩、与会话体量彻底解耦）；**全局 `MathLayoutCache`**（段落高度 + 块级公式高度两张 LRU 4096 表、线程安全、内容 hash+宽度+外观+字号键控）——跨会话切换 / 跨 LRU 逐出重建 / 跨重启免重测量，公式占位首帧即锁定真实高度零跳变；`MarkdownASTCache` 64 条/60 万字符 FIFO → 256 条/400 万字符 LRU（多会话切换不互相驱逐）；常驻会话 LRU 上限 4 → 12（≤12 会话切换零重建纯 opacity 直切）
+- 数学公式渲染全链路异步化（AI 窗）：块级公式 `AsyncMathBlockView`（占位 → 后台光栅化 → 直换回填）；行内公式两段式（锁内快速查缓存 → 命中同步装配 NSTextAttachment / 未命中等宽 LaTeX 占位 + 批量 `rasterizeAsync` 回填）；超长消息分批渐进渲染；`MathRasterizer` 统一 `renderLock` 串行化 + `inFlight` 飞行去重（预热与按需共用）+ 预热让路（utility 队列逐公式 1.5ms 释放锁）+ 失败负缓存 + LRU 512 位图缓存；选中会话后台预热全部公式（收集移出主线程、会话签名去重）；主线程首帧 / 切换路径不再存在未命中缓存的同步 SwiftMath 光栅化
+- 会话消息分组缓存（`MessageGroupingCache`）：`groupMessages` 每次 body O(n) 全量分组 → messages 引用相同（COW 同缓冲区）即复用分组结果，O(1)
 - AI 工具调用并行执行（同一轮回复内，AI 窗）：原 `for ... await` 严格串行（3 个 `web_search` 逐个排队）改为分段执行——**连续的 parallelSafe 工具聚批用 `withTaskGroup` 并发执行**，serial 工具逐个串行。新增 `ToolExecutionPolicy`（`AIToolRegistry`）：`parallelSafe` / `serial`，协议默认 `serial`（保守，未知工具名查询亦返回 serial）。逐工具标注：
   - **parallelSafe（8 个纯读、无共享可变状态）**：`web_search`、`fetch_url`、`read_file`、`read_clipboard`、`list_running_apps`、`get_env`、`list_env`、`get_quickshow_state`
   - **serial（6 个有副作用或共享状态，绝不并行）**：`run_shell`（任意副作用）、`write_file`（写文件 + 危险确认弹窗）、`write_clipboard`（全局剪贴板互相覆盖）、`set_env`（UserDefaults 非原子读改写、并发丢更新）、`open_app`（启动进程副作用）、`get_system_status`（`SystemStatusProvider.shared` 有可变采样缓存 prevCpuInfo/prevBytes 等，并发数据竞争风险）

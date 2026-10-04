@@ -10,8 +10,10 @@ import SwiftUI
 /// - 消息列表铺满窗口主体：AI 回复无气泡铺底排版；落定助手消息下方常驻弱显示操作行（复制/重新生成）
 /// - 输入坞浮岛化：overlay 悬浮于消息列表之上，消息滚动时从玻璃坞底下穿过（真 blur-through，
 ///   Liquid Glass 采样到真实内容流后折射/高光/自适应明度自动成立，不再有 fade 遮罩）
-/// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 聚焦态 accent rim
-/// - 控件语言：发送钮实心琥珀图底反转；⊕/剪贴板/chip 实底微胶囊（白 rim + hover 提亮）
+/// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 激活态 accent rim（安静态零描边）
+/// - 输入坞安静/激活渐进披露：安静态（无草稿/未悬停）收敛为纯输入行，低频工具（剪贴板/
+///   水位/压缩）隐去；控件语言为纯灰图标 + hover 圆底（图钉同款克制），chip 为弱化小字，
+///   发送钮仅在可发送瞬间实心强调色（空态 = 无底灰箭头）——空态视觉重心让回中部引导区
 /// - 快捷键 ⌘N/⌘B/⌘F 由 AIChatKeyMonitor（本地事件监听）接线；ESC/⌘K 仍走窗口层；
 ///   快捷键提示全部由各控件 .help() tooltip 承担（底部提示条已删）
 ///
@@ -62,10 +64,17 @@ struct AIChatView: View {
     /// 滚动位置/贴底跟随/流式状态随视图树天然保留，位置记忆不再依赖 scrollTo 时序。
     /// 超上限 K 时淘汰尾部会话（其视图卸载，重挂载时用 scrollSnapshots 兜底恢复）。
     @State private var residentSessionIds: [UUID] = []
-    /// LRU 常驻上限：活跃会话 + 最近 3 个，内存与保活收益的折中。
-    private let residentSessionLimit = 4
+    /// LRU 常驻上限：12。用户会话数通常在 10 以内，提高上限使绝大多数会话全程常驻，
+    /// 切换回到纯 opacity 切换、零整树重建（消除重挂载卡顿与锚点恢复需求）。
+    /// 内存代价见报告：每常驻会话 = 其视图树 + 已实现化的 NSTextField 池（消息行），
+    /// 公式位图不常驻于会话（在 MathRasterizer 共享 LRU 缓存，上限 512）；解析 AST 走全局
+    /// 64 条/600k 字符预算缓存。上限 12 时最坏约「12 × 各会话已实现行」，仍由 LazyVStack
+    /// 视口附近实现化约束（本机 macOS 13 实现化偏粘滞，见报告评估）。
+    private let residentSessionLimit = 12
     /// 按会话保存的滚动快照：仅 LRU 驱逐后的重挂载恢复需要（常驻会话靠视图树天然保留位置）。
     @State private var scrollSnapshots: [UUID: ScrollSnapshot] = [:]
+    /// 各会话 latex 预热去重签名：签名未变则跳过重复收集/预热（见 prefetchMathLatex）。
+    @State private var latexPrefetchSignatures: [UUID: LatexPrefetchSignature] = [:]
     /// 上一次观察到的会话 id 集合基线：检测会话被删除，清理快照与常驻集合中的死项。
     @State private var knownSessionIds: Set<UUID> = []
     /// ⌘F 聚焦令牌：递增即让侧栏搜索框聚焦。
@@ -81,8 +90,13 @@ struct AIChatView: View {
     @State private var pinned = AIWindowManager.shared.isPinned
     /// 图钉按钮 hover 态。
     @State private var pinHovered = false
-    /// 窗口 key 态：输入卡聚焦 rim 的近似信号（窗口 key 时输入框必被抬为第一响应者，
-    /// 见 ChatInputTextView 的 windowDidBecomeKey 兜底；isKeyWindow 近似足够，不侵入事件链）。
+    /// 坞区 hover 态：安静/激活两态切换的触发源之一（鼠标进入坞区即浮现完整工具行）。
+    /// 输入框唤出即自动聚焦（windowDidBecomeKey 兜底），"聚焦"恒为真、无法作披露信号，
+    /// 故渐进披露的诚实触发源 = 坞区 hover + 内容存在（草稿/附件/队列/生成中）。
+    @State private var dockHovered = false
+    /// 窗口 key 态：输入卡激活 rim 的门控之一（与 dockQuiet 共同决定，见 dockRimActive；
+    /// 窗口 key 时输入框必被抬为第一响应者，见 ChatInputTextView 的 windowDidBecomeKey 兜底；
+    /// isKeyWindow 近似足够，不侵入事件链）。
     @State private var windowIsKey = false
     /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip / 思考 chip 的 hover 提亮）。
     @State private var attachHovered = false
@@ -104,6 +118,9 @@ struct AIChatView: View {
     @State private var exportToastVisible = false
     /// toast 世代令牌：连续导出时旧定时器不得提前收起新 toast。
     @State private var exportToastGeneration = 0
+    /// 当前明暗外观：会话预热取色与渲染路径严格对齐（颜色分量参与公式缓存 key，
+    /// 取色外观不一致会让预热缓存无法命中）。
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 0) {
@@ -183,7 +200,7 @@ struct AIChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             refreshEnvironment()
             pinned = AIWindowManager.shared.isPinned
-            // 输入卡聚焦 rim：只在 AI 窗自身成为 key 时点亮（其他窗口激活不误触）
+            // 输入卡激活 rim 门控：只在 AI 窗自身成为 key 时计入（其他窗口激活不误触）
             if note.object is AIPanel { windowIsKey = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
@@ -410,8 +427,11 @@ struct AIChatView: View {
     }
 
     /// LRU 常驻集合更新：新会话移到头部；超出上限淘汰尾部（其视图卸载，重挂载时快照兜底）。
+    /// 会话首次进入常驻集合（视图将新建，首帧会构建公式）时，后台预热其数学公式缓存，
+    /// 使行内公式的同步光栅化路径大多直接命中缓存，避免首帧主线程卡顿。
     private func updateResidency(for newId: UUID?) {
         guard let newId else { return }
+        let isNewlyResident = !residentSessionIds.contains(newId)
         var updated = residentSessionIds
         updated.removeAll { $0 == newId }
         updated.insert(newId, at: 0)
@@ -419,9 +439,93 @@ struct AIChatView: View {
             updated.removeLast(updated.count - residentSessionLimit)
         }
         if updated != residentSessionIds { residentSessionIds = updated }
+        if isNewlyResident { prefetchMathLatex(in: newId) }
+    }
+
+    /// 选中会话的公式预热：提取会话内全部助手消息的块级/行内 latex，按各自展示模式与取色
+    /// 外观分别后台预热（模式/颜色分量参与缓存 key，须与渲染路径对齐）。
+    ///
+    /// 性能：① 签名去重——同一会话内容未变则跳过重复收集；② 收集（解析+遍历）整体移出主线程
+    /// （MarkdownParser 为纯函数，解析缓存已加锁线程安全），主线程只做颜色外观解析与派发，
+    /// 消除大会话在 updateResidency 的主线程卡顿。
+    private func prefetchMathLatex(in sessionId: UUID) {
+        let messages = state.store.messages(in: sessionId)
+        guard !messages.isEmpty else { return }
+
+        let signature = LatexPrefetchSignature(
+            messageCount: messages.count,
+            totalChars: messages.reduce(0) { $0 + $1.content.count },
+            lastMessageID: messages.last?.id
+        )
+        if latexPrefetchSignatures[sessionId] == signature { return }
+        latexPrefetchSignatures[sessionId] = signature
+
+        let assistantContents = messages.filter { $0.role == .assistant }.map(\.content)
+        guard !assistantContents.isEmpty else { return }
+
+        // 颜色外观解析留在主线程（AppKit 颜色解析需主线程上下文），后台仅做纯解析 + 收集 + 预热。
+        let appearance = MathRasterizer.appearance(for: colorScheme)
+        let blockColor = MathRasterizer.resolvedColor(Theme.Colors.contentPrimary, appearance: appearance)
+        let inlineColor = MathRasterizer.resolvedColor(Color.primary.opacity(0.80), appearance: appearance)
+
+        DispatchQueue.global(qos: .utility).async {
+            var displayLatex: [String] = []
+            var inlineLatex: [String] = []
+            var seenDisplay = Set<String>()
+            var seenInline = Set<String>()
+            for content in assistantContents {
+                // 后台复用（已加锁的）解析缓存：未命中则后台解析并回填，与随后主线程首帧共用。
+                let blocks = AssistantMarkdownView.parsedBlocksForPrefetch(content)
+                for latex in MathLatexCollector.collectBlockMathLatex(blocks: blocks)
+                where seenDisplay.insert(latex).inserted {
+                    displayLatex.append(latex)
+                }
+                for latex in MathLatexCollector.collectInlineMathLatex(blocks: blocks)
+                where seenInline.insert(latex).inserted {
+                    inlineLatex.append(latex)
+                }
+            }
+            if !displayLatex.isEmpty {
+                // 块级：mathBlockView 的 contentPrimary + 14pt display 模式。
+                MathRasterizer.prefetch(latexList: displayLatex, pointSize: 14, color: blockColor, isDisplay: true)
+            }
+            if !inlineLatex.isEmpty {
+                // 行内：正文默认取色（primary 0.80）+ 基准 13pt text 模式。
+                MathRasterizer.prefetch(latexList: inlineLatex, pointSize: 13, color: inlineColor, isDisplay: false)
+            }
+        }
     }
 
     // MARK: - 输入区（浮岛输入坞）
+
+    // MARK: 坞体安静/激活两态（渐进披露）
+
+    /// 安静态判据：无草稿、无附件、无待注入队列、非生成中，且鼠标不在坞区。
+    /// 安静态下坞收敛为「纯输入行 + 弱化小字 chip + 无底灰箭头」——无 accent rim、
+    /// 无实心色块、低频工具隐去，空态视觉重心让回中部引导区；
+    /// 悬停坞区 / 开始输入 / 附加内容 / 生成开始即切换激活态（0.16s 淡入，contentFade）。
+    private var dockQuiet: Bool {
+        inputEmpty
+            && state.clipboardAttachment == nil
+            && state.imageAttachments.isEmpty
+            && state.pendingQueue.isEmpty
+            && !state.isStreaming
+            && !dockHovered
+    }
+
+    /// 激活态描边：坞体激活且窗口 key 时才点亮 accent 环（旧版仅按窗口 key 常亮，
+    /// 空态下形成横贯底部的整圈彩色轮廓带——全图唯一彩色轮廓即源于此）。
+    private var dockRimActive: Bool { windowIsKey && !dockQuiet }
+
+    /// 低频工具组（压缩/水位/剪贴板）显隐：安静态隐去（保留占位、纯透明渐变、布局零跳动）；
+    /// 唯水位逼近上限时破格常显——需要警示的时刻不沉默。
+    private var showDockSecondaryTools: Bool { !dockQuiet || watermarkBreaksThrough }
+
+    /// 水位警示破格：用量占比 > 0.8（与细条进红同一阈值）。
+    private var watermarkBreaksThrough: Bool { (state.contextWatermark?.ratio ?? 0) > 0.8 }
+
+    /// 发送钮实心态判据：可发送或生成中（驱动 禁用灰箭头 ⇄ 实心强调色 的淡变）。
+    private var sendButtonSolid: Bool { state.isStreaming || canSend }
 
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
@@ -453,7 +557,8 @@ struct AIChatView: View {
                 }
             }
 
-            // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 思考 chip / 上下文水位 / 剪贴板 / 发送）
+            // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 思考 chip ║ 低频工具组 / 发送）；
+            // 安静/激活两态语义见 dockQuiet
             VStack(spacing: 0) {
                 // 输入框：NSViewRepresentable 包装 NSTextView（自定义 ⏎/⇧⏎ 与中文 IME 组字语义）
                 ZStack(alignment: .topLeading) {
@@ -482,9 +587,17 @@ struct AIChatView: View {
                     modelChip
                     thinkingChip
                     Spacer(minLength: 0)
-                    compactButton
-                    contextWatermarkIndicator
-                    clipboardButton
+                    // 低频工具组（压缩/水位/剪贴板）：安静态整体隐去——保留占位、纯透明度
+                    // 渐变、布局零跳动；悬停/输入/附件/生成中淡入，水位 >0.8 破格常显
+                    HStack(spacing: Theme.Spacing.lg) {
+                        compactButton
+                        contextWatermarkIndicator
+                        clipboardButton
+                    }
+                    .opacity(showDockSecondaryTools ? 1 : 0)
+                    .allowsHitTesting(showDockSecondaryTools)
+                    .accessibilityHidden(!showDockSecondaryTools)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                     sendButton
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
@@ -493,18 +606,22 @@ struct AIChatView: View {
             // 功能层：输入坞是典型控件面（输入条/发送/附件/模型 chip），26+ 官方 Liquid Glass，
             // <26 退化为 ultraThinMaterial + 0.5pt 描边；坞悬浮于消息流之上，玻璃采样到真实
             // 内容流（blur-through）。纪律：坞内控件（⊕/chip/发送/剪贴板）绝不再用 glassEffect
-            // （glass-on-glass），一律实底微胶囊。
-            .glassSurface(RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous))
-            // 聚焦态 rim：窗口 key 时叠加 accent 低透明度环，材质对状态有响应；
-            // allowsHitTesting(false) 防描边层吞掉坞内控件点击
+            // （glass-on-glass），一律纯灰图标 hover 出圆底（与图钉同一克制语言）。
+            // <26 降级描边随安静/激活换档：安静态降到 cardStroke(0.09) 近无感，激活态回 0.14。
+            .modifier(GlassSurface(
+                shape: RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous),
+                strokeColor: dockQuiet ? Theme.Colors.cardStroke : Theme.Colors.chatStrokeStrong
+            ))
+            // 激活态 rim：坞体激活（悬停/输入/附件/生成中）且窗口 key 时叠加 accent 低透明度环，
+            // 材质对状态有响应；安静态零描边。allowsHitTesting(false) 防描边层吞掉坞内控件点击
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
                     .strokeBorder(
-                        Theme.Colors.accent.opacity(windowIsKey ? Theme.Colors.dockFocusRimOpacity : 0),
+                        Theme.Colors.accent.opacity(dockRimActive ? Theme.Colors.dockFocusRimOpacity : 0),
                         lineWidth: 1
                     )
                     .allowsHitTesting(false)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: windowIsKey)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockRimActive)
             )
             // 双层阴影：接触影贴身定锚 + 环境影拉开纵深（旧单层贴身影 = 卡片糊在底板上）
             .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity), radius: Theme.Shadow.dockContactRadius, y: Theme.Shadow.dockContactY)
@@ -521,12 +638,16 @@ struct AIChatView: View {
         .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xxl)
         .frame(maxWidth: .infinity)
-        // 鼠标进入输入区时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径）
-        .onHover { _ in refreshClipboardAvailability() }
+        // 坞区 hover：进入时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径），
+        // 同时驱动坞体安静→激活切换（低频工具组淡入、accent rim 点亮）
+        .onHover { hovering in
+            if hovering { refreshClipboardAvailability() }
+            dockHovered = hovering
+        }
     }
 
     /// ⊕ 附件菜单：剪贴板导入 / 从文件选择… / 清空会话（清空入口自底部提示条迁入）。
-    /// 微胶囊语言：实底 + 0.5pt 白 rim + hover 提亮，告别裸细线图标。
+    /// 克制语言：静止纯灰图标、无底无 rim（与顶栏图钉同款），hover 才出圆底提亮。
     private var attachMenuButton: some View {
         Menu {
             Button {
@@ -559,11 +680,10 @@ struct AIChatView: View {
             .disabled(state.messages.isEmpty)
         } label: {
             Image(systemName: "plus")
-                .font(Theme.Typography.text(13, .semibold))
+                .font(Theme.Typography.text(13, .medium))
                 .foregroundColor(attachHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                .background(Circle().fill(attachHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceButton))
-                .overlay(Circle().strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5))
+                .background(Circle().fill(attachHovered ? Theme.Colors.iconHoverBg : Color.clear))
         }
         .buttonStyle(.plain)
         .menuStyle(.borderlessButton)
@@ -575,9 +695,9 @@ struct AIChatView: View {
         .help("添加图片附件（可粘贴/拖入）· 导出对话 · 清空会话（⌘K）")
     }
 
-    /// 模型 chip：胶囊显示当前会话绑定模型（未绑定时回落全局默认），点击弹下拉切换。
+    /// 模型 chip：显示当前会话绑定模型（未绑定时回落全局默认），点击弹下拉切换。
     /// 选中写入会话级绑定（state.setSessionModel），不再写全局；仅多模型时显示，单模型弱化隐藏。
-    /// 微胶囊语言：实底 surfaceTrack + 0.5pt 白 rim + hover 提亮。
+    /// 弱化小字语言：无胶囊底无 rim 的三级灰小字常驻（当前模型名需可瞥见），hover 才出圆底提亮。
     @ViewBuilder
     private var modelChip: some View {
         if modelList.count > 1 {
@@ -596,23 +716,19 @@ struct AIChatView: View {
             } label: {
                 HStack(spacing: Theme.Spacing.xs) {
                     Text(currentModelName)
-                        .font(Theme.Typography.text(11, .medium))
+                        .font(Theme.Typography.text(11, .regular))
                         .lineLimit(1)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(Theme.Typography.text(8, .medium))
                         .foregroundColor(Theme.Colors.idleText)
                 }
-                .foregroundColor(chipHovered ? Theme.Colors.iconHover : Theme.Colors.contentSecondaryStrong)
-                .padding(.horizontal, Theme.Spacing.xl)
+                .foregroundColor(chipHovered ? Theme.Colors.iconHover : Theme.Colors.contentTertiary)
+                .padding(.horizontal, Theme.Spacing.lg)
                 .padding(.vertical, Theme.Spacing.xxxs)
                 .frame(height: Theme.Layout.iconButtonSize)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(chipHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
+                        .fill(chipHovered ? Theme.Colors.iconHoverBg : Color.clear)
                 )
             }
             .buttonStyle(.plain)
@@ -638,8 +754,8 @@ struct AIChatView: View {
         return effectiveModelId.isEmpty ? "模型" : effectiveModelId
     }
 
-    /// 思考强度 chip：会话级档位（默认 = 跟随当前模型自身默认），与模型 chip 同微胶囊语言。
-    /// 默认态整枚弱化一档（idleText），选定档位后回到常规对比度——一眼可辨「已覆盖」。
+    /// 思考强度 chip：会话级档位（默认 = 跟随当前模型自身默认），与模型 chip 同弱化小字语言。
+    /// 默认态三级灰小字，选定档位后提到二级对比度——一眼可辨「已覆盖」，但不再是白粗胶囊。
     /// 「关闭」档仅当当前生效模型允许关闭思考时出现（如 GLM-5.3 不可关则不显示该档）。
     private var thinkingChip: some View {
         Menu {
@@ -668,7 +784,7 @@ struct AIChatView: View {
         } label: {
             HStack(spacing: Theme.Spacing.xs) {
                 Text(thinkingChipTitle)
-                    .font(Theme.Typography.text(11, .medium))
+                    .font(Theme.Typography.text(11, .regular))
                     .lineLimit(1)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Theme.Typography.text(8, .medium))
@@ -677,18 +793,14 @@ struct AIChatView: View {
             .foregroundColor(thinkingChipHovered
                              ? Theme.Colors.iconHover
                              : (state.currentThinkingLevel == nil
-                                ? Theme.Colors.idleText
+                                ? Theme.Colors.contentTertiary
                                 : Theme.Colors.contentSecondaryStrong))
-            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.xxxs)
             .frame(height: Theme.Layout.iconButtonSize)
             .background(
                 Capsule(style: .continuous)
-                    .fill(thinkingChipHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
+                    .fill(thinkingChipHovered ? Theme.Colors.iconHoverBg : Color.clear)
             )
         }
         .buttonStyle(.plain)
@@ -725,6 +837,7 @@ struct AIChatView: View {
     /// 立即压缩入口：水位左侧的轻量图标钮，pinButton 同款克制语言——静态纯灰图标无底，
     /// hover 才出圆底提亮（比剪贴板/发送的常驻实底轻一档，与水位的「态势感知」同级）。
     /// 仅在有上下文数据（水位非 nil）时出现，与水位同生共死，右缘布局不插拔跳动；
+    /// 并随水位一同归入低频工具组：安静态整体隐去（见 showDockSecondaryTools）；
     /// 压缩中禁用弱化（对齐剪贴板禁用态），不换成旋转/进度轮——克制优先。
     @ViewBuilder
     private var compactButton: some View {
@@ -753,27 +866,26 @@ struct AIChatView: View {
         }
     }
 
-    /// 上下文水位指示：右缘紧凑数字（已用 / 窗口，自适应 k/M 单位）+ 微光细条
+    /// 上下文水位指示：右缘紧凑数字（已用 / 窗口，自适应 k/M 单位）+ 无底衬微光细条
     /// （与一瞥倒计时同「光丝」语言，2.5pt）。nil 时完全隐藏不占位；
-    /// ratio > 0.8 仅细条进警示红，数字恒保持灰调——警示只交给那根线，不喊。
+    /// 安静态随低频工具组整体隐去，唯 ratio > 0.8 破格常显——需要警示的时刻不沉默；
+    /// 警示仍只交给那根线（细条进红），数字恒保持灰调，不喊。
     @ViewBuilder
     private var contextWatermarkIndicator: some View {
         if let watermark = state.contextWatermark {
             let label = "\(formatTokenCount(watermark.usedTokens)) / \(formatTokenCount(watermark.windowTokens))"
             VStack(spacing: Theme.Spacing.xxs) {
                 watermarkText(label)
-                // 细条宽锚定上方数字宽：hidden 文本占位撑出同宽，overlay 内按 ratio 填充
+                // 细条宽锚定上方数字宽：hidden 文本占位撑出同宽，overlay 内按 ratio 填充；
+                // 无底衬轨道（去掉多余淡胶囊底衬），只剩已用段光丝——0 用量时细条归零不露面
                 watermarkText(label)
                     .hidden()
                     .overlay {
                         GeometryReader { geo in
-                            ZStack(alignment: .leading) {
-                                Capsule(style: .continuous)
-                                    .fill(Theme.Colors.surfaceTrack)
-                                Capsule(style: .continuous)
-                                    .fill(watermark.ratio > 0.8 ? Theme.Colors.statusWarning : Theme.Colors.idleText)
-                                    .frame(width: geo.size.width * min(max(watermark.ratio, 0), 1))
-                            }
+                            Capsule(style: .continuous)
+                                .fill(watermark.ratio > 0.8 ? Theme.Colors.statusWarning : Theme.Colors.idleText)
+                                .frame(width: geo.size.width * min(max(watermark.ratio, 0), 1))
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .frame(height: Theme.Layout.glanceProgressHeight)
@@ -801,6 +913,8 @@ struct AIChatView: View {
         return m.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(m))M" : String(format: "%.1fM", m)
     }
 
+    /// 剪贴板附加钮：低频功能，安静态随低频工具组整体隐去（见 showDockSecondaryTools）；
+    /// 克制语言：静止纯灰图标无底无 rim（与图钉同款），hover 才出圆底提亮。
     private var clipboardButton: some View {
         Button {
             attachClipboard()
@@ -811,8 +925,7 @@ struct AIChatView: View {
                                  ? (clipboardHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
                                  : Theme.Colors.idleText.opacity(0.5))
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                .background(Circle().fill(clipboardHovered && hasClipboardText ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceButton))
-                .overlay(Circle().strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5))
+                .background(Circle().fill(clipboardHovered && hasClipboardText ? Theme.Colors.iconHoverBg : Color.clear))
         }
         .buttonStyle(.plain)
         .disabled(!hasClipboardText)
@@ -835,6 +948,7 @@ struct AIChatView: View {
                 .foregroundColor(sendButtonForeground)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
                 .background(Circle().fill(sendButtonFill))
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: sendButtonSolid)
         }
         .buttonStyle(.plain)
         .disabled(!state.isStreaming && !canSend)
@@ -884,15 +998,15 @@ struct AIChatView: View {
         state.imageAttachments = []
     }
 
-    /// 发送键底：可用 = 主题强调色实心（琥珀/青，全图最强图底反转），流式 = 警告红，
-    /// 禁用 = 浅灰实底（chatSendDisabledFill，与卡底 ≥1.2:1 对比，修正旧版 1.04:1 隐形事故）。
+    /// 发送键底：可用 = 主题强调色实心（琥珀/青，全图最强图底反转——强调只在可发送瞬间登场），
+    /// 流式 = 警告红；空态/禁用 = 无底（透明），杜绝空态下高亮实心色块抢夺视觉重心。
     private var sendButtonFill: Color {
         if state.isStreaming { return Theme.Colors.statusWarning.opacity(0.9) }
-        return canSend ? Theme.Colors.accent : Theme.Colors.chatSendDisabledFill
+        return canSend ? Theme.Colors.accent : Color.clear
     }
 
     /// 发送键图标：实心强调色底上取深色（琥珀/青均属亮色底，深图标对比最稳），
-    /// 流式红底用白色；禁用态 contentTertiary（≈4.7:1，仍清晰可读，不再隐形）。
+    /// 流式红底用白色；禁用态 contentTertiary（≈4.7:1，灰箭头静止可读但不抢眼）。
     private var sendButtonForeground: Color {
         if state.isStreaming { return .white }
         if canSend { return Color.black.opacity(0.72) }
@@ -1152,12 +1266,88 @@ private struct MessageGroup: Identifiable {
     var messages: [ChatMessage]
 }
 
+/// 消息分组缓存：messages 底层存储未变时复用上次分组结果，避免隐藏会话随 store 扇出
+/// 重求值时每次 body 都做 O(n) 全量分组。
+/// 判定用「持有同一份 messages 值 + 同 buffer 地址 + 同长度」：缓存持有值会保持该 buffer
+/// 的引用，store 后续修改必触发 COW 换 buffer，故地址+长度相同即内容相同。O(1)，
+/// 比逐字段 Equatable（含图片 base64/长文本）便宜且同样可靠。
+private final class MessageGroupingCache {
+    private var cachedMessages: [ChatMessage] = []
+    private var cachedGroups: [MessageGroup] = []
+
+    func groups(for messages: [ChatMessage]) -> [MessageGroup] {
+        if !messages.isEmpty,
+           messages.count == cachedMessages.count,
+           sameStorage(messages, cachedMessages) {
+            return cachedGroups
+        }
+        cachedMessages = messages
+        cachedGroups = Self.group(messages)
+        return cachedGroups
+    }
+
+    /// 两数组是否共享同一底层存储 buffer（值语义下即同内容）。
+    private func sameStorage(_ lhs: [ChatMessage], _ rhs: [ChatMessage]) -> Bool {
+        lhs.withUnsafeBufferPointer { left in
+            rhs.withUnsafeBufferPointer { right in
+                left.baseAddress == right.baseAddress
+            }
+        }
+    }
+
+    private static func group(_ messages: [ChatMessage]) -> [MessageGroup] {
+        var groups: [MessageGroup] = []
+        for message in messages {
+            if let last = groups.last, last.role == message.role, message.role != .system {
+                groups[groups.count - 1].messages.append(message)
+            } else {
+                groups.append(MessageGroup(id: message.id, role: message.role, messages: [message]))
+            }
+        }
+        return groups
+    }
+}
+
 /// 单会话滚动快照：切走时记录，切回时据此恢复阅读位置。
 private struct ScrollSnapshot {
     /// 离开时数组序最靠前的可见消息 id（nil 表示当时无可见消息）。
     var topVisibleMessageID: UUID?
-    /// 离开时是否处于贴底跟随态；true 则切回一律贴底。
-    var stickToBottom: Bool
+    /// 离开时是否处于贴底跟随态（pinned）；true 则切回贴底，false 则回到锚点。
+    var isPinned: Bool
+}
+
+// MARK: - 底部锚点几何信号
+
+/// 底部锚点在滚动视口坐标系中的底边 Y（`frame(in: .named(<该实例坐标空间>)).maxY`）。
+/// 每个 `SessionMessageList` 在自己的子树内消费该 preference（`onPreferenceChange` 挂在
+/// 该实例的 ScrollView 上），且坐标系名称按 sessionId 隔离，多个常驻实例互不串扰。
+private struct BottomAnchorYKey: PreferenceKey {
+    static var defaultValue: CGFloat = .greatestFiniteMagnitude
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        // 单实例内只有尾部锚点一处发射；取最新值即可。
+        value = nextValue()
+    }
+}
+
+// MARK: - 消息行几何信号（诚实视口锚点）
+
+/// 每个已实现化消息行上报其在本实例滚动视口坐标系中的 frame（`[messageID: CGRect]`）。
+/// 关键：preference 每次布局**全量重算**，reduce 合并出的字典 = 当前帧真实已实现行集合
+/// （不像行级 onAppear/onDisappear 那样只增不减），据此可算出真实「视口首个可见消息」。
+private struct MessageRowFramePreference: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue()) { _, new in new }
+    }
+}
+
+// MARK: - 公式预热去重签名
+
+/// 会话 latex 预热签名：消息条数 + 内容总字符 + 末条 id。未变则复用上次收集结果、跳过重复收集。
+private struct LatexPrefetchSignature: Equatable {
+    var messageCount: Int
+    var totalChars: Int
+    var lastMessageID: UUID?
 }
 
 // MARK: - 活跃会话滚轮意图中继
@@ -1207,19 +1397,41 @@ private struct SessionMessageList: View {
 
     /// 本会话首载装载态：冷启动与 LRU 重挂载时抑制入场动画，防窗口上屏竞态白屏。
     @State private var isInitialHistoryLoad = true
-    /// 本会话贴底跟随态（随视图树保活，切走保留）。
-    @State private var stickToBottom = true
+    /// 贴底跟随态（pinned）：true = 自动跟随最新内容，false = 用户自由浏览。
+    /// 用户滚动主权最高——一旦 unpinned，任何事件（切换/新消息/流式/渐进扩展）都不自动滚动，
+    /// 直到用户主动回底（容差哨兵重新可见）。
+    @State private var isPinned = true
     /// 本会话流式滚动节流时间戳。
     @State private var lastAutoScrollAt: Date = .distantPast
-    /// 本会话最近一次用户滚轮时间戳。
+    /// 本会话最近一次用户滚轮时间戳（判定「哨兵消失是否由用户滚动驱动」）。
     @State private var lastUserScrollAt: Date = .distantPast
-    /// 本会话底部哨兵可见性（用户滚轮方向判定用）。
-    @State private var bottomSentinelVisible = true
-    /// 本会话可见消息 id 集合（切走时取数组序最靠前者作恢复锚点）。
-    @State private var visibleMessageIDs: Set<UUID> = []
+    /// 是否处于底部容差区（几何感知层驱动：锚点底边距视口底 ≤ bottomTolerance）。
+    @State private var atBottom = true
+    /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
+/// 切走时作为恢复锚点，浮动簇 ↑/↓ 导航也据此定位。
+    @State private var topVisibleMessageID: UUID?
+    /// 消息分组缓存（messages 未变则复用上次分组；见 MessageGroupingCache）。
+    @State private var groupingCache = MessageGroupingCache()
+    /// 用户滚轮短窗：用于「即时脱锚加速」与自动跟随的让位守卫（不再是脱锚的唯一证据）。
+    private let userScrollWindow: TimeInterval = 0.5
+    /// 内容增长窗口：仅在此窗口内确有增长事件（新消息/流式增量/渐进批次）时，
+    /// 哨兵消失才保持 pinned；否则一律默认脱锚（覆盖滚动条拖拽/键盘等无滚轮事件的滚动方式）。
+    private let contentGrowthWindow: TimeInterval = 0.4
+    /// 底部容差区高度（pt）：容差哨兵嵌在原有坞区留白内部，置于真正底部上方此距离，
+    /// 不额外叠加底部空隙（防弹性抖动误判只需 ~16-20pt）。
+    private let bottomTolerance: CGFloat = 18
+    /// 最近一次内容增长时间戳（messages.count 变化 / 流式消息更新 / 几何纠偏期间）。
+    /// 初始为当前时间：让挂载/重挂载首帧的几何 settling（锚点尚在下方）不被误判为用户脱锚。
+    @State private var lastContentGrowthAt: Date = Date()
 
     private var isStreamingSession: Bool { state.isStreaming(sessionId: sessionId) }
 
+    // ⚠️ 刻意移除「首帧骨架 → 下一 runloop 再建真实内容」的两段式切换。
+    // 原因：骨架把真实内容推迟到一个独立的 CA 事务，与历史冷启动白屏同源——
+    // 内容首建提交若落在窗口级淡入/NSGlassEffectView 隐式动画窗口内，内容层会卡在
+    // 近零透明度（CHANGELOG: 消息行近零透明度、白屏 + 幽灵残影）；且该状态随常驻视图
+    // 保留，重选会话不重建 → 永久白屏。首帧轻量化已由 AssistantMarkdownView 的分批
+    // 渐进渲染（首批仅 24 块）与公式异步/预热保证，骨架的额外延迟已冗余且有害。
     var body: some View {
         if messages.isEmpty {
             // 空会话在 ZStack 中不渲染内容；空态欢迎页/引导页由外层 overlay 承担。
@@ -1230,11 +1442,15 @@ private struct SessionMessageList: View {
     }
 
     private var scrollContent: some View {
+        // 外层 GeometryReader 提供视口高度（= ScrollView 可视高度），与底部锚点几何共同
+        // 判定「锚点底边距视口底的距离」。macOS 13 无滚动偏移 API，这是替代不可靠的
+        // onAppear/onDisappear 哨兵的可靠感知层。
+        GeometryReader { viewport in
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 // 三级间距节奏与原单会话一致
                 LazyVStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
-                    ForEach(groupMessages(messages)) { group in
+                    ForEach(groupingCache.groups(for: messages)) { group in
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
                                 // 压缩边界卡：组内行级插入（边界无论落组间/组内都正确；再次压缩
@@ -1265,32 +1481,48 @@ private struct SessionMessageList: View {
                                     onTapImage: onTapImage
                                 )
                                 .equatable()
+                                // 行级几何信号：上报本行在滚动视口坐标系的 frame，供父级算出
+                                // 真实「视口首个可见消息」。preference 每帧全量重算，诚实地反映
+                                // 当前已实现行集合（修复行级 onAppear/onDisappear 只增不减导致的置顶）。
+                                .background(
+                                    GeometryReader { rowGeo in
+                                        Color.clear.preference(
+                                            key: MessageRowFramePreference.self,
+                                            value: [message.id: rowGeo.frame(in: .named(scrollSpaceName))]
+                                        )
+                                    }
+                                )
                                 .id(message.id)
-                                .onAppear { visibleMessageIDs.insert(message.id) }
-                                .onDisappear { visibleMessageIDs.remove(message.id) }
                                 .transition(isInitialHistoryLoad
                                     ? .identity
                                     : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
                             }
                         }
                     }
-                    // 坞顶留白 + 底部哨兵（一体两段，语义同原实现）
-                    Color.clear
-                        .frame(height: Theme.Layout.chatDockClearance)
-                    Color.clear
+                    // 尾部整体作为 LazyVStack 的单个子视图：把原先 4 个尾部子项的 4×36pt 组间距收敛为
+                    // 1 个，其余 3×36 的叠加被消除。
+                    //
+                    // 间距算术（实测坐实 LazyVStack 组间距对尾部子项生效）：本子视图与「末条消息组」
+                    // 之间仍有 1×chatGroupGap(36)。为让「末条消息 → 视口底」回到重构前 124pt 量级，
+                    // 坞区留白扣掉该 36 与内嵌容差：36 + (124−18−36) + 18 + 1 = 125pt。
+                    VStack(spacing: 0) {
+                        // 坞区留白（有效值 = 组间距 36 + 此 spacer + 容差 18 ≈ 124）
+                        Color.clear
+                            .frame(height: max(Theme.Layout.chatDockClearance - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
+                        // 容差带（18pt，嵌入坞区留白内部）
+                        Color.clear
+                            .frame(height: bottomTolerance)
+                        // 底部锚点 + 几何读数：底边相对本实例滚动视口的 maxY。
+                        // 替代不可靠的 onAppear/onDisappear 哨兵，作为 atBottom 的唯一信号源。
+                        GeometryReader { anchorGeo in
+                            Color.clear.preference(
+                                key: BottomAnchorYKey.self,
+                                value: anchorGeo.frame(in: .named(scrollSpaceName)).maxY
+                            )
+                        }
                         .frame(height: 1)
                         .id(bottomAnchorID)
-                        .onAppear {
-                            bottomSentinelVisible = true
-                            stickToBottom = true
-                        }
-                        .onDisappear {
-                            bottomSentinelVisible = false
-                            // 仅当消失由用户滚轮驱动才解除跟随；流式增长顶出属瞬时态，忽略
-                            if Date().timeIntervalSince(lastUserScrollAt) < 0.5 {
-                                stickToBottom = false
-                            }
-                        }
+                    }
                 }
                 .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
                            value: messages.count)
@@ -1299,54 +1531,75 @@ private struct SessionMessageList: View {
                 .padding(.top, Theme.Spacing.section)
                 .frame(maxWidth: .infinity)
             }
+            .coordinateSpace(name: scrollSpaceName)
+            // 首帧视口自适应：把视口高度注入环境，供消息内 AssistantMarkdownView 估算「一屏块数」。
+            .environment(\.chatViewportHeight, viewport.size.height)
+            // 几何信号 → atBottom：底部锚点在视口中的底边 maxY 减去视口高度即「距底溢出」，
+            // ≤ 容差（18pt）判定在底部。onPreferenceChange 仅在数值变化时触发；状态只在
+            // atBottom 布尔跳变时写入，避免每帧 setState 风暴。
+            .onPreferenceChange(BottomAnchorYKey.self) { anchorY in
+                handleGeometry(anchorY, viewportHeight: viewport.size.height, proxy: proxy)
+            }
+            // 行级几何 → 真实视口顶部消息：每帧全量上报已实现行 frame，算出与视口相交且
+            // minY 最靠上（最贴近视口顶）的行；仅在结果变化时写状态（去抖，避免每帧 setState）。
+            .onPreferenceChange(MessageRowFramePreference.self) { frames in
+                updateRowFrames(frames, viewportHeight: viewport.size.height)
+            }
             .onAppear {
                 registerRelayIfActive()
-                // 首帧布局完成后的下一 runloop：恢复位置（快照优先，否则贴底）+ 解除装载态
+                // 首帧布局完成后的下一 runloop：恢复位置（snapshot 锚点 / 贴底）+ 解除装载态。
+                // 解除装载态走显式空动画事务（历史白屏防线，勿动）。此路径仅在
+                // 挂载 / LRU 重挂载时执行；常驻切回不再联动 restoreScroll（见 onChange(isActive)）。
                 DispatchQueue.main.async {
                     restoreScroll(proxy)
-                    isInitialHistoryLoad = false
+                    withAnimation(nil) { isInitialHistoryLoad = false }
                 }
             }
             // 卸载兜底保存快照：覆盖「同 runloop 连续切换、中间会话以 isActive=false 首次建树
             // 导致 onChange(of: isActive) 不触发、无快照」的反例（LRU 驱逐后重挂载会被强制贴底）。
             // 正常失活（非卸载）由 onChange(isActive=false) 保存；saveSnapshot 幂等，重复无害。
             .onDisappear { saveSnapshot() }
-            // 本会话消息数变化：区分「用户发送/重试」与「切回隐藏期间增长过的会话」——
-            // 前者末尾新增 user 消息，无论此前是否上滚一律回底；后者仅在贴底跟随时回底，
-            // 否则保留用户的阅读位置（避免强拉到底破坏位置记忆）。
+            // 消息数变化：仅 pinned 时跟随贴底（新消息/重试/发送）；同时记录内容增长事件。
             .onChange(of: messages.count) { _ in
-                guard isActive else { return }
-                if messages.last?.role == .user {
-                    stickToBottom = true
-                    scrollToBottom(proxy, animated: true)
-                } else if stickToBottom {
-                    scrollToBottom(proxy, animated: true)
-                }
+                lastContentGrowthAt = Date()
+                guard isActive, isPinned else { return }
+                scrollToBottom(proxy, animated: true)
             }
-            // 流式增量：仅活跃 + 本会话生成中 + 贴底时跟随；节流 0.12s 非动画
-            .onChange(of: messages.last?.content) { _ in
-                guard isActive, isStreamingSession, stickToBottom else { return }
+            // 流式/工具/思考增量：以整条 last 消息为增长信号，仅 pinned + 生成中 + 用户未滚动
+            // 时跟随；节流 0.12s 非动画。
+            .onChange(of: messages.last) { _ in
+                lastContentGrowthAt = Date()
+                guard isActive, isStreamingSession, isPinned, !recentlyUserScrolled else { return }
                 let now = Date()
                 guard now.timeIntervalSince(lastAutoScrollAt) > 0.12 else { return }
                 lastAutoScrollAt = now
                 scrollToBottom(proxy, animated: false)
             }
-            // 本会话流式结束：贴底时补一次动画滚动
+            // 流式结束：pinned 时补一次动画贴底。
             .onChange(of: isStreamingSession) { streaming in
-                if !streaming, isActive, stickToBottom { scrollToBottom(proxy, animated: true) }
+                if !streaming, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
-            // 活跃态切换：注册/注销滚轮路由；切回活跃时补滚（隐藏期间流式未跟随）
+            // 活跃态切换：只注册/注销滚轮中继，**不做任何 restoreScroll**。
+            // 常驻视图的 NSScrollView 偏移天然保留；激活时无条件 restoreScroll 是唯一破坏源
+            // （会把用户强制拉走）。位置恢复只发生在挂载/LRU 重挂载的 onAppear。
+            // pinned 会话若在隐藏期间增长，几何纠偏会在其自身菜单内保持贴底（见 handleGeometry）。
             .onChange(of: isActive) { active in
                 if active {
                     registerRelayIfActive()
-                    if stickToBottom {
-                        DispatchQueue.main.async { scrollToBottom(proxy, animated: false) }
-                    }
                 } else {
                     saveSnapshot()
                     scrollRelay.unregister(sessionId: sessionId)
                 }
             }
+            // 浮动导航簇：unpinned 且活跃时于内容区右下角浮现，0.15s 淡入淡出。
+            .overlay(alignment: .bottom) {
+                if !isPinned, isActive {
+                    navClusterOverlay(proxy)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.15), value: isPinned)
+        }
         }
     }
 
@@ -1359,37 +1612,98 @@ private struct SessionMessageList: View {
         }
     }
 
-    /// 用户滚轮意图：记录时间戳；已离底时继续上滚即时解除跟随（消除一次回拽）。
+    /// 用户滚轮意图：记录时间戳；已离开底部容差区时向上滚动即时脱锚（消除一次回拽）。
     private func handleUserScrollIntent(_ scrollingUp: Bool) {
         lastUserScrollAt = Date()
-        if scrollingUp, !bottomSentinelVisible {
-            stickToBottom = false
+        if scrollingUp, !atBottom {
+            isPinned = false
         }
     }
 
     // MARK: - 快照
 
-    /// 切走时保存：数组序最靠前的可见消息 id + 当前贴底态（此时视图尚在、可见集合有效）。
+    /// 切走时保存：真实视口顶部消息 id（几何信号维护）+ 当前 pinned 态。
+    /// 防御：无锚点时保留上一份有效锚点，避免 restoreScroll 因 topID=nil 退回贴底。
     private func saveSnapshot() {
-        let topVisibleID = messages.first { visibleMessageIDs.contains($0.id) }?.id
+        // 诚实锚点：由行级几何信号维护的真实视口顶部消息；无则保留上一份有效锚点。
+        let previousAnchor = scrollSnapshots[sessionId]?.topVisibleMessageID
         scrollSnapshots[sessionId] = ScrollSnapshot(
-            topVisibleMessageID: topVisibleID,
-            stickToBottom: stickToBottom
+            topVisibleMessageID: topVisibleMessageID ?? previousAnchor,
+            isPinned: isPinned
         )
     }
 
-    /// 挂载（首次 / LRU 重挂载）时恢复：
+    /// 行级几何 → 真实视口顶部消息：取与视口相交（maxY>0 且 minY<viewportHeight）且 minY
+    /// 最小（最贴近/高于视口顶）的行；无相交行（极端：视口落在尾部留白内）时退化为最靠近
+    /// 视口顶的行（maxY 最大者）。仅在结果变化时写 @State（去抖）。
+    private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
+        guard viewportHeight > 0, !frames.isEmpty else { return }
+        var bestID: UUID?
+        var bestMinY = CGFloat.greatestFiniteMagnitude
+        for (id, frame) in frames where frame.maxY > 0 && frame.minY < viewportHeight {
+            if frame.minY < bestMinY {
+                bestMinY = frame.minY
+                bestID = id
+            }
+        }
+        // 无相交行（极端：视口落在尾部留白内）：退化为最靠近视口顶的行（maxY 最大者）。
+        let resolved = bestID ?? frames.max(by: { $0.value.maxY < $1.value.maxY })?.key
+        if resolved != topVisibleMessageID { topVisibleMessageID = resolved }
+    }
+
+    /// 挂载（首次 / LRU 重挂载）时恢复（唯一调用点：ScrollView.onAppear）：
     /// - 有非贴底快照且锚点仍在 → 无动画定位到锚点顶部，保持阅读位置；
-    /// - 否则 → 无动画贴底并恢复跟随（含「切回会话生成中且离开时贴底」自然落此分支）。
+    /// - 否则 → 无动画贴底并恢复跟随（含「离开时贴底」与「首次打开无快照」）。
     private func restoreScroll(_ proxy: ScrollViewProxy) {
+        // 标记为一次「内容settling」：让首帧几何信号（锚点仍在下方）不误判为用户脱锚。
+        lastContentGrowthAt = Date()
         if let snapshot = scrollSnapshots[sessionId],
-           !snapshot.stickToBottom,
+           !snapshot.isPinned,
            let topID = snapshot.topVisibleMessageID,
            messages.contains(where: { $0.id == topID }) {
-            stickToBottom = false
+            isPinned = false
             proxy.scrollTo(topID, anchor: .top)
         } else {
-            stickToBottom = true
+            isPinned = true
+            scrollToBottom(proxy, animated: false)
+        }
+    }
+
+    /// 用户滚轮短窗内视为「正在滚动」：任何自动跟随都应让位（用户主权优先）。
+    private var recentlyUserScrolled: Bool {
+        Date().timeIntervalSince(lastUserScrollAt) < userScrollWindow
+    }
+
+    /// 本实例的滚动坐标空间名：按 sessionId 隔离，多个常驻会话并存时不互相污染。
+    private var scrollSpaceName: String { "chatScroll.\(sessionId.uuidString)" }
+
+    /// 几何感知层核心（替代不可靠的 onAppear/onDisappear 哨兵）：
+    /// - 溢距 `overflow = anchorBottomY - viewportHeight`：>0 表示锚点在视口下方（已上滚）；
+    ///   内容短于视口时为负 → 天然判定在底部。
+    /// - `atBottom = overflow ≤ 容差`；仅在布尔跳变时写状态（去抖，避免每帧 setState 风暴）。
+    /// - atBottom→true：重新贴底跟随；atBottom→false：内容增长（0.4s 内）且 pinned 且
+    ///   用户未滚动 → 保持 pinned；其余（含滚动条/键盘等无滚轮事件的滚动）→ 脱锚。
+    /// - 持续纠偏：pinned 且 overflow>容差且用户未滚动 → 非动画贴底；布局静止后 overflow
+    ///   落入容差内自然停止（scrollTo 到最大偏移不过冲，故不振荡、不死循环）。
+    private func handleGeometry(_ anchorBottomY: CGFloat, viewportHeight: CGFloat, proxy: ScrollViewProxy) {
+        guard anchorBottomY != .greatestFiniteMagnitude, viewportHeight > 0 else { return }
+        let overflow = anchorBottomY - viewportHeight
+        let nowAtBottom = overflow <= bottomTolerance
+        if nowAtBottom != atBottom {
+            atBottom = nowAtBottom
+            if nowAtBottom {
+                isPinned = true
+            } else {
+                let growthRecent = Date().timeIntervalSince(lastContentGrowthAt) < contentGrowthWindow
+                if !(growthRecent && isPinned && !recentlyUserScrolled) {
+                    isPinned = false
+                }
+            }
+        }
+        // 持续纠偏（Fix 3）：初始装载期间让位给 restoreScroll，避免与锚点恢复竞争。
+        if !isInitialHistoryLoad, isPinned, !recentlyUserScrolled, overflow > bottomTolerance {
+            // 内容增长把锚点推走：刷新增长时间戳（豁免下一帧离底判定）并非动画重申贴底。
+            lastContentGrowthAt = Date()
             scrollToBottom(proxy, animated: false)
         }
     }
@@ -1402,6 +1716,53 @@ private struct SessionMessageList: View {
         } else {
             proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
+    }
+
+    // MARK: - 浮动导航簇（unpinned 时的回底/用户消息跳转）
+
+    // topVisibleMessageID 现为 @State，由行级几何信号（updateRowFrames）维护，见上方声明。
+
+    /// 视口锚点之前的最后一条 user 消息（「上一条用户消息」目标）。
+    private var previousUserMessageID: UUID? {
+        guard let anchor = topVisibleMessageID,
+              let index = messages.firstIndex(where: { $0.id == anchor }) else { return nil }
+        return messages[..<index].last { $0.role == .user }?.id
+    }
+
+    /// 视口锚点之后的第一条 user 消息（「下一条用户消息」目标）。
+    private var nextUserMessageID: UUID? {
+        guard let anchor = topVisibleMessageID,
+              let index = messages.firstIndex(where: { $0.id == anchor }) else { return nil }
+        let start = messages.index(after: index)
+        guard start < messages.endIndex else { return nil }
+        return messages[start...].first { $0.role == .user }?.id
+    }
+
+    /// 浮动簇容器：右下角对齐到内容列右缘、浮于输入坞上方（同输入坞限宽/居中）。
+    @ViewBuilder
+    private func navClusterOverlay(_ proxy: ScrollViewProxy) -> some View {
+        let previousID = previousUserMessageID
+        let nextID = nextUserMessageID
+        MessageNavCluster(
+            canGoPrevious: previousID != nil,
+            canGoNext: nextID != nil,
+            onLatest: {
+                isPinned = true
+                scrollToBottom(proxy, animated: true)
+            },
+            onPrevious: {
+                guard let previousID else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(previousID, anchor: .top) }
+            },
+            onNext: {
+                guard let nextID else { return }
+                withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(nextID, anchor: .top) }
+            }
+        )
+        .frame(maxWidth: contentMaxWidth, alignment: .trailing)
+        .padding(.horizontal, Theme.Spacing.section)
+        .padding(.bottom, Theme.Layout.chatDockClearance + Theme.Spacing.lg)
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - 分组 / 可重生成
@@ -1419,19 +1780,6 @@ private struct SessionMessageList: View {
               let uuid = UUID(uuidString: raw),
               messages.contains(where: { $0.id == uuid }) else { return nil }
         return uuid
-    }
-
-    /// 连续同角色消息分组（组 id 取首条消息 id，保证 SwiftUI 身份稳定不闪动）。
-    private func groupMessages(_ messages: [ChatMessage]) -> [MessageGroup] {
-        var groups: [MessageGroup] = []
-        for message in messages {
-            if let last = groups.last, last.role == message.role, message.role != .system {
-                groups[groups.count - 1].messages.append(message)
-            } else {
-                groups.append(MessageGroup(id: message.id, role: message.role, messages: [message]))
-            }
-        }
-        return groups
     }
 
     /// 最后一条可重新生成的助手消息 id：仅活跃会话 + 本会话非生成中时提供
@@ -1452,6 +1800,83 @@ private struct SessionMessageList: View {
     private var lastEditableUserMessageId: UUID? {
         guard isActive, !state.isGenerating else { return nil }
         return messages.last { $0.role == .user }?.id
+    }
+}
+
+// MARK: - 浮动导航簇（unpinned 时回底 / 用户消息跳转）
+
+/// 浮动导航簇：半透明底小控件簇，纵排三键——上一条用户消息 / 下一条用户消息 / 跳到最新。
+/// 复用现有 surface/stroke/icon 配色，hover 提亮；显示与否由父级 isPinned 控制（贴底淡出）。
+private struct MessageNavCluster: View {
+    let canGoPrevious: Bool
+    let canGoNext: Bool
+    let onLatest: () -> Void
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            NavClusterButton(systemName: "arrow.up", help: "上一条用户消息",
+                             enabled: canGoPrevious, action: onPrevious)
+            divider
+            NavClusterButton(systemName: "arrow.down", help: "下一条用户消息",
+                             enabled: canGoNext, action: onNext)
+            divider
+            NavClusterButton(systemName: "arrow.down.to.line", help: "跳到最新",
+                             enabled: true, action: onLatest)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                .fill(Theme.Colors.surfaceTrack)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+        )
+        .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity),
+                radius: Theme.Shadow.dockContactRadius,
+                y: Theme.Shadow.dockContactY)
+        .fixedSize()
+    }
+
+    private var divider: some View {
+        Rectangle()
+            .fill(Theme.Colors.chatStrokeStrong)
+            .frame(height: 0.5)
+            .padding(.horizontal, Theme.Spacing.sm)
+    }
+}
+
+/// 簇内单键：30×30 命中区，hover 叠 iconHoverBg 圆角底（与操作行按钮同语言）；禁用降透明度。
+private struct NavClusterButton: View {
+    let systemName: String
+    let help: String
+    let enabled: Bool
+    let action: () -> Void
+
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(Theme.Typography.text(12, .medium))
+                .foregroundColor(enabled
+                                 ? (hovered ? Theme.Colors.iconHover : Theme.Colors.contentSecondaryStrong)
+                                 : Theme.Colors.contentTertiary.opacity(0.45))
+                .frame(width: 30, height: 30)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                        .fill(hovered && enabled ? Theme.Colors.iconHoverBg : Color.clear)
+                        .padding(1.5)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
+        .help(help)
     }
 }
 
@@ -1790,6 +2215,8 @@ private struct ChatMessageRow: View, Equatable {
             // textSelection 支持按块选区复制（跨块选择与含公式段落不支持，见 MarkdownInlineText 结构限制）
             if !skipsTextPart {
                 AssistantMarkdownView(content: message.content)
+                    // 显式绑定消息身份：message.id 变化即重建视图，分批渲染游标随之重置。
+                    .id(message.id)
                     .textSelection(.enabled)
             }
         case .aborted:
@@ -1797,6 +2224,7 @@ private struct ChatMessageRow: View, Equatable {
             VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 if !skipsTextPart {
                     AssistantMarkdownView(content: message.content)
+                        .id(message.id)
                         .textSelection(.enabled)
                 }
                 AbortedTag()
