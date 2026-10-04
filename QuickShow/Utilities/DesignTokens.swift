@@ -194,6 +194,18 @@ enum Theme {
         /// 发送钮禁用态底：浅灰实底，与输入卡底保持 ≥1.2:1 对比（杜绝旧版 1.04:1 隐形事故）
         static let chatSendDisabledFill = aiAdaptive(dark: (1, 1, 1, 0.18), light: (0, 0, 0, 0.14))
 
+        // —— 2026-10 AI 窗视觉重设计（刻度轨导航 / 行内代码提亮 / 浮层深底）——
+        /// 行内代码 chip 底色：比面板亮一档（primary 0.10，旧值 surfaceTrack 0.06 在玻璃上近乎隐形）；
+        /// AttributedString 渲染管线不支持背景框描边，对比度由底色 + 主文字色承担
+        static let chatInlineCodeFill = Color.primary.opacity(0.10)
+        /// 刻度轨 tick 默认态：暗灰细短（浏览辅助，不抢内容）
+        static let chatTick = Color.primary.opacity(0.42)
+        /// 刻度轨 tick hover 提亮
+        static let chatTickHover = Color.primary.opacity(0.60)
+        /// 浏览导航浮层深底（预览胶囊 / 回底圆钮共用）：近不透明深面板，
+        /// 玻璃上稳定承载白字，与坞/工具条同一家族
+        static let chatNavFloatFill = aiAdaptive(dark: (0.15, 0.15, 0.165, 0.95), light: (0.98, 0.98, 0.985, 0.95))
+
         // 窗口边缘 rim light（方向性内描边：顶部受光最强 → 侧缘弱 → 底缘近无，
         // 受光方向 = 玻璃厚度感；替代旧版均匀 1px 灰线的无方向感）
         static let rimTopOpacity: Double = 0.70      // 顶缘白
@@ -290,6 +302,7 @@ enum Theme {
         static let insetCard: CGFloat = 10  // 内层卡（番茄钟台/日历卡）
         static let keyCap: CGFloat = 5      // 快捷键键帽
         static let userBubble: CGFloat = 18 // 用户消息气泡（groupCard 12 → 18，更圆的对话语言）
+        static let previewCapsule: CGFloat = 8 // 刻度轨预览胶囊（2026-10 重设计）
     }
     
     // MARK: - 布局尺寸（面板尺寸档位的单一来源；ScreenHelper.metrics 引用此处，逻辑不搬）
@@ -350,11 +363,35 @@ enum Theme {
         // 720~816pt 区间列宽 = 内容宽 − 56；≥816pt 列锁 760，两侧留白随窗自然生长
         static let chatReadingWideBreakpoint: CGFloat = 720
         static let chatReadingWidePadding: CGFloat = 28
-        // AI 对话浮岛输入坞：消息列表底部留白 = 坞高（卡片 ≈88 + 上下缝隙）+ 12pt 浮动缝，
-        // 保证滚到底时末条消息完整露出坞顶；滚动中消息从玻璃坞底下穿过（真 blur-through）
-        static let chatDockClearance: CGFloat = 124
+        // AI 对话浮岛输入坞：消息列表底部留白 = 坞高（输入行 44 + 工具行 ≈32 + 底缝 12 ≈ 88）+ 2pt 浮动缝，
+        // 保证滚到底时末条消息完整露出坞顶；底缘渐隐带（chatFadeMaskHeight）叠加在坞上方承担过渡，
+        // 滚动内容不再穿入坞下（2026-10 重设计：124 → 90，巨型空洞收敛）
+        static let chatDockClearance: CGFloat = 90
         // AI 对话思考过程（reasoning）展开区限高，超出内部滚动
         static let reasoningMaxHeight: CGFloat = 160
+
+        // —— 2026-10 AI 窗视觉重设计 ——
+        static let chatTopBarHeight: CGFloat = 36      // 顶栏高（28→36，图钉归入顶栏节奏）
+        static let chatInputHeight: CGFloat = 44       // 输入行高（56→44，坞体收紧）
+        static let chatFadeMaskHeight: CGFloat = 26    // 滚动区底缘渐隐带（止于坞顶）
+        static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
+        static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
+        // 右缘刻度轨 tick：默认 10×2 圆头；hover 13；当前条 16×3（accent）；
+        // 上下 ±7 隐形热区（2pt 细线本身无法命中）；视觉间距 22（含热区，VStack spacing = 22 − 2×7）
+        static let chatTickWidth: CGFloat = 10
+        static let chatTickHeight: CGFloat = 2
+        static let chatTickHoverWidth: CGFloat = 13
+        static let chatTickActiveWidth: CGFloat = 16
+        static let chatTickActiveHeight: CGFloat = 3
+        static let chatTickHitSlop: CGFloat = 7
+        static let chatTickSpacing: CGFloat = 22
+        static let chatTickTrailing: CGFloat = 4       // tick 右端距窗口右内缘（在阅读列边距带内）
+        static let chatTickMaxCount = 12               // 用户消息超限时按视口取样（当前锚点前后各 6）
+        static let chatTickPreviewGap: CGFloat = 12    // 预览胶囊与 tick 水平间距
+        static let chatTickPreviewMaxWidth: CGFloat = 230 // 预览胶囊单行截断上限
+        static let chatCodeBlockPaddingV: CGFloat = 12 // 代码块上下内边距（对称）
+        static let chatCodeBlockPaddingH: CGFloat = 14 // 代码块左右内边距
+        static let chatCodeBlockHeaderGap: CGFloat = 8 // 代码块 header 与代码区间距
     }
 
     // MARK: - 投影档位（浮起层级的值源：接触影贴身定锚 + 环境影拉开纵深，禁止单层贴身影）
@@ -366,6 +403,10 @@ enum Theme {
         static let dockAmbientRadius: CGFloat = 16   // 环境影 blur 32
         static let dockAmbientY: CGFloat = 12
         static let dockAmbientOpacity: Double = 0.08
+        // 浏览导航浮层（预览胶囊 / 回底圆钮）：单层轻影，不抢坞的纵深
+        static let navFloatRadius: CGFloat = 7       // blur 14
+        static let navFloatY: CGFloat = 2
+        static let navFloatOpacity: Double = 0.28
     }
     
     // MARK: - 动画时长（窗口尺寸动画是唯一尺寸时钟，其余为显隐/淡入淡出节奏）

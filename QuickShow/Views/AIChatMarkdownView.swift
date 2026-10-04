@@ -745,7 +745,7 @@ struct CodeBlockView: View {
     @State private var copied = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
             HStack(spacing: Theme.Spacing.lg) {
                 if let language, !language.isEmpty {
                     Text(language)
@@ -784,8 +784,9 @@ struct CodeBlockView: View {
             // 父 body 重算会被 SwiftUI 子视图值 diff 短路，大段高亮文本永不重建。
             CodeBlockText(code: code, language: language)
         }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.vertical, Theme.Spacing.xl)
+        // 2026-10 重设计：上下对称、左右一致（12/14，旧值 10/12 上下失衡、重心悬空）
+        .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+        .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
@@ -1247,10 +1248,12 @@ enum MarkdownInline {
                 result.append(piece)
 
             case let .code(value):
+                // 2026-10 重设计：底色 0.06→0.10（比面板亮一档，旧值在玻璃上近乎隐形），
+                // 字色 0.80→主文字色——行内代码 chip 对比度提升，一眼可辨
                 var piece = AttributedString(value)
                 piece.font = Theme.Typography.mono(12.5)
-                piece.foregroundColor = bodyColor
-                piece.backgroundColor = Theme.Colors.surfaceTrack
+                piece.foregroundColor = Theme.Colors.contentPrimary
+                piece.backgroundColor = Theme.Colors.chatInlineCodeFill
                 result.append(piece)
 
             case let .bold(inner):
@@ -1273,8 +1276,9 @@ enum MarkdownInline {
             case let .highlight(inner):
                 let start = result.endIndex
                 append(inner, into: &result, styledRuns: &styledRuns, bodyColor: bodyColor, size: size)
-                // 半透明强调色高亮（alpha 0.18 与 AppKit 路径 MarkdownInlineNS 对齐）。
-                result[start..<result.endIndex].backgroundColor = Theme.Colors.accent.opacity(0.18)
+                // 半透明强调色高亮（alpha 0.15，2026-10 重设计自 0.18 收敛降噪；
+                // 与 AppKit 路径 MarkdownInlineNS 对齐）
+                result[start..<result.endIndex].backgroundColor = Theme.Colors.accent.opacity(0.15)
 
             case let .subscript(inner):
                 let subSize = max(size - 2, 9)

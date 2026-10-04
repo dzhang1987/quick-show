@@ -8,12 +8,14 @@ import SwiftUI
 /// Wave 3 结构（2026-10 视觉质感专项）：
 /// - 左侧会话窄栏（⌘B 显隐，展开时窗口整体加宽，见 AIWindowManager.setSidebarVisible）
 /// - 消息列表铺满窗口主体：AI 回复无气泡铺底排版；落定助手消息下方常驻弱显示操作行（复制/重新生成）
-/// - 输入坞浮岛化：overlay 悬浮于消息列表之上，消息滚动时从玻璃坞底下穿过（真 blur-through，
-///   Liquid Glass 采样到真实内容流后折射/高光/自适应明度自动成立，不再有 fade 遮罩）
+/// - 输入坞浮岛化：overlay 悬浮于消息列表之上；滚动区底缘 26pt 渐隐带止于坞顶，
+///   内容在到达坞之前收没，绝不露出被裁的半截内容（2026-10 重设计取代 blur-through）
 /// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 激活态 accent rim（安静态零描边）
 /// - 输入坞安静/激活渐进披露：安静态（无草稿/未悬停）收敛为纯输入行，低频工具（剪贴板/
 ///   水位/压缩）隐去；控件语言为纯灰图标 + hover 圆底（图钉同款克制），chip 为弱化小字，
 ///   发送钮仅在可发送瞬间实心强调色（空态 = 无底灰箭头）——空态视觉重心让回中部引导区
+/// - 浏览导航（2026-10 重设计，取代竖排双↓胶囊簇）：右缘刻度轨（每条用户消息一枚 tick，
+///   当前条 accent 点亮；hover 弹预览胶囊、点击跳转）+ 坞正上方 ↓ 回底钮；浏览态显示、贴底隐藏
 /// - 快捷键 ⌘N/⌘B/⌘F 由 AIChatKeyMonitor（本地事件监听）接线；ESC/⌘K 仍走窗口层；
 ///   快捷键提示全部由各控件 .help() tooltip 承担（底部提示条已删）
 ///
@@ -56,7 +58,7 @@ struct AIChatView: View {
     @State private var inputEmpty = true
     /// 输入坞「生长区」实测高度（队列胶囊 + 图片附件条 + 剪贴板胶囊，输入卡上方段）：
     /// 由生长区 background 内 GeometryReader 经 preference 回写（macOS 13 无 onGeometryChange），
-    /// 供消息列表尾部留白 / 空态 overlay / 导出 toast / 浮动导航簇四处统一叠加——
+    /// 供消息列表尾部留白 / 空态 overlay / 导出 toast / 浏览导航四处统一叠加——
     /// 遮挡带随生长区动态跟随，末条消息永远完整露出坞顶。值单向流入留白计算，
     /// 绝不反向影响生长区布局（无反馈环）；生长区三段全空时容器移除，preference 回退 0。
     @State private var dockGrowthHeight: CGFloat = 0
@@ -351,8 +353,8 @@ struct AIChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。
-        // 消息滚动时从坞的玻璃底下穿过——glassEffect 采样到真实内容流，
-        // 折射/高光/自适应明度自动成立（glass-on-glass 退化为塑料块的根因即采样不到内容）。
+        // 滚动区底缘 26pt 渐隐带止于坞顶（见 SessionMessageList 的 mask），内容在到达坞之前
+        // 收没，不再从坞下穿过（2026-10 重设计：生硬裁切/溢出泄漏 → 渐隐过渡）。
         // 列表底部留白（chatDockClearance + 生长区实测高度）保证滚到底时末条消息完整露出
         // 坞顶——生长区（队列胶囊等）在坞顶向上生长，遮挡带随之动态跟随。
         .overlay(alignment: .bottom) {
@@ -380,20 +382,20 @@ struct AIChatView: View {
 
     // MARK: - 顶部拖动条（移动窗口 + 图钉）
 
-    /// 顶部拖动条：真实占位高 28pt 全宽，左段为可拖动区域，右端图钉按钮消费点击。
+    /// 顶部拖动条：36pt 全宽，左段为可拖动区域，右端图钉经 chatReadingColumn 对齐——
+    /// 图钉右缘 = 阅读列右缘（统一右基准线），与内容/坞卡同一条线，不再悬浮于真空中。
     private var windowTopBar: some View {
-        HStack(spacing: 0) {
-            WindowDragHandle()
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            pinButton
-                .padding(.trailing, Theme.Spacing.xxl)
-        }
-        .padding(.horizontal, Theme.Spacing.sm)
-        .frame(height: 28)
-        .frame(maxWidth: .infinity)
+        WindowDragHandle()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay(alignment: .trailing) {
+                pinButton
+                    .chatReadingColumn(alignment: .trailing)
+            }
+            .frame(height: Theme.Layout.chatTopBarHeight)
+            .frame(maxWidth: .infinity)
         // 纯透明热区：不铺 glass/底色/描边——顶栏只承担拖动与图钉命中功能，
         // 根部内容材质一铺到窗口圆角，恢复重构前的一体观感（告别独立「帽子」横带）。
-        // 28pt 高度与 WindowDragHandle 命中区完整保留，拖动/吸附功能不受影响。
+        // WindowDragHandle 命中区完整保留，拖动/吸附功能不受影响。
     }
 
     /// 图钉按钮：与主面板 StatusBarView 同一克制语言——静止 iconRest 灰、hover 提亮 + 圆底，
@@ -631,30 +633,37 @@ struct AIChatView: View {
                         Text(inputPlaceholder)
                             .font(Theme.Typography.text(13))
                             .foregroundColor(Theme.Colors.idleText)
-                            // 与 textContainerInset 同步：光标距卡边 18pt（旧 12pt 太贴边）
+                            // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 配 44pt 行高近居中
                             .padding(.horizontal, Theme.Spacing.section)
-                            .padding(.vertical, Theme.Spacing.xl)
+                            .padding(.vertical, Theme.Spacing.xxl)
                             .allowsHitTesting(false)
                     }
                 }
-                .frame(height: 56)
+                .frame(height: Theme.Layout.chatInputHeight)
 
+                // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 模型 chip / 思考 chip /
+                // 水位小字 / 压缩（低频工具组随 showDockSecondaryTools 显隐）；
+                // 右组 = 剪贴板（hover 坞浮现）+ 发送钮。元素间距统一 lg(8)。
                 HStack(spacing: Theme.Spacing.lg) {
                     attachMenuButton
                     modelChip
                     thinkingChip
-                    Spacer(minLength: 0)
-                    // 低频工具组（压缩/水位/剪贴板）：安静态整体隐去——保留占位、纯透明度
+                    // 低频工具组（水位/压缩）：安静态整体隐去——保留占位、纯透明度
                     // 渐变、布局零跳动；悬停/输入/附件/生成中淡入，水位 >0.8 破格常显
                     HStack(spacing: Theme.Spacing.lg) {
-                        compactButton
                         contextWatermarkIndicator
-                        clipboardButton
+                        compactButton
                     }
                     .opacity(showDockSecondaryTools ? 1 : 0)
                     .allowsHitTesting(showDockSecondaryTools)
                     .accessibilityHidden(!showDockSecondaryTools)
                     .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
+                    Spacer(minLength: 0)
+                    clipboardButton
+                        .opacity(showDockSecondaryTools ? 1 : 0)
+                        .allowsHitTesting(showDockSecondaryTools)
+                        .accessibilityHidden(!showDockSecondaryTools)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                     sendButton
                 }
                 .padding(.horizontal, Theme.Spacing.xl)
@@ -689,8 +698,8 @@ struct AIChatView: View {
             }
         }
         // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
-        // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部
-        .padding(.top, Theme.Spacing.xxl)
+        // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部。
+        // 顶部零 padding：坞顶上方过渡由滚动区底缘渐隐带承担；底部 12pt 为坞与窗缘的呼吸缝
         .padding(.bottom, Theme.Spacing.xxl)
         .chatReadingColumn()
         // 坞区 hover：进入时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径），
@@ -893,7 +902,7 @@ struct AIChatView: View {
         }
     }
 
-    /// 立即压缩入口：水位左侧的轻量图标钮，pinButton 同款克制语言——静态纯灰图标无底，
+    /// 立即压缩入口：水位小字右侧的轻量图标钮，pinButton 同款克制语言——静态纯灰图标无底，
     /// hover 才出圆底提亮（比剪贴板/发送的常驻实底轻一档，与水位的「态势感知」同级）。
     /// 仅在有上下文数据（水位非 nil）时出现，与水位同生共死，右缘布局不插拔跳动；
     /// 并随水位一同归入低频工具组：安静态整体隐去（见 showDockSecondaryTools）；
@@ -925,40 +934,20 @@ struct AIChatView: View {
         }
     }
 
-    /// 上下文水位指示：右缘紧凑数字（已用 / 窗口，自适应 k/M 单位）+ 无底衬微光细条
-    /// （与一瞥倒计时同「光丝」语言，2.5pt）。nil 时完全隐藏不占位；
-    /// 安静态随低频工具组整体隐去，唯 ratio > 0.8 破格常显——需要警示的时刻不沉默；
-    /// 警示仍只交给那根线（细条进红），数字恒保持灰调，不喊。
+    /// 上下文水位：低调小字（10pt SF Mono 三级灰），归入工具行左组、思考 chip 之后，
+    /// 不与发送区抢位；安静态随低频工具组整体隐去，唯 ratio > 0.8 破格常显且小字进警示色——
+    /// 需要警示的时刻不沉默。
+    /// 2026-10 重设计：拆除旧版「数字 + hidden 文本撑宽 + overlay 细条」的叠层结构
+    /// （数字上的竖线残影根因），降级为纯单行小字。
     @ViewBuilder
     private var contextWatermarkIndicator: some View {
         if let watermark = state.contextWatermark {
-            let label = "\(formatTokenCount(watermark.usedTokens)) / \(formatTokenCount(watermark.windowTokens))"
-            VStack(spacing: Theme.Spacing.xxs) {
-                watermarkText(label)
-                // 细条宽锚定上方数字宽：hidden 文本占位撑出同宽，overlay 内按 ratio 填充；
-                // 无底衬轨道（去掉多余淡胶囊底衬），只剩已用段光丝——0 用量时细条归零不露面
-                watermarkText(label)
-                    .hidden()
-                    .overlay {
-                        GeometryReader { geo in
-                            Capsule(style: .continuous)
-                                .fill(watermark.ratio > 0.8 ? Theme.Colors.statusWarning : Theme.Colors.idleText)
-                                .frame(width: geo.size.width * min(max(watermark.ratio, 0), 1))
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
-                    }
-                    .frame(height: Theme.Layout.glanceProgressHeight)
-            }
-            .fixedSize()
-            .help("上下文用量（已用 tokens / 窗口上限）")
+            Text("\(formatTokenCount(watermark.usedTokens)) / \(formatTokenCount(watermark.windowTokens))")
+                .font(Theme.Typography.mono(10))
+                .foregroundColor(watermark.ratio > 0.8 ? Theme.Colors.statusWarning : Theme.Colors.contentTertiary)
+                .fixedSize()
+                .help("上下文用量（已用 tokens / 窗口上限）")
         }
-    }
-
-    /// 水位数字样式：SF Mono 10pt 三级灰（纯数字走 mono，与全项目字体族策略一致）。
-    private func watermarkText(_ text: String) -> Text {
-        Text(text)
-            .font(Theme.Typography.mono(10))
-            .foregroundColor(Theme.Colors.contentTertiary)
     }
 
     /// token 数紧凑格式化：<1k 原样；≥1k 用 k、≥1M 用 M，整倍去小数（512k），否则一位小数（12.3k）。
@@ -1682,7 +1671,7 @@ private struct SessionMessageList: View {
     let onTapImage: (ChatImageAttachment) -> Void
     @Binding var scrollSnapshots: [UUID: ScrollSnapshot]
     let scrollCoordinator: ChatScrollCoordinator
-    /// 输入坞生长区实测高度（父级统一传入）：尾部留白与浮动导航簇的底部预算同步叠加，
+    /// 输入坞生长区实测高度（父级统一传入）：尾部留白、底缘渐隐带与浏览导航的底部预算同步叠加，
     /// 遮挡带随坞体向上生长动态跟随。生长区只属于当前活跃会话的输入坞，但 pendingQueue
     /// 本就按会话隔离读取，高度值对全部常驻实例统一应用（非活跃会话 opacity=0 不可见）。
     let dockGrowthHeight: CGFloat
@@ -1696,8 +1685,10 @@ private struct SessionMessageList: View {
     /// 用户输入离底 → false。内容高度变化永不直接改写本态。
     @State private var isPinned = true
     /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
-    /// 切走时作为恢复锚点，浮动簇 ↑/↓ 导航也据此定位。
+    /// 切走时作为恢复锚点，刻度轨「当前条」判定也据此定位。
     @State private var topVisibleMessageID: UUID?
+    /// 刻度轨 hover 态：被悬停 tick 的消息 id（驱动 tick 提亮 + 预览胶囊弹出）。
+    @State private var hoveredTickId: UUID?
     /// 消息分组缓存（messages 未变则复用上次分组；见 MessageGroupingCache）。
     @State private var groupingCache = MessageGroupingCache()
     /// 已消费的跳底信号时间戳（消费式标记）：挂载/重建时对照 state.scrollJumpRequests，
@@ -1747,6 +1738,12 @@ private struct SessionMessageList: View {
         // onAppear/onDisappear 哨兵的可靠感知层。
         GeometryReader { viewport in
         ScrollViewReader { proxy in
+            // 底缘渐隐带的绝对位置（换算为渐变 location 比例，钉死数学、不依赖布局分配）：
+            // 顶部→fadeStart 全不透明；fadeStart→fadeEnd 26pt 渐隐；fadeEnd→底部（坞区）全透明
+            let viewportHeight = max(viewport.size.height, 1)
+            let dockBand = Theme.Layout.chatDockClearance + dockGrowthHeight
+            let fadeEndLocation = min(max((viewportHeight - dockBand) / viewportHeight, 0), 1)
+            let fadeStartLocation = min(max((viewportHeight - dockBand - Theme.Layout.chatFadeMaskHeight) / viewportHeight, 0), 1)
             ScrollView(.vertical, showsIndicators: false) {
                 // 手动虚拟化容器（VStack 全行常驻）：LazyVStack 在 macOS 13 上回收远行
                 // 的高度估算归零/失准，实例化-回收的「估算↔真实」差一次性结算成 doc 骤变
@@ -1812,12 +1809,11 @@ private struct SessionMessageList: View {
                     // 尾部整体作为 LazyVStack 的单个子视图：把原先 4 个尾部子项的 4×36pt 组间距收敛为
                     // 1 个，其余 3×36 的叠加被消除。
                     //
-                    // 间距算术（实测坐实 LazyVStack 组间距对尾部子项生效）：本子视图与「末条消息组」
-                    // 之间仍有 1×chatGroupGap(36)。为让「末条消息 → 视口底」回到重构前 124pt 量级，
-                    // 坞区留白扣掉该 36 与内嵌容差：36 + (124−18−36) + 18 + 1 = 125pt。
+                    // 间距算术：本子视图与「末条消息组」之间仍有 1×chatGroupGap(36)。
+                    // 2026-10 重设计后坞区收敛（chatDockClearance 124→90 + 底缘渐隐带）：
+                    // 36 + (90−18−36) + 18 + 1 ≈ 91pt，巨型空洞消除，末条消息与坞体自然衔接。
                     VStack(spacing: 0) {
-                        // 坞区留白（有效值 = 组间距 36 + 此 spacer + 容差 18 ≈ 124）：
-                        // 基础预算 124pt 只覆盖输入卡本体；队列胶囊等生长区在坞顶向上生长，
+                        // 坞区留白：基础预算 90pt 只覆盖输入卡本体；队列胶囊等生长区在坞顶向上生长，
                         // 此处叠加其实测高度（dockGrowthHeight），滚到底时末条消息永远完整
                         // 露出遮挡带顶。留白随胶囊增删平滑过渡（与生长区动画同时长）；
                         // pinned 时由 coordinator 的内容高度路径自动保持贴底，unpinned
@@ -1844,6 +1840,24 @@ private struct SessionMessageList: View {
                 .background(ChatScrollBridgeView(sessionId: sessionId, coordinator: scrollCoordinator))
             }
             .coordinateSpace(name: scrollSpaceName)
+            // 底缘渐隐带（2026-10 重设计）：滚动内容在坞顶上方 26pt 内渐隐收没，
+            // 坞下不再露出被裁的半截内容（替代生硬裁切）。
+            // 关键纪律：mask 只挂 ScrollView 本体——导航 overlay 挂在其后（见下方两个
+            // .overlay），坞在更外层 mainColumn overlay，均不被罩住。
+            // 实现双保险（修复顶部 ~130px 暗带事故）：
+            // ① 遮罩色用不透明白而非黑——mask 在某些渲染路径按亮度解释（黑=暗=半透明遮蔽），
+            //    白色在 alpha/亮度两种语义下恒为「全显示」；
+            // ② 单条 LinearGradient 绝对 stops 替代 VStack 三段堆叠——渐隐带位置由视口高度
+            //    数学换算钉死，不依赖 flexible 视图的布局分配（macOS 13 黑盒行为排除）。
+            .mask(
+                LinearGradient(stops: [
+                    .init(color: .white, location: 0),
+                    .init(color: .white, location: fadeStartLocation),
+                    .init(color: .clear, location: fadeEndLocation),
+                    .init(color: .clear, location: 1)
+                ], startPoint: .top, endPoint: .bottom)
+            )
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
             // 首帧视口自适应：把视口高度注入环境，供消息内 AssistantMarkdownView 估算「一屏块数」。
             .environment(\.chatViewportHeight, viewport.size.height)
             // 行级几何 → 真实视口顶部消息：每帧全量上报已实现行 frame，算出与视口相交且
@@ -1898,10 +1912,25 @@ private struct SessionMessageList: View {
             .onChange(of: isActive) { active in
                 if !active { saveSnapshot() }
             }
-            // 浮动导航簇：unpinned 且活跃时于内容区右下角浮现，0.15s 淡入淡出。
+            // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套）：
+            // unpinned（浏览态）且活跃时显示，0.15s 淡入淡出；贴底时整体隐藏。
+            // 两件套各自挂 overlay（均在 mask 之后，不被渐隐罩住）：
+            // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick；
+            // ② ↓ 回底钮：坞正上方、右缘贴统一右基准线。
+            .overlay(alignment: .trailing) {
+                if !isPinned, isActive {
+                    tickRail(proxy)
+                        .padding(.trailing, Theme.Layout.chatTickTrailing)
+                        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight)
+                        .transition(.opacity)
+                }
+            }
             .overlay(alignment: .bottom) {
                 if !isPinned, isActive {
-                    navClusterOverlay(proxy)
+                    toBottomButton(proxy)
+                        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight + Theme.Layout.chatNavDockGap)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+                        .chatReadingColumn(alignment: .trailing)
                         .transition(.opacity)
                 }
             }
@@ -2036,58 +2065,169 @@ private struct SessionMessageList: View {
         }
     }
 
-    // MARK: - 浮动导航簇（unpinned 时的回底/用户消息跳转）
+    // MARK: - 浏览导航（刻度轨 + 预览胶囊 + 回底钮；unpinned 浏览态显示）
 
     // topVisibleMessageID 现为 @State，由行级几何信号（updateRowFrames）维护，见上方声明。
 
-    /// 视口锚点之前的最后一条 user 消息（「上一条用户消息」目标）。
-    private var previousUserMessageID: UUID? {
-        guard let anchor = topVisibleMessageID,
-              let index = messages.firstIndex(where: { $0.id == anchor }) else { return nil }
-        return messages[..<index].last { $0.role == .user }?.id
+    /// 刻度轨数据源：当前会话全部用户消息；超过 chatTickMaxCount 时按视口取样——
+    /// 以「当前条」锚点为中心保留前后各 6 条，避免长会话 tick 过密失去辨识度。
+    private var tickMessages: [ChatMessage] {
+        let users = messages.filter { $0.role == .user }
+        let limit = Theme.Layout.chatTickMaxCount
+        guard users.count > limit else { return users }
+        let anchorId = currentTickMessageId ?? users.last?.id
+        guard let anchorId, let index = users.firstIndex(where: { $0.id == anchorId }) else {
+            return Array(users.suffix(limit))
+        }
+        let half = limit / 2
+        let lower = max(0, min(index - half, users.count - limit))
+        return Array(users[lower ..< lower + limit])
     }
 
-    /// 视口锚点之后的第一条 user 消息（「下一条用户消息」目标）。
-    private var nextUserMessageID: UUID? {
+    /// 当前查看的用户消息 tick：视口锚点（含自身）所属的最近一条用户消息，
+    /// 随滚动经行级几何信号实时更新；无锚点时兜底取最后一条用户消息。
+    private var currentTickMessageId: UUID? {
         guard let anchor = topVisibleMessageID,
-              let index = messages.firstIndex(where: { $0.id == anchor }) else { return nil }
-        let start = messages.index(after: index)
-        guard start < messages.endIndex else { return nil }
-        return messages[start...].first { $0.role == .user }?.id
+              let index = messages.firstIndex(where: { $0.id == anchor }) else {
+            return messages.last { $0.role == .user }?.id
+        }
+        return messages[...index].last { $0.role == .user }?.id
     }
 
-    /// 浮动簇容器：右下角对齐到内容列右缘、浮于输入坞上方（同输入坞限宽/居中）。
+    /// 右缘刻度轨：tick 垂直均匀排布（视觉间距 22 = VStack spacing + 双向热区），
+    /// 贴窗口右内缘（chatTickTrailing，位于阅读列边距带内、不侵入内容区）。
     @ViewBuilder
-    private func navClusterOverlay(_ proxy: ScrollViewProxy) -> some View {
-        let previousID = previousUserMessageID
-        let nextID = nextUserMessageID
-        MessageNavCluster(
-            canGoPrevious: previousID != nil,
-            canGoNext: nextID != nil,
-            onLatest: {
-                scrollCoordinator.setPinned(sessionId, true)
-                scrollToBottom(proxy, animated: true)
-            },
-            onPrevious: {
-                guard let previousID else { return }
-                // 程序化遮蔽：0.2s 动画期间的逐帧 bounds 变化不计为用户滚动
-                //（用户点导航跳转属于「浏览」而非「滚动」，pin 态由落点几何自然决定）。
-                scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(previousID, anchor: .top) }
-                }
-            },
-            onNext: {
-                guard let nextID else { return }
-                scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(nextID, anchor: .top) }
+    private func tickRail(_ proxy: ScrollViewProxy) -> some View {
+        VStack(spacing: Theme.Layout.chatTickSpacing - 2 * Theme.Layout.chatTickHitSlop) {
+            ForEach(tickMessages) { message in
+                tickView(message, proxy: proxy)
+            }
+        }
+    }
+
+    /// 单枚 tick：默认 10×2 暗灰圆头；hover 提亮加长到 13；
+    /// 当前查看条 16×3 accent 青点亮（与 pinned 图钉/可发送钮同一状态色语义）。
+    /// 上下 ±7pt 隐形热区（2pt 细线本身无法命中）；点击跳转该条消息（程序化遮蔽窗内）。
+    @ViewBuilder
+    private func tickView(_ message: ChatMessage, proxy: ScrollViewProxy) -> some View {
+        let isCurrent = message.id == currentTickMessageId
+        let hovered = hoveredTickId == message.id
+        Capsule(style: .continuous)
+            .fill(isCurrent ? Theme.Colors.accent
+                  : (hovered ? Theme.Colors.chatTickHover : Theme.Colors.chatTick))
+            .frame(width: isCurrent ? Theme.Layout.chatTickActiveWidth
+                   : (hovered ? Theme.Layout.chatTickHoverWidth : Theme.Layout.chatTickWidth),
+                   height: isCurrent ? Theme.Layout.chatTickActiveHeight : Theme.Layout.chatTickHeight)
+            .padding(.vertical, Theme.Layout.chatTickHitSlop)
+            .contentShape(Rectangle())
+            .overlay(alignment: .trailing) {
+                // 预览胶囊：hover 弹出，锚定 tick 左侧 12pt、与 tick 垂直对齐
+                //（overlay trailing 对齐 = 水平贴右、垂直居中，中心即 tick 视觉中心）；
+                // 0.15s 透明度 + 5pt 横向位移过渡；纯图片等空文本消息不弹胶囊
+                let previewText = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+                if hovered && !previewText.isEmpty {
+                    tickPreviewCapsule(previewText)
+                        .padding(.trailing, (isCurrent ? Theme.Layout.chatTickActiveWidth
+                                 : Theme.Layout.chatTickHoverWidth) + Theme.Layout.chatTickPreviewGap)
+                        .transition(.opacity.combined(with: .offset(x: 5)))
                 }
             }
-        )
-        // 底部预算叠加生长区高度：unpinned 浏览历史时簇与队列胶囊同在，避免叠压；
-        // 高度随生长区增删平滑过渡
-        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight + Theme.Spacing.lg)
-        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
-        .chatReadingColumn(alignment: .trailing)
+            .onHover { hovering in
+                withAnimation(.easeOut(duration: 0.15)) { hoveredTickId = hovering ? message.id : nil }
+            }
+            .onTapGesture {
+                // 程序化遮蔽：0.2s 动画期间的逐帧 bounds 变化不计为用户滚动
+                // （点 tick 跳转属于「浏览」而非「滚动」，pin 态由落点几何自然决定）
+                scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
+                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(message.id, anchor: .top) }
+                }
+            }
+            // 注意：刻意不挂 .help()——系统 tooltip 与预览胶囊语义冗余，
+            // 且 tooltip 会越出窗口边界（贴右内缘的 tick 没有系统 tip 的落点空间）
+            .animation(.easeOut(duration: 0.15), value: hovered)
+            .animation(.easeOut(duration: 0.15), value: isCurrent)
+    }
+
+    /// 预览胶囊：深面板底 + 0.5pt 描边 + 8pt 圆角 + 轻投影，白字单行截断；
+    /// 右端小三角指回 tick（方向性锚点）。
+    ///
+    /// 布局关键（空壳事故根因）：本视图挂在 tick 的 overlay 里，SwiftUI overlay 会把
+    /// 宿主 tick 的窄尺寸（≈10~16pt）作为宽度 proposal 传进来，Text 会被压扁截断、
+    /// 只剩描边空壳。修复 = 先 frame(maxWidth:) 再 fixedSize：fixedSize 让本视图忽略
+    /// 宿主 proposal，frame(maxWidth:) 在自由 proposal 下把超长文本钳到上限截断。
+    /// 顺序不可换（fixedSize 在前会让 frame 重新收到窄 proposal，前功尽弃）。
+    private func tickPreviewCapsule(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Typography.text(Theme.Typography.footnote))
+            .foregroundColor(Theme.Colors.contentPrimary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: Theme.Layout.chatTickPreviewMaxWidth - Theme.Spacing.xl * 2)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
+                    .fill(Theme.Colors.chatNavFloatFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
+                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+            )
+            .overlay(alignment: .trailing) {
+                TickPreviewTail()
+                    .fill(Theme.Colors.chatNavFloatFill)
+                    .frame(width: 5, height: 8)
+                    .offset(x: 4.5)
+            }
+            .shadow(color: .black.opacity(Theme.Shadow.navFloatOpacity),
+                    radius: Theme.Shadow.navFloatRadius,
+                    y: Theme.Shadow.navFloatY)
+    }
+
+    /// ↓ 回到底部：浏览态显示；坞正上方、右缘贴统一右基准线；
+    /// 点击回底（复用现有程序化贴底滚动）。
+    /// 材质（Safari 后退钮同款原生玻璃语言）：
+    /// - 26+：GlassSurface 走官方 glassEffect(.regular)，系统自带 vibrancy/顶部高光/rim/投影；
+    /// - 13~25 降级：ultraThinMaterial + 0.5pt 描边（GlassSurface 内建）+ 顶部受光 rim（此处叠加）
+    ///   + 双层轻投影，营造玻璃感；
+    /// - 箭头 bold 纯白（iconHover 0.95），与玻璃底强对比。
+    private func toBottomButton(_ proxy: ScrollViewProxy) -> some View {
+        Button {
+            scrollCoordinator.setPinned(sessionId, true)
+            scrollToBottom(proxy, animated: true)
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(Theme.Typography.text(12, .bold))
+                .foregroundColor(Theme.Colors.iconHover)
+                .frame(width: Theme.Layout.chatToBottomButtonSize, height: Theme.Layout.chatToBottomButtonSize)
+                .contentShape(Circle())
+                .modifier(GlassSurface(shape: Circle()))
+                // 降级路径补玻璃感：顶部受光 rim（26+ 由系统玻璃自带 specular，不叠加防双边缘）
+                .overlay {
+                    if !OSFeatures.liquidGlass {
+                        Circle()
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [.white.opacity(Theme.Colors.rimTopOpacity * 0.5),
+                                             .white.opacity(0)],
+                                    startPoint: .top,
+                                    endPoint: .center
+                                ),
+                                lineWidth: 0.5
+                            )
+                            .allowsHitTesting(false)
+                    }
+                }
+                .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity),
+                        radius: Theme.Shadow.dockContactRadius,
+                        y: Theme.Shadow.dockContactY)
+                .shadow(color: .black.opacity(Theme.Shadow.dockAmbientOpacity),
+                        radius: Theme.Shadow.dockAmbientRadius,
+                        y: Theme.Shadow.dockAmbientY)
+        }
+        .buttonStyle(.plain)
+        .help("回到底部")
     }
 
     // MARK: - 分组 / 可重生成
@@ -2159,80 +2299,17 @@ private struct ChatVirtualRow<Content: View>: View {
     }
 }
 
-// MARK: - 浮动导航簇（unpinned 时回底 / 用户消息跳转）
+// MARK: - 浏览导航预览胶囊小三角
 
-/// 浮动导航簇：半透明底小控件簇，纵排三键——上一条用户消息 / 下一条用户消息 / 跳到最新。
-/// 复用现有 surface/stroke/icon 配色，hover 提亮；显示与否由父级 isPinned 控制（贴底淡出）。
-private struct MessageNavCluster: View {
-    let canGoPrevious: Bool
-    let canGoNext: Bool
-    let onLatest: () -> Void
-    let onPrevious: () -> Void
-    let onNext: () -> Void
-
-    var body: some View {
-        VStack(spacing: 0) {
-            NavClusterButton(systemName: "arrow.up", help: "上一条用户消息",
-                             enabled: canGoPrevious, action: onPrevious)
-            divider
-            NavClusterButton(systemName: "arrow.down", help: "下一条用户消息",
-                             enabled: canGoNext, action: onNext)
-            divider
-            NavClusterButton(systemName: "arrow.down.to.line", help: "跳到最新",
-                             enabled: true, action: onLatest)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.surfaceTrack)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-        )
-        .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity),
-                radius: Theme.Shadow.dockContactRadius,
-                y: Theme.Shadow.dockContactY)
-        .fixedSize()
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(Theme.Colors.chatStrokeStrong)
-            .frame(height: 0.5)
-            .padding(.horizontal, Theme.Spacing.sm)
-    }
-}
-
-/// 簇内单键：30×30 命中区，hover 叠 iconHoverBg 圆角底（与操作行按钮同语言）；禁用降透明度。
-private struct NavClusterButton: View {
-    let systemName: String
-    let help: String
-    let enabled: Bool
-    let action: () -> Void
-
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(Theme.Typography.text(12, .medium))
-                .foregroundColor(enabled
-                                 ? (hovered ? Theme.Colors.iconHover : Theme.Colors.contentSecondaryStrong)
-                                 : Theme.Colors.contentTertiary.opacity(0.45))
-                .frame(width: 30, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                        .fill(hovered && enabled ? Theme.Colors.iconHoverBg : Color.clear)
-                        .padding(1.5)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
-        }
-        .help(help)
+/// 预览胶囊右端指向 tick 的小三角（方向性锚点）。
+private struct TickPreviewTail: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.midY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -2276,7 +2353,8 @@ private struct ChatMessageRow: View, Equatable {
             HStack(alignment: .top, spacing: 0) {
                 if message.role == .user { Spacer(minLength: Theme.Spacing.panel) }
                 content
-                if message.role == .assistant { Spacer(minLength: Theme.Spacing.panel) }
+                // 2026-10 重设计：助手侧尾部 Spacer 已移除——正文/代码块右缘
+                // 与用户气泡、输入坞统一到同一条右基准线（阅读列右缘，±0）
             }
             if showsActionRow {
                 actionRow
@@ -3200,10 +3278,11 @@ private struct ChatInputTextView: NSViewRepresentable {
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [NSView.AutoresizingMask.width]
-        // 内边距与 SwiftUI 占位文案 padding 对齐：左右 18pt（section），光标不再贴卡边
+        // 内边距与 SwiftUI 占位文案 padding 对齐：左右 18pt（section），垂直 12pt
+        //（配 44pt 输入行高视觉近居中；56→44 收紧后同步调整）
         textView.textContainerInset = NSSize(
             width: Theme.Spacing.section,
-            height: Theme.Spacing.xl
+            height: Theme.Spacing.xxl
         )
         textView.textContainer?.lineFragmentPadding = 0
         // 追加注册图片拖放类型（不影响默认文本拖入；jpeg 无内置常量，用 UTI 字符串）

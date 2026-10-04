@@ -1520,14 +1520,14 @@ enum MarkdownInlineNS {
         NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
-    /// 行内代码底色：surfaceTrack = Color.primary.opacity(0.06) 的 NSColor 近似。
+    /// 行内代码底色：chatInlineCodeFill = Color.primary.opacity(0.10) 的 NSColor 近似。
     private static var codeBackground: NSColor {
-        NSColor.labelColor.withAlphaComponent(0.06)
+        NSColor.labelColor.withAlphaComponent(0.10)
     }
 
-    /// 高亮（`<mark>`）底色：半透明强调色（与 SwiftUI 路径同 accent 色系）。
+    /// 高亮（`<mark>`）底色：半透明强调色（与 SwiftUI 路径同 accent 色系，0.15 降噪）。
     private static var highlightBackground: NSColor {
-        accentColor.withAlphaComponent(0.18)
+        accentColor.withAlphaComponent(0.15)
     }
 
     /// accent 的 NSColor 近似：优先取当前主题 accent 解析值，失败退回系统 linkColor。
