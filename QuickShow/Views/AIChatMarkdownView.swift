@@ -744,7 +744,7 @@ struct CodeBlockView: View {
                 // （鼠标离开时按钮随 hovered 隐去，不会残留悬空的第二按钮）。
                 Button(action: copyCode) {
                     HStack(spacing: Theme.Spacing.xs) {
-                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        Image(systemName: copied ? "checkmark" : "square.on.square")
                             .font(Theme.Typography.text(9.5, .medium))
                         Text(copied ? "已复制" : "复制")
                             .font(Theme.Typography.text(9.5, .medium))

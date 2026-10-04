@@ -193,7 +193,7 @@ struct AIChatMapCardView: View {
                 openInMaps()
             }
             MapCardActionButton(
-                systemName: copied ? "checkmark" : "doc.on.doc",
+                systemName: copied ? "checkmark" : "square.on.square",
                 title: copied ? "已复制" : "复制坐标",
                 tint: copied ? Theme.Colors.accent : Theme.Colors.contentTertiary,
                 help: "复制中心点经纬度"

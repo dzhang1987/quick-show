@@ -213,7 +213,7 @@ private struct ToolCallResultBlock: View {
                 if hovered || copied {
                     Button(action: copyResult) {
                         HStack(spacing: Theme.Spacing.xs) {
-                            Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            Image(systemName: copied ? "checkmark" : "square.on.square")
                                 .font(Theme.Typography.text(9.5, .medium))
                             Text(copied ? "已复制" : "复制")
                                 .font(Theme.Typography.text(9.5, .medium))

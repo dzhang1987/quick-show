@@ -1991,8 +1991,8 @@ private struct ChatMessageRow: View, Equatable {
     @State private var editHeight: CGFloat = 18
 
     var body: some View {
-        // 消息内容 + 下方常驻操作行（与正文底部留 10pt 成组间距；用户消息整体右对齐）
-        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Theme.Spacing.xl) {
+        // 消息内容 + 下方紧凑操作行（紧贴正文底部 3pt；用户消息整体右对齐）
+        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Theme.Spacing.xs) {
             HStack(alignment: .top, spacing: 0) {
                 if message.role == .user { Spacer(minLength: Theme.Spacing.panel) }
                 content
@@ -2016,7 +2016,7 @@ private struct ChatMessageRow: View, Equatable {
     private var rowContextMenu: some View {
         if !message.content.isEmpty {
             Button { copyContent() } label: {
-                Label("复制消息", systemImage: "doc.on.doc")
+                Label("复制消息", systemImage: "square.on.square")
             }
         }
         if message.role == .user, canEditLastRound {
@@ -2032,7 +2032,7 @@ private struct ChatMessageRow: View, Equatable {
 
     /// 操作行渲染条件：
     /// - 助手：落定终态（done/aborted；失败态有独立重试卡片，流式期间不提供半截内容的复制入口）
-    /// - 用户：有文本可复制，或是可撤回/编辑的最后一轮（撤回/编辑按钮随 hover 浮现）
+    /// - 用户：有文本可复制，或是可撤回/编辑的最后一轮
     /// 就地编辑态一律隐藏（编辑操作由编辑气泡内按钮承担）。
     private var showsActionRow: Bool {
         if editing { return false }
@@ -2052,13 +2052,13 @@ private struct ChatMessageRow: View, Equatable {
     }
 
     /// 常驻操作行：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」；
-    /// 会话内最后一条 user 消息附「撤回 / 编辑」（随整行 hover 浮现，生成中不显示）。
+    /// 会话内最后一条 user 消息附「撤回 / 编辑」（与复制一致常驻，生成中不显示）。
     /// 弱化常驻：图标静止 38% 灰、整行 hover 提亮 85%；按钮自身 hover 叠 0.08 圆角底，不抢正文层级。
     private var actionRow: some View {
-        HStack(spacing: Theme.Spacing.md) {
+        HStack(spacing: Theme.Spacing.sm) {
             if !message.content.isEmpty {
                 ChatActionIconButton(
-                    systemName: copied ? "checkmark" : "doc.on.doc",
+                    systemName: copied ? "checkmark" : "square.on.square",
                     tint: copied ? Theme.Colors.accent : nil,
                     help: "复制",
                     rowHovered: rowHovered,
@@ -2076,26 +2076,22 @@ private struct ChatMessageRow: View, Equatable {
                 )
             }
 
-            // 撤回/编辑：常驻占位 + opacity 随 hover 显隐（宽度恒占，避免 hover 时整行左右跳动）
+            // 撤回/编辑：与复制行为一致——常驻可见（静止 38% 灰、行 hover 提亮），不做 hover 浮现
             if message.role == .user, canEditLastRound {
-                Group {
-                    ChatActionIconButton(
-                        systemName: "pencil",
-                        tint: nil,
-                        help: "编辑并重发",
-                        rowHovered: rowHovered,
-                        action: beginEdit
-                    )
-                    ChatActionIconButton(
-                        systemName: "arrow.uturn.backward",
-                        tint: nil,
-                        help: "撤回该轮（内容回填输入框）",
-                        rowHovered: rowHovered,
-                        action: onWithdraw
-                    )
-                }
-                .opacity(rowHovered ? 1 : 0)
-                .allowsHitTesting(rowHovered)
+                ChatActionIconButton(
+                    systemName: "pencil",
+                    tint: nil,
+                    help: "编辑并重发",
+                    rowHovered: rowHovered,
+                    action: beginEdit
+                )
+                ChatActionIconButton(
+                    systemName: "arrow.uturn.backward",
+                    tint: nil,
+                    help: "撤回该轮（内容回填输入框）",
+                    rowHovered: rowHovered,
+                    action: onWithdraw
+                )
             }
         }
     }
@@ -2315,7 +2311,7 @@ private struct ChatMessageRow: View, Equatable {
     }
 }
 
-/// 操作行图标钮：13pt hierarchical 符号、26×26 命中区；
+/// 操作行图标钮：10pt hierarchical 符号、18×18 命中区；
 /// 图标色随行 hover 提亮（0.38 → 0.85），自身 hover 叠 primary 0.08 圆角底（macOS 工具图标惯例）。
 private struct ChatActionIconButton: View {
     let systemName: String
@@ -2331,12 +2327,12 @@ private struct ChatActionIconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(Theme.Typography.text(13, .medium))
+                .font(Theme.Typography.text(10, .medium))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundColor(tint ?? Color.primary.opacity(rowHovered ? 0.85 : 0.38))
-                .frame(width: 26, height: 26)
+                .frame(width: 18, height: 18)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: 4, style: .continuous)
                         .fill(Color.primary.opacity(hovered ? 0.08 : 0))
                 )
                 .contentShape(Rectangle())

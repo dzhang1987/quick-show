@@ -60,6 +60,7 @@
 
 ### Changed
 
+- 消息操作行极简收紧（AI 窗，消息操作按钮专项）：操作行与消息内容垂直间距 10pt → 3pt（`Theme.Spacing.xs`）、按钮间水平间距 6pt → 4pt（`Theme.Spacing.sm`）、`ChatActionIconButton` 命中区 26×26 → 18×18（图标 13pt → 10pt、圆角 6 → 4）——消除「按钮独占一大行、与消息间距过大」的观感；用户消息「编辑并重发 / 撤回」从「常驻占位 + opacity 随整行 hover 浮现」改为与复制完全一致的行为（三钮常驻可见、静止 38% 灰、整行 hover 提亮 85%），静止态唯一可见的复制按钮被透明占位顶离气泡右缘的观感错位随之消除（生成中不显示编辑/撤回的门控语义不变——两者均为替换当前轮的破坏性操作，与在途流冲突）；复制图标 `doc.on.doc`（双页文档，描边繁复）全 app 6 处统一换 `square.on.square`（两枚叠角方块，极简复制隐喻）——消息操作行 / 行右键菜单 / 代码块复制 / 工具卡复制结果 / 地图卡复制坐标 / 监控面板复制内网 IP
 - 阅读体验优化（AI 窗，内容列宽 + 代码块折行专项）：对话阅读列最大宽度 600 → 760（`Theme.Layout.chatContentMaxWidth` 单源 token，替换 `AIChatView` / `SessionMessageList` 内两份硬编码副本），消息列 / 输入坞 / 浮动导航簇三处收敛到统一 `.chatReadingColumn()` ViewModifier（限宽居中 + 水平边距分级：内容区 <720pt 沿用 `Spacing.section`=18 即默认窗铺满现状、≥720pt 升 28——宽窗留白随窗成比例生长保留玻璃呼吸边；宽度读取 background GeometryReader + preference，macOS 13 部署目标不可用 onGeometryChange(14+)）；宽窗下等宽 12.5pt 代码可用列 ~72 → ~93 列；代码块长行从软换行改为横向滚动（`ScrollView(.horizontal)` + `fixedSize(horizontal: true, vertical: false)`）——折行破坏缩进结构、复制粘贴混入换行符；嵌套滚动安全：内层 NSScrollView 不消费垂直滚轮 delta（沿 responder chain 冒泡回外层消息列表，滚轮鼠标体验不变），仅消费水平 delta（shift+滚轮 / 双指横滑）；高亮 task / 流式渐进渲染 / 一屏块数估算（保守偏大的 estimatedBlockHeight）不受影响
 - 滚动跟随语义重构（AI 窗，用户滚动主权最高）：用户向上滚动立即脱离贴底（几何信号判定，滚动条拖拽 / 键盘 / 触控板通吃），此后切会话 / 新消息到达 / 流式输出一律不再自动滚动；流式仅在贴底时跟随（节流 0.12s）；贴底期间内容异步长高由几何信号持续纠偏至布局静止——根治「假底部」（此前 scrollTo 按过时内容高度落点，末条消息与输入栏间恒留 200~375px 空白且每次不同、切换后 1 秒内视图连跳 5 次）
 

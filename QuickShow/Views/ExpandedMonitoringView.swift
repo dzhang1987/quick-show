@@ -274,7 +274,7 @@ struct ExpandedMonitoringView: View {
                             appState.copyLocalIP()
                         } label: {
                             HStack(spacing: Theme.Spacing.sm) {
-                                Image(systemName: "doc.on.doc")
+                                Image(systemName: "square.on.square")
                                     .font(.system(size: Theme.Typography.tiny))
                                     .foregroundStyle(Theme.Colors.contentTertiary)
                                 Text("复制内网 IP")
