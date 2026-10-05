@@ -33,6 +33,20 @@ struct CompactionInfo {
     let summarizedCount: Int
     /// 摘要全文（折叠卡展开用）。
     let summary: String
+    /// 已压缩消息 id 集合：消息流行级降档（透明度弱化）的判定数据源。
+    let summarizedIDs: Set<String>
+}
+
+// MARK: - 压缩结果反馈（UI 契约）
+
+/// 最近一次上下文压缩的结果：成功（会话 + 本次条数 + 时间戳）/ 失败（会话 + 原因简述）。
+/// 压缩原先是「失败静默」路径（runCompaction 各 guard 直接 return），用户无从感知；
+/// 此状态供两处消费：视口内即时 toast（边沿触发、弹完即走）+ 水位圆环详情卡的持久行。
+enum CompactionOutcome: Equatable {
+    /// 成功：本次压缩的消息条数（非累计值）+ 完成时间戳（兼作 toast 去重标识）。
+    case succeeded(sessionId: UUID, count: Int, at: Date)
+    /// 失败：一句中文原因简述（服务请求失败 / 空摘要 / 会话已变化）。
+    case failed(sessionId: UUID, reason: String)
 }
 
 /// AI 会话门面：串联 ChatSessionStore（多会话数据层）与 AIChatService（网络层），
@@ -79,6 +93,19 @@ final class AIChatState: ObservableObject {
     @Published private(set) var isCompacting: Bool = false
     /// 当前会话的压缩摘要信息；nil = 从未压缩过。
     @Published private(set) var compactionInfo: CompactionInfo?
+    /// 最近一次压缩结果（成功/失败）；nil = 本运行周期内从未尝试过。
+    /// 仅内存态不落盘——反馈语义是「本次使用期间」，跨重启无意义。
+    @Published private(set) var lastCompactionOutcome: CompactionOutcome?
+
+    /// 当前会话的最近一次压缩结果；非当前会话的结果不回传——自动压缩在流结束后
+    /// 异步触发，用户可能已切换会话，跨会话的 toast/详情行会错位（防串会话反馈）。
+    var currentSessionOutcome: CompactionOutcome? {
+        guard let outcome = lastCompactionOutcome else { return nil }
+        switch outcome {
+        case .succeeded(let sessionId, _, _), .failed(let sessionId, _):
+            return sessionId == store.currentSessionId ? outcome : nil
+        }
+    }
 
     /// 多会话数据层（Wave 2 侧边栏消费其分组 / 搜索 / 增删改 API）。
     let store = ChatSessionStore.shared
@@ -493,23 +520,39 @@ final class AIChatState: ObservableObject {
         }
     }
 
-    /// 执行压缩：旧摘要 + 本批消息 → 合并为单份新摘要；成功写回会话，失败静默忽略。
+    /// 执行压缩：旧摘要 + 本批消息 → 合并为单份新摘要；成功写回会话。
+    /// 失败不再静默：各失败路径把一句中文原因记入 lastCompactionOutcome，
+    /// 由视口 toast + 水位圆环详情卡两级呈现；唯「会话已删除」保持静默
+    /// （会话都没了，没有可反馈的 UI 上下文）。防重入逻辑（isCompacting）不变。
     private func runCompaction(sessionId: UUID, plan: CompactionPlan) async {
         guard let session = store.session(id: sessionId) else { return }
         let prompt = buildCompactionPrompt(existingSummary: session.contextSummary, messages: plan.messages)
         let options = compactionRequestOptions(for: session)
-        guard let raw = try? await service.complete(
-            messages: prompt,
-            options: options,
-            maxTokens: compactionMaxTokens
-        ) else { return }
+        let raw: String
+        do {
+            raw = try await service.complete(
+                messages: prompt,
+                options: options,
+                maxTokens: compactionMaxTokens
+            )
+        } catch {
+            // 网络/鉴权/超时等服务侧错误：不向用户暴露技术细节，一句简述即可
+            lastCompactionOutcome = .failed(sessionId: sessionId, reason: "服务请求失败")
+            return
+        }
         let summary = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !summary.isEmpty else { return }
+        guard !summary.isEmpty else {
+            lastCompactionOutcome = .failed(sessionId: sessionId, reason: "服务返回了空摘要")
+            return
+        }
 
         // 应用前二次校验：目标消息仍存在（防止压缩期间清空/撤回导致写错）。
         guard let latest = store.session(id: sessionId) else { return }
         let existingIDs = Set(latest.messages.map { $0.id.uuidString })
-        guard plan.messageIDs.allSatisfy({ existingIDs.contains($0) }) else { return }
+        guard plan.messageIDs.allSatisfy({ existingIDs.contains($0) }) else {
+            lastCompactionOutcome = .failed(sessionId: sessionId, reason: "会话内容已变化")
+            return
+        }
 
         // 合并 id（保序去重）：旧摘要 id 保留 + 本批新 id。
         let mergedIDs: [String]
@@ -526,6 +569,7 @@ final class AIChatState: ObservableObject {
         }
         store.setCompaction(id: sessionId, summary: summary, summarizedMessageIDs: mergedIDs)
         refreshCompactionInfo()
+        lastCompactionOutcome = .succeeded(sessionId: sessionId, count: plan.messageIDs.count, at: Date())
         // 注意：不重置 contextTokens —— 下一次请求的真实 usage 会自然回落，水位随之下降。
     }
 
@@ -584,7 +628,8 @@ final class AIChatState: ObservableObject {
         if let existing = compactionInfo,
            existing.beforeMessageID == info.beforeMessageID,
            existing.summarizedCount == info.summarizedCount,
-           existing.summary == info.summary {
+           existing.summary == info.summary,
+           existing.summarizedIDs == info.summarizedIDs {
             return
         }
         compactionInfo = info
@@ -598,8 +643,12 @@ final class AIChatState: ObservableObject {
         }
         let summarized = Set(session.summarizedMessageIDs ?? [])
         let beforeMessageID = session.messages.first { !summarized.contains($0.id.uuidString) }?.id.uuidString
-        let count = (session.summarizedMessageIDs ?? []).count
-        return CompactionInfo(beforeMessageID: beforeMessageID, summarizedCount: count, summary: summary)
+        return CompactionInfo(
+            beforeMessageID: beforeMessageID,
+            summarizedCount: summarized.count,
+            summary: summary,
+            summarizedIDs: summarized
+        )
     }
 
     /// 工具调用回路：流式请求 → 执行工具 → 结果回传 → 续请求，直到产出文本或达轮数上限。
@@ -800,6 +849,18 @@ final class AIChatState: ObservableObject {
                     self.settle(assistantID, state: .done, in: sessionId)
 
                     toolRounds += 1
+
+                    // 软限制收尾：还剩 2 轮时向 wire 注入一条引导消息，促使模型停止
+                    // 发起新工具调用、基于已有结果给出最终答复，避免任务被硬截断拦腰砍断。
+                    // 仅追加到请求侧 wire，不落 UI 与持久化；若此后 steering 注入重建
+                    // wire（buildRequestMessages）会丢失本提示，退化为硬截断兜底，可接受。
+                    if toolRounds == AIToolExecutor.maxToolRounds - 2 {
+                        let remaining = AIToolExecutor.maxToolRounds - toolRounds
+                        wireMessages.append(ChatCompletionMessage(
+                            role: "user",
+                            content: "系统提示：工具调用轮数即将耗尽（还剩 \(remaining) 轮）。请停止发起更多工具调用，基于已获得的结果直接给出最终答复。"
+                        ))
+                    }
                     if toolRounds >= AIToolExecutor.maxToolRounds {
                         // 达到轮数上限：落一条文本说明并停止续请求。
                         let limitNote = "已达工具调用轮数上限（\(AIToolExecutor.maxToolRounds) 轮），停止继续调用工具。"

@@ -56,12 +56,14 @@ struct AIChatView: View {
     /// （onChange 不响应初始值、updateNSView 周期内写 state 不可靠），单通道会在草稿恢复
     /// （重启载入 / 程序化填充）时与既有文字重影；派生条件首帧求值即正确，零时序依赖。
     @State private var inputEmpty = true
-    /// 输入坞「生长区」实测高度（队列胶囊 + 图片附件条 + 剪贴板胶囊，输入卡上方段）：
-    /// 由生长区 background 内 GeometryReader 经 preference 回写（macOS 13 无 onGeometryChange），
-    /// 供消息列表尾部留白 / 空态 overlay / 导出 toast / 浏览导航四处统一叠加——
-    /// 遮挡带随生长区动态跟随，末条消息永远完整露出坞顶。值单向流入留白计算，
-    /// 绝不反向影响生长区布局（无反馈环）；生长区三段全空时容器移除，preference 回退 0。
-    @State private var dockGrowthHeight: CGFloat = 0
+    /// 输入坞实测总高（生长区 + 输入卡 + 底缝，即 inputArea 完整高度）：
+    /// 由 inputArea 最外层 background 内 GeometryReader 的 onAppear/onChange 直写
+    /// （macOS 13 无 onGeometryChange；preference 冒泡在本上下文实测中断不可用，
+    /// 事件直写已被实证可靠），供渐隐带锚点 / 消息列表尾部留白 / 空态 overlay /
+    /// 导出 toast / 浏览导航统一消费——渐隐带 fadeEnd 恒锚定真实坞顶（穿透衔接不脱开），
+    /// 尾部留白随坞体动态生长。值单向流入布局计算，绝不反向影响坞体布局（无反馈环）；
+    /// 初值 chatDockHeightFallback 首帧兜底，实测后校准；<0.5pt 去抖跳过。
+    @State private var dockTotalHeight: CGFloat = Theme.Layout.chatDockHeightFallback
     /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
     @State private var hasClipboardText = false
     /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
@@ -114,8 +116,6 @@ struct AIChatView: View {
     @State private var clipboardHovered = false
     @State private var chipHovered = false
     @State private var thinkingChipHovered = false
-    /// 立即压缩入口 hover 态。
-    @State private var compactHovered = false
     /// 压缩状态变化戳（"count|boundaryId|isCompacting"）：state 的 compactionInfo/isCompacting
     /// 是无扇出属性的前提下，与 sessionConfigStamp 同款的触发器——订阅 store.$sessions
     /// 扇出时读取；removeDuplicates 挡流式冲刷，幂等赋值防重订阅重放循环。
@@ -129,6 +129,13 @@ struct AIChatView: View {
     @State private var exportToastVisible = false
     /// toast 世代令牌：连续导出时旧定时器不得提前收起新 toast。
     @State private var exportToastGeneration = 0
+    /// 压缩结果反馈 toast 可见态（导出 toast 同款语言，坞上方浮出、1.6s 自动淡出）。
+    @State private var compactionToastVisible = false
+    /// 压缩 toast 世代令牌（同款语义：连续触发时旧定时器不得提前收起新 toast）。
+    @State private var compactionToastGeneration = 0
+    /// 已处理的压缩结果：防 @Published 重放误弹——窗口/视图重建时 onReceive 会先
+    /// 收到一次当前值，非 nil 即误弹 toast；记录已处理值，仅在值真正变化时弹出。
+    @State private var handledCompactionOutcome: CompactionOutcome?
     /// 当前明暗外观：会话预热取色与渲染路径严格对齐（颜色分量参与公式缓存 key，
     /// 取色外观不一致会让预热缓存无法命中）。
     @Environment(\.colorScheme) private var colorScheme
@@ -279,6 +286,16 @@ struct AIChatView: View {
         ) { stamp in
             if stamp != compactionStamp { compactionStamp = stamp }
         }
+        // 压缩结果 → 视口内即时 toast：边界卡常落在会话流顶部（视口外）、圆环在安静态
+        // 可能隐去，toast 浮于坞上方恒可见，是压缩成功/失败最可靠的即时信号。
+        // 仅当前会话的结果弹出（自动压缩在流结束后异步触发，用户可能已切会话——
+        // 跨会话弹「已压缩」会错位）；handledCompactionOutcome 防重建重放误弹。
+        .onReceive(state.$lastCompactionOutcome) { outcome in
+            guard let outcome, outcome != handledCompactionOutcome else { return }
+            handledCompactionOutcome = outcome
+            guard state.currentSessionOutcome != nil else { return }
+            showCompactionToast()
+        }
     }
 
     // MARK: - 窗口边缘 rim light
@@ -339,24 +356,24 @@ struct AIChatView: View {
                     // 欢迎页/引导页），遮挡带随坞体生长动态抬高
                     if !configured && activeSessionMessagesEmpty {
                         UnconfiguredGuideView(onOpenSettings: onOpenSettings)
-                            .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight)
-                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+                            .padding(.bottom, dockTotalHeight)
+                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                     } else if activeSessionMessagesEmpty {
                         WelcomeView(
                             hasClipboardText: hasClipboardText,
                             onAttachClipboard: { attachClipboard() }
                         )
-                        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+                        .padding(.bottom, dockTotalHeight)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                     }
                 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。
-        // 滚动区底缘 26pt 渐隐带止于坞顶（见 SessionMessageList 的 mask），内容在到达坞之前
-        // 收没，不再从坞下穿过（2026-10 重设计：生硬裁切/溢出泄漏 → 渐隐过渡）。
-        // 列表底部留白（chatDockClearance + 生长区实测高度）保证滚到底时末条消息完整露出
-        // 坞顶——生长区（队列胶囊等）在坞顶向上生长，遮挡带随之动态跟随。
+        // 滚动区底缘 26pt 渐隐带锚定 inputArea 实测总高 = 真实坞顶（见 SessionMessageList
+        // 的 mask），内容渐隐没入玻璃坞下（穿透衔接），不再从坞下露出被裁的半截内容。
+        // 列表尾部留白 = 实测坞高 + 渐隐带 + 呼吸缝，保证滚到底时末条消息完整露出
+        // 渐隐带上缘——坞体生长（队列胶囊等在坞顶向上生长、工具行换态）遮挡带随之动态跟随。
         .overlay(alignment: .bottom) {
             inputArea
         }
@@ -371,9 +388,32 @@ struct AIChatView: View {
                     .padding(.vertical, Theme.Spacing.md)
                     .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
                     .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
-                    .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight + Theme.Spacing.lg)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+                    .padding(.bottom, dockTotalHeight + Theme.Spacing.lg)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                     .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+            }
+        }
+        // 压缩结果轻反馈：与导出 toast 同位同语言（坞上方胶囊、1.6s 自动淡出）；
+        // 成功纯文字，失败前置警示三角——克制度对齐：不整行变红，图标一点警示色足够
+        .overlay(alignment: .bottom) {
+            if compactionToastVisible, let outcome = state.currentSessionOutcome {
+                HStack(spacing: Theme.Spacing.sm) {
+                    if case .failed = outcome {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                            .foregroundColor(Theme.Colors.statusWarning)
+                    }
+                    Text(compactionToastText(outcome))
+                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                }
+                .padding(.horizontal, Theme.Spacing.card)
+                .padding(.vertical, Theme.Spacing.md)
+                .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
+                .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
+                .padding(.bottom, dockTotalHeight + Theme.Spacing.lg)
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
             }
         }
         // 全窗材质两级收敛：根部 ultraThinMaterial 是唯一内容基面（铺满主列与阅读区），
@@ -445,7 +485,7 @@ struct AIChatView: View {
                     },
                     scrollSnapshots: $scrollSnapshots,
                     scrollCoordinator: scrollCoordinator,
-                    dockGrowthHeight: dockGrowthHeight
+                    dockTotalHeight: dockTotalHeight
                 )
                 .opacity(isActive ? 1 : 0)
                 .allowsHitTesting(isActive)
@@ -606,11 +646,8 @@ struct AIChatView: View {
                         }
                     }
                 }
-                .background(
-                    GeometryReader { geo in
-                        Color.clear.preference(key: ChatDockGrowthHeightKey.self, value: geo.size.height)
-                    }
-                )
+                // 坞体高度上报已上移至 inputArea 根（整体实测直写 @State），
+                // 生长区容器不再单独上报——生长区高度变化经总高自然捕获。
             }
 
             // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 思考 chip ║ 低频工具组 / 发送）；
@@ -642,22 +679,28 @@ struct AIChatView: View {
                 .frame(height: Theme.Layout.chatInputHeight)
 
                 // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 模型 chip / 思考 chip /
-                // 水位小字 / 压缩（低频工具组随 showDockSecondaryTools 显隐）；
+                // 水位圆环（低频工具组随 showDockSecondaryTools 显隐）；
                 // 右组 = 剪贴板（hover 坞浮现）+ 发送钮。元素间距统一 lg(8)。
                 HStack(spacing: Theme.Spacing.lg) {
                     attachMenuButton
                     modelChip
                     thinkingChip
-                    // 低频工具组（水位/压缩）：安静态整体隐去——保留占位、纯透明度
-                    // 渐变、布局零跳动；悬停/输入/附件/生成中淡入，水位 >0.8 破格常显
-                    HStack(spacing: Theme.Spacing.lg) {
-                        contextWatermarkIndicator
-                        compactButton
+                    // 低频工具组（水位圆环：水位/详情/压缩三合一，AIChatContextRingView）：
+                    // 安静态整体隐去——保留占位、纯透明度渐变、布局零跳动；
+                    // 悬停/输入/附件/生成中淡入，水位 >0.8 破格常显（警戒亮弧语义在组件内）
+                    if let watermark = state.contextWatermark {
+                        AIChatContextRingView(
+                            watermark: watermark,
+                            isCompacting: state.isCompacting,
+                            summarizedCount: state.compactionInfo?.summarizedCount,
+                            compactionOutcome: state.currentSessionOutcome,
+                            onCompact: { state.compactNow() }
+                        )
+                        .opacity(showDockSecondaryTools ? 1 : 0)
+                        .allowsHitTesting(showDockSecondaryTools)
+                        .accessibilityHidden(!showDockSecondaryTools)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                     }
-                    .opacity(showDockSecondaryTools ? 1 : 0)
-                    .allowsHitTesting(showDockSecondaryTools)
-                    .accessibilityHidden(!showDockSecondaryTools)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                     Spacer(minLength: 0)
                     clipboardButton
                         .opacity(showDockSecondaryTools ? 1 : 0)
@@ -696,11 +739,31 @@ struct AIChatView: View {
             .onDrop(of: ["public.image", "public.file-url"], isTargeted: nil) { providers in
                 handleDropProviders(providers)
             }
+            // 水位圆环详情卡宿主：必须位于 GlassSurface 之后——26+ 的 .glassEffect 会把
+            // 内容裁剪进玻璃形状，挂早了浮层会被输入卡顶缘切断（机制见组件头注）
+            .contextRingDetailHost()
         }
         // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
         // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部。
         // 顶部零 padding：坞顶上方过渡由滚动区底缘渐隐带承担；底部 12pt 为坞与窗缘的呼吸缝
         .padding(.bottom, Theme.Spacing.xxl)
+        // 坞体总高实测（生长区 + 输入卡 + 底缝）：background GeometryReader 不占布局、
+        // 只在坞高变化（胶囊增删/工具行换态）时求值，事件级频率非逐帧；经 preference
+        // 回写 dockTotalHeight，单向流入渐隐带锚点/尾部留白等消费点，绝不反向影响
+        // 坞体布局（无反馈环）。
+        // 坞体总高实测（生长区 + 输入卡 + 底缝）：background GeometryReader 不占布局、
+        // 只在坞高变化（胶囊增删/工具行换态）时求值，事件级频率非逐帧。
+        // 机制说明：经实测 preference 冒泡在本视图上下文中断——发射值到不了链尾观察点
+        // （恒收 defaultValue 0，写死常量发射亦然，而发射视图 onAppear 正常在渲染）；
+        // 改用 GeometryReader 内容的 onAppear/onChange 直写 @State（同视图事件已被
+        // 实证可靠触发，首帧即拿到真实高度、坞体生长时跟随更新）。
+        .background(
+            GeometryReader { geo in
+                Color.clear
+                    .onAppear { noteDockTotalHeight(geo.size.height) }
+                    .onChange(of: geo.size.height) { noteDockTotalHeight($0) }
+            }
+        )
         .chatReadingColumn()
         // 坞区 hover：进入时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径），
         // 同时驱动坞体安静→激活切换（低频工具组淡入、accent rim 点亮）
@@ -708,9 +771,12 @@ struct AIChatView: View {
             if hovering { refreshClipboardAvailability() }
             dockHovered = hovering
         }
-        // 生长区高度回写：单向流入尾部留白等四处消费点，绝不反向影响生长区布局。
-        .onPreferenceChange(ChatDockGrowthHeightKey.self) { height in
-            dockGrowthHeight = height
+    }
+
+    /// 坞体总高回写：去抖（<0.5pt 跳过）防微抖重渲染；首帧 fallback → 实测校准一次。
+    private func noteDockTotalHeight(_ height: CGFloat) {
+        if abs(height - dockTotalHeight) > 0.5 {
+            dockTotalHeight = height
         }
     }
 
@@ -902,65 +968,6 @@ struct AIChatView: View {
         }
     }
 
-    /// 立即压缩入口：水位小字右侧的轻量图标钮，pinButton 同款克制语言——静态纯灰图标无底，
-    /// hover 才出圆底提亮（比剪贴板/发送的常驻实底轻一档，与水位的「态势感知」同级）。
-    /// 仅在有上下文数据（水位非 nil）时出现，与水位同生共死，右缘布局不插拔跳动；
-    /// 并随水位一同归入低频工具组：安静态整体隐去（见 showDockSecondaryTools）；
-    /// 压缩中禁用弱化（对齐剪贴板禁用态），不换成旋转/进度轮——克制优先。
-    @ViewBuilder
-    private var compactButton: some View {
-        if state.contextWatermark != nil {
-            Button {
-                state.compactNow()
-            } label: {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(Theme.Typography.text(13, .medium))
-                    .foregroundColor(state.isCompacting
-                                     ? Theme.Colors.idleText.opacity(0.5)
-                                     : (compactHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest))
-                    .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                    .background(
-                        Circle().fill(compactHovered && !state.isCompacting
-                                      ? Theme.Colors.iconHoverBg : Color.clear)
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(state.isCompacting)
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { compactHovered = hovering }
-            }
-            .help(state.isCompacting ? "正在压缩早期对话…" : "压缩早期对话（释放上下文）")
-        }
-    }
-
-    /// 上下文水位：低调小字（10pt SF Mono 三级灰），归入工具行左组、思考 chip 之后，
-    /// 不与发送区抢位；安静态随低频工具组整体隐去，唯 ratio > 0.8 破格常显且小字进警示色——
-    /// 需要警示的时刻不沉默。
-    /// 2026-10 重设计：拆除旧版「数字 + hidden 文本撑宽 + overlay 细条」的叠层结构
-    /// （数字上的竖线残影根因），降级为纯单行小字。
-    @ViewBuilder
-    private var contextWatermarkIndicator: some View {
-        if let watermark = state.contextWatermark {
-            Text("\(formatTokenCount(watermark.usedTokens)) / \(formatTokenCount(watermark.windowTokens))")
-                .font(Theme.Typography.mono(10))
-                .foregroundColor(watermark.ratio > 0.8 ? Theme.Colors.statusWarning : Theme.Colors.contentTertiary)
-                .fixedSize()
-                .help("上下文用量（已用 tokens / 窗口上限）")
-        }
-    }
-
-    /// token 数紧凑格式化：<1k 原样；≥1k 用 k、≥1M 用 M，整倍去小数（512k），否则一位小数（12.3k）。
-    private func formatTokenCount(_ count: Int) -> String {
-        if count < 1_000 { return "\(count)" }
-        if count < 1_000_000 {
-            let k = Double(count) / 1_000
-            return k.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(k))k" : String(format: "%.1fk", k)
-        }
-        let m = Double(count) / 1_000_000
-        return m.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(m))M" : String(format: "%.1fM", m)
-    }
-
     /// 剪贴板附加钮：低频功能，安静态随低频工具组整体隐去（见 showDockSecondaryTools）；
     /// 克制语言：静止纯灰图标无底无 rim（与图钉同款），hover 才出圆底提亮。
     private var clipboardButton: some View {
@@ -1103,6 +1110,25 @@ struct AIChatView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.toastDuration) {
             guard generation == exportToastGeneration else { return }
             withAnimation(.easeInOut(duration: Theme.Motion.toastOut)) { exportToastVisible = false }
+        }
+    }
+
+    /// 压缩结果轻反馈（导出 toast 同款：世代令牌 + 1.6s 自动淡出）。
+    private func showCompactionToast() {
+        compactionToastGeneration += 1
+        let generation = compactionToastGeneration
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) { compactionToastVisible = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.toastDuration) {
+            guard generation == compactionToastGeneration else { return }
+            withAnimation(.easeInOut(duration: Theme.Motion.toastOut)) { compactionToastVisible = false }
+        }
+    }
+
+    /// 压缩 toast 文案：成功报本次条数（非累计值，更诚实）；失败带一句原因简述。
+    private func compactionToastText(_ outcome: CompactionOutcome) -> String {
+        switch outcome {
+        case .succeeded(_, let count, _): return "已压缩 \(count) 条早期对话"
+        case .failed(_, let reason): return "压缩失败：\(reason)"
         }
     }
 
@@ -1674,7 +1700,7 @@ private struct SessionMessageList: View {
     /// 输入坞生长区实测高度（父级统一传入）：尾部留白、底缘渐隐带与浏览导航的底部预算同步叠加，
     /// 遮挡带随坞体向上生长动态跟随。生长区只属于当前活跃会话的输入坞，但 pendingQueue
     /// 本就按会话隔离读取，高度值对全部常驻实例统一应用（非活跃会话 opacity=0 不可见）。
-    let dockGrowthHeight: CGFloat
+    let dockTotalHeight: CGFloat
 
     private let bottomAnchorID = "aiChat.bottom"
 
@@ -1687,8 +1713,6 @@ private struct SessionMessageList: View {
     /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
     /// 切走时作为恢复锚点，刻度轨「当前条」判定也据此定位。
     @State private var topVisibleMessageID: UUID?
-    /// 刻度轨 hover 态：被悬停 tick 的消息 id（驱动 tick 提亮 + 预览胶囊弹出）。
-    @State private var hoveredTickId: UUID?
     /// 消息分组缓存（messages 未变则复用上次分组；见 MessageGroupingCache）。
     @State private var groupingCache = MessageGroupingCache()
     /// 已消费的跳底信号时间戳（消费式标记）：挂载/重建时对照 state.scrollJumpRequests，
@@ -1739,9 +1763,11 @@ private struct SessionMessageList: View {
         GeometryReader { viewport in
         ScrollViewReader { proxy in
             // 底缘渐隐带的绝对位置（换算为渐变 location 比例，钉死数学、不依赖布局分配）：
-            // 顶部→fadeStart 全不透明；fadeStart→fadeEnd 26pt 渐隐；fadeEnd→底部（坞区）全透明
+            // 顶部→fadeStart 全不透明；fadeStart→fadeEnd 26pt 渐隐；fadeEnd→底部（坞区）全透明。
+            // fadeEnd 锚定 inputArea 实测总高 = 真实坞顶：渐隐带与坞体恒衔接（内容渐隐没入
+            // 玻璃坞下的穿透感），静态预算脱开断层与工具行动态超估算漂移一并根治。
             let viewportHeight = max(viewport.size.height, 1)
-            let dockBand = Theme.Layout.chatDockClearance + dockGrowthHeight
+            let dockBand = dockTotalHeight
             let fadeEndLocation = min(max((viewportHeight - dockBand) / viewportHeight, 0), 1)
             let fadeStartLocation = min(max((viewportHeight - dockBand - Theme.Layout.chatFadeMaskHeight) / viewportHeight, 0), 1)
             ScrollView(.vertical, showsIndicators: false) {
@@ -1774,8 +1800,14 @@ private struct SessionMessageList: View {
                                     rowHeights: $rowHeights,
                                     inWindow: virtualWindowIds.contains(message.id)
                                 ) {
+                                    // 已压缩行降档：id ∈ summarizedMessageIDs 的行整行降到可读下限档
+                                    // 透明度——「模型视角已分叉」由此可扫读；原文仍是阅读资产，
+                                    // 不折叠不隐藏。opacity 不改布局，虚拟化等高占位机制不受影响；
+                                    // contentFade 渐变让压缩完成瞬间的区域弱化本身就是反馈。
+                                    let isSummarized = state.compactionInfo?.summarizedIDs.contains(message.id.uuidString) ?? false
                                     ChatMessageRow(
                                         message: message,
+                                        isSummarized: isSummarized,
                                         canRegenerate: message.id == lastRegeneratableAssistantId,
                                         canEditLastRound: message.id == lastEditableUserMessageId,
                                         onRetry: { if isActive { state.retryLast() } },
@@ -1787,6 +1819,8 @@ private struct SessionMessageList: View {
                                         onTapImage: onTapImage
                                     )
                                     .equatable()
+                                    .opacity(isSummarized ? Theme.Colors.summarizedRowOpacity : 1)
+                                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: isSummarized)
                                     .transition(isInitialHistoryLoad
                                         ? .identity
                                         : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
@@ -1810,17 +1844,20 @@ private struct SessionMessageList: View {
                     // 1 个，其余 3×36 的叠加被消除。
                     //
                     // 间距算术：本子视图与「末条消息组」之间仍有 1×chatGroupGap(36)。
-                    // 2026-10 重设计后坞区收敛（chatDockClearance 124→90 + 底缘渐隐带）：
-                    // 36 + (90−18−36) + 18 + 1 ≈ 91pt，巨型空洞消除，末条消息与坞体自然衔接。
+                    // 尾部总留白 = dockTotalHeight（实测坞高）+ 渐隐带 26 + 呼吸缝 4：
+                    // 36 + (坞高+30−18−36) + 18 + 1 = 坞高+31，末条消息底边恒在渐隐带
+                    // fadeStart 之上完整可见（与坞体真实高度解耦，工具行动态变化自动跟随）。
+                    // （2026-10：静态 90/110 预算时代末条悬在渐隐带深区被压、渐隐带与
+                    // 坞体脱开断层 → 由实测坞高单一真实来源根治。）
                     VStack(spacing: 0) {
-                        // 坞区留白：基础预算 90pt 只覆盖输入卡本体；队列胶囊等生长区在坞顶向上生长，
-                        // 此处叠加其实测高度（dockGrowthHeight），滚到底时末条消息永远完整
-                        // 露出遮挡带顶。留白随胶囊增删平滑过渡（与生长区动画同时长）；
-                        // pinned 时由 coordinator 的内容高度路径自动保持贴底，unpinned
-                        // 不受干扰（用户阅读位置主权最高）。
+                        // 坞区让位留白：实测坞总高 + 渐隐带 + 呼吸缝，扣除外层组间距(36)
+                        // 与容差带(18)——两者分别由本子视图外/内承担，此处只补差额。
+                        // 留白随坞体生长/收缩平滑过渡（与坞内动画同时长）；pinned 时由
+                        // coordinator 的内容高度路径自动保持贴底，unpinned 不受干扰
+                        // （用户阅读位置主权最高）。
                         Color.clear
-                            .frame(height: max(Theme.Layout.chatDockClearance + dockGrowthHeight - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
-                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+                            .frame(height: max(dockTotalHeight + Theme.Layout.chatFadeMaskHeight + Theme.Layout.chatDockTailBreathing - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
+                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                         // 容差带（18pt，嵌入坞区留白内部）
                         Color.clear
                             .frame(height: bottomTolerance)
@@ -1857,7 +1894,7 @@ private struct SessionMessageList: View {
                     .init(color: .clear, location: 1)
                 ], startPoint: .top, endPoint: .bottom)
             )
-            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
             // 首帧视口自适应：把视口高度注入环境，供消息内 AssistantMarkdownView 估算「一屏块数」。
             .environment(\.chatViewportHeight, viewport.size.height)
             // 行级几何 → 真实视口顶部消息：每帧全量上报已实现行 frame，算出与视口相交且
@@ -1912,24 +1949,31 @@ private struct SessionMessageList: View {
             .onChange(of: isActive) { active in
                 if !active { saveSnapshot() }
             }
-            // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套）：
+            // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套 → Dock 放大刻度轨）：
             // unpinned（浏览态）且活跃时显示，0.15s 淡入淡出；贴底时整体隐藏。
             // 两件套各自挂 overlay（均在 mask 之后，不被渐隐罩住）：
-            // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick；
+            // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick，
+            //   静止紧凑密排、光标接近时按余弦钟形衰减放大推开（详见 ChatTickRail）；
             // ② ↓ 回底钮：坞正上方、右缘贴统一右基准线。
             .overlay(alignment: .trailing) {
-                if !isPinned, isActive {
-                    tickRail(proxy)
-                        .padding(.trailing, Theme.Layout.chatTickTrailing)
-                        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight)
-                        .transition(.opacity)
+                if !isPinned, isActive, !tickItems.isEmpty {
+                    ChatTickRail(items: tickItems) { messageId in
+                        // 程序化遮蔽：0.2s 动画期间的逐帧 bounds 变化不计为用户滚动
+                        // （点 tick 跳转属于「浏览」而非「滚动」，pin 态由落点几何自然决定）
+                        scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
+                            withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(messageId, anchor: .top) }
+                        }
+                    }
+                    .padding(.trailing, Theme.Layout.chatTickTrailing)
+                    .padding(.bottom, dockTotalHeight)
+                    .transition(.opacity)
                 }
             }
             .overlay(alignment: .bottom) {
                 if !isPinned, isActive {
                     toBottomButton(proxy)
-                        .padding(.bottom, Theme.Layout.chatDockClearance + dockGrowthHeight + Theme.Layout.chatNavDockGap)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockGrowthHeight)
+                        .padding(.bottom, dockTotalHeight + Theme.Layout.chatNavDockGap)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                         .chatReadingColumn(alignment: .trailing)
                         .transition(.opacity)
                 }
@@ -2070,7 +2114,7 @@ private struct SessionMessageList: View {
     // topVisibleMessageID 现为 @State，由行级几何信号（updateRowFrames）维护，见上方声明。
 
     /// 刻度轨数据源：当前会话全部用户消息；超过 chatTickMaxCount 时按视口取样——
-    /// 以「当前条」锚点为中心保留前后各 6 条，避免长会话 tick 过密失去辨识度。
+    /// 以「当前条」锚点为中心保留前后各半（密度主由轨内自适应 pitch 承担，取样仅作极端兜底）。
     private var tickMessages: [ChatMessage] {
         let users = messages.filter { $0.role == .user }
         let limit = Theme.Layout.chatTickMaxCount
@@ -2094,95 +2138,15 @@ private struct SessionMessageList: View {
         return messages[...index].last { $0.role == .user }?.id
     }
 
-    /// 右缘刻度轨：tick 垂直均匀排布（视觉间距 22 = VStack spacing + 双向热区），
-    /// 贴窗口右内缘（chatTickTrailing，位于阅读列边距带内、不侵入内容区）。
-    @ViewBuilder
-    private func tickRail(_ proxy: ScrollViewProxy) -> some View {
-        VStack(spacing: Theme.Layout.chatTickSpacing - 2 * Theme.Layout.chatTickHitSlop) {
-            ForEach(tickMessages) { message in
-                tickView(message, proxy: proxy)
-            }
+    /// 刻度轨条目：采样后用户消息 → 轨渲染模型（预览文本预裁剪、当前条标记）。
+    private var tickItems: [ChatTickRail.Item] {
+        tickMessages.map {
+            ChatTickRail.Item(
+                id: $0.id,
+                preview: $0.content.trimmingCharacters(in: .whitespacesAndNewlines),
+                isCurrent: $0.id == currentTickMessageId
+            )
         }
-    }
-
-    /// 单枚 tick：默认 10×2 暗灰圆头；hover 提亮加长到 13；
-    /// 当前查看条 16×3 accent 青点亮（与 pinned 图钉/可发送钮同一状态色语义）。
-    /// 上下 ±7pt 隐形热区（2pt 细线本身无法命中）；点击跳转该条消息（程序化遮蔽窗内）。
-    @ViewBuilder
-    private func tickView(_ message: ChatMessage, proxy: ScrollViewProxy) -> some View {
-        let isCurrent = message.id == currentTickMessageId
-        let hovered = hoveredTickId == message.id
-        Capsule(style: .continuous)
-            .fill(isCurrent ? Theme.Colors.accent
-                  : (hovered ? Theme.Colors.chatTickHover : Theme.Colors.chatTick))
-            .frame(width: isCurrent ? Theme.Layout.chatTickActiveWidth
-                   : (hovered ? Theme.Layout.chatTickHoverWidth : Theme.Layout.chatTickWidth),
-                   height: isCurrent ? Theme.Layout.chatTickActiveHeight : Theme.Layout.chatTickHeight)
-            .padding(.vertical, Theme.Layout.chatTickHitSlop)
-            .contentShape(Rectangle())
-            .overlay(alignment: .trailing) {
-                // 预览胶囊：hover 弹出，锚定 tick 左侧 12pt、与 tick 垂直对齐
-                //（overlay trailing 对齐 = 水平贴右、垂直居中，中心即 tick 视觉中心）；
-                // 0.15s 透明度 + 5pt 横向位移过渡；纯图片等空文本消息不弹胶囊
-                let previewText = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
-                if hovered && !previewText.isEmpty {
-                    tickPreviewCapsule(previewText)
-                        .padding(.trailing, (isCurrent ? Theme.Layout.chatTickActiveWidth
-                                 : Theme.Layout.chatTickHoverWidth) + Theme.Layout.chatTickPreviewGap)
-                        .transition(.opacity.combined(with: .offset(x: 5)))
-                }
-            }
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: 0.15)) { hoveredTickId = hovering ? message.id : nil }
-            }
-            .onTapGesture {
-                // 程序化遮蔽：0.2s 动画期间的逐帧 bounds 变化不计为用户滚动
-                // （点 tick 跳转属于「浏览」而非「滚动」，pin 态由落点几何自然决定）
-                scrollCoordinator.withProgrammaticScope(sessionId, window: 0.35) {
-                    withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(message.id, anchor: .top) }
-                }
-            }
-            // 注意：刻意不挂 .help()——系统 tooltip 与预览胶囊语义冗余，
-            // 且 tooltip 会越出窗口边界（贴右内缘的 tick 没有系统 tip 的落点空间）
-            .animation(.easeOut(duration: 0.15), value: hovered)
-            .animation(.easeOut(duration: 0.15), value: isCurrent)
-    }
-
-    /// 预览胶囊：深面板底 + 0.5pt 描边 + 8pt 圆角 + 轻投影，白字单行截断；
-    /// 右端小三角指回 tick（方向性锚点）。
-    ///
-    /// 布局关键（空壳事故根因）：本视图挂在 tick 的 overlay 里，SwiftUI overlay 会把
-    /// 宿主 tick 的窄尺寸（≈10~16pt）作为宽度 proposal 传进来，Text 会被压扁截断、
-    /// 只剩描边空壳。修复 = 先 frame(maxWidth:) 再 fixedSize：fixedSize 让本视图忽略
-    /// 宿主 proposal，frame(maxWidth:) 在自由 proposal 下把超长文本钳到上限截断。
-    /// 顺序不可换（fixedSize 在前会让 frame 重新收到窄 proposal，前功尽弃）。
-    private func tickPreviewCapsule(_ text: String) -> some View {
-        Text(text)
-            .font(Theme.Typography.text(Theme.Typography.footnote))
-            .foregroundColor(Theme.Colors.contentPrimary)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(maxWidth: Theme.Layout.chatTickPreviewMaxWidth - Theme.Spacing.xl * 2)
-            .fixedSize(horizontal: true, vertical: false)
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.md)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
-                    .fill(Theme.Colors.chatNavFloatFill)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
-                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-            )
-            .overlay(alignment: .trailing) {
-                TickPreviewTail()
-                    .fill(Theme.Colors.chatNavFloatFill)
-                    .frame(width: 5, height: 8)
-                    .offset(x: 4.5)
-            }
-            .shadow(color: .black.opacity(Theme.Shadow.navFloatOpacity),
-                    radius: Theme.Shadow.navFloatRadius,
-                    y: Theme.Shadow.navFloatY)
     }
 
     /// ↓ 回到底部：浏览态显示；坞正上方、右缘贴统一右基准线；
@@ -2268,6 +2232,314 @@ private struct SessionMessageList: View {
     }
 }
 
+// MARK: - 浏览导航刻度轨（Dock 放大手感）
+
+/// 刻度轨布局数学（纯值模型，光标每帧移动即整轨 O(n) 重算）：
+/// - 静止态：均匀紧凑 pitch（可用高 ÷ 条数自适应收缩、保底 pitchMin），容器高恒为
+///   静止总高并垂直居中——**坐标系恒定是丝滑的关键**：放大只改槽内偏移与 scale，
+///   容器几何不随放大变化，跟踪坐标无反馈漂移、无边界追逐振荡；
+/// - 放大态：每枚 tick 按「光标 → 静止中心」距离的余弦钟形得权重 w（Dock 经典衰减：
+///   峰在光标正下方、radius 处平滑归零、域外恒 0）；槽心 = 静止中心 + 上方累计生长
+///   − 锚点前累计生长——**锚点（当前消息 tick）恒钉死在静止位、scale 恒 1**，不参与
+///   放大布局，成为波中的稳定零位；其余 tick 相对它彼此推开；
+/// - 明暗与大小共用同一条 w：不透明度 = rest + t×(lerp(dim, bright, w) − rest)，
+///   光标正下方最亮、远端比静止更暗，两个维度同步流动；
+/// - 命中槽由相邻槽心中点切分（Voronoi），无缝相接、随放大同步长大——hover 判定与
+///   点击目标在任何放大态下都严丝合缝。
+private struct ChatTickRailLayout {
+    struct Slot: Equatable {
+        var center: CGFloat      // 槽心 y（容器静止坐标系；tick 视觉锚点）
+        var frameTop: CGFloat    // 命中槽顶（相邻槽心中点切分，可溢出容器上下缘）
+        var frameHeight: CGFloat // 命中槽高（槽间恒无缝）
+        var scale: CGFloat       // 放大倍率（1 = 静止/锚点）
+        var opacity: Double      // 明暗梯度输出（仅普通 tick 使用；accent 锚点忽略）
+    }
+
+    let pitch: CGFloat
+    /// 静止总高（容器固定高 = n × pitch）
+    let restHeight: CGFloat
+    /// 容器顶缘在几何区（overlay 可用区）坐标系中的 y（垂直居中换算；跟踪层局部坐标
+    /// 经 trackTop 偏移换算到本坐标系后使用）
+    let containerTop: CGFloat
+    /// 首/末命中槽的外缘（容器坐标系，可越出 [0, restHeight]）——hover 判定的上下界
+    let railTop: CGFloat
+    let railBottom: CGFloat
+    let slots: [Slot]
+
+    /// - pinnedIndex: 当前消息 tick 下标（accent 锚点）——恒 scale 1、位置钉死不动；
+    ///   nil 时退化为绕几何中心对称生长
+    init(count: Int, availableHeight: CGFloat, cursorY: CGFloat, amount: CGFloat, pinnedIndex: Int?) {
+        let tokens = Theme.Layout.self
+        let n = max(count, 0)
+        let avail = max(availableHeight, 1)
+        // 放大生长余量（worst-case 上界 Σ(scale−1)·pitch ≤ (maxScale−1)·(radius+pitch)）：
+        // 静止总高预算先扣除它 → 光标扫到峰值时整轨视觉高也不超可用区
+        let growthReserve = (tokens.chatTickMagnifyMaxScale - 1)
+            * (tokens.chatTickMagnifyRadius + tokens.chatTickPitch)
+        let p = n > 0
+            ? min(tokens.chatTickPitch, max(tokens.chatTickPitchMin, (avail - growthReserve) / CGFloat(n)))
+            : tokens.chatTickPitch
+        pitch = p
+        restHeight = p * CGFloat(n)
+        containerTop = (avail - restHeight) / 2
+
+        guard n > 0 else {
+            slots = []
+            railTop = 0
+            railBottom = 0
+            return
+        }
+        let t = min(max(amount, 0), 1)
+        let maxGain = tokens.chatTickMagnifyMaxScale - 1
+        let radius = tokens.chatTickMagnifyRadius
+        let pinned = pinnedIndex.flatMap { $0 >= 0 && $0 < n ? $0 : nil }
+        let colors = Theme.Colors.self
+
+        // 第一遍：各 tick 的权重 w（余弦钟形）→ scale / 不透明度 / 生长量
+        var scales: [CGFloat] = []
+        scales.reserveCapacity(n)
+        var opacities: [Double] = []
+        opacities.reserveCapacity(n)
+        var growths: [CGFloat] = []
+        growths.reserveCapacity(n)
+        for i in 0..<n {
+            let center = containerTop + p * (CGFloat(i) + 0.5)
+            let d = abs(cursorY - center)
+            let w: CGFloat = d < radius ? 0.5 * (1 + cos(.pi * d / radius)) : 0
+            // 锚点不参与放大布局：scale 恒 1（颜色恒 accent，不透明度输出不参与）
+            let scale = i == pinned ? 1 : 1 + maxGain * w * t
+            scales.append(scale)
+            growths.append((scale - 1) * p)
+            // 明暗双维度：与大小共用同一 w 与渐入量 t（rest → lerp(dim, bright, w)）
+            let target = colors.chatTickDimOpacity + (colors.chatTickBrightOpacity - colors.chatTickDimOpacity) * Double(w)
+            opacities.append(colors.chatTickRestOpacity + Double(t) * (target - colors.chatTickRestOpacity))
+        }
+        // 第二遍：槽心 = 静止中心 + 上方累计生长 − 锚点前累计生长（锚点钉死 = 零位）；
+        // 无锚点时退化为全局生长一半（绕几何中心对称生长）
+        var growthAbove: [CGFloat] = []
+        growthAbove.reserveCapacity(n)
+        var running: CGFloat = 0
+        var totalGrowth: CGFloat = 0
+        for i in 0..<n {
+            growthAbove.append(running)
+            running += growths[i]
+            totalGrowth += growths[i]
+        }
+        let pivot = pinned.map { growthAbove[$0] } ?? totalGrowth / 2
+        var centers: [CGFloat] = []
+        centers.reserveCapacity(n)
+        for i in 0..<n {
+            centers.append(p * (CGFloat(i) + 0.5) + growthAbove[i] - pivot)
+        }
+        // 第三遍：命中槽 = 相邻槽心中点切分（端点槽向外延伸自身半步，可越容器缘）
+        var result: [Slot] = []
+        result.reserveCapacity(n)
+        for i in 0..<n {
+            let top = i > 0
+                ? (centers[i - 1] + centers[i]) / 2
+                : centers[0] - (n > 1 ? (centers[1] - centers[0]) / 2 : p * scales[0] / 2)
+            let bottom = i < n - 1
+                ? (centers[i] + centers[i + 1]) / 2
+                : centers[i] + (n > 1 ? (centers[i] - centers[i - 1]) / 2 : p * scales[i] / 2)
+            result.append(Slot(center: centers[i], frameTop: top,
+                               frameHeight: bottom - top, scale: scales[i], opacity: opacities[i]))
+        }
+        slots = result
+        railTop = result[0].frameTop
+        railBottom = result[n - 1].frameTop + result[n - 1].frameHeight
+    }
+
+    /// 几何区坐标 → 光标正下方的 tick 下标：横坐标须落在轨体内（左伸接近带只驱动放大、
+    /// 不触发 hover），纵坐标须落在命中槽域内；槽无缝相接，命中即返。
+    func hoveredIndex(at point: CGPoint, trackWidth: CGFloat, railWidth: CGFloat) -> Int? {
+        guard !slots.isEmpty, point.x >= trackWidth - railWidth else { return nil }
+        let y = point.y - containerTop
+        guard y >= railTop, y <= railBottom else { return nil }
+        for (i, slot) in slots.enumerated() where y >= slot.frameTop && y < slot.frameTop + slot.frameHeight {
+            return i
+        }
+        return slots.indices.last  // y == railBottom 边界兜底
+    }
+}
+
+/// 右缘消息刻度轨（Dock magnification 手感）：
+/// 每条用户消息一枚 tick，静止紧凑密排（pitch 按可用高度自适应收缩）；光标进入磁吸
+/// 跟踪带（轨体 + 上下各一个衰减半径 + 左伸接近带）后，光标附近的 tick 按余弦钟形
+/// 衰减实时放大并彼此推开、明暗同步流动；离开平滑收拢。hover 预览胶囊、点击直达、
+/// 当前条 accent 锚点（钉死不动）全部保留。
+///
+/// 丝滑的关键路径：
+/// - **跟踪面必须挂在覆盖整个交互区的共同祖先上**（历史根因：跟踪层曾是 tick 层
+///   下方兄弟节点，光标压上可命中的 tick 即触发 hover exit → 放大瞬间塌缩、胶囊
+///   永不出现）——现在 contentShape + onContinuousHover 挂在包裹 tick 层的磁吸带
+///   容器上，tick 是其后代，从左邻带到轨上 hover 连续不断流；
+/// - 光标 y 直接赋值驱动每帧布局（无隐式动画、即时跟随）；只有 magnifyAmount 的
+///   进入 0→1 / 离开 1→0 走显式 easeOut 动画（渐入点亮 / 收拢回弹）——进入动画
+///   只在 hover 生命周期开始播一次（amount 目标值即时为 1，后续移动不重复触发）；
+/// - hover 写入不走 withAnimation（防同事物染指槽位布局），胶囊过渡由 tick 内层
+///   值域动画 `.animation(_:value:)` 承担（只在 hover 变化帧生效，光标移动帧零动画）；
+/// - 光标状态私有于本视图——每帧重算只触及刻度轨子树，不冲刷消息列表。
+private struct ChatTickRail: View {
+    struct Item: Identifiable, Equatable {
+        let id: UUID
+        let preview: String
+        let isCurrent: Bool
+    }
+
+    let items: [Item]
+    let onSelect: (UUID) -> Void
+
+    /// 光标 y（几何区坐标系；直接驱动 = 零动画即时跟随）
+    @State private var cursorY: CGFloat = 0
+    /// 放大渐入量 0…1：唯一走动画的分量（进入点亮 / 离开收拢）
+    @State private var magnifyAmount: CGFloat = 0
+    /// 被悬停 tick 的消息 id（预览胶囊锚点），由跟踪坐标派生
+    @State private var hoveredTickId: UUID?
+
+    /// 轨体宽 = 当前条峰值放大后宽度（tick 右缘对齐，放大向左生长，右基准线钉死不动）
+    private var railWidth: CGFloat {
+        Theme.Layout.chatTickActiveWidth * Theme.Layout.chatTickMagnifyMaxScale
+    }
+
+    /// 跟踪带宽 = 轨体宽 + 左伸接近带（光标逼近即开始响应，Dock 同款「迎光标」）
+    private var trackWidth: CGFloat {
+        railWidth + Theme.Layout.chatTickTrackSlop
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let model = ChatTickRailLayout(
+                count: items.count,
+                availableHeight: geo.size.height,
+                cursorY: cursorY,
+                amount: magnifyAmount,
+                pinnedIndex: items.firstIndex(where: { $0.isCurrent })
+            )
+            let radius = Theme.Layout.chatTickMagnifyRadius
+            // 磁吸带 = 轨体 ± 一个衰减半径（几何区坐标）；不铺满全高——带外衰减恒零
+            // （手感无差），右缘其余区域不占用命中（滚动条可拖拽）
+            let trackTop = max(0, model.containerTop - radius)
+            let trackHeight = min(geo.size.height, model.containerTop + model.restHeight + radius) - trackTop
+            ZStack(alignment: .topTrailing) {
+                // tick 层：容器恒为静止总高；放大形变全部收在槽内偏移与 scale
+                ZStack(alignment: .top) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        tick(item, slot: model.slots[index])
+                    }
+                }
+                .frame(width: railWidth, height: model.restHeight, alignment: .top)
+                .offset(y: model.containerTop - trackTop)
+            }
+            .frame(width: trackWidth, height: trackHeight, alignment: .topTrailing)
+            // 单一跟踪面：覆盖整个交互区（接近带 + 轨体），tick 是其后代 →
+            // 光标在带内任意位置 hover 连续；点击仍由 tick 自身的 tap 手势命中
+            .contentShape(Rectangle())
+            .onContinuousHover(coordinateSpace: .local) { phase in
+                switch phase {
+                case .active(let location):
+                    let y = location.y + trackTop  // 带局部 → 几何区坐标系
+                    cursorY = y
+                    updateHover(at: CGPoint(x: location.x, y: y), model: model)
+                    if magnifyAmount < 1 {
+                        withAnimation(.easeOut(duration: Theme.Motion.chatTickMagnifyIn)) {
+                            magnifyAmount = 1
+                        }
+                    }
+                case .ended:
+                    withAnimation(.easeOut(duration: Theme.Motion.chatTickMagnifyOut)) {
+                        magnifyAmount = 0
+                        hoveredTickId = nil
+                    }
+                }
+            }
+            .position(x: geo.size.width - trackWidth / 2, y: trackTop + trackHeight / 2)
+        }
+    }
+
+    /// 跟踪坐标派生 hover：命中槽含光标即点亮该 tick；变化才写状态（去抖防每帧 setState）。
+    /// 刻意裸写不走 withAnimation——胶囊过渡由 tick 内层 .animation(_:value:) 承担，
+    /// 本路径若带动画事务会染指同一渲染帧里的槽位布局（放大跟手性受损）。
+    private func updateHover(at location: CGPoint, model: ChatTickRailLayout) {
+        let newId = model.hoveredIndex(at: location, trackWidth: trackWidth, railWidth: railWidth)
+            .map { items[$0].id }
+        guard newId != hoveredTickId else { return }
+        hoveredTickId = newId
+    }
+
+    /// 单枚 tick：默认 10×2 圆头；当前查看条 16×3 accent 点亮（锚点，钉死不动）；
+    /// 普通 tick 明暗随槽位梯度输出（光标正下方最亮、远端更暗）；点击直达该条消息。
+    /// 命中区 = Voronoi 槽（随放大同步长大、槽间无缝），胶囊视觉锚定槽心、scaleEffect 放大。
+    /// 动画作用域纪律：`.animation(_:value:)` 只罩颜色/胶囊/缩放内层（hover 变化帧才生效）；
+    /// 槽位 offset/frame 外壳零动画修饰——光标移动帧的布局即时跟随，绝不橡胶延迟。
+    @ViewBuilder
+    private func tick(_ item: Item, slot: ChatTickRailLayout.Slot) -> some View {
+        let hovered = hoveredTickId == item.id
+        let baseWidth = item.isCurrent ? Theme.Layout.chatTickActiveWidth : Theme.Layout.chatTickWidth
+        let baseHeight = item.isCurrent ? Theme.Layout.chatTickActiveHeight : Theme.Layout.chatTickHeight
+        Capsule(style: .continuous)
+            .fill(item.isCurrent ? Theme.Colors.accent : Color.primary.opacity(slot.opacity))
+            .frame(width: baseWidth, height: baseHeight)
+            .scaleEffect(slot.scale)
+            .overlay(alignment: .trailing) {
+                // 预览胶囊：hover 弹出，锚定放大后 tick 左侧（overlay trailing = 垂直中心
+                // 即 tick 视觉中心）；空文本（纯图片等）消息不弹胶囊；纯展示不吞命中
+                if hovered && !item.preview.isEmpty {
+                    tickPreviewCapsule(item.preview)
+                        .padding(.trailing, baseWidth * slot.scale + Theme.Layout.chatTickPreviewGap)
+                        .transition(.opacity.combined(with: .offset(x: 5)))
+                        .allowsHitTesting(false)
+                }
+            }
+            .animation(.easeOut(duration: Theme.Motion.chatTickHoverFade), value: hovered)
+            .animation(.easeOut(duration: Theme.Motion.chatTickHoverFade), value: item.isCurrent)
+            // —— 以下外壳定位属性无动画修饰覆盖：光标驱动即时跟随 ——
+            // 视觉锚定槽心（命中槽与视觉中心在轨端略有错位，故不用槽 frame 的中心对齐）
+            .offset(y: slot.center - slot.frameTop - baseHeight / 2)
+            .frame(width: railWidth, height: slot.frameHeight, alignment: .topTrailing)
+            .contentShape(Rectangle())
+            .onTapGesture { onSelect(item.id) }
+            // 刻意不挂 .help()——系统 tooltip 与预览胶囊语义冗余，且贴右缘没有 tip 落点空间
+            .offset(y: slot.frameTop)
+    }
+
+    /// 预览胶囊：深面板底 + 0.5pt 描边 + 8pt 圆角 + 轻投影，白字单行截断；
+    /// 右端小三角指回 tick（方向性锚点）。
+    ///
+    /// 布局关键（空壳事故根因）：本视图挂在 tick 的 overlay 里，SwiftUI overlay 会把
+    /// 宿主 tick 的窄尺寸（≈10~16pt）作为宽度 proposal 传进来，Text 会被压扁截断、
+    /// 只剩描边空壳。修复 = 先 frame(maxWidth:) 再 fixedSize：fixedSize 让本视图忽略
+    /// 宿主 proposal，frame(maxWidth:) 在自由 proposal 下把超长文本钳到上限截断。
+    /// 顺序不可换（fixedSize 在前会让 frame 重新收到窄 proposal，前功尽弃）。
+    private func tickPreviewCapsule(_ text: String) -> some View {
+        Text(text)
+            .font(Theme.Typography.text(Theme.Typography.footnote))
+            .foregroundColor(Theme.Colors.contentPrimary)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .frame(maxWidth: Theme.Layout.chatTickPreviewMaxWidth - Theme.Spacing.xl * 2)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
+                    .fill(Theme.Colors.chatNavFloatFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
+                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+            )
+            .overlay(alignment: .trailing) {
+                TickPreviewTail()
+                    .fill(Theme.Colors.chatNavFloatFill)
+                    .frame(width: 5, height: 8)
+                    .offset(x: 4.5)
+            }
+            .shadow(color: .black.opacity(Theme.Shadow.navFloatOpacity),
+                    radius: Theme.Shadow.navFloatRadius,
+                    y: Theme.Shadow.navFloatY)
+    }
+}
+
 // MARK: - 手动虚拟化行容器
 
 /// 行级「实渲染 ↔ 等高占位」切换容器：窗口内（或首见无缓存）实渲染；窗口外用缓存
@@ -2315,6 +2587,9 @@ private struct TickPreviewTail: Shape {
 
 private struct ChatMessageRow: View, Equatable {
     let message: ChatMessage
+    /// 是否已被压缩摘要化（纯显示态：驱动整行降档透明度；行内不直接消费，
+    /// 参与 Equatable 判定使压缩落盘瞬间相关行重绘弱化）。
+    let isSummarized: Bool
     /// 是否为最后一条可重新生成的助手消息（父视图计算，含流式中禁用语义）。
     let canRegenerate: Bool
     /// 是否为会话内最后一条 user 消息且可撤回/编辑（父视图计算，含生成中禁用语义）。
@@ -2323,7 +2598,7 @@ private struct ChatMessageRow: View, Equatable {
     let onRegenerate: () -> Void
     /// 撤回最后一轮（数据层删除该轮并把文本+图片回填输入框）。
     let onWithdraw: () -> Void
-    /// 编辑重发最后一轮（就地编辑确认后回调新文本与图片附件）。
+    /// 编辑重发（就地编辑确认后回调新文本与图片附件）。
     let onEditResend: (String, [ChatImageAttachment]) -> Void
     let onTapImage: (ChatImageAttachment) -> Void
 
@@ -2333,6 +2608,7 @@ private struct ChatMessageRow: View, Equatable {
     /// 既不被流式冲刷重置，也不会导致无关行重绘。
     static func == (lhs: ChatMessageRow, rhs: ChatMessageRow) -> Bool {
         lhs.message == rhs.message
+            && lhs.isSummarized == rhs.isSummarized
             && lhs.canRegenerate == rhs.canRegenerate
             && lhs.canEditLastRound == rhs.canEditLastRound
     }
@@ -2856,36 +3132,47 @@ private struct CompactionBoundaryCard: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: Theme.Spacing.sm) {
-                    Image(systemName: "arrow.counterclockwise")
-                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                    Text(isCompacting ? "正在压缩…" : "已压缩早期对话（\(summarizedCount) 条）")
-                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                    if !isCompacting {
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+            // 分界线语义（2026-10 升级）：胶囊不再是孤立徽章，两侧羽化细线贯穿阅读列，
+            // 与行级降档（线上方 = 已摘要化区域、整行弱化）共同构成「章节分界」——
+            // 用户扫读时一眼可见模型视角的分叉点。
+            HStack(spacing: Theme.Spacing.xl) {
+                featheredDivider
+                Button {
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: "arrow.counterclockwise")
+                            .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                        Text(isCompacting ? "正在压缩…" : "已压缩早期对话（\(summarizedCount) 条）")
+                            .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                        if !isCompacting {
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                                .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+                        }
                     }
+                    // 单行钉死：两侧羽化细线是无限弹性填充，会把胶囊可用宽挤窄导致文案折行
+                    //（回归实拍：「已压缩早期对话／（N 条）」两行）。fixedSize 让胶囊取理想
+                    // 单行宽，宽度余量由细线吸收——章节分界语义下「线让位于字」。
+                    .fixedSize()
+                    .foregroundColor(isCompacting
+                                     ? Theme.Colors.idleText
+                                     : (hovered ? Theme.Colors.contentSecondaryStrong : Theme.Colors.contentTertiary))
+                    .padding(.horizontal, Theme.Spacing.xl)
+                    .padding(.vertical, Theme.Spacing.chip)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(!isCompacting && hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceBadge)
+                    )
+                    .contentShape(Capsule(style: .continuous))
                 }
-                .foregroundColor(isCompacting
-                                 ? Theme.Colors.idleText
-                                 : (hovered ? Theme.Colors.contentSecondaryStrong : Theme.Colors.contentTertiary))
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.vertical, Theme.Spacing.chip)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(!isCompacting && hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceBadge)
-                )
-                .contentShape(Capsule(style: .continuous))
+                .buttonStyle(.plain)
+                .disabled(isCompacting)
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+                }
+                .help(isCompacting ? "正在压缩早期对话…" : (expanded ? "收起压缩摘要" : "查看压缩摘要"))
+                featheredDivider
             }
-            .buttonStyle(.plain)
-            .disabled(isCompacting)
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
-            }
-            .help(isCompacting ? "正在压缩早期对话…" : (expanded ? "收起压缩摘要" : "查看压缩摘要"))
 
             if expanded, !isCompacting, !summary.isEmpty {
                 VStack(spacing: 0) {
@@ -2903,13 +3190,14 @@ private struct CompactionBoundaryCard: View {
                 .transition(.opacity)
             }
         }
-        // 胶囊行随 VStack 居中（章节标记语义，同 iMessage 时间戳）；上下补一点呼吸，
+        // 分界行随 VStack 撑满阅读列（细线向两侧延展）；上下补一点呼吸，
         // 使组内插入时上下节奏（xl=10 + xs）与组间章节感平衡
         .frame(maxWidth: .infinity)
         .padding(.vertical, Theme.Spacing.xs)
     }
 
-    /// 两端羽化的 0.5pt 细边线（窗口分割线同款渐变语言，水平方向）。
+    /// 两端羽化的 0.5pt 细边线（窗口分割线同款渐变语言，水平方向）；
+    /// 分界行内左右各一条，maxWidth 均分胶囊两侧的剩余空间。
     private var featheredDivider: some View {
         Rectangle()
             .fill(
@@ -2923,6 +3211,7 @@ private struct CompactionBoundaryCard: View {
                     endPoint: .trailing
                 )
             )
+            .frame(maxWidth: .infinity)
             .frame(height: Theme.Layout.dividerHeight)
     }
 }
@@ -3669,16 +3958,10 @@ private struct ChatReadingColumnWidthKey: PreferenceKey {
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
-/// 坞生长区（队列胶囊 + 图片附件条 + 剪贴板胶囊，输入卡上方段）实测高度上报键。
-/// 全树仅生长区容器一处发射，取最新值即可；容器随三段全空移除后 preference 回退
-/// 默认值 0，消费方（onPreferenceChange）随之收到归零事件，无需额外归零通道。
-private struct ChatDockGrowthHeightKey: PreferenceKey {
-    static var defaultValue: CGFloat { 0 }
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
-}
-
 /// 阅读列统一约束：限宽 `Theme.Layout.chatContentMaxWidth` 居中 + 水平边距分级
-/// （内容区 <720pt 用 `Spacing.section`=18 即默认窗现状；≥720pt 升为 28，宽窗保留玻璃呼吸边）。
+/// （内容区 <720pt 用 `Spacing.section`=18 即默认窗现状；≥720pt 升为 28，宽窗保留玻璃呼吸边）
+/// + 右缘 `chatTickRailLane` 让位通道（消息/坞/图钉/回底钮整体内缩，与右缘刻度轨之间
+/// 留足呼吸带——窄窗右总边距 46pt，覆盖 tick 放大峰值宽度仍有余量）。
 /// 三处应用点共用本修饰器，列左缘/右缘对齐逻辑单一来源、永不漂移。
 ///
 /// 宽度读取走 background GeometryReader + preference：部署目标 macOS 13 不可用
@@ -3703,6 +3986,7 @@ private struct ChatReadingColumn: ViewModifier {
         content
             .frame(maxWidth: Theme.Layout.chatContentMaxWidth, alignment: alignment)
             .padding(.horizontal, horizontalPadding)
+            .padding(.trailing, Theme.Layout.chatTickRailLane)
             .frame(maxWidth: .infinity)
             .background(
                 GeometryReader { geo in

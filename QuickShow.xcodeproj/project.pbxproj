@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00B5149450CDBE5397A80E8D /* MTMathListIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C132F36FD7F7D2FD7DD1FFF8 /* MTMathListIndex.swift */; };
+		03F9B8B0283FE7ABB9D12123 /* AIChatContextRingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */; };
 		065A7458F83D731ED73D4D33 /* MTConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307BA9E935DBCE1A3EE84090 /* MTConfig.swift */; };
 		066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B0B0357916235B809E566B /* FloatingPanel.swift */; };
 		06AFDE855BCBA67DE767B4E1 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC77F949B43F2F53CE7959C4 /* MarkdownParser.swift */; };
@@ -138,6 +139,7 @@
 		6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontV2.swift; sourceTree = "<group>"; };
 		6E1362BEB3DC49FF20A811F5 /* MTUnicode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTUnicode.swift; sourceTree = "<group>"; };
 		6EC8BA98E9C478A6D25D3962 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatContextRingView.swift; sourceTree = "<group>"; };
 		751F343AA24F0685B3EFBE9A /* pojoaque.min.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = pojoaque.min.css; sourceTree = "<group>"; };
 		7DB2782A10BC852F7C88D212 /* MTMathImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathImage.swift; sourceTree = "<group>"; };
 		7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatSidebarView.swift; sourceTree = "<group>"; };
@@ -246,6 +248,7 @@
 			isa = PBXGroup;
 			children = (
 				1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */,
+				74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */,
 				39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */,
 				0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */,
 				D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */,
@@ -388,7 +391,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_F25DBF8D-0E23-4638-91B7-B84FD95A3430" /* Resources */ = {
+		"TEMP_C2D3EB4E-A8EC-429A-88F2-C1912EA833EC" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -567,6 +570,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */,
+				03F9B8B0283FE7ABB9D12123 /* AIChatContextRingView.swift in Sources */,
 				B4BC135ABE2AF381BF4507B8 /* AIChatMapCardView.swift in Sources */,
 				B294658D1B91F980CBB27E32 /* AIChatMarkdownView.swift in Sources */,
 				ACA81BBE00536E8C914F3A1D /* AIChatMathViews.swift in Sources */,

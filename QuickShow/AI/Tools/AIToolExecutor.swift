@@ -9,8 +9,10 @@ import Foundation
 final class AIToolExecutor {
     static let shared = AIToolExecutor()
 
-    /// 单轮对话内工具调用轮数上限（供对话回路层读取）
-    static let maxToolRounds = 8
+    /// 单轮对话内工具调用轮数上限（供对话回路层读取）。
+    /// 达到「上限 - 2」轮时回路先注入软限制收尾提示，引导模型自行收敛；
+    /// 真正达到上限才硬截断并落说明文本。
+    static let maxToolRounds = 16
 
     /// 单次工具执行超时秒数
     static let executionTimeout: TimeInterval = 30

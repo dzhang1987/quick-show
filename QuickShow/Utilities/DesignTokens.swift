@@ -198,13 +198,18 @@ enum Theme {
         /// 行内代码 chip 底色：比面板亮一档（primary 0.10，旧值 surfaceTrack 0.06 在玻璃上近乎隐形）；
         /// AttributedString 渲染管线不支持背景框描边，对比度由底色 + 主文字色承担
         static let chatInlineCodeFill = Color.primary.opacity(0.10)
-        /// 刻度轨 tick 默认态：暗灰细短（浏览辅助，不抢内容）
-        static let chatTick = Color.primary.opacity(0.42)
-        /// 刻度轨 tick hover 提亮
-        static let chatTickHover = Color.primary.opacity(0.60)
+        // 刻度轨明暗梯度（与大小放大共用同一条余弦权重曲线，大小与明暗同步流动）：
+        // 静止 = rest；光标正下方 = bright；远端 = dim（比静止更暗——放大态下全轨变暗、
+        // 波峰提亮，梯度可辨）；当前条恒 accent、不受梯度调制（独立稳定锚点）
+        static let chatTickRestOpacity: Double = 0.42
+        static let chatTickBrightOpacity: Double = 0.60
+        static let chatTickDimOpacity: Double = 0.28
         /// 浏览导航浮层深底（预览胶囊 / 回底圆钮共用）：近不透明深面板，
         /// 玻璃上稳定承载白字，与坞/工具条同一家族
         static let chatNavFloatFill = aiAdaptive(dark: (0.15, 0.15, 0.165, 0.95), light: (0.98, 0.98, 0.985, 0.95))
+        /// 已压缩消息行降档不透明度（0.55：与 contentTertiary 同 alpha 档，双模式实测
+        /// ≈4.7:1 达 WCAG AA——原文仍是用户的阅读资产，只降视觉层级，不折叠不隐藏）
+        static let summarizedRowOpacity: Double = 0.55
 
         // 窗口边缘 rim light（方向性内描边：顶部受光最强 → 侧缘弱 → 底缘近无，
         // 受光方向 = 玻璃厚度感；替代旧版均匀 1px 灰线的无方向感）
@@ -363,10 +368,16 @@ enum Theme {
         // 720~816pt 区间列宽 = 内容宽 − 56；≥816pt 列锁 760，两侧留白随窗自然生长
         static let chatReadingWideBreakpoint: CGFloat = 720
         static let chatReadingWidePadding: CGFloat = 28
-        // AI 对话浮岛输入坞：消息列表底部留白 = 坞高（输入行 44 + 工具行 ≈32 + 底缝 12 ≈ 88）+ 2pt 浮动缝，
-        // 保证滚到底时末条消息完整露出坞顶；底缘渐隐带（chatFadeMaskHeight）叠加在坞上方承担过渡，
-        // 滚动内容不再穿入坞下（2026-10 重设计：124 → 90，巨型空洞收敛）
-        static let chatDockClearance: CGFloat = 90
+        // AI 对话浮岛输入坞：坞体真实高度不做静态预算，由 inputArea 整体实测直写
+        // （GeometryReader onAppear/onChange 事件路径，先例同原生长区高度键）。本常量
+        // 仅作布局链建立前的首帧兜底（输入行 44 + 工具行 ≈32 + 底缝 12），实测后立即
+        // 校准——渐隐带 fadeEnd 锚定实测坞顶恒衔接（穿透感），尾部留白 = 实测坞高 + 渐隐带 + 呼吸缝。
+        // （2026-10：静态 90/110 预算曾一常量双职锚定渐隐带与尾部留白，工具行高度动态
+        // 超估算导致末条消息被坞体压制、渐隐带与坞体脱开断层 → 改为实测单一真实来源）
+        static let chatDockHeightFallback: CGFloat = 88
+        // 尾部留白在渐隐带（chatFadeMaskHeight）之上的额外呼吸缝：滚到底时末条消息
+        // 脱离渐隐带全透明区后与渐隐带上缘的可见间距
+        static let chatDockTailBreathing: CGFloat = 4
         // AI 对话思考过程（reasoning）展开区限高，超出内部滚动
         static let reasoningMaxHeight: CGFloat = 160
 
@@ -376,17 +387,23 @@ enum Theme {
         static let chatFadeMaskHeight: CGFloat = 26    // 滚动区底缘渐隐带（止于坞顶）
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
         static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
-        // 右缘刻度轨 tick：默认 10×2 圆头；hover 13；当前条 16×3（accent）；
-        // 上下 ±7 隐形热区（2pt 细线本身无法命中）；视觉间距 22（含热区，VStack spacing = 22 − 2×7）
+        // 右缘刻度轨 tick：默认 10×2 圆头；当前条 16×3 accent 点亮。
+        // 排布为 Dock 放大模型（详见 AIChatView.ChatTickRail）：静止按 pitch 紧凑密排，
+        // 光标进入右缘通道后按余弦钟形衰减实时放大并彼此推开，离开平滑收拢。
         static let chatTickWidth: CGFloat = 10
         static let chatTickHeight: CGFloat = 2
-        static let chatTickHoverWidth: CGFloat = 13
         static let chatTickActiveWidth: CGFloat = 16
         static let chatTickActiveHeight: CGFloat = 3
-        static let chatTickHitSlop: CGFloat = 7
-        static let chatTickSpacing: CGFloat = 22
-        static let chatTickTrailing: CGFloat = 4       // tick 右端距窗口右内缘（在阅读列边距带内）
-        static let chatTickMaxCount = 12               // 用户消息超限时按视口取样（当前锚点前后各 6）
+        static let chatTickTrailing: CGFloat = 4       // tick 右端距窗口右内缘
+        // 刻度轨专用让位通道：阅读列（消息/坞/图钉/回底钮共用 ChatReadingColumn）右缘整体
+        // 内缩此值，内容右缘与刻度轨之间留足呼吸带（窄窗 18+28=46 右边距，覆盖放大峰值宽度）
+        static let chatTickRailLane: CGFloat = 28
+        static let chatTickPitch: CGFloat = 10         // 静止基线间距（紧凑密排）
+        static let chatTickPitchMin: CGFloat = 4       // 密度自适应下限（tick 多时再密也不低于此）
+        static let chatTickMagnifyMaxScale: CGFloat = 1.9  // 光标正下方峰值放大（Dock ≈1.8~2.2 手感带）
+        static let chatTickMagnifyRadius: CGFloat = 44     // 余弦钟形衰减半径（峰要陡：相邻 tick 权重差拉开才读得出梯度）
+        static let chatTickTrackSlop: CGFloat = 10     // 跟踪通道左伸接近带（光标接近即开始响应）
+        static let chatTickMaxCount = 72               // 超限时按视口取样（当前锚点前后各半）；密度主由自适应 pitch 承担，取样仅作极端兜底
         static let chatTickPreviewGap: CGFloat = 12    // 预览胶囊与 tick 水平间距
         static let chatTickPreviewMaxWidth: CGFloat = 230 // 预览胶囊单行截断上限
         static let chatCodeBlockPaddingV: CGFloat = 12 // 代码块上下内边距（对称）
@@ -423,5 +440,8 @@ enum Theme {
         static let overlayScale: CGFloat = 0.97  // CheatSheet 入场缩放
         static let caretBlink: Double = 0.55       // 流式块状光标闪烁节拍（近似系统 caret，只闪光标不呼吸整行）
         static let messageArriveOffset: CGFloat = 2 // 新消息落定位移（配合 contentFade：0.16s 淡入 + 2pt 上移）
+        static let chatTickMagnifyIn: Double = 0.12   // 刻度轨放大渐入（光标进入通道）
+        static let chatTickMagnifyOut: Double = 0.24  // 刻度轨收拢回弹（光标离开通道，easeOut）
+        static let chatTickHoverFade: Double = 0.15   // tick 提亮 / 预览胶囊显隐
     }
 }
