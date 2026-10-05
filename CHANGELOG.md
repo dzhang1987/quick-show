@@ -6,6 +6,7 @@
 
 ### Changed
 
+- 手动压缩语义重设计（AI 窗上下文管理，行为变化）：手动压缩改为「历史全部压缩 + 豁免最后一轮」——全部未压缩消息合并进单份摘要（与 Claude Code `/compact` 等主流产品的手动语义对齐，经官方文档 / 源码实证调研），但最后一个 user 消息起的最后一轮（含内嵌工具调用与结果，轮边界与 `trimmedContextMessages` 分轮规则一致）保持原文，当前对话上下文高保真、后续回复不建立在二次摘要之上；删除原「水位未超标时只压最旧 6 条」的兜底分支（不匹配任何用户心智模型的孤立设计，用户实测吐槽触发）；仅剩最近一轮无可压时给出明确 toast 反馈「早期对话均已压缩（最近一轮保持原文）」而非静默；自动压缩语义不变（水位 ≥70% 触发、从最旧压到 ≤40%、≥6 条防碎片）；一次性输入成本 = 全部历史 token（与 /compact 同款），摘要输出恒 ≤2000 token
 - 大文件组件化拆分（第二批，含唯一的运行时架构改造）：
   - `AIChatState.swift` 1767 → 543 行：方法按职责域拆出 6 个 extension 文件（`+Streaming` 流式回路 / 合帧 / 收尾、`+Compaction` 上下文压缩、`+RequestAssembly` 请求组装、`+Queue` 待注入队列、`+SessionEdits` 撤回 / 编辑 / 导出、`+Notifications` 标题摘要 / 系统通知），69 个方法全量核对一致；存储属性与 init / Combine 订阅留守主文件，跨文件引用的 `private` 成员放宽 internal
   - `AIChatMathViews.swift` 1151 行全量拆为 4 文件后删除：`MathLayoutCache` / `MathRasterizer` / `MathViews`（公式视图层）/ `MarkdownInlineNS`（NSAttributedString 行内渲染，两个私有扩展与使用者同文件保持 private）
