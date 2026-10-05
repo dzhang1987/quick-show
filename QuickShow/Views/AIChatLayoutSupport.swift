@@ -108,9 +108,11 @@ struct ChatReadingColumnWidthKey: PreferenceKey {
 
 /// 阅读列统一约束：限宽 `Theme.Layout.chatContentMaxWidth` 居中 + 水平边距分级
 /// （内容区 <720pt 用 `Spacing.section`=18 即默认窗现状；≥720pt 升为 28，宽窗保留玻璃呼吸边）
-/// + 右缘 `chatTickRailLane` 让位通道（消息/坞/图钉/回底钮整体内缩，与右缘刻度轨之间
-/// 留足呼吸带——窄窗右总边距 46pt，覆盖 tick 放大峰值宽度仍有余量）。
-/// 三处应用点共用本修饰器，列左缘/右缘对齐逻辑单一来源、永不漂移。
+/// + 左右双侧 `chatTickRailLane` 对称内缩：右侧是刻度轨让位通道（与右缘刻度轨之间留足
+/// 呼吸带，覆盖 tick 放大峰值宽度仍有余量），左侧镜像补齐同宽——内容列左右边距恒相等
+/// （窄窗 18+28=46 / 宽窗 28+28=56），整列居中不再左偏。刻度轨本体挂在阅读列之外的
+/// ScrollView overlay 上（贴窗口右缘），不随本修饰器位移。
+/// 各应用点（消息列/输入坞/回底钮/顶栏图钉）共用本修饰器，列左缘/右缘对齐逻辑单一来源、永不漂移。
 ///
 /// 宽度读取走 background GeometryReader + preference：部署目标 macOS 13 不可用
 /// onGeometryChange（14+）；GeometryReader 挂 background 内尺寸被前景约束（最外层撑满帧），
@@ -125,7 +127,10 @@ struct ChatReadingColumn: ViewModifier {
     @State private var containerWidth: CGFloat = 0
 
     private var horizontalPadding: CGFloat {
-        containerWidth >= Theme.Layout.chatReadingWideBreakpoint
+        // 断点比较留 1pt 容差（死区）：⌘B 侧栏展开时窗口 +216 且主列宽度补偿后为 W−0.5，
+        // 窗口恰停在 720 附近时精确 `>= 720` 会让每次侧栏切换在 18↔28 档位间翻转 →
+        // 整列重排。容差仅 1pt，视觉影响为零，只吸收这 0.5pt 的宽度补偿抖动。
+        containerWidth >= Theme.Layout.chatReadingWideBreakpoint - 1
             ? Theme.Layout.chatReadingWidePadding
             : Theme.Spacing.section
     }
@@ -134,7 +139,8 @@ struct ChatReadingColumn: ViewModifier {
         content
             .frame(maxWidth: Theme.Layout.chatContentMaxWidth, alignment: alignment)
             .padding(.horizontal, horizontalPadding)
-            .padding(.trailing, Theme.Layout.chatTickRailLane)
+            // 双侧对称内缩：右侧为刻度轨让位通道，左侧镜像同宽，内容列左右边距一致
+            .padding(.horizontal, Theme.Layout.chatTickRailLane)
             .frame(maxWidth: .infinity)
             .background(
                 GeometryReader { geo in

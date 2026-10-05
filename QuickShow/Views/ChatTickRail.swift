@@ -46,11 +46,18 @@ struct ChatTickRailLayout {
         // 静止总高预算先扣除它 → 光标扫到峰值时整轨视觉高也不超可用区
         let growthReserve = (tokens.chatTickMagnifyMaxScale - 1)
             * (tokens.chatTickMagnifyRadius + tokens.chatTickPitch)
+        // 密度自适应：优先在可用区内收缩 pitch（保底 pitchMin）。但极端窄窗 + 大量 tick
+        // （dock 增高与会话变长叠加）时 pitchMin 地板仍会令 p×n > avail，轨体上下溢出
+        // overlay 边缘。再加拟合上界 avail/n：正常区间不生效，只在地板失守时兜底，把
+        // 静止总高与全部槽位（均以 p 为步长铺开）一并收进可用区——密度语义（均匀 pitch、
+        // shrink-to-fit）不变，仅可读性让位于「绝不溢出」。
         let p = n > 0
-            ? min(tokens.chatTickPitch, max(tokens.chatTickPitchMin, (avail - growthReserve) / CGFloat(n)))
+            ? min(tokens.chatTickPitch,
+                  max(tokens.chatTickPitchMin, (avail - growthReserve) / CGFloat(n)),
+                  avail / CGFloat(n))
             : tokens.chatTickPitch
         pitch = p
-        restHeight = p * CGFloat(n)
+        restHeight = min(p * CGFloat(n), avail)
         containerTop = (avail - restHeight) / 2
 
         guard n > 0 else {

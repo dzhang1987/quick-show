@@ -6,6 +6,18 @@
 
 ### Changed
 
+- 输入区布局对称化 + 输入框固定行高（AI 窗视觉调整，用户实测反馈驱动）：
+  - **阅读列左右边距对称**：`ChatReadingColumn` 修饰器的刻度轨让位通道从「仅右缘 28pt」改为「左右双侧各 28pt」——内容列（消息列 / 输入坞 / 回底钮 / 顶栏图钉共用）左右边距恒等（窄窗 46 / 宽窗 56），整列居中不再左偏（实测右侧曾为左侧 2.6 倍）；刻度轨本体挂在阅读列之外的 ScrollView overlay 上仍贴窗口右缘，不受修饰器位移影响
+  - **主输入框固定 3 行高**：`chatInputHeight` 44 → 72（3 × 13pt 行高 ≈ 16 + 垂直内边距 12 × 2），常驻容纳 3 行文字，超出内部滚动；`hasVerticalScroller = false` 隐藏滚动条（滚轮滚动行为不变）；坞高兜底 `chatDockHeightFallback` 88 → 116（72 + 工具行 ≈32 + 底缝 12）
+  - **ask_user 自由输入条固定 2 行高**：`freeInputMinHeight`/`freeInputMaxHeight`（22/60 生长区间）收敛为单一 `freeInputHeight = 38`（2 × 12pt 行高 ≈ 14.8 + TextEditor 垂直内边距 ≈ 7 + 防裁切余量 1），`.scrollIndicators(.never)` 隐藏滚动条（超出 2 行仍可滚轮内部滚动）
+
+### Fixed
+
+- 会话滚动卡死回归（上述列宽变化引爆，两层根因连环修复，滚动判别根基重构）：
+  - **pin 判定从「几何方向 + 容差猜测」重构为「滚轮事件来源判别」**（`ChatScrollCoordinator`）：新增 `NSEvent` 本地 `scrollWheel` 监听（只观察不消费，hit-test 与事件派发同路径路由到具体会话 + 0.15s 关联时窗）。用户上滚立即解除底部跟随——触控板容差带内的小 delta 滚动也生效，根治「上滚攒不过 18pt 容差线、被 pinned 逐帧 `scrollPinnedToBottom` 拽回」的滚动卡死；流式内容塌缩时 AppKit 的被动 clamp（bounds 通知在 `documentView.setFrame` 调用栈内同步投出且**先于** frame 通知，任何程序化遮蔽窗原理上罩不住——独立 AppKit harness 实证）不再被误判为用户输入，流式贴底跟随全程保持；底部 rubber-band 越界区回收的 movedUp 显式豁免（回弹后跟随不丢）；非用户来源的下行滚动永不改写 pin（历史「塌缩瞬移 → pin 误恢复 → 回填拽回」bug 族被构造性消灭，不再是几何守卫的妥协）。已知保守取舍：滚动条拖拽 / 键盘滚动不产生滚轮事件，不改写跟随态（回底由 ↓ 按钮 / 发送跳底覆盖）
+  - **虚拟化行高缓存增加列宽维度**（`AIChatMessageList`）：`rowHeights` 新增伴随 `cachedColumnWidth`，内容列宽变化 >1pt 即清空缓存全行重测——修复列宽变化后「占位高 ≠ 实渲染高」打破虚拟化恒等式，导致的 document 高度持续抖动与全列反复重排（主线程 CPU 风暴、滚动间歇性冻住）；触发源覆盖窗口 resize / ⌘B 侧栏切换 / 冷启动首帧宽度修正
+  - **阅读列 720pt 宽度断点加 1pt 死区**：吸收 ⌘B 侧栏展开的 0.5pt 主列宽度补偿，防止窗口停在 720 附近时每次侧栏开关触发 18 ↔ 28 档位翻转全列重排（视觉零变化）
+  - **刻度轨密度自适应加上界钳制**（`ChatTickRail`）：pitch 计算加 `avail / n` 拟合上界 + `restHeight` 钳制——坞体增高压缩可用高度时轨体与全部槽位收进可用区，不再溢出 overlay 上下缘
 - 大文件组件化拆分（收尾批：DrawerPanel 业务域 + MarkdownBlocks 独立渲染器，混杂清单清零）：
   - `AIChatDrawerPanel.swift` 540 → 52（分派容器 + `AIChatDrawerMetrics` 节拍常量留守）：拆出 `ToolConfirmationDrawer`（147，工具权限确认抽屉）/ `UserQuestionDrawer`（169，ask_user 提问抽屉）/ `DrawerWidgets`（175，OptionCapsule / ActionButton 三档样式 / OptionFlowLayout 共享控件）；5 个跨文件引用类型 private→internal（唯一放宽项），分派容器对 AIChatInputDock 的契约零变化；抽屉统一设计维持现状——容器契约（动画/玻璃/ESC/状态重置）与控件层已统一，两抽屉装配差异属语义性，模板化按三次法则等第三种抽屉类型出现再做
   - `MarkdownBlocks.swift` 486 → 264：拆出 `MarkdownTableView`（87，表格渲染器）与 `MarkdownCodeBlock`（141，CodeBlockView + CodeBlockText）；实证修正评估结论——CodeBlockView 的跨文件「引用」实为注释提及，实际构造点仅块分派处，可见性维持 internal 不放宽

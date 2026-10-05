@@ -119,17 +119,17 @@ struct UserQuestionDrawerContent: View {
 
     // MARK: 统一输入条与提交
 
-    /// 底部统一输入条：自由答案入口（与已选项一并提交）。
+    /// 底部统一输入条：自由答案入口（与已选项一并提交）。固定 2 行高度，超出内部滚动。
     /// ⏎ 只换行不提交（TextEditor 默认行为），提交统一走按钮。
     private var freeInputBar: some View {
         ZStack(alignment: .topLeading) {
             TextEditor(text: $customText)
                 .scrollContentBackground(.hidden)
+                // 隐藏垂直滚动条：超出 2 行的内容仍可滚轮内部滚动
+                .scrollIndicators(.never)
                 .font(Theme.Typography.text(Theme.Typography.body))
                 .foregroundColor(Theme.Colors.contentPrimary)
-                .frame(minHeight: AIChatDrawerMetrics.freeInputMinHeight,
-                       maxHeight: AIChatDrawerMetrics.freeInputMaxHeight)
-                .fixedSize(horizontal: false, vertical: true)
+                .frame(height: AIChatDrawerMetrics.freeInputHeight)
             if customText.isEmpty {
                 Text("输入自定义答案…")
                     .font(Theme.Typography.text(Theme.Typography.body))

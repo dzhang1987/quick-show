@@ -359,23 +359,24 @@ enum Theme {
         static let dividerHeight: CGFloat = 0.5      // 微光分割线（严格 0.5pt）
         static let glanceProgressHeight: CGFloat = 2.5  // 一瞥倒计时微光进度条高（细若光丝，2x 屏 5px 清晰可辨）
 
-        // AI 对话阅读列限宽（消息列/输入坞/浮动导航簇三处共用，经 .chatReadingColumn() 应用）：
+        // AI 对话阅读列限宽（消息列/输入坞/浮动导航簇/顶栏图钉共用，经 .chatReadingColumn() 应用）：
         // 行长控制——760 ≈ 正文 ~95 字符、等宽 12.5pt 代码 ~93 列（扣除列边距与代码卡内边距）；
         // 窗口更宽时整列居中、两侧透出玻璃呼吸。原 600 在宽窗下留白占比失衡、长代码行折行严重
         static let chatContentMaxWidth: CGFloat = 760
         // 阅读列水平边距宽档：内容区 ≥720pt 时由 Spacing.section(18) 升为 28——
         // 宽窗列几近铺满时仍保留玻璃呼吸边（28 = 18×1.56，感知可辨而不突兀）。
-        // 720~816pt 区间列宽 = 内容宽 − 56；≥816pt 列锁 760，两侧留白随窗自然生长
+        // 双侧另有 chatTickRailLane(28) 对称内缩：720~872pt 区间列宽 = 内容宽 − 112；
+        // ≥872pt 列锁 760，两侧留白随窗自然生长
         static let chatReadingWideBreakpoint: CGFloat = 720
         static let chatReadingWidePadding: CGFloat = 28
         // AI 对话浮岛输入坞：坞体真实高度不做静态预算，由 inputArea 整体实测直写
         // （GeometryReader onAppear/onChange 事件路径，先例同原生长区高度键）。本常量
-        // 仅作布局链建立前的首帧兜底（输入行 44 + 工具行 ≈32 + 底缝 12），实测后立即
+        // 仅作布局链建立前的首帧兜底（输入框 72 + 工具行 ≈32 + 底缝 12），实测后立即
         // 校准——尾部留白 = 实测坞高 + 呼吸缝，真穿透设计下滚动内容穿入坞底被玻璃
         // 实时 blur 采样。
         // （2026-10：静态 90/110 预算时代一常量双职锚定渐隐带与尾部留白，工具行高度动态
         // 超估算导致末条消息被坞体压制、渐隐带与坞体脱开断层 → 改为实测单一真实来源）
-        static let chatDockHeightFallback: CGFloat = 88
+        static let chatDockHeightFallback: CGFloat = 116
         // 尾部留白在坞顶之上的呼吸缝：滚到底时末条消息底边与坞顶的可见间距
         // （真穿透：再往上滚，消息即自然穿入玻璃坞下被 blur 采样）
         static let chatDockTailBreathing: CGFloat = 20
@@ -384,7 +385,7 @@ enum Theme {
 
         // —— 2026-10 AI 窗视觉重设计 ——
         static let chatTopBarHeight: CGFloat = 36      // 顶栏高（28→36，图钉归入顶栏节奏）
-        static let chatInputHeight: CGFloat = 44       // 输入行高（56→44，坞体收紧）
+        static let chatInputHeight: CGFloat = 72       // 输入框固定高（44→72 常驻 3 行：3×13pt 行高≈16 + 垂直内边距 12×2；超出内部滚动、滚动条隐藏）
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
         static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
         // 右缘刻度轨 tick：默认 10×2 圆头；当前条 16×3 accent 点亮。
@@ -395,8 +396,9 @@ enum Theme {
         static let chatTickActiveWidth: CGFloat = 16
         static let chatTickActiveHeight: CGFloat = 3
         static let chatTickTrailing: CGFloat = 4       // tick 右端距窗口右内缘
-        // 刻度轨专用让位通道：阅读列（消息/坞/图钉/回底钮共用 ChatReadingColumn）右缘整体
-        // 内缩此值，内容右缘与刻度轨之间留足呼吸带（窄窗 18+28=46 右边距，覆盖放大峰值宽度）
+        // 刻度轨专用让位通道：阅读列（消息/坞/图钉/回底钮/顶栏图钉共用 ChatReadingColumn）
+        // 左右双侧各内缩此值——右侧与刻度轨留足呼吸带（覆盖放大峰值宽度），左侧镜像对称，
+        // 内容列左右边距恒相等（窄窗 18+28=46 / 宽窗 28+28=56）
         static let chatTickRailLane: CGFloat = 28
         static let chatTickPitch: CGFloat = 10         // 静止基线间距（紧凑密排）
         static let chatTickPitchMin: CGFloat = 4       // 密度自适应下限（tick 多时再密也不低于此）

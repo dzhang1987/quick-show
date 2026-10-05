@@ -27,9 +27,9 @@ enum AIChatDrawerMetrics {
     static let questionsMaxHeight: CGFloat = 260
     /// 权限面板完整参数区限高（超出内部滚动）
     static let argumentsMaxHeight: CGFloat = 160
-    /// 统一输入条高度档（单行起步，随内容生长至上限后内部滚动）
-    static let freeInputMinHeight: CGFloat = 22
-    static let freeInputMaxHeight: CGFloat = 60
+    /// 统一输入条固定高度（常驻 2 行）：2 × 12pt 正文行高(≈14.8) + TextEditor 垂直内边距(≈7)
+    /// + 1pt 防裁切余量 ≈ 38；内容超出 2 行时内部滚动（滚动条已隐藏，见 UserQuestionDrawer）
+    static let freeInputHeight: CGFloat = 38
     /// 参数原文超过该长度即视为「长命令」，默认折叠为单行摘要
     static let argumentsShortLimit: Int = 120
 }

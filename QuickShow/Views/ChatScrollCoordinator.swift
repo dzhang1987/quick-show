@@ -15,11 +15,16 @@ import SwiftUI
 ///
 /// 判定规则（单一写路径）：
 /// - pinned = true 只来自两处：用户输入把视口带回底部容差区 / 发送消息强制跳底；
-/// - pinned = false 只来自一处：用户输入把视口推离底部容差区；
+/// - pinned = false 只来自一处：**用户滚轮事件驱动**的离底滚动（事件来源判别
+///   `lastUserScrollWheelAt`）——非「几何方向」判别；
 /// - 内容高度变化（documentView frame 变化）**永不**直接改 pin 态——pinned 时程序化
 ///   保持贴底（跟随的唯一执行点），unpinned 时绝不干预（用户阅读位置主权最高）；
 /// - 程序化滚动经 `beginProgrammatic` 遮蔽窗排除在「用户输入」之外（同步滚动短窗、
 ///   动画滚动按动画时长 + 兜底）。
+///
+/// 实证结论：**被动 clamp 的 bounds 通知在 documentView.setFrame 调用栈内同步投出、
+/// 且先于 frame 通知**，同步遮蔽窗原理上罩不住——几何守卫必然误伤（方向判别两头漏：
+/// 容差吞咽真实上滚 / 无条件 unpin 误伤 clamp），来源判别是唯一正解。
 ///
 /// 非隔离类：全部回调恒在主线程（NSNotification 主队列 + SwiftUI 主线程回调），
 /// 先例见 AIChatKeyMonitor；避免跨隔离域开销。
@@ -52,6 +57,16 @@ final class ChatScrollCoordinator {
     /// 各会话 documentView 上一次高度（frame 变化时算 delta）。
     private var lastDocHeights: [UUID: CGFloat] = [:]
 
+    /// 各会话最近一次「命中本会话滚动区」的用户滚轮事件时间戳：
+    /// bounds 变化的来源判别真源（用户输入 vs 被动 clamp/程序化）——取代几何
+    /// 方向+容差猜测。惯性（momentumPhase）事件同源持续刷新。
+    private var lastUserScrollWheelAt: [UUID: Date] = [:]
+    /// 全局滚轮监听 token：首个会话 attach 时 lazy 安装一次，随 app 生命周期常驻。
+    private var scrollWheelMonitor: Any?
+    /// 用户滚轮事件的关联时窗：滚轮事件与其驱动的 bounds 变化在同一事件派发
+    /// 栈内落定（实证同步），0.15s 仅为 runloop 抖动余量。
+    private let userScrollRecencyWindow: TimeInterval = 0.15
+
     /// 底部容差区高度（pt）：与视图层 bottomTolerance 同源——判定「视口在底部」的容差。
     private let bottomTolerance: CGFloat = 18
 
@@ -72,6 +87,7 @@ final class ChatScrollCoordinator {
     func unbind(sessionId: UUID) {
         pinnedChangeHandlers[sessionId] = nil
         pinStates[sessionId] = nil
+        lastUserScrollWheelAt[sessionId] = nil
     }
 
     /// pin 态唯一写入口：class 真源即时生效（判定路径同帧可读，零延迟），
@@ -94,6 +110,9 @@ final class ChatScrollCoordinator {
     /// 桥视图解析到本会话底层 NSScrollView 后调用：安装 clipView bounds 变化与
     /// documentView frame 变化两类通知（posts 开关显式开启——两者默认都不发通知）。
     func attach(sessionId: UUID, scrollView: NSScrollView) {
+        // 滚轮监听 lazy 安装（首个会话挂载时一次）：全局常驻、幂等；无会话时监听
+        // 空转无害（noteUserScrollWheel 遍历空字典即返回），故无需随 unbind 拆卸。
+        installScrollWheelMonitorIfNeeded()
         if attached[sessionId]?.view === scrollView, observers[sessionId] != nil { return }
         if let old = observers[sessionId] {
             NotificationCenter.default.removeObserver(old.bounds)
@@ -119,6 +138,32 @@ final class ChatScrollCoordinator {
             self?.handleDocumentFrameChanged(sessionId: sessionId, scrollView: scrollView)
         }
         observers[sessionId] = (boundsToken, frameToken)
+    }
+
+    /// 安装全局滚轮监听（lazy 一次）：只观察不消费（返回原 event，放行给正常响应链）。
+    /// 选择 local monitor 而非会话级事件视图：滚轮事件不冒泡成可挂载手势，只有
+    /// NSApplication 级派发能看到「哪个会话被命中」；且 monitor 与事件派发共享同一条
+    /// hit-test 路径，命中判定零额外几何推算。
+    private func installScrollWheelMonitorIfNeeded() {
+        guard scrollWheelMonitor == nil else { return }
+        scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            self?.noteUserScrollWheel(event)
+            return event   // 只观察不消费
+        }
+    }
+
+    /// 命中判定与事件派发同一条 hit-test 路径：哪个会话的 scrollView 被命中，
+    /// 滚轮就滚哪个、时间戳就记哪个——多会话并存路由自洽；命中坞/输入框/
+    /// 隐藏会话时不记录，列表同期被动 clamp 不误判。
+    private func noteUserScrollWheel(_ event: NSEvent) {
+        guard let window = event.window, let contentView = window.contentView,
+              let hit = contentView.hitTest(event.locationInWindow) else { return }
+        for (sessionId, box) in attached {
+            guard let sv = box.view, sv.window === window else { continue }
+            if hit === sv || hit.isDescendant(of: sv) {
+                lastUserScrollWheelAt[sessionId] = Date()
+            }
+        }
     }
 
     /// 底层 NSScrollView 弱引用读取（跳底直滚 / 桥可用性判定）。
@@ -173,6 +218,16 @@ final class ChatScrollCoordinator {
     /// 按用户输入处理（用户主权最高）。这保证流式逐帧贴底期间用户上滚**立即**生效
     /// （历史缺陷：贴底开 0.05s 时间窗 × 50ms 合帧节拍背靠背覆盖时间线，用户滚轮
     /// 全部被吞——「转向消息后滚不上去」的根因）。
+    ///
+    /// 遮蔽外（未遮蔽）的 pin 判定改用**事件来源判别**（lastUserScrollWheelAt），不再用
+    /// 几何方向/容差猜测：
+    /// - 近期滚轮事件驱动的上滚 = 用户明确离底意图，一律 unpin（18pt 容差不豁免）；
+    /// - 无近期事件的上滚 = 被动 clamp / 橡皮筋回弹 → 不动 pin；
+    /// - 下行仅用户驱动时按 atBottom 恢复/解除，非用户来源永不改写 pin。
+    /// - **回弹抑制**：origin 自底部越界区（rubber band）回收的 movedUp 不算上滚意图
+    ///   （越界态只能由下拉/弹性产生，真实上滚从 maxOffset 出发不经此区）。
+    /// - **键盘/无障碍滚动不产生滚轮事件 → 永不改写 pin**（保守降级），这是事件来源
+    ///   判别的已知取舍。
     private func handleBoundsChanged(sessionId: UUID, scrollView: NSScrollView) {
         let origin = scrollView.contentView.bounds.origin
         let last = lastOrigins[sessionId] ?? origin
@@ -198,16 +253,33 @@ final class ChatScrollCoordinator {
             endProgrammatic(sessionId: sessionId)
         }
         let atBottom = isAtBottom(scrollView)
-        // 方向守卫（塌缩瞬移特征排除）：用户回底必然是**向下滚**（origin 向底部移动）；
-        // 「向上滚却判定在底部」（movedUp && atBottom）的矛盾组合只来自内容塌缩后
-        // SwiftUI/AppKit 把 origin 压到新 maxOffset 的被动调整——日志实证的
-        // 「瞬移 13915px 回底 + pin 误恢复 → 回填期间逐帧 scrollToBottom 拽回」根因。
-        // 矛盾组合一律吞掉（不写 pin）；内容不满一屏区（maxOffset=0 恒 atBottom）的
-        // 向上橡皮筋微滚同被吞，写同值 1 亦无语义损失。
-        if movedUp, atBottom {
+        let userDriven = (lastUserScrollWheelAt[sessionId]
+            .map { Date().timeIntervalSince($0) < userScrollRecencyWindow }) ?? false
+
+        if movedUp {
+            // 回弹抑制：origin 自底部越界区（rubber band，flipped 下 last.y > maxOffset）
+            // 回收的 movedUp 不算上滚意图——越界态只能由下拉/弹性产生，真实上滚从
+            // maxOffset 出发不经此区，两集合不交。
+            let maxOffset = max(0, (scrollView.contentView.documentView?.bounds.height ?? 0)
+                                - scrollView.contentView.bounds.height)
+            let cameFromOverscroll = flipped
+                ? last.y > maxOffset + 0.5
+                : last.y < -maxOffset - 0.5
+            // 事件来源判别：近期滚轮事件驱动的上滚 = 用户明确离底意图，一律 unpin，
+            // 18pt 容差不豁免；无近期事件 = 被动 clamp/回弹 → 不动 pin。
+            // （实证：塌缩 clamp 的 bounds 通知在 documentView.setFrame 调用栈内同步投出、
+            //  先于 frame 通知，任何遮蔽窗都罩不住，只能按来源判别；几何方向判别两头漏——
+            //  容差吞咽真实上滚 / 无条件 unpin 误伤 clamp。）
+            if userDriven && !cameFromOverscroll {
+                setPinned(sessionId, false)
+            }
             return
         }
-        setPinned(sessionId, atBottom)
+        // 下行：仅用户驱动时写 pin（回底容差恢复跟随）；非用户来源（塌缩 clamp /
+        // 迟到的程序化通知）永不改写 pin——历史「塌缩瞬移 pin 误恢复」由构造消灭。
+        if userDriven {
+            setPinned(sessionId, atBottom)
+        }
     }
 
     /// documentView frame 变化（内容高度增长/塌缩）：跟随的唯一执行点。

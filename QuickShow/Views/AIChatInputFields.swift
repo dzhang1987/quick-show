@@ -70,7 +70,7 @@ struct ChatInputTextView: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [NSView.AutoresizingMask.width]
         // 内边距与 SwiftUI 占位文案 padding 对齐：左右 18pt（section），垂直 12pt
-        //（配 44pt 输入行高视觉近居中；56→44 收紧后同步调整）
+        //（固定 3 行输入框 72pt = 3×13pt 行高≈16 + 12×2，首行与占位文案顶对齐）
         textView.textContainerInset = NSSize(
             width: Theme.Spacing.section,
             height: Theme.Spacing.xxl
@@ -83,9 +83,9 @@ struct ChatInputTextView: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
+        // 无垂直滚动条：输入框固定 3 行（72pt），超出内容滚轮/光标内部滚动照旧，
+        // 只是不显示滚动条（autohidesScrollers/scrollerStyle 随之失去意义，一并移除）
+        scrollView.hasVerticalScroller = false
 
         context.coordinator.textView = textView
         context.coordinator.startObservingWindow()

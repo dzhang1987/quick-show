@@ -53,6 +53,12 @@ struct SessionMessageList: View {
     /// 由行级几何信号（updateRowFrames）回写；@State 写入在 preference 回调
     /// （渲染周期合法路径），首帧 nil = 全实渲染（首见全量，秒开诉求已按用户决策放弃）。
     @State private var rowHeights: [UUID: CGFloat] = [:]
+    /// 行高缓存对应的内容列宽（回写行高时的实测宽度）：**行高是列宽的函数**——文字折行
+    /// 点数、图片等比缩放后的高度都随列宽变化。列宽一变，旧缓存高度即失效：占位高度
+    /// ≠ 新宽度下的实渲染高度，「占位 = 实测」恒等式破裂 → 滚动虚拟化切换时 doc 高度
+    /// 抖动（列宽变化期尤为明显）。触发源：窗口 resize、⌘B 侧栏展开时主列补偿导致的
+    /// 720↔719.5 断点翻转（见 ChatReadingColumn）、冷启动首帧宽度上报修正。
+    @State private var cachedColumnWidth: CGFloat?
     /// 虚拟化窗口（实渲染行集合）：视口 ±2 屏内的行实渲染，窗口外等高占位。
     /// 由行级几何信号每帧维护；切换高度恒等（占位 = 缓存 = 实测）。
     @State private var virtualWindowIds: Set<UUID> = []
@@ -341,6 +347,14 @@ struct SessionMessageList: View {
     ///   frame.height 即缓存值本身，天然无变化。
     private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
         guard viewportHeight > 0, !frames.isEmpty else { return }
+        // 列宽变化即整体失效行高缓存：行 frame 宽度统一 = 内容列宽，任取一行即可代表。
+        // 清空后本帧随后的回写会按新宽度重测填充（ChatVirtualRow 对 rowHeights[id]==nil
+        // 恒实渲染，天然支持全行回落重测）；大范围实渲染是一次性 settle 开销，属预期。
+        let probeWidth = frames.values.first?.width ?? 0
+        if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 1 {
+            rowHeights.removeAll()
+            cachedColumnWidth = probeWidth
+        }
         var bestID: UUID?
         var bestMinY = CGFloat.greatestFiniteMagnitude
         for (id, frame) in frames where frame.maxY > 0 && frame.minY < viewportHeight {

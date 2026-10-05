@@ -300,7 +300,7 @@ struct AIChatInputDock: View {
                     Text(inputPlaceholder)
                         .font(Theme.Typography.text(13))
                         .foregroundColor(Theme.Colors.idleText)
-                        // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 配 44pt 行高近居中
+                        // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 与固定 3 行框（72pt）首行顶对齐
                         .padding(.horizontal, Theme.Spacing.section)
                         .padding(.vertical, Theme.Spacing.xxl)
                         .allowsHitTesting(false)
