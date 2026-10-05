@@ -38,6 +38,14 @@ final class ChatScrollCoordinator {
     /// 视图 @State 驱动 UI 刷新。UI 镜像延迟一帧无妨——它不在判定路径上。
     private var pinnedChangeHandlers: [UUID: (Bool) -> Void] = [:]
 
+    /// 浏览导航（刻度轨/回底钮）显隐真源（按会话）：unpinned 且离底距离超过
+    /// `Theme.Layout.chatNavRevealDistance` 才浮现。**显隐与 pin 是两个关注点**：
+    /// pin 解除必须「上滚立即生效」（滚动卡死根治，不可动），显隐直接绑 pin 会让
+    /// 1pt 上滚就冒 UI——故由本状态按离底距离独立判定。
+    private var navVisibleStates: [UUID: Bool] = [:]
+    /// 浏览导航显隐变化通知（视图挂载时注册，写 isNavVisible UI 镜像）。
+    private var navVisibilityHandlers: [UUID: (Bool) -> Void] = [:]
+
     /// 程序化滚动遮蔽——两种机制，按路径选用：
     /// - **同步作用域**（`programmaticDepths`）：`clipView.scroll(to:)` 的 bounds 通知在
     ///   调用栈内**同步**发出，进出作用域即可精确遮蔽，**零时间窗**——流式逐帧贴底
@@ -78,15 +86,23 @@ final class ChatScrollCoordinator {
 
     // MARK: - 会话注册与 pin 真源
 
-    /// 挂载时注册：pin 变化通知（同步视图的 isPinned UI 镜像）。常驻期间保持。
-    func bind(sessionId: UUID, onPinnedChange: @escaping (Bool) -> Void) {
+    /// 挂载时注册：pin 变化 + 浏览导航显隐变化的镜像同步回调。常驻期间保持。
+    /// 注册时立即按真源同步一次（LRU 重挂载/视图重建时不等首次滚动即恢复镜像）。
+    func bind(sessionId: UUID,
+              onPinnedChange: @escaping (Bool) -> Void,
+              onNavVisibilityChange: @escaping (Bool) -> Void) {
         pinnedChangeHandlers[sessionId] = onPinnedChange
+        navVisibilityHandlers[sessionId] = onNavVisibilityChange
+        onPinnedChange(pinStates[sessionId] ?? true)
+        onNavVisibilityChange(navVisibleStates[sessionId] ?? false)
     }
 
     /// 卸载时注销并清理真源。
     func unbind(sessionId: UUID) {
         pinnedChangeHandlers[sessionId] = nil
+        navVisibilityHandlers[sessionId] = nil
         pinStates[sessionId] = nil
+        navVisibleStates[sessionId] = nil
         lastUserScrollWheelAt[sessionId] = nil
     }
 
@@ -97,6 +113,10 @@ final class ChatScrollCoordinator {
         guard old != pinned else { return }
         pinStates[sessionId] = pinned
         pinnedChangeHandlers[sessionId]?(pinned)
+        // pin 翻转直接影响显隐（pinned 恒隐藏）：跳底/回底点击路径立即隐藏导航。
+        if let sv = attached[sessionId]?.view {
+            updateNavVisibility(sessionId: sessionId, scrollView: sv)
+        }
     }
 
     /// pin 真源公开读取（视图层快照等路径必须读真源——@State 镜像写入对读取
@@ -138,6 +158,8 @@ final class ChatScrollCoordinator {
             self?.handleDocumentFrameChanged(sessionId: sessionId, scrollView: scrollView)
         }
         observers[sessionId] = (boundsToken, frameToken)
+        // 重挂载/桥重建时立即按当前几何重估一次（不等首次滚动）。
+        updateNavVisibility(sessionId: sessionId, scrollView: scrollView)
     }
 
     /// 安装全局滚轮监听（lazy 一次）：只观察不消费（返回原 event，放行给正常响应链）。
@@ -209,6 +231,30 @@ final class ChatScrollCoordinator {
         return body()
     }
 
+    // MARK: - 浏览导航显隐（离底距离门槛）
+
+    /// 浏览导航显隐判定：unpinned 且离底距离超过 `chatNavRevealDistance`。
+    /// 幂等写（变化才通知）。调用点：setPinned（pin 翻转）/ attach（重挂载）/
+    /// handleBoundsChanged 与 handleDocumentFrameChanged 的 defer（每次几何变化
+    /// 重估，且在 handler 内 pin 写入之后执行——读到最终态）。
+    private func updateNavVisibility(sessionId: UUID, scrollView: NSScrollView) {
+        let visible = !isPinned(sessionId) && distanceFromBottom(scrollView) > Theme.Layout.chatNavRevealDistance
+        if navVisibleStates[sessionId] != visible {
+            navVisibleStates[sessionId] = visible
+            navVisibilityHandlers[sessionId]?(visible)
+        }
+    }
+
+    /// 视口离内容底部的距离（pt）。flipped 文档 = maxOffset - origin.y，非 flipped
+    /// 镜像；内容不满一屏恒为 0（与 isAtBottom 的几何同源）。
+    private func distanceFromBottom(_ scrollView: NSScrollView) -> CGFloat {
+        guard let doc = scrollView.contentView.documentView else { return 0 }
+        let clip = scrollView.contentView
+        let maxOffset = max(0, doc.bounds.height - clip.bounds.height)
+        let offset = doc.isFlipped ? clip.bounds.origin.y : -clip.bounds.origin.y
+        return max(0, maxOffset - offset)
+    }
+
     // MARK: - 通知处理（判定核心）
 
     /// clipView bounds 变化：origin 变 = 滚动（用户，或未被遮蔽的程序化）；origin 不变
@@ -229,6 +275,11 @@ final class ChatScrollCoordinator {
     /// - **键盘/无障碍滚动不产生滚轮事件 → 永不改写 pin**（保守降级），这是事件来源
     ///   判别的已知取舍。
     private func handleBoundsChanged(sessionId: UUID, scrollView: NSScrollView) {
+        // 浏览导航显隐随每次 bounds 变化重估：defer 覆盖全部 return 路径（含遮蔽
+        // 早退/上滚分支），且在 pin 写入之后执行，读到的是本事件的最终态。
+        // 重入安全：贴底滚动会同步再投 bounds 通知 → 嵌套 handler 自行 defer 重估，
+        // 幂等写无竞态。
+        defer { updateNavVisibility(sessionId: sessionId, scrollView: scrollView) }
         let origin = scrollView.contentView.bounds.origin
         let last = lastOrigins[sessionId] ?? origin
         lastOrigins[sessionId] = origin
@@ -288,6 +339,8 @@ final class ChatScrollCoordinator {
     ///   即将做的调整，但由我们在遮蔽窗内完成）：否则随后 AppKit 自己 clamp 的 bounds
     ///   变化会被误判为用户滚动，把 pin 态错误翻转（历史「瞬移到底 + 回弹错位」根因）。
     private func handleDocumentFrameChanged(sessionId: UUID, scrollView: NSScrollView) {
+        // 内容高度变化改变离底距离（如浏览中尾部塌缩把视口拉近底部）：显隐随之重估。
+        defer { updateNavVisibility(sessionId: sessionId, scrollView: scrollView) }
         guard let doc = scrollView.contentView.documentView else { return }
         let newHeight = doc.frame.height
         let oldHeight = lastDocHeights[sessionId] ?? newHeight

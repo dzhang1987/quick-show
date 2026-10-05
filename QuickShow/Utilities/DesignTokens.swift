@@ -388,6 +388,11 @@ enum Theme {
         static let chatInputHeight: CGFloat = 72       // 输入框固定高（44→72 常驻 3 行：3×13pt 行高≈16 + 垂直内边距 12×2；超出内部滚动、滚动条隐藏）
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
         static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
+        // 浏览导航（刻度轨/回底钮）离底浮现门槛：上滚一点点（门槛内）滚动跟随照常
+        // 暂停（pin 解除不受影响），但 UI 不浮现；越过才淡入，滚回门槛内即淡出。
+        // 显隐与跟随解耦的动机：pin 解除必须「上滚立即生效」（滚动卡死根治），
+        // 显隐若直接绑 pin 就会在 1pt 上滚时冒 UI——太敏感。
+        static let chatNavRevealDistance: CGFloat = 120
         // 右缘刻度轨 tick：默认 10×2 圆头；当前条 16×3 accent 点亮。
         // 排布为 Dock 放大模型（详见 AIChatView.ChatTickRail）：静止按 pitch 紧凑密排，
         // 光标进入右缘通道后按余弦钟形衰减实时放大并彼此推开，离开平滑收拢。

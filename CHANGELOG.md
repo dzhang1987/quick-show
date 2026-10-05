@@ -6,6 +6,7 @@
 
 ### Changed
 
+- 浏览导航（刻度轨 + 回底钮）浮现门槛：显隐与贴底跟随 pin 解耦（用户实测反馈「上滚一点点就出现，太敏感」）——pin 解除必须「用户上滚立即生效」（滚动卡死根治根基，不可动），显隐此前直接绑 `isPinned` 导致 1pt 上滚即冒 UI；现在由 coordinator 新增显隐真源按**离底距离**独立判定（`Theme.Layout.chatNavRevealDistance` = 120pt，DesignTokens 单源）：上滚一点点（门槛内）跟随照常暂停但 UI 不浮现，越过门槛淡入、滚回门槛内淡出、点回底钮/发送跳底立即隐藏、快照恢复远位置正常显示；判定挂点：`setPinned`（pin 翻转恒隐藏）/ `attach`（重挂载即重估）/ bounds 与 document frame 两通知 handler 的 defer（覆盖全部 return 路径、pin 写入后读最终态、嵌套通知幂等）；`bind` 扩展 `onNavVisibilityChange` 双回调并注册时立即同步镜像（重挂载不等首次滚动），视图层 `isNavVisible` @State 替换两处 overlay 的 `!isPinned` 判定、淡入淡出动画（0.15s）随之切换；`distanceFromBottom` 与 `isAtBottom` 几何同源（flipped = maxOffset - origin.y，内容不满一屏恒 0）
 - 输入区布局对称化 + 输入框固定行高（AI 窗视觉调整，用户实测反馈驱动）：
   - **阅读列左右边距对称**：`ChatReadingColumn` 修饰器的刻度轨让位通道从「仅右缘 28pt」改为「左右双侧各 28pt」——内容列（消息列 / 输入坞 / 回底钮 / 顶栏图钉共用）左右边距恒等（窄窗 46 / 宽窗 56），整列居中不再左偏（实测右侧曾为左侧 2.6 倍）；刻度轨本体挂在阅读列之外的 ScrollView overlay 上仍贴窗口右缘，不受修饰器位移影响
   - **主输入框固定 3 行高**：`chatInputHeight` 44 → 72（3 × 13pt 行高 ≈ 16 + 垂直内边距 12 × 2），常驻容纳 3 行文字，超出内部滚动；`hasVerticalScroller = false` 隐藏滚动条（滚轮滚动行为不变）；坞高兜底 `chatDockHeightFallback` 88 → 116（72 + 工具行 ≈32 + 底缝 12）

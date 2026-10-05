@@ -33,6 +33,10 @@ struct SessionMessageList: View {
     /// 写路径单一（见 ChatScrollCoordinator）：用户输入回底/发送跳底 → true；
     /// 用户输入离底 → false。内容高度变化永不直接改写本态。
     @State private var isPinned = true
+    /// 浏览导航（刻度轨/回底钮）显隐镜像：unpinned 且离底超过
+    /// `Theme.Layout.chatNavRevealDistance` 才为 true（真源在 coordinator，本回调同步）。
+    /// 与 isPinned（跟随态）刻意解耦：上滚一点点时跟随照常暂停，但 UI 不冒出来。
+    @State private var isNavVisible = false
     /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
     /// 切走时作为恢复锚点，刻度轨「当前条」判定也据此定位。
     @State private var topVisibleMessageID: UUID?
@@ -257,13 +261,15 @@ struct SessionMessageList: View {
                 if !active { saveSnapshot() }
             }
             // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套 → Dock 放大刻度轨）：
-            // unpinned（浏览态）且活跃时显示，0.15s 淡入淡出；贴底时整体隐藏。
+            // 显隐 = isNavVisible（unpinned 且离底超过 chatNavRevealDistance）且活跃，
+            // 0.15s 淡入淡出；贴底或门槛内隐藏。**显隐与 pin 解耦**：上滚一点点
+            // （门槛内）跟随照常暂停但不冒 UI；越过门槛才浮现，滚回门槛内即淡出。
             // 两件套各自挂 overlay（浮于滚动内容之上，真穿透后内容与坞/导航同层互不遮罩）：
             // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick，
             //   静止紧凑密排、光标接近时按余弦钟形衰减放大推开（详见 ChatTickRail）；
             // ② ↓ 回底钮：坞正上方、右缘贴统一右基准线。
             .overlay(alignment: .trailing) {
-                if !isPinned, isActive, !tickItems.isEmpty {
+                if isNavVisible, isActive, !tickItems.isEmpty {
                     ChatTickRail(items: tickItems) { messageId in
                         // 程序化遮蔽：0.2s 动画期间的逐帧 bounds 变化不计为用户滚动
                         // （点 tick 跳转属于「浏览」而非「滚动」，pin 态由落点几何自然决定）
@@ -277,7 +283,7 @@ struct SessionMessageList: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if !isPinned, isActive {
+                if isNavVisible, isActive {
                     toBottomButton(proxy)
                         .padding(.bottom, dockTotalHeight + Theme.Layout.chatNavDockGap)
                         .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
@@ -285,7 +291,7 @@ struct SessionMessageList: View {
                         .transition(.opacity)
                 }
             }
-            .animation(.easeInOut(duration: 0.15), value: isPinned)
+            .animation(.easeInOut(duration: 0.15), value: isNavVisible)
         }
         }
     }
@@ -295,12 +301,19 @@ struct SessionMessageList: View {
     /// 挂载时注册（常驻期间保持，不随 isActive 切换注销——隐藏会话并行流式时
     /// coordinator 的 frame 路径仍需读 pin 真源保持贴底）：
     /// pin 真源在 coordinator（class 内即时读写）——@State isPinned 降级为纯 UI 镜像
-    /// （导航簇显隐），由本闭包同步。日志实证：@State 经通知回调写入后同帧读取拿到
-    /// 旧值（「解除跟随后仍被逐帧贴底拽回」根因），判定路径必须读 class 真源。
+    /// （跟随逻辑判定），由本闭包同步；isNavVisible 是浏览导航显隐的第二镜像
+    /// （离底距离门槛判定，与 pin 解耦）。日志实证：@State 经通知回调写入后同帧
+    /// 读取拿到旧值（「解除跟随后仍被逐帧贴底拽回」根因），判定路径必须读 class 真源。
     private func bindScrollCoordinator() {
-        scrollCoordinator.bind(sessionId: sessionId) { pinned in
-            isPinned = pinned
-        }
+        scrollCoordinator.bind(
+            sessionId: sessionId,
+            onPinnedChange: { pinned in
+                isPinned = pinned
+            },
+            onNavVisibilityChange: { visible in
+                isNavVisible = visible
+            }
+        )
     }
 
     /// 消费式跳底信号补消费：挂载/重建时 state.scrollJumpRequests 里存在「新于挂载时刻」
