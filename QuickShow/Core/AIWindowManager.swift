@@ -5,7 +5,7 @@ import SwiftUI
 /// 与主面板 FloatingPanel 语义不同（无速查表 / Space Pin / Tab 等全局键），故独立子类。
 /// 仅保留 AI 窗专属拦截：
 /// 1. 文本编辑聚焦时其余按键全部放行（1.3.0 高危修复：窗口级拦截吞掉输入导致丢草稿）；
-/// 2. ESC 两阶段语义（流式生成中先中止；否则关窗还焦点）；
+/// 2. ESC 三阶段语义（⓪ 抽屉在场先取消抽屉；① 流式生成中先中止；② 否则关窗还焦点）；
 /// 3. ⌘K 清空会话。
 ///
 /// 注意：ESC/⌘K 作为「AI 窗级命令」在文本聚焦时同样优先处理（PHASE3_PLAN §2 硬性要求），
@@ -14,6 +14,9 @@ final class AIPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    /// ESC 阶段 ⓪：输入坞抽屉在场时优先取消抽屉（权限 = 拒绝 / 提问 = 取消；
+    /// 返回 true = 已消费本次 ESC，保持窗口打开）
+    var onCancelDrawer: (() -> Bool)?
     /// ESC 第一阶段：流式生成中中止（返回 true = 已消费本次 ESC，保持窗口打开）
     var onAbortStreaming: (() -> Bool)?
     /// ESC 第二阶段：非流式时关窗还焦点
@@ -99,8 +102,12 @@ final class AIPanel: NSPanel {
         super.keyDown(with: event)
     }
 
-    /// ESC 两阶段：流式生成中先中止（消费 ESC）；否则关窗还焦点
+    /// ESC 三阶段：⓪ 抽屉在场先取消抽屉（权限 = 拒绝 / 提问 = 取消）；
+    /// ① 流式生成中先中止（消费 ESC）；② 否则关窗还焦点
     private func handleEscape() {
+        if let cancelDrawer = onCancelDrawer, cancelDrawer() {
+            return
+        }
         if let abort = onAbortStreaming, abort() {
             return
         }
@@ -453,8 +460,25 @@ final class AIWindowManager {
             self?.scheduleFrameSave()
         })
 
-        // 接线：ESC 两阶段（直连 AIChatState） / ⌘K 清空 / 被动失焦隐藏
-        // AIChatState 为 @MainActor，闭包恒在主线程按键路径触发，assumeIsolated 同步桥接
+        // 接线：ESC 三阶段（⓪ 抽屉 → ① 中止流式 → ② 关窗，直连交互中心与 AIChatState）
+        // / ⌘K 清空 / 被动失焦隐藏。
+        // ChatInteractionCenter/AIChatState 为 @MainActor，闭包恒在主线程按键路径触发，
+        // assumeIsolated 同步桥接（编译期隔离检查合规，运行期零开销）
+        panel.onCancelDrawer = {
+            MainActor.assumeIsolated {
+                let center = ChatInteractionCenter.shared
+                guard let request = center.request else { return false }
+                switch request {
+                case .toolConfirmation:
+                    // 权限抽屉 ESC = 拒绝（安全默认值）
+                    center.resolveConfirmation(.denied)
+                case .userQuestions:
+                    // 提问抽屉 ESC = 取消
+                    center.cancelQuestions()
+                }
+                return true
+            }
+        }
         panel.onAbortStreaming = {
             MainActor.assumeIsolated {
                 let state = AIChatState.shared

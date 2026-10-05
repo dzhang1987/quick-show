@@ -1,11 +1,11 @@
-import AppKit
 import Foundation
 
 // MARK: - 工具执行器
 
 /// AI 工具执行器：串联注册表、危险确认、超时与统一结果序列化。
 /// 执行入口为 async 非隔离，可被后台对话回路直接调用；
-/// 涉及 UI（NSAlert）与 AppKit 的操作用 MainActor 桥接。
+/// 危险确认经 ChatInteractionCenter 发布输入坞抽屉请求（原 NSAlert 已移除），
+/// 涉及 MainActor 状态的操作用 await 桥接。
 final class AIToolExecutor {
     static let shared = AIToolExecutor()
 
@@ -21,8 +21,8 @@ final class AIToolExecutor {
 
     /// 执行一次工具调用：
     /// 1) 工具不存在或被禁用 → failed（error 说明）
-    /// 2) isDangerous → 主线程弹 NSAlert 确认（说明工具名+参数摘要+风险），用户取消 → denied
-    /// 3) 执行超时 30 秒 → failed
+    /// 2) isDangerous → 经输入坞抽屉请求用户确认，取消/无 UI → denied
+    /// 3) 执行超时 30 秒 → failed；交互工具（isInteractive）豁免超时，无限静候
     /// 4) 正常返回 → done，resultJSON 为工具返回文本（若工具未按 ok/error 包装则包一层）
     func execute(call: ToolCallRequest) async -> ToolExecutionResult {
         let registry = AIToolRegistry.shared
@@ -58,10 +58,16 @@ final class AIToolExecutor {
             }
         }
 
-        // 4) 带超时执行
+        // 4) 执行：交互工具（如 ask_user）挂起等待用户操作，无限静候、豁免超时；
+        //    其余工具带 30 秒超时执行。
         do {
-            let raw = try await Self.runWithTimeout(seconds: Self.executionTimeout) {
-                try await tool.execute(arguments: arguments)
+            let raw: String
+            if tool.isInteractive {
+                raw = try await tool.execute(arguments: arguments)
+            } else {
+                raw = try await Self.runWithTimeout(seconds: Self.executionTimeout) {
+                    try await tool.execute(arguments: arguments)
+                }
             }
             return ToolExecutionResult(
                 callID: call.id,
@@ -127,39 +133,33 @@ final class AIToolExecutor {
 
     // MARK: - 危险确认
 
-    /// 主线程弹出危险工具确认框：优先以 AI 聊天窗口为附着窗口弹 sheet，
-    /// 找不到可见的 AI 窗则退化为独立 runModal。返回 true = 用户选择“执行”。
+    /// 经输入坞抽屉请求危险工具确认（原 NSAlert 逻辑已整体移除）。
+    /// 流程：会话记忆命中 → 直接放行；否则发布请求并挂起等待 UI 响应。
+    /// 返回 true = 允许执行，false = 拒绝。
+    /// 会话记忆以「工具名 + 参数原文」为键，`.alwaysAllowThisSession` 时写入。
     @MainActor
     private func confirmDangerousExecution(tool: AITool, argumentsJSON: String) async -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "AI 请求执行工具"
-        let summary = Self.truncate(argumentsJSON, limit: 400)
-        alert.informativeText = """
-        工具：\(tool.name)
-        参数：\(summary.isEmpty ? "（无）" : summary)
+        let center = ChatInteractionCenter.shared
 
-        该操作可能修改系统内容，请确认是否允许执行。
-        """
-        alert.addButton(withTitle: "执行")
-        alert.addButton(withTitle: "拒绝")
-
-        // 附着窗口：NSApp.windows 中可见的 AI 聊天窗（AIPanel）；无主窗口应用注意主线程
-        if let window = NSApp.windows.first(where: { $0 is AIPanel && $0.isVisible }) {
-            return await withCheckedContinuation { continuation in
-                alert.beginSheetModal(for: window) { response in
-                    continuation.resume(returning: response == .alertFirstButtonReturn)
-                }
-            }
+        // 1) 会话内已允许同一命令：直接放行，不再打扰用户
+        if center.isSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON) {
+            return true
         }
 
-        // 无可用附着窗口：独立模态（激活 App 确保弹窗可见）
-        NSApp.activate(ignoringOtherApps: true)
-        return alert.runModal() == .alertFirstButtonReturn
-    }
-
-    private static func truncate(_ text: String, limit: Int) -> String {
-        text.count <= limit ? text : String(text.prefix(limit)) + "…"
+        // 2) 发布抽屉请求并挂起（summary 由交互中心按单行摘要规则生成；无 UI 时中心兜底 .denied）
+        let outcome = await center.requestToolConfirmation(
+            toolName: tool.name,
+            argumentsJSON: argumentsJSON
+        )
+        switch outcome {
+        case .denied:
+            return false
+        case .executeOnce:
+            return true
+        case .alwaysAllowThisSession:
+            center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
+            return true
+        }
     }
 
     // MARK: - 超时控制

@@ -15,7 +15,7 @@ enum ToolExecutionPolicy {
 // MARK: - 工具分类
 
 /// 内置工具分类：设置页分组与展示用。
-/// `rawValue` 稳定，`allCases` 即固定分组顺序（剪贴板/系统状态/文件/环境变量/联网/地图）。
+/// `rawValue` 稳定，`allCases` 即固定分组顺序（剪贴板/系统状态/文件/环境变量/联网/地图/用户互动）。
 enum ToolCategory: String, CaseIterable {
     case clipboard
     case system
@@ -23,6 +23,8 @@ enum ToolCategory: String, CaseIterable {
     case environment
     case web
     case map
+    /// 用户互动类（如 ask_user）：挂在分组序最后
+    case interaction
 
     /// 分组中文名
     var label: String {
@@ -33,6 +35,7 @@ enum ToolCategory: String, CaseIterable {
         case .environment: return "环境变量"
         case .web: return "联网"
         case .map: return "地图"
+        case .interaction: return "用户互动"
         }
     }
 }
@@ -57,6 +60,9 @@ protocol AITool {
     var isDangerous: Bool { get }
     /// 执行策略：parallelSafe = 可并行；serial = 必须串行（默认）。
     var executionPolicy: ToolExecutionPolicy { get }
+    /// 是否交互工具：需挂起等待用户操作（如 ask_user）。经协议要求声明以获得动态派发，
+    /// 执行器对 true 的工具豁免超时（无限静候用户）。
+    var isInteractive: Bool { get }
     /// 执行工具，返回结果 JSON 文本；抛错时由执行器封装为 failed 结果
     func execute(arguments: [String: Any]) async throws -> String
 }
@@ -66,6 +72,9 @@ extension AITool {
     var isDangerous: Bool { false }
     /// 默认串行：未明确标注为并行安全的工具一律保守串行，避免并发副作用。
     var executionPolicy: ToolExecutionPolicy { .serial }
+    /// 默认非交互：仅需挂起等待用户操作的工具体（如 ask_user）标注 true，
+    /// 执行器对其豁免超时（无限静候用户）。
+    var isInteractive: Bool { false }
 }
 
 // MARK: - 协议层模型
@@ -139,7 +148,8 @@ final class AIToolRegistry {
             SearchPlacesTool(),
             PlanRouteTool(),
             ShowMapTool(),
-            MyLocationTool()
+            MyLocationTool(),
+            AskUserTool()
         ]
     }
 

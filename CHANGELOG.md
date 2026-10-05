@@ -6,6 +6,15 @@
 
 ### Added
 
+- ask_user 提问工具 + 输入坞抽屉交互体系（AI 窗，交互抽屉专项，内置工具 19 → 20）：
+  - **ask_user 工具**（`AskUserTool.swift`）：模型在需求不明确 / 有歧义 / 方案有分支时先提问再执行——一次 1-5 题、每题 2-6 个选项（单选 / 多选）、支持自由输入作答；入参校验（空 / 超 5 题 / 选项不足 / label 空 → 抛「参数不合规」）；结果按题目顺序还原（选中 option id → label + custom 文本），取消返回 `ok:false`；协议层新增 `isInteractive` 声明（默认 false），执行器对 true 豁免 30s 超时无限静候用户
+  - **ChatInteractionCenter 交互中心**（`ChatInteractionCenter.swift`）：`ChatDrawerRequest`（权限确认 / 用户提问二选一挂起，同一时刻仅一个请求）发布-挂起-应答管道；UI 在场登记（`markUIActive`，AIChatView onAppear/onDisappear 维护）——UI 离场时挂起中的请求唤醒为兜底结果（确认 → 拒绝 / 提问 → 取消）防泄漏；危险工具「总是允许」会话记忆（工具名 + 参数原文为键，会话切换 `resetSessionMemory` 幂等清除，防误清当前会话的旧值判定）
+  - **危险确认 NSAlert → 抽屉化**（`AIToolExecutor`）：原主线程 NSAlert（sheet 附着 / runModal 双路径）整体移除，改经交互中心发布抽屉请求挂起等待；三按钮 = 拒绝（次要）/ 执行（主要）/ 本会话总是允许（描边第三样式）；会话记忆命中直接放行不再打扰
+  - **输入坞抽屉**（`AIChatDrawerPanel.swift` + `AIChatView` 连续玻璃体重构）：抽屉从输入卡上沿向上滑入（0.25s easeOut），与输入卡共享同一个 GlassSurface / accent rim / 双层阴影——衔接处零间隙、圆角恒为 Radius.groupCard、中间仅 0.5pt 极淡分隔线，「抽屉是输入卡长出的上半部分，不是独立弹窗」；窗口 frame 不动、纯视图内布局（规避整窗玻璃 + SwiftUI 测量链死锁），聊天流经 dockTotalHeight 实测自动让位；提问面板题目区限高 260pt 内部滚动（抽屉不把输入卡推出窗口）、权限面板长命令默认单行摘要点击展开（120 字阈值，短参数不制造折叠切换）、自由输入条 22-60pt 生长；选中态 / 自由输入存 @State，调用方 `.id(request.id)` 请求切换整树重建状态天然重置；抽屉收起后焦点主动归还主输入框（`aiChatRefocusInput` 通知，ChatInputTextView 观察）；`dockQuiet` 安静态判据补「无抽屉请求」
+  - **ESC 三阶段语义**：⓪ 抽屉在场先取消抽屉（权限 = 拒绝 / 提问 = 取消，`AIPanel.onCancelDrawer` 前置接线）→ ① 流式生成中先中止 → ② 关窗还焦点
+  - **ask_user 工具卡专属呈现**（`AIToolCardView`）：调参侧「问题摘要」块（题数 / 每题选项数与单多选）、结果侧「用户答案」块（每题选中项 + 补充输入，取消 / denied 单行「用户取消」）；结构化解析任一环节失败回退通用 JSON 块不丢原文
+  - **内置 system 引导**（`AIChatState.buildRequestMessages`）：ask_user 启用时注入互动纪律（先问再做 / 一次合并提问不反复打扰 / 2-6 个具体选项 / 何时无需提问），与用户自定义 systemPrompt 拼接为单条 system 消息共存（引导管纪律、用户文案管个性，职责不重叠；Responses 协议单条即两协议通吃）；工具禁用时不注入（不引导调用不存在的工具）
+  - 设置页工具分类新增「用户互动」组（`ToolCategory.interaction`，挂分组序最后）
 - 上下文水位圆环 + 压缩结果反馈（AI 窗，输入坞态势感知专项）：
   - **水位圆环三合一**（`AIChatContextRingView` 新组件，取代旧「水位小字 + ⟲ 压缩钮」双控件组合）：一枚 14pt 描边空心环同时承担三职——环体即水位（12 点起步顺时针，亮弧 = 已用/窗口比例、暗弧 = 剩余轨道）；hover 弹详情卡（已用/窗口/百分比 + 压缩摘要信息——自绘浮层经 anchorPreference 上报锚点 + 数据快照，由调用侧 `contextRingDetailHost()` 在玻璃裁剪域之外挂载，规避 macOS 26+ `glassEffect` 把 overlay 内容裁剪进玻璃形状的陷阱）；点击即压缩（整环一枚按钮）。视觉纪律与图钉/剪贴板同一克制语言：静止纯灰无底、hover 圆底提亮、ratio > 0.8 亮弧转 `statusWarning` 破格常显（阈值与低频工具组显隐同源）、压缩中降透明度禁用不换旋转
   - **压缩结果反馈**（补齐原「失败静默」路径）：`CompactionOutcome` 契约（成功 = 会话 + 本次条数 + 时间戳 / 失败 = 一句中文原因简述），`currentSessionOutcome` 仅回传当前会话（自动压缩在流结束后异步触发、落定时用户可能已切换会话，防跨会话反馈错位）；两级呈现 = 视口即时 toast（1.6s 弹完即走，与导出 toast 同位同语言）+ 圆环详情卡持久行；`runCompaction` 各 guard 失败路径全部记入，唯「会话已删除」保持静默

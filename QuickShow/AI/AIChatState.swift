@@ -231,11 +231,18 @@ final class AIChatState: ObservableObject {
         store.$currentSessionId
             .sink { [weak self] sessionId in
                 guard let self else { return }
+                // switchDraft 会更新 draftOwnerSessionId；先取旧值判定「是否真的换了会话」，
+                // 避免重复点击当前会话时误清空「总是允许」记忆（首次订阅重放也不算切换）。
+                let sessionChanged = self.draftOwnerSessionId != sessionId
                 self.switchDraft(to: sessionId)
                 if let sessionId {
                     self.unreadSessionIds.remove(sessionId)
                 }
                 self.syncStreamingState()
+                // 会话切换/新对话：危险工具「总是允许」记忆随会话失效（幂等，仅真实切换时清）。
+                if sessionChanged {
+                    ChatInteractionCenter.shared.resetSessionMemory()
+                }
             }
             .store(in: &cancellables)
 
@@ -1291,14 +1298,43 @@ final class AIChatState: ObservableObject {
         """
     }
 
+    /// 内置 system 引导：角色定位 + ask_user 互动纪律。
+    /// 仅在 ask_user 工具启用时注入（禁用时不引导模型调用不存在的工具，保持最小侵入）；
+    /// 用户自定义 systemPrompt 叠加其后——两者共存，用户配置不会导致内置引导丢失
+    /// （引导管行为纪律，用户文案管个性化任务，职责不重叠）。
+    private static let builtinSystemGuidance = """
+        你是 QuickShow 的 AI 助手，运行在 macOS 悬浮输入条上。
+
+        互动纪律：
+        - 用户需求不明确、存在歧义或方案有分支时，先调用 ask_user 工具向用户确认，
+          不要基于猜测直接执行。
+        - 把需要澄清的点合并成一次 ask_user 调用（最多 5 题），避免反复打扰。
+        - 每个问题给出 2-6 个具体选项（单选或复选），用户也可能会直接输入答案。
+        - 无需提问的情况：指令已明确；细节琐碎不影响结果；用户已表达「直接做」。
+        """
+
     /// 构造发往服务端的消息数组：system prompt 在最前，其次为早期对话的压缩摘要，
     /// 最后是未压缩上下文（按 token 水位截断兜底；system 不参与丢弃）。
     private func buildRequestMessages(for sessionId: UUID) -> [ChatCompletionMessage] {
         var result: [ChatCompletionMessage] = []
 
-        let system = service.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !system.isEmpty {
-            result.append(ChatCompletionMessage(role: ChatMessage.Role.system.rawValue, content: system))
+        // system 段组装：内置引导（ask_user 启用时）+ 用户自定义，合并为单条 system 消息
+        // （Responses 协议会合并全部 system 为 instructions，此处单条即两协议通吃）。
+        var systemParts: [String] = []
+        let askUserEnabled = AIToolRegistry.shared.enabledTools()
+            .contains { $0.name == "ask_user" }
+        if askUserEnabled {
+            systemParts.append(Self.builtinSystemGuidance)
+        }
+        let customSystem = service.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !customSystem.isEmpty {
+            systemParts.append(customSystem)
+        }
+        if !systemParts.isEmpty {
+            result.append(ChatCompletionMessage(
+                role: ChatMessage.Role.system.rawValue,
+                content: systemParts.joined(separator: "\n\n")
+            ))
         }
         // 摘要注入：紧随 systemPrompt，作为压缩后的早期上下文。
         if let summary = store.session(id: sessionId)?.contextSummary?

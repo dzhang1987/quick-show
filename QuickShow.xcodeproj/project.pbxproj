@@ -37,6 +37,7 @@
 		5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */; };
 		6113DF015E84E4580BEEB38B /* github-dark.min.css in Resources */ = {isa = PBXBuildFile; fileRef = F5D74E5480F19A9FCF5818B9 /* github-dark.min.css */; };
 		6918C3EBE458573F5544DA21 /* CodeAttributedString.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5FA43600E34A41A8B9BEAF7 /* CodeAttributedString.swift */; };
+		69AED504F44D67677B401ECD /* AskUserTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = E80B8E81B7EA035907A34056 /* AskUserTool.swift */; };
 		6EBCA67406643D8157B55A57 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = F99ABD71A91473D072310ABF /* DesignTokens.swift */; };
 		7325565C24EBC2891BB84D17 /* PanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB3F9819E7541B279D9C3FB /* PanelManager.swift */; };
 		73C4F5FD7250B1905670B6FD /* atom-one-light.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 5822253DCCE3035ACFC217BB /* atom-one-light.min.css */; };
@@ -62,6 +63,7 @@
 		A3E1307AC8680216CF70DC61 /* AIChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */; };
 		A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AE831E93734F1F74D7F169 /* AIWindowManager.swift */; };
 		A75BFBFB6A010F7CFF636EC4 /* MyLocationTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AA50A500CD868147CD9442B /* MyLocationTool.swift */; };
+		AB8319ECBF04E457827650EB /* AIChatDrawerPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3544D1B995838ACC9069019C /* AIChatDrawerPanel.swift */; };
 		ACA81BBE00536E8C914F3A1D /* AIChatMathViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */; };
 		AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80187D648ECC52984FCD6D2C /* QuickShowApp.swift */; };
 		AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */; };
@@ -69,6 +71,7 @@
 		B4BC135ABE2AF381BF4507B8 /* AIChatMapCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */; };
 		B9C5F13390504281B5288EB4 /* GlassSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB3ADAC64611005A5FDFBEB /* GlassSurface.swift */; };
 		BAAA508F44101CD01C5E43A2 /* MTBezierPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9979D59CD3CF1794FBDCF514 /* MTBezierPath.swift */; };
+		C0DD578E6B16FCC9F371BDDE /* ChatInteractionCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */; };
 		C44C8F9955459F63DE62720D /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5B6AEB17D96D8E09E7C833E /* Theme.swift */; };
 		C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */; };
 		C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02C56336313E564A9C58442B /* AppState.swift */; };
@@ -124,6 +127,7 @@
 		297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolRegistry.swift; sourceTree = "<group>"; };
 		307BA9E935DBCE1A3EE84090 /* MTConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTConfig.swift; sourceTree = "<group>"; };
 		31B220E8199511E133A53FEA /* MTMathAtomFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathAtomFactory.swift; sourceTree = "<group>"; };
+		3544D1B995838ACC9069019C /* AIChatDrawerPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatDrawerPanel.swift; sourceTree = "<group>"; };
 		39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMapCardView.swift; sourceTree = "<group>"; };
 		3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebTools.swift; sourceTree = "<group>"; };
 		3B2211C3F2E376A20DB7FE5A /* MTColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTColor.swift; sourceTree = "<group>"; };
@@ -166,10 +170,12 @@
 		D265EF154F546FE21365CDDE /* AIToolCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolCardView.swift; sourceTree = "<group>"; };
 		D2BC33923F7BAC20B1968651 /* MTMathUILabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathUILabel.swift; sourceTree = "<group>"; };
 		D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMathViews.swift; sourceTree = "<group>"; };
+		D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInteractionCenter.swift; sourceTree = "<group>"; };
 		D63AB70CD13631A39A802994 /* LunarCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunarCalendar.swift; sourceTree = "<group>"; };
 		D68032BC793ACA6923E904D1 /* AICompletionNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AICompletionNotifier.swift; sourceTree = "<group>"; };
 		D7C7EC4C33CD9AD3C0270AD3 /* RWLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RWLock.swift; sourceTree = "<group>"; };
 		E5FA43600E34A41A8B9BEAF7 /* CodeAttributedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeAttributedString.swift; sourceTree = "<group>"; };
+		E80B8E81B7EA035907A34056 /* AskUserTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserTool.swift; sourceTree = "<group>"; };
 		E8306490C02B02B7D9AC1528 /* MTFontMathTableV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontMathTableV2.swift; sourceTree = "<group>"; };
 		E84BDE0348FDAA9E49D752F1 /* MTLabel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTLabel.swift; sourceTree = "<group>"; };
 		E97C435AE3528691A109E6D1 /* RichCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichCard.swift; sourceTree = "<group>"; };
@@ -227,6 +233,7 @@
 			children = (
 				04AE831E93734F1F74D7F169 /* AIWindowManager.swift */,
 				02C56336313E564A9C58442B /* AppState.swift */,
+				D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */,
 				A717A5076D26657EA117861F /* HotKeyManager.swift */,
 				4CB3F9819E7541B279D9C3FB /* PanelManager.swift */,
 			);
@@ -249,6 +256,7 @@
 			children = (
 				1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */,
 				74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */,
+				3544D1B995838ACC9069019C /* AIChatDrawerPanel.swift */,
 				39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */,
 				0EDD99D2C350FE69E982FD14 /* AIChatMarkdownView.swift */,
 				D342490DBC4E6D19B0BB6D48 /* AIChatMathViews.swift */,
@@ -357,6 +365,7 @@
 			children = (
 				1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */,
 				297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */,
+				E80B8E81B7EA035907A34056 /* AskUserTool.swift */,
 				57013FDF715F8B5844F318F0 /* BuiltInTools.swift */,
 				7E88470F13C5E08A67557375 /* MapService.swift */,
 				EB8F7C9405E7B908FF1A9A77 /* MapTools.swift */,
@@ -391,7 +400,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_C2D3EB4E-A8EC-429A-88F2-C1912EA833EC" /* Resources */ = {
+		"TEMP_DEDB1C4C-C86A-4C15-A127-2E877D17B4A9" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -571,6 +580,7 @@
 			files = (
 				AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */,
 				03F9B8B0283FE7ABB9D12123 /* AIChatContextRingView.swift in Sources */,
+				AB8319ECBF04E457827650EB /* AIChatDrawerPanel.swift in Sources */,
 				B4BC135ABE2AF381BF4507B8 /* AIChatMapCardView.swift in Sources */,
 				B294658D1B91F980CBB27E32 /* AIChatMarkdownView.swift in Sources */,
 				ACA81BBE00536E8C914F3A1D /* AIChatMathViews.swift in Sources */,
@@ -586,8 +596,10 @@
 				C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */,
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
 				C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */,
+				69AED504F44D67677B401ECD /* AskUserTool.swift in Sources */,
 				48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */,
 				492029441824493F4626037D /* CalendarView.swift in Sources */,
+				C0DD578E6B16FCC9F371BDDE /* ChatInteractionCenter.swift in Sources */,
 				E542D68A284B997ED9194C5F /* ChatSessionStore.swift in Sources */,
 				6EBCA67406643D8157B55A57 /* DesignTokens.swift in Sources */,
 				91069499DDBCC2426DCC41CD /* ExpandedMonitoringView.swift in Sources */,

@@ -2,6 +2,11 @@ import AppKit
 import Combine
 import SwiftUI
 
+extension Notification.Name {
+    /// 抽屉关闭后请求主输入框恢复第一响应者（AIChatView 发布，ChatInputTextView 观察）。
+    static let aiChatRefocusInput = Notification.Name("aiChat.refocusInput")
+}
+
 /// AI 对话视图（Lane C）：将嵌入 NSHostingView，由 AIWindowManager 管理外窗尺寸与焦点。
 /// 视觉常量全部走 DesignTokens 令牌（AI 专用令牌集中在 DesignTokens 的 chatXxx 区，本文件不硬编码）。
 ///
@@ -18,6 +23,10 @@ import SwiftUI
 ///   当前条 accent 点亮；hover 弹预览胶囊、点击跳转）+ 坞正上方 ↓ 回底钮；浏览态显示、贴底隐藏
 /// - 快捷键 ⌘N/⌘B/⌘F 由 AIChatKeyMonitor（本地事件监听）接线；ESC/⌘K 仍走窗口层；
 ///   快捷键提示全部由各控件 .help() tooltip 承担（底部提示条已删）
+/// - 输入坞抽屉（2026-10 抽屉式交互）：权限确认 / AI 提问从输入框正上方向上滑出，
+///   与输入卡共享同一个连续玻璃体（抽屉是输入卡"长出"的上半部分，详见
+///   AIChatDrawerPanel.swift）；抽屉在场时 ESC 优先取消抽屉（权限 = 拒绝 / 提问 = 取消），
+///   聊天流经 dockTotalHeight 实测自动让位，窗口 frame 不动
 ///
 /// 公开接口（接线用）：
 /// - `state`：会话状态（AIChatState.shared）。
@@ -27,6 +36,8 @@ import SwiftUI
 @MainActor
 struct AIChatView: View {
     @ObservedObject var state: AIChatState
+    /// 输入坞抽屉交互中心：观察 request 驱动抽屉展开/收起（权限确认 / AI 提问）。
+    @ObservedObject private var interaction = ChatInteractionCenter.shared
     var onOpenSettings: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -209,9 +220,13 @@ struct AIChatView: View {
             installKeyMonitor()
             pinned = AIWindowManager.shared.isPinned
             windowIsKey = NSApp.keyWindow is AIPanel
+            // 抽屉 UI 在场登记：逻辑层据此决定发布请求还是安全兜底（拒绝/取消）
+            interaction.markUIActive(true)
         }
         .onDisappear {
             keyMonitor.remove()
+            // UI 离场：挂起中的抽屉请求被唤醒为兜底结果（确认→拒绝 / 提问→取消），防泄漏
+            interaction.markUIActive(false)
         }
         // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
@@ -228,6 +243,13 @@ struct AIChatView: View {
         // 因此这里对组字文本同样生效；绑定与 textView.string 一致后不会形成回写回路。
         .onChange(of: state.inputText) { newValue in
             inputEmpty = newValue.isEmpty
+        }
+        // 抽屉关闭（request 由非 nil 变 nil）后把焦点还回主输入框：
+        // 提问面板的自由输入条持焦期间点提交/取消，焦点随抽屉移除悬空，须主动归还。
+        .onChange(of: interaction.request == nil) { drawerGone in
+            if drawerGone {
+                NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+            }
         }
         // 会话切换检测（根级恒挂载）：把新会话置入 LRU 常驻集合头部，超限淘汰尾部（视图卸载）。
         // dropFirst 跳过订阅时重放的当前值，避免首挂载误判；常驻集合已由 init 以当前会话起步。
@@ -572,10 +594,10 @@ struct AIChatView: View {
 
     // MARK: 坞体安静/激活两态（渐进披露）
 
-    /// 安静态判据：无草稿、无附件、无待注入队列、非生成中，且鼠标不在坞区。
+    /// 安静态判据：无草稿、无附件、无待注入队列、非生成中、无抽屉请求，且鼠标不在坞区。
     /// 安静态下坞收敛为「纯输入行 + 弱化小字 chip + 无底灰箭头」——无 accent rim、
     /// 无实心色块、低频工具隐去，空态视觉重心让回中部引导区；
-    /// 悬停坞区 / 开始输入 / 附加内容 / 生成开始即切换激活态（0.16s 淡入，contentFade）。
+    /// 悬停坞区 / 开始输入 / 附加内容 / 生成开始 / 抽屉展开即切换激活态（0.16s 淡入，contentFade）。
     private var dockQuiet: Bool {
         // 空态判据双通道与：草稿恢复期 inputEmpty 可能滞后（@State 初值 true、首帧无变化事件），
         // state.inputText 非空即有草稿，首帧即正确（见 inputEmpty 声明处注释）。
@@ -585,6 +607,7 @@ struct AIChatView: View {
             && state.imageAttachments.isEmpty
             && state.pendingQueue.isEmpty
             && !state.isStreaming
+            && interaction.request == nil
             && !dockHovered
     }
 
@@ -650,67 +673,27 @@ struct AIChatView: View {
                 // 生长区容器不再单独上报——生长区高度变化经总高自然捕获。
             }
 
-            // 输入卡：文本区 + 底部工具行（⊕ 附件 / 模型 chip / 思考 chip ║ 低频工具组 / 发送）；
-            // 安静/激活两态语义见 dockQuiet
+            // 连续玻璃体（2026-10 抽屉式交互）：抽屉（在场时）+ 输入卡共享同一个
+            // GlassSurface / accent rim / 双层阴影——抽屉是输入卡"长出"的上半部分，
+            // 衔接处零间隙、圆角恒为 Radius.groupCard，中间仅一条 0.5pt 极淡分隔线。
+            // 窗口 frame 不动：抽屉展开纯视图内布局（聊天流自动让位收缩），
+            // 规避整窗玻璃 + SwiftUI 测量链死锁。
             VStack(spacing: 0) {
-                // 输入框：NSViewRepresentable 包装 NSTextView（自定义 ⏎/⇧⏎ 与中文 IME 组字语义）
-                ZStack(alignment: .topLeading) {
-                    ChatInputTextView(
-                        text: $state.inputText,
-                        isInputEmpty: $inputEmpty,
-                        onSubmit: { submitInput() },
-                        onSubmitFollowUp: { submitFollowUp() },
-                        onEscape: { handleEscape() },
-                        onInsertImages: { images in insertImages(images) },
-                        onRecallFirst: { state.recallFirstQueuedInput() }
-                    )
-                    // 双通道与：草稿恢复期 inputEmpty 滞后为 true（@State 初值、首帧无变化事件），
-                    // state.inputText 非空即有文字，placeholder 不显示——防重影（见 inputEmpty 声明处注释）。
-                    if inputEmpty && state.inputText.isEmpty {
-                        Text(inputPlaceholder)
-                            .font(Theme.Typography.text(13))
-                            .foregroundColor(Theme.Colors.idleText)
-                            // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 配 44pt 行高近居中
-                            .padding(.horizontal, Theme.Spacing.section)
-                            .padding(.vertical, Theme.Spacing.xxl)
-                            .allowsHitTesting(false)
-                    }
+                // 抽屉（权限确认 / AI 提问）：从输入卡上沿向上滑入；
+                // .id(request.id) 使请求切换时整树重建、面板内 @State 天然重置。
+                if let request = interaction.request {
+                    AIChatDrawerPanel(request: request)
+                        .id(request.id)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    // 衔接处极淡分隔（0.5pt，水平内收与抽屉内容边距一致）
+                    Rectangle()
+                        .fill(Theme.Colors.cardStroke)
+                        .frame(height: Theme.Layout.dividerHeight)
+                        .padding(.horizontal, Theme.Spacing.section)
+                        .transition(.opacity)
                 }
-                .frame(height: Theme.Layout.chatInputHeight)
 
-                // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 模型 chip / 思考 chip /
-                // 水位圆环（低频工具组随 showDockSecondaryTools 显隐）；
-                // 右组 = 剪贴板（hover 坞浮现）+ 发送钮。元素间距统一 lg(8)。
-                HStack(spacing: Theme.Spacing.lg) {
-                    attachMenuButton
-                    modelChip
-                    thinkingChip
-                    // 低频工具组（水位圆环：水位/详情/压缩三合一，AIChatContextRingView）：
-                    // 安静态整体隐去——保留占位、纯透明度渐变、布局零跳动；
-                    // 悬停/输入/附件/生成中淡入，水位 >0.8 破格常显（警戒亮弧语义在组件内）
-                    if let watermark = state.contextWatermark {
-                        AIChatContextRingView(
-                            watermark: watermark,
-                            isCompacting: state.isCompacting,
-                            summarizedCount: state.compactionInfo?.summarizedCount,
-                            compactionOutcome: state.currentSessionOutcome,
-                            onCompact: { state.compactNow() }
-                        )
-                        .opacity(showDockSecondaryTools ? 1 : 0)
-                        .allowsHitTesting(showDockSecondaryTools)
-                        .accessibilityHidden(!showDockSecondaryTools)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
-                    }
-                    Spacer(minLength: 0)
-                    clipboardButton
-                        .opacity(showDockSecondaryTools ? 1 : 0)
-                        .allowsHitTesting(showDockSecondaryTools)
-                        .accessibilityHidden(!showDockSecondaryTools)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
-                    sendButton
-                }
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.bottom, Theme.Spacing.lg)
+                inputCardContent
             }
             // 功能层：输入坞是典型控件面（输入条/发送/附件/模型 chip），26+ 官方 Liquid Glass，
             // <26 退化为 ultraThinMaterial + 0.5pt 描边；坞悬浮于消息流之上，玻璃采样到真实
@@ -721,8 +704,9 @@ struct AIChatView: View {
                 shape: RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous),
                 strokeColor: dockQuiet ? Theme.Colors.cardStroke : Theme.Colors.chatStrokeStrong
             ))
-            // 激活态 rim：坞体激活（悬停/输入/附件/生成中）且窗口 key 时叠加 accent 低透明度环，
-            // 材质对状态有响应；安静态零描边。allowsHitTesting(false) 防描边层吞掉坞内控件点击
+            // 激活态 rim：坞体激活（悬停/输入/附件/生成中/抽屉在场）且窗口 key 时叠加
+            // accent 低透明度环，材质对状态有响应；安静态零描边。
+            // allowsHitTesting(false) 防描边层吞掉坞内控件点击
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
                     .strokeBorder(
@@ -742,15 +726,14 @@ struct AIChatView: View {
             // 水位圆环详情卡宿主：必须位于 GlassSurface 之后——26+ 的 .glassEffect 会把
             // 内容裁剪进玻璃形状，挂早了浮层会被输入卡顶缘切断（机制见组件头注）
             .contextRingDetailHost()
+            // 抽屉展开/收起动画：0.25s easeOut 滑入滑出（本特性私有节拍，令牌见
+            // AIChatDrawerPanel.swift 头注）；渐隐带经 dockTotalHeight 实测自动跟随抽屉顶。
+            .animation(.easeOut(duration: AIChatDrawerMetrics.slideDuration), value: interaction.request?.id)
         }
         // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
         // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部。
         // 顶部零 padding：坞顶上方过渡由滚动区底缘渐隐带承担；底部 12pt 为坞与窗缘的呼吸缝
         .padding(.bottom, Theme.Spacing.xxl)
-        // 坞体总高实测（生长区 + 输入卡 + 底缝）：background GeometryReader 不占布局、
-        // 只在坞高变化（胶囊增删/工具行换态）时求值，事件级频率非逐帧；经 preference
-        // 回写 dockTotalHeight，单向流入渐隐带锚点/尾部留白等消费点，绝不反向影响
-        // 坞体布局（无反馈环）。
         // 坞体总高实测（生长区 + 输入卡 + 底缝）：background GeometryReader 不占布局、
         // 只在坞高变化（胶囊增删/工具行换态）时求值，事件级频率非逐帧。
         // 机制说明：经实测 preference 冒泡在本视图上下文中断——发射值到不了链尾观察点
@@ -777,6 +760,72 @@ struct AIChatView: View {
     private func noteDockTotalHeight(_ height: CGFloat) {
         if abs(height - dockTotalHeight) > 0.5 {
             dockTotalHeight = height
+        }
+    }
+
+    /// 输入卡内容（连续玻璃体的下半部分）：文本区 + 底部工具行
+    /// （⊕ 附件 / 模型 chip / 思考 chip ║ 低频工具组 / 发送）；安静/激活两态语义见 dockQuiet。
+    /// 玻璃面/描边/阴影由外层连续体容器统一施加，本视图只排版内容。
+    private var inputCardContent: some View {
+        VStack(spacing: 0) {
+            // 输入框：NSViewRepresentable 包装 NSTextView（自定义 ⏎/⇧⏎ 与中文 IME 组字语义）
+            ZStack(alignment: .topLeading) {
+                ChatInputTextView(
+                    text: $state.inputText,
+                    isInputEmpty: $inputEmpty,
+                    onSubmit: { submitInput() },
+                    onSubmitFollowUp: { submitFollowUp() },
+                    onEscape: { handleEscape() },
+                    onInsertImages: { images in insertImages(images) },
+                    onRecallFirst: { state.recallFirstQueuedInput() }
+                )
+                // 双通道与：草稿恢复期 inputEmpty 滞后为 true（@State 初值、首帧无变化事件），
+                // state.inputText 非空即有文字，placeholder 不显示——防重影（见 inputEmpty 声明处注释）。
+                if inputEmpty && state.inputText.isEmpty {
+                    Text(inputPlaceholder)
+                        .font(Theme.Typography.text(13))
+                        .foregroundColor(Theme.Colors.idleText)
+                        // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 配 44pt 行高近居中
+                        .padding(.horizontal, Theme.Spacing.section)
+                        .padding(.vertical, Theme.Spacing.xxl)
+                        .allowsHitTesting(false)
+                }
+            }
+            .frame(height: Theme.Layout.chatInputHeight)
+
+            // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 模型 chip / 思考 chip /
+            // 水位圆环（低频工具组随 showDockSecondaryTools 显隐）；
+            // 右组 = 剪贴板（hover 坞浮现）+ 发送钮。元素间距统一 lg(8)。
+            HStack(spacing: Theme.Spacing.lg) {
+                attachMenuButton
+                modelChip
+                thinkingChip
+                // 低频工具组（水位圆环：水位/详情/压缩三合一，AIChatContextRingView）：
+                // 安静态整体隐去——保留占位、纯透明度渐变、布局零跳动；
+                // 悬停/输入/附件/生成中淡入，水位 >0.8 破格常显（警戒亮弧语义在组件内）
+                if let watermark = state.contextWatermark {
+                    AIChatContextRingView(
+                        watermark: watermark,
+                        isCompacting: state.isCompacting,
+                        summarizedCount: state.compactionInfo?.summarizedCount,
+                        compactionOutcome: state.currentSessionOutcome,
+                        onCompact: { state.compactNow() }
+                    )
+                    .opacity(showDockSecondaryTools ? 1 : 0)
+                    .allowsHitTesting(showDockSecondaryTools)
+                    .accessibilityHidden(!showDockSecondaryTools)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
+                }
+                Spacer(minLength: 0)
+                clipboardButton
+                    .opacity(showDockSecondaryTools ? 1 : 0)
+                    .allowsHitTesting(showDockSecondaryTools)
+                    .accessibilityHidden(!showDockSecondaryTools)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
+                sendButton
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.bottom, Theme.Spacing.lg)
         }
     }
 
@@ -1206,6 +1255,8 @@ struct AIChatView: View {
     // MARK: - 快捷键监听（⌘N/⌘B/⌘F + 重命名/放大态 ESC 先行消费）
 
     private func installKeyMonitor() {
+        keyMonitor.isDrawerOpen = { ChatInteractionCenter.shared.request != nil }
+        keyMonitor.onCancelDrawer = { _ = self.cancelActiveDrawerIfNeeded() }
         keyMonitor.isRenaming = { AIChatState.shared.renamingSessionId != nil }
         keyMonitor.onCancelRename = { AIChatState.shared.renamingSessionId = nil }
         keyMonitor.isZooming = { zoomedAttachment != nil }
@@ -1224,9 +1275,12 @@ struct AIChatView: View {
         keyMonitor.install()
     }
 
-    /// ESC 三阶段语义（输入框聚焦时的兜底路径）：
-    /// ① 行内重命名进行中 → 先取消重命名（不关窗、不中止流）；② 流式中 → 中止生成；③ 否则关窗还焦点。
+    /// ESC 阶段语义（输入框聚焦时的兜底路径）：
+    /// ⓪ 抽屉在场 → 先取消抽屉（权限 = 拒绝 / 提问 = 取消）；
+    /// ① 行内重命名进行中 → 先取消重命名（不关窗、不中止流）；
+    /// ② 流式中 → 中止生成；③ 否则关窗还焦点。
     private func handleEscape() {
+        if cancelActiveDrawerIfNeeded() { return }
         if state.renamingSessionId != nil {
             state.renamingSessionId = nil
             return
@@ -1237,6 +1291,20 @@ struct AIChatView: View {
             onClose?()
         }
     }
+
+    /// ESC 阶段 0（与窗口层 AIPanel / 按键监听 AIChatKeyMonitor 三条链路同一语义）：
+    /// 抽屉在场时取消并消费本次 ESC；权限抽屉 = 拒绝，提问抽屉 = 取消。
+    /// 返回 true = 已消费。request 由逻辑层清空，抽屉随动画收起。
+    private func cancelActiveDrawerIfNeeded() -> Bool {
+        guard let request = interaction.request else { return false }
+        switch request {
+        case .toolConfirmation:
+            interaction.resolveConfirmation(.denied)
+        case .userQuestions:
+            interaction.cancelQuestions()
+        }
+        return true
+    }
 }
 
 // MARK: - AI 窗快捷键监听
@@ -1245,11 +1313,16 @@ struct AIChatView: View {
 /// 为什么不用 AIPanel.sendEvent 拦截：窗口层按键纪律（ESC/⌘K/文本聚焦放行）不允许改动；
 /// 本地监听在 NSApplication 派发到窗口之前触发，既不动窗口层逻辑，又能覆盖
 /// 「第一响应者非输入框」（如焦点在侧栏会话行）的路径。
-/// 另承担两个 UI 态下的 ESC 先行消费：行内重命名中 → 取消重命名；图片放大中 → 关闭放大层。
+/// 另承担三个 UI 态下的 ESC 先行消费：抽屉在场 → 取消抽屉（阶段 0，与窗口层同一语义）；
+/// 行内重命名中 → 取消重命名；图片放大中 → 关闭放大层。
 /// 非隔离类：本地监听恒在主线程事件派发路径触发，回调直接执行，避免 NSEvent 跨隔离域。
 final class AIChatKeyMonitor {
     private var monitor: Any?
 
+    /// 抽屉（权限确认 / AI 提问）是否在场
+    var isDrawerOpen: () -> Bool = { false }
+    /// 抽屉取消动作（权限 = 拒绝 / 提问 = 取消）
+    var onCancelDrawer: () -> Void = {}
     var isRenaming: () -> Bool = { false }
     var onCancelRename: () -> Void = {}
     var isZooming: () -> Bool = { false }
@@ -1277,8 +1350,9 @@ final class AIChatKeyMonitor {
         guard event.window is AIPanel else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
 
-        // ESC：仅在重命名/放大态下先行消费；其余放行给窗口层两阶段语义
+        // ESC：抽屉/重命名/放大态下先行消费；其余放行给窗口层阶段语义
         if event.keyCode == 53, flags.isEmpty {
+            if isDrawerOpen() { onCancelDrawer(); return nil }
             if isRenaming() { onCancelRename(); return nil }
             if isZooming() { onDismissZoom(); return nil }
             return event
@@ -3678,6 +3752,8 @@ private struct ChatInputTextView: NSViewRepresentable {
         }
 
         /// 监听窗口成为 key：保证 AI 窗每次唤出时输入框拿到第一响应者。
+        /// 同挂抽屉关闭通知：抽屉内的自由输入条持焦期间点提交/取消，
+        /// 焦点随抽屉移除悬空，须主动归还主输入框。
         func startObservingWindow() {
             NotificationCenter.default.addObserver(
                 self,
@@ -3685,10 +3761,16 @@ private struct ChatInputTextView: NSViewRepresentable {
                 name: NSWindow.didBecomeKeyNotification,
                 object: nil
             )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(refocusInputRequested(_:)),
+                name: .aiChatRefocusInput,
+                object: nil
+            )
         }
 
         func stopObservingWindow() {
-            NotificationCenter.default.removeObserver(self, name: NSWindow.didBecomeKeyNotification, object: nil)
+            NotificationCenter.default.removeObserver(self)
         }
 
         @objc private func windowDidBecomeKey(_ note: Notification) {
@@ -3696,6 +3778,15 @@ private struct ChatInputTextView: NSViewRepresentable {
                   window === textView?.window else { return }
             // 侧栏行内重命名等文本控件已持焦点时让位，不抢占第一响应者
             // （重命名 TextField 的 field editor 也是 NSTextView；区别于本输入框）
+            if let responder = window.firstResponder as? NSTextView, responder !== textView {
+                return
+            }
+            window.makeFirstResponder(textView)
+        }
+
+        /// 抽屉关闭后焦点归还：其他文本控件（如侧栏重命名 field editor）持焦时同样让位。
+        @objc private func refocusInputRequested(_ note: Notification) {
+            guard let textView, let window = textView.window else { return }
             if let responder = window.firstResponder as? NSTextView, responder !== textView {
                 return
             }
