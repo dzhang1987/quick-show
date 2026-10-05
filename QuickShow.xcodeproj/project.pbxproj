@@ -472,7 +472,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_ACB71048-B78D-4AD3-BEFD-45055004F86B" /* Resources */ = {
+		"TEMP_E4306BDB-1D0C-4BE9-AFDA-3CEA83D952BF" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
