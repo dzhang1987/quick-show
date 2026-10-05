@@ -14,8 +14,11 @@ import SwiftUI
 /// - hover 才出圆底提亮（iconHoverBg + iconHover），不常驻 rim；
 /// - 警戒破格：ratio > 0.8 亮弧转 statusWarning（阈值与调用侧 showDockSecondaryTools
 ///   的破格常显同源）——需要警示的时刻不沉默；
-/// - 压缩中整体降透明度 + 禁用，不换成旋转/进度轮——克制优先；
-/// - 动效只用 Theme.Motion.contentFade 的 ease-out，与其他控件同级。
+/// - 压缩中：水位弧让位于不定态转圈（固定 1/4 圈亮弧 iconHover、线性匀速 1s/圈），
+///   禁用点击但全亮——「进行中」是活跃信号，不再做 0.5 降透明度弱化
+///  （2026-10 用户决策：取代先前「纯禁用弱化、不换旋转/进度轮」的约定；
+///   压缩中并由调用侧 showDockSecondaryTools 破格常显，进行中的操作不消失）；
+/// - 动效只用 Theme.Motion.contentFade 的 ease-out；唯转圈是线性匀速（不定态语义本身）。
 ///
 /// 结构纪律（详情卡的渲染层级）：
 /// macOS 26+ 的 .glassEffect 会把内容裁剪进玻璃形状——详情卡若挂在坞内按钮的
@@ -25,7 +28,7 @@ import SwiftUI
 struct AIChatContextRingView: View {
     /// 水位快照（usedTokens/windowTokens/ratio；真源在 AIChatState.contextWatermark）。
     let watermark: ContextWatermark
-    /// 压缩进行中：整体降透明度 + 禁用点击。
+    /// 压缩进行中：环体切换为不定态转圈 + 禁用点击（见头注视觉纪律）。
     let isCompacting: Bool
     /// 已压缩消息条数（nil = 从未压缩；详情卡的摘要行据此显隐）。
     let summarizedCount: Int?
@@ -36,6 +39,9 @@ struct AIChatContextRingView: View {
 
     /// hover 态：驱动圆底提亮、亮弧增色与详情卡上报。
     @State private var hovered = false
+    /// 不定态转圈角（度）：仅 isCompacting 期间由无限动画驱动 0→360 循环；
+    /// 停止时禁用动画归零——不残留中间角度、不继续微转，下次启动恒从 12 点干净起步。
+    @State private var spinnerAngle: Double = 0
 
     /// 环体直径 14pt：比 13pt 图标略大一档——空心描边环无填充、视觉偏小，
     /// 与电池图标「视觉偏小需加大一档」同思路；点击区仍对齐 24pt 图标钮档位。
@@ -44,6 +50,10 @@ struct AIChatContextRingView: View {
     private let ringLineWidth: CGFloat = 1.5
     /// 警戒阈值：与调用侧 watermarkBreaksThrough（showDockSecondaryTools 破格）同源。
     private let warningRatio: Double = 0.8
+    /// 不定态弧长：固定 1/4 圈。
+    private let spinnerArcFraction: Double = 0.25
+    /// 不定态转速：线性匀速 1s/圈。
+    private let spinnerPeriod: Double = 1.0
 
     private var isWarning: Bool { watermark.ratio > warningRatio }
 
@@ -56,18 +66,34 @@ struct AIChatContextRingView: View {
     var body: some View {
         Button(action: onCompact) {
             ZStack {
-                // 暗弧轨道：iconRest 再降透明度——存在感低于亮弧，只界定「满环在哪」
+                // 暗弧轨道：iconRest 再降透明度——存在感低于亮弧，只界定「满环在哪」；
+                // 转圈期间轨道保留（不定态弧绕轨道运行的参照系）
                 Circle()
                     .stroke(Theme.Colors.iconRest.opacity(0.35), lineWidth: ringLineWidth)
-                // 亮弧：12 点起步（rotationEffect -90°）顺时针；round 端点在极小尺寸下
-                // 更精致；ratio 钳制 [0,1]，水位估算越界（如 usage 超窗）不脱轨
-                Circle()
-                    .trim(from: 0, to: min(max(watermark.ratio, 0), 1))
-                    .stroke(arcColor, style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
+                if isCompacting {
+                    // 不定态 spinner：隐藏水位弧，固定 1/4 圈亮弧线性匀速循环。
+                    // 与水位弧互斥渲染（if/else 分支 + opacity 交叉淡化）——两个
+                    // .animation(value:) 修饰器各管各的，互不干扰；色用 iconHover 档
+                    // 全亮（「进行中」是活跃信号，不做禁用降透明度）
+                    Circle()
+                        .trim(from: 0, to: spinnerArcFraction)
+                        .stroke(Theme.Colors.iconHover,
+                                style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90 + spinnerAngle))
+                        .transition(.opacity)
+                } else {
+                    // 水位弧：12 点起步（rotationEffect -90°）顺时针；round 端点在极小尺寸
+                    // 下更精致；ratio 钳制 [0,1]，水位估算越界（如 usage 超窗）不脱轨
+                    Circle()
+                        .trim(from: 0, to: min(max(watermark.ratio, 0), 1))
+                        .stroke(arcColor, style: StrokeStyle(lineWidth: ringLineWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .transition(.opacity)
+                }
             }
             .frame(width: ringDiameter, height: ringDiameter)
             // 点击/hover 区对齐全组统一的 24pt 图标钮档位；hover 圆底是家族语言
+            //（压缩中禁用点击，圆底不出——但 onHover 仍驱动详情卡上报）
             .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
             .background(
                 Circle().fill(hovered && !isCompacting ? Theme.Colors.iconHoverBg : Color.clear)
@@ -76,9 +102,16 @@ struct AIChatContextRingView: View {
         }
         .buttonStyle(.plain)
         .disabled(isCompacting)
-        .opacity(isCompacting ? 0.5 : 1)
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
+        // 转圈启停：isCompacting 翻转即启动/停止，启停边界干净（见函数注释）；
+        // onAppear 兜底「进窗时已在压缩」（onChange 不对初始值触发）
+        .onChange(of: isCompacting) { compacting in
+            if compacting { startSpinner() } else { stopSpinner() }
+        }
+        .onAppear {
+            if isCompacting { startSpinner() }
         }
         // hover 中上报「按钮锚点 + 数据快照」，详情卡由宿主层渲染（见头注结构纪律）；
         // hover 结束上报 nil，卡片随之收起
@@ -93,9 +126,29 @@ struct AIChatContextRingView: View {
                 )
                 : nil
         }
-        // 弧长/警戒色随水位渐变；压缩态透明度同节奏
+        // 弧长/警戒色随水位渐变；isCompacting 翻转驱动两弧 opacity 交叉淡化
         .animation(.easeOut(duration: Theme.Motion.contentFade), value: watermark.ratio)
         .animation(.easeOut(duration: Theme.Motion.contentFade), value: isCompacting)
+    }
+
+    /// 启动不定态转圈：先无动画归零（双保险防快速启停残留中间角度），
+    /// 再以线性匀速无限循环 0→360（autoreverses: false，每圈 360→0 瞬回，视觉无缝）。
+    private func startSpinner() {
+        var reset = Transaction()
+        reset.disablesAnimations = true
+        withTransaction(reset) { spinnerAngle = 0 }
+        withAnimation(.linear(duration: spinnerPeriod).repeatForever(autoreverses: false)) {
+            spinnerAngle = 360
+        }
+    }
+
+    /// 停止转圈：禁用动画归零——repeatForever 的进行中动画随状态重写被替换，
+    /// 角度直接回 0，不残留中间角度、不继续微转；此刻 spinner 弧已随分支切换
+    /// 移除，归零只是状态卫生（下次启动恒从 12 点起步）。
+    private func stopSpinner() {
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { spinnerAngle = 0 }
     }
 }
 

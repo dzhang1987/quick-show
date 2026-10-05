@@ -378,7 +378,7 @@ enum Theme {
         static let chatDockHeightFallback: CGFloat = 88
         // 尾部留白在坞顶之上的呼吸缝：滚到底时末条消息底边与坞顶的可见间距
         // （真穿透：再往上滚，消息即自然穿入玻璃坞下被 blur 采样）
-        static let chatDockTailBreathing: CGFloat = 10
+        static let chatDockTailBreathing: CGFloat = 20
         // AI 对话思考过程（reasoning）展开区限高，超出内部滚动
         static let reasoningMaxHeight: CGFloat = 160
 

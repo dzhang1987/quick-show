@@ -611,8 +611,10 @@ struct AIChatView: View {
     private var dockRimActive: Bool { windowIsKey && !dockQuiet }
 
     /// 低频工具组（压缩/水位/剪贴板）显隐：安静态隐去（保留占位、纯透明渐变、布局零跳动）；
-    /// 唯水位逼近上限时破格常显——需要警示的时刻不沉默。
-    private var showDockSecondaryTools: Bool { !dockQuiet || watermarkBreaksThrough }
+    /// 两类破格常显，同源同档：水位逼近上限（需要警示的时刻不沉默）+ 压缩进行中
+    /// （进行中的操作不消失——2026-10 用户决策：压缩中圆环转不定态 spinner，必须留在
+    /// 视口内；压缩结束恢复随安静态隐去）。
+    private var showDockSecondaryTools: Bool { !dockQuiet || watermarkBreaksThrough || state.isCompacting }
 
     /// 水位警示破格：用量占比 > 0.8（与细条进红同一阈值）。
     private var watermarkBreaksThrough: Bool { (state.contextWatermark?.ratio ?? 0) > 0.8 }
@@ -798,7 +800,8 @@ struct AIChatView: View {
                 thinkingChip
                 // 低频工具组（水位圆环：水位/详情/压缩三合一，AIChatContextRingView）：
                 // 安静态整体隐去——保留占位、纯透明度渐变、布局零跳动；
-                // 悬停/输入/附件/生成中淡入，水位 >0.8 破格常显（警戒亮弧语义在组件内）
+                // 悬停/输入/附件/生成中淡入；两类破格常显：水位 >0.8（警戒亮弧语义在
+                // 组件内）+ 压缩进行中（spinner 必须可见，见 showDockSecondaryTools）
                 if let watermark = state.contextWatermark {
                     AIChatContextRingView(
                         watermark: watermark,
