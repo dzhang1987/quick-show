@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 大文件组件化拆分（第一批低风险机械拆分，行为零变化）：7 个巨型文件按已有类型边界拆为 30 个文件，全部纯机械搬家经逐字节 diff 校验（逻辑 / 格式 / `@AppStorage` 键名 / 持久化解码契约零改动），唯一语义变化为 66 处顶层 `private → internal`（Swift 同文件可见性限制的必然放宽）：
+  - `AIChatView.swift` 4096 → 1303 行：子视图族拆出 6 个文件——`AIChatLayoutSupport`（布局修饰符 / 偏好键 / 分组缓存）、`AIChatScrollNavigation`（滚动协调器 / 刻度轨 / 虚拟化行 / 键监听）、`AIChatMessageList`（会话消息列表保活单元）、`AIChatMessageRow`（消息行 / 流式 / 推理折叠 / 失败态一族）、`AIChatStatusViews`（队列胶囊 / 欢迎页 / 引导页）、`AIChatInputFields`（输入框 AppKit 三件套）；主 struct（窗口装饰 / 输入坞 / 会话管理）留守
+  - `AIChatMathViews.swift` 1966 → 1151 行：拆出 `MathLatexTranspiler`（818 行零依赖 LaTeX 纯函数转译器）
+  - `AIChatService.swift` 1674 → 1021 行：拆出 `AIChatWireModels`（26 个请求 / 响应 wire DTO，含访问控制连锁放宽 17 处）
+  - `SettingsView.swift` 1604 → 189 行：6 个 tab 表单拆出 `SettingsGeneralForms` / `SettingsShortcutsForm` / `AIServiceSettingsForm` / `AISettingsSections`，外壳仅保留 tab 枚举 / 路由 / KeyBadge
+  - `MarkdownParser.swift` 1551 → 317 行：AST 独立成 `MarkdownAST`，解析域拆出 `MarkdownParser+Inline` / `+List` / `+HTML` / `+Links` 四个扩展文件（20 个跨域调用函数放宽 internal）
+  - `ExpandedMonitoringView.swift` 747 → 42 行：左右卡片拆出 `PerformanceCard` / `FocusWorkCard`，`NowPlayingCardRow` / `PomodoroPresetButton` 独立成文件，原文件仅剩布局壳
+  - `ChatSessionStore.swift` 690 → 470 行：模型层（ChatMessage / ChatSession / 附件 / 工具记录 / 分组）拆出 `ChatModels`，`CodingKeys` 与兼容解码逐字节原样
+
 ## [1.13.0] - 2026-10-05
 
 ### Added
