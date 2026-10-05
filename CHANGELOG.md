@@ -6,6 +6,9 @@
 
 ### Changed
 
+- 大文件组件化拆分（收尾批：DrawerPanel 业务域 + MarkdownBlocks 独立渲染器，混杂清单清零）：
+  - `AIChatDrawerPanel.swift` 540 → 52（分派容器 + `AIChatDrawerMetrics` 节拍常量留守）：拆出 `ToolConfirmationDrawer`（147，工具权限确认抽屉）/ `UserQuestionDrawer`（169，ask_user 提问抽屉）/ `DrawerWidgets`（175，OptionCapsule / ActionButton 三档样式 / OptionFlowLayout 共享控件）；5 个跨文件引用类型 private→internal（唯一放宽项），分派容器对 AIChatInputDock 的契约零变化；抽屉统一设计维持现状——容器契约（动画/玻璃/ESC/状态重置）与控件层已统一，两抽屉装配差异属语义性，模板化按三次法则等第三种抽屉类型出现再做
+  - `MarkdownBlocks.swift` 486 → 264：拆出 `MarkdownTableView`（87，表格渲染器）与 `MarkdownCodeBlock`（141，CodeBlockView + CodeBlockText）；实证修正评估结论——CodeBlockView 的跨文件「引用」实为注释提及，实际构造点仅块分派处，可见性维持 internal 不放宽
 - 大文件组件化拆分（第四批：中等体量文件的职责混杂域拆分，8 条并行 lane，全部经 HEAD 逐字 diff 验证）：
   - `AIChatScrollNavigation.swift` 726 行拆三后删除：`AIChatKeyMonitor`（64，⌘N/⌘B/⌘F 监听）/ `ChatScrollCoordinator`（342，滚动状态机 + BridgeView + 虚拟化行容器）/ `ChatTickRail`（325，刻度轨布局 + 视图 + 预览尾）——键盘监听、滚动状态机、浏览刻度轨三域原本互不相干
   - `AIChatMessageRow.swift` 724 → 580：抽出 `ChatMessageActionRow`（103，操作行 + `ChatActionIconButton` 随迁）与 `MessageEditBubble`（115，就地编辑气泡 + 编辑会话草稿态随气泡生命周期创建/销毁，父级只持 `editing` 条件开关）；用户气泡渲染 / hover / 上下文菜单 / assistant 分支 / 流式外围小视图全部留守
