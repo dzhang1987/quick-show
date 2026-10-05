@@ -92,7 +92,7 @@ struct SessionMessageList: View {
                 // VStack + 行内「实渲染 ↔ 等高占位」切换（ChatVirtualRow）：占位高度 =
                 // 实测缓存高度，切换高度恒等 → doc 恒稳。间距语义与 LazyVStack 一致。
                 VStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
-                    ForEach(groupingCache.groups(for: messages)) { group in
+                    ForEach(MessageListDerivations.groupedMessages(cache: groupingCache, messages: messages)) { group in
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
                                 // 压缩边界卡：组内行级插入（边界无论落组间/组内都正确；再次压缩
@@ -417,37 +417,21 @@ struct SessionMessageList: View {
     /// 刻度轨数据源：当前会话全部用户消息；超过 chatTickMaxCount 时按视口取样——
     /// 以「当前条」锚点为中心保留前后各半（密度主由轨内自适应 pitch 承担，取样仅作极端兜底）。
     private var tickMessages: [ChatMessage] {
-        let users = messages.filter { $0.role == .user }
-        let limit = Theme.Layout.chatTickMaxCount
-        guard users.count > limit else { return users }
-        let anchorId = currentTickMessageId ?? users.last?.id
-        guard let anchorId, let index = users.firstIndex(where: { $0.id == anchorId }) else {
-            return Array(users.suffix(limit))
-        }
-        let half = limit / 2
-        let lower = max(0, min(index - half, users.count - limit))
-        return Array(users[lower ..< lower + limit])
+        MessageListDerivations.tickMessages(messages: messages,
+                                            currentTickMessageId: currentTickMessageId)
     }
 
     /// 当前查看的用户消息 tick：视口锚点（含自身）所属的最近一条用户消息，
     /// 随滚动经行级几何信号实时更新；无锚点时兜底取最后一条用户消息。
     private var currentTickMessageId: UUID? {
-        guard let anchor = topVisibleMessageID,
-              let index = messages.firstIndex(where: { $0.id == anchor }) else {
-            return messages.last { $0.role == .user }?.id
-        }
-        return messages[...index].last { $0.role == .user }?.id
+        MessageListDerivations.currentTickMessageId(messages: messages,
+                                                    topVisibleMessageID: topVisibleMessageID)
     }
 
     /// 刻度轨条目：采样后用户消息 → 轨渲染模型（预览文本预裁剪、当前条标记）。
     private var tickItems: [ChatTickRail.Item] {
-        tickMessages.map {
-            ChatTickRail.Item(
-                id: $0.id,
-                preview: $0.content.trimmingCharacters(in: .whitespacesAndNewlines),
-                isCurrent: $0.id == currentTickMessageId
-            )
-        }
+        MessageListDerivations.tickItems(messages: messages,
+                                         currentTickMessageId: currentTickMessageId)
     }
 
     /// ↓ 回到底部：浏览态显示；坞正上方、右缘贴统一右基准线；
@@ -500,35 +484,33 @@ struct SessionMessageList: View {
     /// 是否渲染压缩边界卡：仅活跃会话（compactionInfo 是「当前会话」门面，隐藏会话树
     /// 不渲染，防跨会话错位；切回活跃时随重求值自然出现）；有压缩记录或压缩进行中。
     private var showsCompactionCard: Bool {
-        isActive && (state.isCompacting || state.compactionInfo != nil)
+        MessageListDerivations.showsCompactionCard(isActive: isActive,
+                                                   isCompacting: state.isCompacting,
+                                                   compactionInfo: state.compactionInfo)
     }
 
     /// 压缩边界消息 id：beforeMessageID（String）转 UUID 且在本会话消息里存在时按位插入；
     /// nil / 转换失败 / 消息已不存在 → nil（卡片落到会话流最顶部，契约语义）。
     private var compactionBoundaryMessageId: UUID? {
-        guard let raw = state.compactionInfo?.beforeMessageID,
-              let uuid = UUID(uuidString: raw),
-              messages.contains(where: { $0.id == uuid }) else { return nil }
-        return uuid
+        MessageListDerivations.compactionBoundaryMessageId(
+            messages: messages,
+            beforeMessageID: state.compactionInfo?.beforeMessageID
+        )
     }
 
     /// 最后一条可重新生成的助手消息 id：仅活跃会话 + 本会话非生成中时提供
     /// （重试动作只对当前会话有效，隐藏会话不显示按钮）。
     private var lastRegeneratableAssistantId: UUID? {
-        guard isActive, !isStreamingSession else { return nil }
-        return messages.last { message in
-            guard message.role == .assistant else { return false }
-            switch message.state {
-            case .done, .aborted: return true
-            default: return false
-            }
-        }?.id
+        MessageListDerivations.lastRegeneratableAssistantId(messages: messages,
+                                                            isActive: isActive,
+                                                            isStreaming: isStreamingSession)
     }
 
     /// 会话内最后一条 user 消息 id：仅活跃会话 + 非生成中时提供
     /// （撤回/编辑只对当前会话最后一轮有效；隐藏会话与生成中不显示入口）。
     private var lastEditableUserMessageId: UUID? {
-        guard isActive, !state.isGenerating else { return nil }
-        return messages.last { $0.role == .user }?.id
+        MessageListDerivations.lastEditableUserMessageId(messages: messages,
+                                                         isActive: isActive,
+                                                         isGenerating: state.isGenerating)
     }
 }

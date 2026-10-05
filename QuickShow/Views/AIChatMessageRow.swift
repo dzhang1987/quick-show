@@ -35,12 +35,9 @@ struct ChatMessageRow: View, Equatable {
     @State private var rowHovered = false
     @State private var copied = false
     /// 就地编辑态（仅 canEditLastRound 的 user 行可进入）。
+    /// 仅作协调开关（showsActionRow 隐藏操作行、content 分派到 MessageEditBubble）；
+    /// 编辑草稿（文本/图片/高度）随 MessageEditBubble 生命周期创建与销毁。
     @State private var editing = false
-    /// 编辑草稿：进入编辑时以原消息文本/图片初始化，确认后交给 onEditResend。
-    @State private var editText = ""
-    @State private var editImages: [ChatImageAttachment] = []
-    /// 编辑器内容高度（由 ChatInlineEditTextView 实测回写，驱动编辑气泡自适应生长）。
-    @State private var editHeight: CGFloat = 18
 
     var body: some View {
         // 消息内容 + 下方紧凑操作行（紧贴正文底部 3pt；用户消息整体右对齐）
@@ -52,7 +49,17 @@ struct ChatMessageRow: View, Equatable {
                 // 与用户气泡、输入坞统一到同一条右基准线（阅读列右缘，±0）
             }
             if showsActionRow {
-                actionRow
+                ChatMessageActionRow(
+                    message: message,
+                    canRegenerate: canRegenerate,
+                    canEditLastRound: canEditLastRound,
+                    copied: copied,
+                    rowHovered: rowHovered,
+                    onCopy: copyContent,
+                    onRegenerate: onRegenerate,
+                    onBeginEdit: beginEdit,
+                    onWithdraw: onWithdraw
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
@@ -104,51 +111,6 @@ struct ChatMessageRow: View, Equatable {
         }
     }
 
-    /// 常驻操作行：复制（成功变对勾轻反馈）；最后一条落定助手消息附「重新生成」；
-    /// 会话内最后一条 user 消息附「撤回 / 编辑」（与复制一致常驻，生成中不显示）。
-    /// 弱化常驻：图标静止 38% 灰、整行 hover 提亮 85%；按钮自身 hover 叠 0.08 圆角底，不抢正文层级。
-    private var actionRow: some View {
-        HStack(spacing: Theme.Spacing.sm) {
-            if !message.content.isEmpty {
-                ChatActionIconButton(
-                    systemName: copied ? "checkmark" : "square.on.square",
-                    tint: copied ? Theme.Colors.accent : nil,
-                    help: "复制",
-                    rowHovered: rowHovered,
-                    action: copyContent
-                )
-            }
-
-            if message.role == .assistant, canRegenerate {
-                ChatActionIconButton(
-                    systemName: "arrow.clockwise",
-                    tint: nil,
-                    help: "重新生成",
-                    rowHovered: rowHovered,
-                    action: onRegenerate
-                )
-            }
-
-            // 撤回/编辑：与复制行为一致——常驻可见（静止 38% 灰、行 hover 提亮），不做 hover 浮现
-            if message.role == .user, canEditLastRound {
-                ChatActionIconButton(
-                    systemName: "pencil",
-                    tint: nil,
-                    help: "编辑并重发",
-                    rowHovered: rowHovered,
-                    action: beginEdit
-                )
-                ChatActionIconButton(
-                    systemName: "arrow.uturn.backward",
-                    tint: nil,
-                    help: "撤回该轮（内容回填输入框）",
-                    rowHovered: rowHovered,
-                    action: onWithdraw
-                )
-            }
-        }
-    }
-
     private func copyContent() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -164,7 +126,15 @@ struct ChatMessageRow: View, Equatable {
         case .user:
             // 就地编辑态：气泡原地变为编辑器（仅最后一轮 user 消息可进入）
             if editing {
-                editBubble
+                MessageEditBubble(
+                    message: message,
+                    onCommit: { text, images in
+                        // 与拆前 confirmEdit 逐字一致：视觉先行退出编辑态，再把新文本/图片交给数据层重发（不阻塞）。
+                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
+                        onEditResend(text, images)
+                    },
+                    onCancel: cancelEdit
+                )
             } else {
                 userBubble
             }
@@ -214,93 +184,13 @@ struct ChatMessageRow: View, Equatable {
         }
     }
 
-    /// 就地编辑态：气泡原地「展开」为编辑器——同底色/圆角/内边距，无跳变感。
-    /// 顶部为可单张移除的图片附件条（粘贴可追加）；中间为 IME 安全编辑框
-    /// （⏎ 确认 / ⇧⏎ 换行 / ESC 取消，高度随内容自适应、封顶滚动）；
-    /// 底部为操作钮（快捷键语义由 .help() tooltip 承担，对齐全窗提示纪律）。
-    private var editBubble: some View {
-        VStack(alignment: .trailing, spacing: Theme.Spacing.lg) {
-            if !editImages.isEmpty {
-                ImageAttachmentStrip(attachments: editImages) { id in
-                    editImages.removeAll { $0.id == id }
-                }
-            }
-
-            ChatInlineEditTextView(
-                text: $editText,
-                contentHeight: $editHeight,
-                onSubmit: confirmEdit,
-                onEscape: cancelEdit,
-                onInsertImages: { images in
-                    for image in images {
-                        if let attachment = ImageAttachmentProcessor.makeAttachment(from: image) {
-                            editImages.append(attachment)
-                        }
-                    }
-                }
-            )
-            .frame(maxWidth: .infinity)
-            .frame(height: editHeight)
-
-            HStack(spacing: Theme.Spacing.md) {
-                editBubbleButton(title: "取消", tint: Theme.Colors.contentSecondaryStrong, action: cancelEdit)
-                    .help("取消编辑（ESC）")
-                editBubbleButton(
-                    title: "重发",
-                    tint: canConfirmEdit ? Theme.Colors.accent : Theme.Colors.contentTertiary,
-                    action: confirmEdit
-                )
-                .disabled(!canConfirmEdit)
-                .help("确认并重发（⏎）")
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.vertical, Theme.Spacing.xl)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
-                .fill(Theme.Colors.chatUserBubble)
-        )
-        .frame(maxWidth: .infinity, alignment: .trailing)
-    }
-
-    /// 编辑气泡内的小胶囊钮：与失败卡「重试」同一语言（surfaceButton 实底 + keyCap 圆角）。
-    private func editBubbleButton(title: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(title)
-                .font(Theme.Typography.text(11, .semibold))
-                .foregroundColor(tint)
-                .padding(.horizontal, Theme.Spacing.xxl)
-                .padding(.vertical, Theme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                        .fill(Theme.Colors.surfaceButton)
-                )
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// 可确认重发：文本非空或仍有图片附件（与主输入框 canSend 同规则）。
-    private var canConfirmEdit: Bool {
-        !editText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !editImages.isEmpty
-    }
-
-    /// 进入编辑态：以原消息文本/图片初始化草稿，轻量淡入切换。
+    /// 进入编辑态：轻量淡入切换；编辑草稿（文本/图片/高度）由 MessageEditBubble
+    /// 创建时以原消息文本/图片初始化，退出销毁即重置，父级无需手工复位。
     private func beginEdit() {
-        editText = message.content
-        editImages = message.images
-        editHeight = 18
         withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = true }
     }
 
-    /// 确认编辑：先退出编辑态（视觉先行），再把新文本/图片交给数据层重发（不阻塞）。
-    private func confirmEdit() {
-        let text = editText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !editImages.isEmpty else { return }
-        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
-        onEditResend(text, editImages)
-    }
-
-    /// 取消编辑：丢弃草稿，恢复原气泡。
+    /// 取消编辑：退出编辑态，MessageEditBubble 随之销毁丢弃草稿，恢复原气泡。
     private func cancelEdit() {
         withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
     }
@@ -373,40 +263,6 @@ struct ChatMessageRow: View, Equatable {
                 }
                 AbortedTag()
             }
-        }
-    }
-}
-
-/// 操作行图标钮：10pt hierarchical 符号、18×18 命中区；
-/// 图标色随行 hover 提亮（0.38 → 0.85），自身 hover 叠 primary 0.08 圆角底（macOS 工具图标惯例）。
-struct ChatActionIconButton: View {
-    let systemName: String
-    /// 反馈色（如复制成功的 accent 对勾）；nil = 常规灰度档。
-    var tint: Color? = nil
-    let help: String
-    /// 父行 hover 态：驱动图标色提亮（行级弱化/增强的统一信号）。
-    let rowHovered: Bool
-    let action: () -> Void
-
-    @State private var hovered = false
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(Theme.Typography.text(10, .medium))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundColor(tint ?? Color.primary.opacity(rowHovered ? 0.85 : 0.38))
-                .frame(width: 18, height: 18)
-                .background(
-                    RoundedRectangle(cornerRadius: 4, style: .continuous)
-                        .fill(Color.primary.opacity(hovered ? 0.08 : 0))
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(help)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
     }
 }

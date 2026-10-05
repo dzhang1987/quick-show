@@ -6,6 +6,15 @@
 
 ### Changed
 
+- 大文件组件化拆分（第四批：中等体量文件的职责混杂域拆分，8 条并行 lane，全部经 HEAD 逐字 diff 验证）：
+  - `AIChatScrollNavigation.swift` 726 行拆三后删除：`AIChatKeyMonitor`（64，⌘N/⌘B/⌘F 监听）/ `ChatScrollCoordinator`（342，滚动状态机 + BridgeView + 虚拟化行容器）/ `ChatTickRail`（325，刻度轨布局 + 视图 + 预览尾）——键盘监听、滚动状态机、浏览刻度轨三域原本互不相干
+  - `AIChatMessageRow.swift` 724 → 580：抽出 `ChatMessageActionRow`（103，操作行 + `ChatActionIconButton` 随迁）与 `MessageEditBubble`（115，就地编辑气泡 + 编辑会话草稿态随气泡生命周期创建/销毁，父级只持 `editing` 条件开关）；用户气泡渲染 / hover / 上下文菜单 / assistant 分支 / 流式外围小视图全部留守
+  - `CalendarView.swift` 659 行拆三后删除：`CalendarGridViews`（388，网格面板 + 日格 + 日程行）/ `CalendarEventDetailView`（129）/ `CalendarEventEditView`（146，EventKit 编辑表单）——`CalendarPanelView` 对 PanelView 的契约零变化
+  - `AIToolCardView.swift` 619 → 393：抽出 `AskUserToolViews`（195，ask_user 问答存档渲染域，三类型 private→internal）与 `ToolJSONText`（32，跨卡复用的 JSON 美化展示）
+  - `WebTools.swift` 529 → 255：抽出 `WebToolsConfig`（141，Tavily 凭证存取/Keychain 迁移，AISettingsSections 引用兼容）/ `HTMLTextExtractor`（140，通用 HTML→文本引擎，8 个 private 实例方法函数化）；`BuiltInTools.swift` 614 → 591（`toolSuccessJSON`/`requiredString` 迁入共享 `ToolHelpers`，WebTools/MapTools 引用不变）——**HTML 实体表与 MarkdownParser 经实证语义不一致（nbsp 解码字符不同、实体覆盖 9 vs 48、amp 解码顺序刻意不同），保留独立实现不去重**
+  - `AIChatMapCardView.swift` 478 → 235：抽出 `MapCardModels`（84，DTO + 派生 + `MapCardProvider` 注册）/ `InteractiveMapView`（162，MKMapView 桥）；fileprivate 常量随迁收紧为 private，零放宽
+  - `AssistantMarkdownView.swift` 422 → 169：抽出 `MarkdownASTCache`（65，线程安全 AST 缓存）/ `MathLatexCollector`（82，latex 预热收集）/ `AsyncMathBlockView`（107，异步栅格化块）；`FootnoteEntry` 嵌套类型留守（MarkdownBlocks 依赖）
+  - `AIChatMessageList.swift` 534 → 516：派生计算 8 项（tick/压缩边界/最后可重生成/最后可编辑/分组缓存）函数化迁入 `MessageListDerivations`（118）；**滚动协调器接线 / 快照恢复 / 手动虚拟化状态机一字未动**（ScrollController 抽取为已知高风险项，留待后续评估）
 - 大文件组件化拆分（第三批收官：AIChatService 域拆分 + AIChatView 输入坞抽离 + AppState 门面化与 tick 事件总线）：
   - `AIChatService.swift` 1021 → 174 行：方法按域拆出 4 个 extension 文件（`+Config` 配置与 API Key/Keychain 迁移、`+Streaming` SSE 流式主链路（含 TaskCancellationBox/FirstTokenFlag 随迁）、`+Completion` 非流式补全与模型列表、`+RequestEncoding` 请求编码/工具声明/Responses 映射），存储属性与 init 留守主文件
   - `AIChatView.swift` 1307 → 675 行：浮岛输入坞抽离为 `AIChatInputDock`（691 行）——契约模式与 SessionMessageList/Sidebar 同构（@ObservedObject state + 8 个显式参数），输入区 / 附件菜单 / 模型与思考 chip / 剪贴板 / 发送键路 / 图片四件套 / drop 整体迁入，GlassSurface 修饰链逐字剪切（字节级比对保真），**零 private 放宽**（父级方法以闭包值在父作用域传出）；compactionStamp（消息列表唯一刷新触发器）/ 导出 toast / ESC 三链路总线 / keyMonitor / 侧栏留守；hover 等瞬态从 dirty 整个父体收敛为只 dirty 坞子树
