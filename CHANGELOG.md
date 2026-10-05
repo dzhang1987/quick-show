@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-10-05
+
 ### Added
 
 - preview_file 本地文件预览工具 + QuickLook 富卡片（AI 窗，文件预览专项，内置工具 20 → 21）：
