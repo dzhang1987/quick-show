@@ -6,6 +6,11 @@
 
 ### Added
 
+- preview_file 本地文件预览工具 + QuickLook 富卡片（AI 窗，文件预览专项，内置工具 20 → 21）：
+  - **preview_file 工具**（`PreviewFileTool.swift`）：对话中预览本地文件——图片 / PDF / 文本 / 音视频 / Office 等任意系统 Quick Look 可预览格式（复用系统 Quick Look 引擎零解析代码，与地图卡自绘 MKMapView 平行的 RichCard 第二张卡片）；`~` 展开、存在性 / 非目录校验、50MB 上限（超限错误带人类可读大小）；kind 识别优先 `typeIdentifier` 回退扩展名小写；结果 `card` + `data` 双写信封（与 ShowMapTool 同模式，随 ToolCallRecord 持久化，历史会话可回放）
+  - **QuickLook 富卡片**（`AIChatPreviewCardView.swift`）：视觉机械复刻 MapCard 范式（chatAssistantBubble 底 + cardStroke 0.5pt 描边 + groupCard 圆角，头部信息条 = 文件名 + kind → 预览区）；渲染主体 NSViewRepresentable 包装 QLPreviewView——`autostarts`、清自带背景融入卡片容器、Coordinator URL / 标题指纹 diff（父视图刷新 / 历史回放不重置用户缩放与滚动位置）、`dismantleNSView` 清预览项防 QuickLook 后台生成器持有已销毁视图、可失败构造兜底空白 NSView 绝不崩
+  - **高度按类型自适应**：文档族（文本 / 表格 / PDF）520pt、媒体类（图片 / 音视频 / 未知）300pt——300pt 下长文档看不到完整语义单元（.md 表格约 5.5 行且末行截断、PDF 页底约 15% 被裁，截图实测定档）；判定优先 `UTType(kind).conforms(to: .text / .pdf)`（系统权威分类，覆盖 plain-text / source-code / markdown / json / csv 全文本族），kind 为扩展名回退值时用 22 项扩展名集合兜底；macOS 13 部署目标用单参 `UTType(_:)` 构造（两参 `allowUndeclared` 形式为 27+ API）
+  - **降级安全**：渲染期 `FileManager` 探测文件存在（历史回放时文件可能已被清理）——已删 / 移走显示「文件不存在或已被移动」占位不崩；payload 解码失败返回可读错误卡；卡片未注册类型降级 JSON 展示（前后向兼容均安全）
 - ask_user 提问工具 + 输入坞抽屉交互体系（AI 窗，交互抽屉专项，内置工具 19 → 20）：
   - **ask_user 工具**（`AskUserTool.swift`）：模型在需求不明确 / 有歧义 / 方案有分支时先提问再执行——一次 1-5 题、每题 2-6 个选项（单选 / 多选）、支持自由输入作答；入参校验（空 / 超 5 题 / 选项不足 / label 空 → 抛「参数不合规」）；结果按题目顺序还原（选中 option id → label + custom 文本），取消返回 `ok:false`；协议层新增 `isInteractive` 声明（默认 false），执行器对 true 豁免 30s 超时无限静候用户
   - **ChatInteractionCenter 交互中心**（`ChatInteractionCenter.swift`）：`ChatDrawerRequest`（权限确认 / 用户提问二选一挂起，同一时刻仅一个请求）发布-挂起-应答管道；UI 在场登记（`markUIActive`，AIChatView onAppear/onDisappear 维护）——UI 离场时挂起中的请求唤醒为兜底结果（确认 → 拒绝 / 提问 → 取消）防泄漏；危险工具「总是允许」会话记忆（工具名 + 参数原文为键，会话切换 `resetSessionMemory` 幂等清除，防误清当前会话的旧值判定）

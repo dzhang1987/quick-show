@@ -139,7 +139,8 @@ final class RichCardRegistry {
     /// 注册内置卡片（应用启动时调用一次）。
     /// 新增卡片在此追加一行注册。
     func registerBuiltIns() {
-        register(MapCardProvider.self)   // 地图卡（AIChatMapCardView.swift）
+        register(MapCardProvider.self)       // 地图卡（AIChatMapCardView.swift）
+        register(PreviewCardProvider.self)   // 文件预览卡（AIChatPreviewCardView.swift）
     }
 }
 

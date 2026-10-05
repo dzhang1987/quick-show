@@ -136,6 +136,7 @@ final class AIToolRegistry {
             ListRunningAppsTool(),
             OpenAppTool(),
             ReadFileTool(),
+            PreviewFileTool(),
             WriteFileTool(),
             GetEnvTool(),
             SetEnvTool(),
