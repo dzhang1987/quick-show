@@ -6,6 +6,11 @@
 
 ### Changed
 
+- 大文件组件化拆分（第二批，含唯一的运行时架构改造）：
+  - `AIChatState.swift` 1767 → 543 行：方法按职责域拆出 6 个 extension 文件（`+Streaming` 流式回路 / 合帧 / 收尾、`+Compaction` 上下文压缩、`+RequestAssembly` 请求组装、`+Queue` 待注入队列、`+SessionEdits` 撤回 / 编辑 / 导出、`+Notifications` 标题摘要 / 系统通知），69 个方法全量核对一致；存储属性与 init / Combine 订阅留守主文件，跨文件引用的 `private` 成员放宽 internal
+  - `AIChatMathViews.swift` 1151 行全量拆为 4 文件后删除：`MathLayoutCache` / `MathRasterizer` / `MathViews`（公式视图层）/ `MarkdownInlineNS`（NSAttributedString 行内渲染，两个私有扩展与使用者同文件保持 private）
+  - `AIChatMarkdownView.swift` 1377 行拆为 4 文件后删除：`AssistantMarkdownView`（装配 + 缓存基建）/ `MarkdownBlocks`（各块渲染器）/ `MarkdownImageView` / `MarkdownInline`（SwiftUI 行内），3 处 private 放宽
+  - `SystemStatusProvider.swift` 1551 行**真子 provider 架构拆**（本批唯一动运行时结构）：DTO 层 `SystemStatusModels` + 6 个子 provider（`NowPlayingProvider` adapter 进程 / 流 / 封面、`AudioProvider` CoreAudio HAL + C 监听、`CalendarProvider` EventKit、`SystemMetricsProvider` 差分采集、`DeviceProvider` 定位 / 电池 / WiFi / 蓝牙 / DND、`SystemActions` 无状态动作）+ 237 行薄聚合门面；对外契约逐项保真（`shared` / 全部方法签名 / `$nowPlayingInfo` publisher 经回调喂数 / `audioChangeSubject` 稳定转发 / CoreAudio C 指针生命周期模式原样 / adapter 进程终止三入口 / willTerminate 钩子），AppState 等约 40 处调用方零改动
 - ask_user 互动纪律提示词重写（内置 system 引导，`AIChatState.builtinSystemGuidance`，堵「该问不问」放水口）：模型实际对话自证旧纪律失效——「不明确 / 歧义 / 有分支时先问」与「无需提问：指令已明确 / 细节琐碎」全为形容词，是否豁免由模型自行裁量，叠加用户自定义行动派人格 systemPrompt（拼接在同条 system 且靠后，recency 权重更高）后默认行为滑向直接执行，被用户指出后仅在对话文本里口头认错、下一轮照样放水（口头认错非修复）；重写为举证责任反转的硬判定结构：
   - **必问触发清单（或，任一命中必须先问）**：① 在两种以上都合理的做法之间犹豫过（哪怕一瞬间）——犹豫即分支；② 操作有副作用（写 / 删文件、执行命令、改配置等不可逆或影响系统）；③ 用户意图存在一种以上合理理解；④ 缺少完成任务的必要信息（路径、命名、目标值等）
   - **豁免条件（与，须同时满足才可直接执行）**：执行路径唯一 + 操作无副作用且可逆 + 用户指令已包含全部必要信息；外加兜底句「拿不准算不算满足时，一律视为不满足，回到先问」——专门堵「靠自觉」的裁量口子
