@@ -13,6 +13,7 @@
 		065A7458F83D731ED73D4D33 /* MTConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 307BA9E935DBCE1A3EE84090 /* MTConfig.swift */; };
 		066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03B0B0357916235B809E566B /* FloatingPanel.swift */; };
 		06AFDE855BCBA67DE767B4E1 /* MarkdownParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FC77F949B43F2F53CE7959C4 /* MarkdownParser.swift */; };
+		08B6452D8C9B974472C3DD71 /* SystemStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF5F18006899874846806D1 /* SystemStatusStore.swift */; };
 		098A67D50CB525F84AB8CB17 /* AIChatMessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD353D5D27F078B3E0FBC63 /* AIChatMessageRow.swift */; };
 		0B53C4B5540BB1CA1796211A /* AIChatStatusViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E580FA27BD85C8347C6C646 /* AIChatStatusViews.swift */; };
 		0BB0E0FE6EC153DCC4DED9CF /* MTColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2211C3F2E376A20DB7FE5A /* MTColor.swift */; };
@@ -20,7 +21,9 @@
 		0DFB3A82508830293EE99A56 /* CalendarProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF5BE1591E097DFDF1C55A4C /* CalendarProvider.swift */; };
 		0FF0EAC1AC72FBE27721C977 /* MediaRemote in Resources */ = {isa = PBXBuildFile; fileRef = C01588AECCABE573EFDE95CD /* MediaRemote */; };
 		100106054C6516EEC59F9D50 /* MapService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E88470F13C5E08A67557375 /* MapService.swift */; };
+		10488C80962AE90C51DE8943 /* MonitoringStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B9E47FFC6045EDC0E50BE6F /* MonitoringStore.swift */; };
 		1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */; };
+		12936723ACBBFE0CBDDB36E8 /* AIChatService+Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 593FA64731993CAEC270C733 /* AIChatService+Config.swift */; };
 		134C9389697F7A8589E3C21A /* AICompletionNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68032BC793ACA6923E904D1 /* AICompletionNotifier.swift */; };
 		16E81EBBA25542856B8CEC7D /* MTMathImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB2782A10BC852F7C88D212 /* MTMathImage.swift */; };
 		193E5F0FE7A4523525789E42 /* Shims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622B97F8A4F6847EC8A4273F /* Shims.swift */; };
@@ -29,11 +32,13 @@
 		1E9A6BF764BBA8B7E4804633 /* AIChatLayoutSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C3ED14E818FD6A81E2993F6 /* AIChatLayoutSupport.swift */; };
 		1EA9017E2E780F8C1523240F /* MarkdownImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43A3531AA75BABD5D1FE3080 /* MarkdownImageView.swift */; };
 		20FDD0F9E673832EB7CDA593 /* AIChatState+Compaction.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB435C852FEF250AC0839469 /* AIChatState+Compaction.swift */; };
+		2366D5FF5873667D5598EDEA /* MediaStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3291950B8938576996251B5D /* MediaStore.swift */; };
 		2462D0ECFAD2ACEFCD5226A1 /* HTMLUtils.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610C954BF7E854E4799CC62B /* HTMLUtils.swift */; };
 		267EBE782C8E63EC0B1B76FB /* MTMathListBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9656C66211292A7426B2795C /* MTMathListBuilder.swift */; };
 		2C21B8451DB6A2C6F905652B /* AIChatState+Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B946333D1317A323F75AC17 /* AIChatState+Notifications.swift */; };
 		2FE8433EC0F02F3317099504 /* mathFonts.bundle in Resources */ = {isa = PBXBuildFile; fileRef = B447A4A50153BE5D3817D655 /* mathFonts.bundle */; };
 		30440526851B6CE2562C8459 /* MTLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E84BDE0348FDAA9E49D752F1 /* MTLabel.swift */; };
+		321E4DFC3AA99F3C8829C9D5 /* AIChatService+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7695F4FF6C1E0DD5672E388 /* AIChatService+Streaming.swift */; };
 		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
 		39760048DBDB878931394AC3 /* AIModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4270992A33D3DD27F0515539 /* AIModelAdapter.swift */; };
 		3F030C8F6AC7AAC865530EFF /* FocusWorkCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2167D019993E6060D6D375A /* FocusWorkCard.swift */; };
@@ -42,13 +47,18 @@
 		45F48861BD508743A0514146 /* MTFontV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */; };
 		48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57013FDF715F8B5844F318F0 /* BuiltInTools.swift */; };
 		492029441824493F4626037D /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491F9CCD9C383D8736352FDA /* CalendarView.swift */; };
+		4BEFD53909D13445A22E6DF0 /* AIChatInputDock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 821BCF327327B8A737D704CE /* AIChatInputDock.swift */; };
 		4FCD29930D213AB61EB73C17 /* AIChatInputFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E541987A420C8F32EF8469D /* AIChatInputFields.swift */; };
 		5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */; };
 		52C20512446766AAB58B2144 /* pojoaque.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 751F343AA24F0685B3EFBE9A /* pojoaque.min.css */; };
+		536AA6C6BE64E1651D587CEE /* AIChatService+RequestEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D051C96C18F1878137BCF0B /* AIChatService+RequestEncoding.swift */; };
+		54F3DBE5FAF2AC2BAC8FDB20 /* AppState+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E96296DA3CAB83BC3CB9374 /* AppState+Actions.swift */; };
 		5860BE40BE412797192070A6 /* NowPlayingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2CA444DE18DD444351B1C21 /* NowPlayingProvider.swift */; };
 		5B33242FC8FA6D78307F318E /* AudioProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A51F804C8ADC984A49AEEC2 /* AudioProvider.swift */; };
 		5B5A3E7275818436396E7FAF /* AIToolExecutor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */; };
 		5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF5392359F9E715F636D0AE1 /* ScreenHelper.swift */; };
+		5CCB1AA7FCD1E076C224113C /* AppState+Forwarding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BA2EFE2F727CEF5B0BEBC55 /* AppState+Forwarding.swift */; };
+		5E494DCBD0CFAEA3CC51269B /* PomodoroStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E308FBA4E88417CC9AEF471 /* PomodoroStore.swift */; };
 		5ED9778EAB65A148653771F9 /* SettingsGeneralForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA8FD61001FFBE03FF9530C6 /* SettingsGeneralForms.swift */; };
 		6113DF015E84E4580BEEB38B /* github-dark.min.css in Resources */ = {isa = PBXBuildFile; fileRef = F5D74E5480F19A9FCF5818B9 /* github-dark.min.css */; };
 		68A4DFC9590BBC63D9C0E292 /* AIChatMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC88919D5EAE9E17E6C437E /* AIChatMessageList.swift */; };
@@ -61,6 +71,7 @@
 		739BA7095E61D54EF8BBD81D /* MathLatexTranspiler.swift in Sources */ = {isa = PBXBuildFile; fileRef = F125C20A7A18B3250E0DC143 /* MathLatexTranspiler.swift */; };
 		73C4F5FD7250B1905670B6FD /* atom-one-light.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 5822253DCCE3035ACFC217BB /* atom-one-light.min.css */; };
 		753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */; };
+		7742EE8B4E5BF2CDFD9AADF3 /* CalendarStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34CBD4C89D5A33D444B5AA62 /* CalendarStore.swift */; };
 		7906F865F0AA2682B8BEC633 /* MathViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5CDA8D120E9963B5D5F84A33 /* MathViews.swift */; };
 		7B1CF349CFA5269F288D9612 /* MTFontMathTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03458E0DB4A3F5DA4B1ABA3F /* MTFontMathTable.swift */; };
 		7D894712465CA4E102E46212 /* MTMathList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75DEE0C2484EC7C0E4D4828 /* MTMathList.swift */; };
@@ -91,6 +102,8 @@
 		A3E1307AC8680216CF70DC61 /* AIChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */; };
 		A3FB31F1FE5755FC2B12689B /* DeviceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CF0F2EA78ECAACDCE0E67F /* DeviceProvider.swift */; };
 		A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AE831E93734F1F74D7F169 /* AIWindowManager.swift */; };
+		A481C52ADB6F702FF209986E /* TickEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03CA1A414D9CFB03EA210EA2 /* TickEngine.swift */; };
+		A502FE2A9F1F56D2B44AC5AC /* AIChatService+Completion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3690C0A5C026E98A6BD709AF /* AIChatService+Completion.swift */; };
 		A5F6EC4516F732842271BAB0 /* AISettingsSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BD4B04C800A479129E797F /* AISettingsSections.swift */; };
 		A75BFBFB6A010F7CFF636EC4 /* MyLocationTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AA50A500CD868147CD9442B /* MyLocationTool.swift */; };
 		A7F35FAD436B9C049843B9FB /* MarkdownBlocks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAAD65B6EE17A2EF5DAD010C /* MarkdownBlocks.swift */; };
@@ -102,6 +115,7 @@
 		B0ECE1DB2D47FB57A2D14298 /* AIChatState+SessionEdits.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04F94926A222A5B89654606D /* AIChatState+SessionEdits.swift */; };
 		B4BC135ABE2AF381BF4507B8 /* AIChatMapCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */; };
 		B5F5E254C109BB86DD27ED1A /* AIChatState+RequestAssembly.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAE68F9B169D86DE978CDC45 /* AIChatState+RequestAssembly.swift */; };
+		B90F4DF6126D82E466037781 /* SettingsStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9D368641E2232C1D0E9B426 /* SettingsStore.swift */; };
 		B9C5F13390504281B5288EB4 /* GlassSurface.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDB3ADAC64611005A5FDFBEB /* GlassSurface.swift */; };
 		BAAA508F44101CD01C5E43A2 /* MTBezierPath.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9979D59CD3CF1794FBDCF514 /* MTBezierPath.swift */; };
 		BE888E9AFDD4F957ED54EC36 /* AIChatState+Queue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B981BD8A323C69B8BF55E0FF /* AIChatState+Queue.swift */; };
@@ -154,6 +168,7 @@
 		02EDB0F7F9308986A84F3401 /* AIServiceSettingsForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServiceSettingsForm.swift; sourceTree = "<group>"; };
 		03458E0DB4A3F5DA4B1ABA3F /* MTFontMathTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontMathTable.swift; sourceTree = "<group>"; };
 		03B0B0357916235B809E566B /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
+		03CA1A414D9CFB03EA210EA2 /* TickEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TickEngine.swift; sourceTree = "<group>"; };
 		03E691C51CDD1D3AB278BC85 /* Highlightr.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlightr.swift; sourceTree = "<group>"; };
 		04AE831E93734F1F74D7F169 /* AIWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWindowManager.swift; sourceTree = "<group>"; };
 		04F94926A222A5B89654606D /* AIChatState+SessionEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+SessionEdits.swift"; sourceTree = "<group>"; };
@@ -177,10 +192,15 @@
 		2E580FA27BD85C8347C6C646 /* AIChatStatusViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatStatusViews.swift; sourceTree = "<group>"; };
 		307BA9E935DBCE1A3EE84090 /* MTConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTConfig.swift; sourceTree = "<group>"; };
 		31B220E8199511E133A53FEA /* MTMathAtomFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathAtomFactory.swift; sourceTree = "<group>"; };
+		3291950B8938576996251B5D /* MediaStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaStore.swift; sourceTree = "<group>"; };
+		34CBD4C89D5A33D444B5AA62 /* CalendarStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarStore.swift; sourceTree = "<group>"; };
 		3544D1B995838ACC9069019C /* AIChatDrawerPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatDrawerPanel.swift; sourceTree = "<group>"; };
+		3690C0A5C026E98A6BD709AF /* AIChatService+Completion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+Completion.swift"; sourceTree = "<group>"; };
 		39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMapCardView.swift; sourceTree = "<group>"; };
 		3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebTools.swift; sourceTree = "<group>"; };
 		3B2211C3F2E376A20DB7FE5A /* MTColor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTColor.swift; sourceTree = "<group>"; };
+		3B9E47FFC6045EDC0E50BE6F /* MonitoringStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringStore.swift; sourceTree = "<group>"; };
+		3BA2EFE2F727CEF5B0BEBC55 /* AppState+Forwarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Forwarding.swift"; sourceTree = "<group>"; };
 		3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAttachment.swift; sourceTree = "<group>"; };
 		4270992A33D3DD27F0515539 /* AIModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelAdapter.swift; sourceTree = "<group>"; };
 		43A3531AA75BABD5D1FE3080 /* MarkdownImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownImageView.swift; sourceTree = "<group>"; };
@@ -189,6 +209,7 @@
 		50CF0F2EA78ECAACDCE0E67F /* DeviceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceProvider.swift; sourceTree = "<group>"; };
 		57013FDF715F8B5844F318F0 /* BuiltInTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInTools.swift; sourceTree = "<group>"; };
 		5822253DCCE3035ACFC217BB /* atom-one-light.min.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = "atom-one-light.min.css"; sourceTree = "<group>"; };
+		593FA64731993CAEC270C733 /* AIChatService+Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+Config.swift"; sourceTree = "<group>"; };
 		5CDA8D120E9963B5D5F84A33 /* MathViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathViews.swift; sourceTree = "<group>"; };
 		5E1467F308D8D21AC801C2B0 /* SystemMetricsProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemMetricsProvider.swift; sourceTree = "<group>"; };
 		610C954BF7E854E4799CC62B /* HTMLUtils.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HTMLUtils.swift; sourceTree = "<group>"; };
@@ -198,6 +219,7 @@
 		6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontV2.swift; sourceTree = "<group>"; };
 		6C3ED14E818FD6A81E2993F6 /* AIChatLayoutSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatLayoutSupport.swift; sourceTree = "<group>"; };
 		6E1362BEB3DC49FF20A811F5 /* MTUnicode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTUnicode.swift; sourceTree = "<group>"; };
+		6E96296DA3CAB83BC3CB9374 /* AppState+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Actions.swift"; sourceTree = "<group>"; };
 		6EBB220C3DE2C9A87217EC24 /* SettingsShortcutsForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsShortcutsForm.swift; sourceTree = "<group>"; };
 		6EC8BA98E9C478A6D25D3962 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		701C4A6F6EA8CB5F9B11E942 /* PreviewFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewFileTool.swift; sourceTree = "<group>"; };
@@ -207,10 +229,12 @@
 		7B946333D1317A323F75AC17 /* AIChatState+Notifications.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+Notifications.swift"; sourceTree = "<group>"; };
 		7DB2782A10BC852F7C88D212 /* MTMathImage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathImage.swift; sourceTree = "<group>"; };
 		7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatSidebarView.swift; sourceTree = "<group>"; };
+		7E308FBA4E88417CC9AEF471 /* PomodoroStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PomodoroStore.swift; sourceTree = "<group>"; };
 		7E51A1D78CFF17301EC71B29 /* AIChatWireModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatWireModels.swift; sourceTree = "<group>"; };
 		7E88470F13C5E08A67557375 /* MapService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapService.swift; sourceTree = "<group>"; };
 		80187D648ECC52984FCD6D2C /* QuickShowApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickShowApp.swift; sourceTree = "<group>"; };
 		804C2AFE4E28879F9C343208 /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
+		821BCF327327B8A737D704CE /* AIChatInputDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatInputDock.swift; sourceTree = "<group>"; };
 		8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelView.swift; sourceTree = "<group>"; };
 		8F29E4C4AB23A2CD575B4FD2 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatService.swift; sourceTree = "<group>"; };
@@ -219,6 +243,7 @@
 		97D5B500F6579D728562FD78 /* SystemStatusModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusModels.swift; sourceTree = "<group>"; };
 		9979D59CD3CF1794FBDCF514 /* MTBezierPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTBezierPath.swift; sourceTree = "<group>"; };
 		9BC88919D5EAE9E17E6C437E /* AIChatMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMessageList.swift; sourceTree = "<group>"; };
+		9D051C96C18F1878137BCF0B /* AIChatService+RequestEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+RequestEncoding.swift"; sourceTree = "<group>"; };
 		9E541987A420C8F32EF8469D /* AIChatInputFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatInputFields.swift; sourceTree = "<group>"; };
 		A6D6B1318545D06F8B940923 /* AIChatPreviewCardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatPreviewCardView.swift; sourceTree = "<group>"; };
 		A717A5076D26657EA117861F /* HotKeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotKeyManager.swift; sourceTree = "<group>"; };
@@ -233,6 +258,7 @@
 		B7BF9C965803CBAE72E3577B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B88CB548F8258C555E4F510C /* MTTypesetter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTTypesetter.swift; sourceTree = "<group>"; };
 		B981BD8A323C69B8BF55E0FF /* AIChatState+Queue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+Queue.swift"; sourceTree = "<group>"; };
+		B9D368641E2232C1D0E9B426 /* SettingsStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsStore.swift; sourceTree = "<group>"; };
 		BC4F3CD708D8C2432833E3E3 /* AIChatWindowControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatWindowControls.swift; sourceTree = "<group>"; };
 		BC5668F43DA49F7BCE29893E /* PerformanceCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceCard.swift; sourceTree = "<group>"; };
 		C01588AECCABE573EFDE95CD /* MediaRemote */ = {isa = PBXFileReference; lastKnownFileType = folder; name = MediaRemote; path = QuickShow/Resources/MediaRemote; sourceTree = SOURCE_ROOT; };
@@ -246,10 +272,12 @@
 		D5DD1A58827FCD3047A809B0 /* MarkdownParser+List.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MarkdownParser+List.swift"; sourceTree = "<group>"; };
 		D63AB70CD13631A39A802994 /* LunarCalendar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LunarCalendar.swift; sourceTree = "<group>"; };
 		D68032BC793ACA6923E904D1 /* AICompletionNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AICompletionNotifier.swift; sourceTree = "<group>"; };
+		D7695F4FF6C1E0DD5672E388 /* AIChatService+Streaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+Streaming.swift"; sourceTree = "<group>"; };
 		D7C7EC4C33CD9AD3C0270AD3 /* RWLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RWLock.swift; sourceTree = "<group>"; };
 		D81F82ADD4A7001FC77F83D1 /* MarkdownAST.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownAST.swift; sourceTree = "<group>"; };
 		DB435C852FEF250AC0839469 /* AIChatState+Compaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+Compaction.swift"; sourceTree = "<group>"; };
 		DDD353D5D27F078B3E0FBC63 /* AIChatMessageRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMessageRow.swift; sourceTree = "<group>"; };
+		DDF5F18006899874846806D1 /* SystemStatusStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusStore.swift; sourceTree = "<group>"; };
 		E2CA444DE18DD444351B1C21 /* NowPlayingProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingProvider.swift; sourceTree = "<group>"; };
 		E5FA43600E34A41A8B9BEAF7 /* CodeAttributedString.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodeAttributedString.swift; sourceTree = "<group>"; };
 		E80B8E81B7EA035907A34056 /* AskUserTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserTool.swift; sourceTree = "<group>"; };
@@ -326,9 +354,18 @@
 			children = (
 				04AE831E93734F1F74D7F169 /* AIWindowManager.swift */,
 				02C56336313E564A9C58442B /* AppState.swift */,
+				6E96296DA3CAB83BC3CB9374 /* AppState+Actions.swift */,
+				3BA2EFE2F727CEF5B0BEBC55 /* AppState+Forwarding.swift */,
+				34CBD4C89D5A33D444B5AA62 /* CalendarStore.swift */,
 				D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */,
 				A717A5076D26657EA117861F /* HotKeyManager.swift */,
+				3291950B8938576996251B5D /* MediaStore.swift */,
+				3B9E47FFC6045EDC0E50BE6F /* MonitoringStore.swift */,
 				4CB3F9819E7541B279D9C3FB /* PanelManager.swift */,
+				7E308FBA4E88417CC9AEF471 /* PomodoroStore.swift */,
+				B9D368641E2232C1D0E9B426 /* SettingsStore.swift */,
+				DDF5F18006899874846806D1 /* SystemStatusStore.swift */,
+				03CA1A414D9CFB03EA210EA2 /* TickEngine.swift */,
 			);
 			path = Core;
 			sourceTree = "<group>";
@@ -350,6 +387,7 @@
 				1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */,
 				74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */,
 				3544D1B995838ACC9069019C /* AIChatDrawerPanel.swift */,
+				821BCF327327B8A737D704CE /* AIChatInputDock.swift */,
 				9E541987A420C8F32EF8469D /* AIChatInputFields.swift */,
 				6C3ED14E818FD6A81E2993F6 /* AIChatLayoutSupport.swift */,
 				39B9B7454F91F39A7995E564 /* AIChatMapCardView.swift */,
@@ -440,6 +478,10 @@
 			isa = PBXGroup;
 			children = (
 				8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */,
+				3690C0A5C026E98A6BD709AF /* AIChatService+Completion.swift */,
+				593FA64731993CAEC270C733 /* AIChatService+Config.swift */,
+				9D051C96C18F1878137BCF0B /* AIChatService+RequestEncoding.swift */,
+				D7695F4FF6C1E0DD5672E388 /* AIChatService+Streaming.swift */,
 				26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */,
 				DB435C852FEF250AC0839469 /* AIChatState+Compaction.swift */,
 				7B946333D1317A323F75AC17 /* AIChatState+Notifications.swift */,
@@ -529,7 +571,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_AB79BC60-1C68-4401-AAE5-0F59DF4965BB" /* Resources */ = {
+		"TEMP_AC51B786-25F3-4028-BFC0-E0C85BC7C100" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -710,6 +752,7 @@
 				AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */,
 				03F9B8B0283FE7ABB9D12123 /* AIChatContextRingView.swift in Sources */,
 				AB8319ECBF04E457827650EB /* AIChatDrawerPanel.swift in Sources */,
+				4BEFD53909D13445A22E6DF0 /* AIChatInputDock.swift in Sources */,
 				4FCD29930D213AB61EB73C17 /* AIChatInputFields.swift in Sources */,
 				1E9A6BF764BBA8B7E4804633 /* AIChatLayoutSupport.swift in Sources */,
 				B4BC135ABE2AF381BF4507B8 /* AIChatMapCardView.swift in Sources */,
@@ -717,6 +760,10 @@
 				098A67D50CB525F84AB8CB17 /* AIChatMessageRow.swift in Sources */,
 				AE1EC6E5B5477D7EE46D569D /* AIChatPreviewCardView.swift in Sources */,
 				9BE8ABABCEED82B65AA4456B /* AIChatScrollNavigation.swift in Sources */,
+				A502FE2A9F1F56D2B44AC5AC /* AIChatService+Completion.swift in Sources */,
+				12936723ACBBFE0CBDDB36E8 /* AIChatService+Config.swift in Sources */,
+				536AA6C6BE64E1651D587CEE /* AIChatService+RequestEncoding.swift in Sources */,
+				321E4DFC3AA99F3C8829C9D5 /* AIChatService+Streaming.swift in Sources */,
 				86FE75DF91D637852C56DA63 /* AIChatService.swift in Sources */,
 				851C980FD0829DA5AD6402D2 /* AIChatSidebarView.swift in Sources */,
 				20FDD0F9E673832EB7CDA593 /* AIChatState+Compaction.swift in Sources */,
@@ -738,12 +785,15 @@
 				5B5A3E7275818436396E7FAF /* AIToolExecutor.swift in Sources */,
 				C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */,
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
+				54F3DBE5FAF2AC2BAC8FDB20 /* AppState+Actions.swift in Sources */,
+				5CCB1AA7FCD1E076C224113C /* AppState+Forwarding.swift in Sources */,
 				C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */,
 				69AED504F44D67677B401ECD /* AskUserTool.swift in Sources */,
 				AFFAE05ECC641A750B1D1354 /* AssistantMarkdownView.swift in Sources */,
 				5B33242FC8FA6D78307F318E /* AudioProvider.swift in Sources */,
 				48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */,
 				0DFB3A82508830293EE99A56 /* CalendarProvider.swift in Sources */,
+				7742EE8B4E5BF2CDFD9AADF3 /* CalendarStore.swift in Sources */,
 				492029441824493F4626037D /* CalendarView.swift in Sources */,
 				C0DD578E6B16FCC9F371BDDE /* ChatInteractionCenter.swift in Sources */,
 				68E62723FB6F18FC036D0DD9 /* ChatModels.swift in Sources */,
@@ -774,6 +824,8 @@
 				A2BB37E72F6E14AD44182149 /* MathLayoutCache.swift in Sources */,
 				705F8FFECA8E0AB2FB751996 /* MathRasterizer.swift in Sources */,
 				7906F865F0AA2682B8BEC633 /* MathViews.swift in Sources */,
+				2366D5FF5873667D5598EDEA /* MediaStore.swift in Sources */,
+				10488C80962AE90C51DE8943 /* MonitoringStore.swift in Sources */,
 				A75BFBFB6A010F7CFF636EC4 /* MyLocationTool.swift in Sources */,
 				F45ECFA4963FA434C37BACDF /* NowPlayingCardRow.swift in Sources */,
 				5860BE40BE412797192070A6 /* NowPlayingProvider.swift in Sources */,
@@ -781,18 +833,22 @@
 				753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */,
 				1AB8BCEF90D921D67A654AE5 /* PerformanceCard.swift in Sources */,
 				4524EBF3DECAE2AF7D8AB698 /* PomodoroPresetButton.swift in Sources */,
+				5E494DCBD0CFAEA3CC51269B /* PomodoroStore.swift in Sources */,
 				F2E1A0BD0DAC79DABE9AEE15 /* PreviewFileTool.swift in Sources */,
 				AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */,
 				890BDB806B48148067D0E4F0 /* RichCard.swift in Sources */,
 				5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */,
 				5ED9778EAB65A148653771F9 /* SettingsGeneralForms.swift in Sources */,
 				063D8C81B464D96670DF3D12 /* SettingsShortcutsForm.swift in Sources */,
+				B90F4DF6126D82E466037781 /* SettingsStore.swift in Sources */,
 				1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */,
 				9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */,
 				DB289B1C35342CF3AC4D608A /* SystemActions.swift in Sources */,
 				825D8E0668CA724C6E71CC37 /* SystemMetricsProvider.swift in Sources */,
 				9CC49B9EED1B8F61AF97F815 /* SystemStatusModels.swift in Sources */,
 				873EB16C0D9C58155D24B3B8 /* SystemStatusProvider.swift in Sources */,
+				08B6452D8C9B974472C3DD71 /* SystemStatusStore.swift in Sources */,
+				A481C52ADB6F702FF209986E /* TickEngine.swift in Sources */,
 				5162038574579AC6630B05D5 /* TimeDisplayView.swift in Sources */,
 				7E7814E04576707C2E177CD2 /* WebTools.swift in Sources */,
 			);

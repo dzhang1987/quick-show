@@ -6,6 +6,11 @@
 
 ### Changed
 
+- 大文件组件化拆分（第三批收官：AIChatService 域拆分 + AIChatView 输入坞抽离 + AppState 门面化与 tick 事件总线）：
+  - `AIChatService.swift` 1021 → 174 行：方法按域拆出 4 个 extension 文件（`+Config` 配置与 API Key/Keychain 迁移、`+Streaming` SSE 流式主链路（含 TaskCancellationBox/FirstTokenFlag 随迁）、`+Completion` 非流式补全与模型列表、`+RequestEncoding` 请求编码/工具声明/Responses 映射），存储属性与 init 留守主文件
+  - `AIChatView.swift` 1307 → 675 行：浮岛输入坞抽离为 `AIChatInputDock`（691 行）——契约模式与 SessionMessageList/Sidebar 同构（@ObservedObject state + 8 个显式参数），输入区 / 附件菜单 / 模型与思考 chip / 剪贴板 / 发送键路 / 图片四件套 / drop 整体迁入，GlassSurface 修饰链逐字剪切（字节级比对保真），**零 private 放宽**（父级方法以闭包值在父作用域传出）；compactionStamp（消息列表唯一刷新触发器）/ 导出 toast / ESC 三链路总线 / keyMonitor / 侧栏留守；hover 等瞬态从 dirty 整个父体收敛为只 dirty 坞子树
+  - `AppState.swift` 1220 → 320 行装配门面：`TickEngine` 单一 1s 主时钟 + `PassthroughSubject<AppTick>` 广播（show/dismiss 原位替换 startClock/stopClock，「面板隐藏即零消耗」由 Timer cancel 天然保持，runloop 归属原样）；6 个域 store（Settings / SystemStatus / Monitoring / Media / Pomodoro / Calendar）+ 转发扩展 + 动作扩展共 9 文件；19 处 `@ObservedObject` 视图零改动（计算属性转发构成 WritableKeyPath + objectWillChange 合并订阅）；tick 相位常量（%5==2 / %60==10 等）与 init 订阅顺序逐字搬运；statusRefreshQueue 收敛为 `BackgroundQueues`；明确不拆 glance 倒计时 / 上下文路由（装配契约本体）
+  - 收官指标：千行文件 9 → 0 个，全工程最大文件 818 行（`MathLatexTranspiler`，单一职责纯函数模块）
 - 压缩中圆环转不定态 spinner（AI 窗输入坞水位圆环，视觉/交互调整）：手动/自动压缩进行中，水位弧让位于固定 1/4 圈亮弧、线性匀速 1s/圈的不定态转圈（禁用点击但全亮——「进行中」是活跃信号，取代先前「0.5 降透明度弱化 + 禁用」的约定）；停止时禁用动画归零、不残留中间角度，下次恒从 12 点干净起步；调用侧 `showDockSecondaryTools` 新增压缩中破格常显（与水位 > 0.8 警戒破格同源同档）——进行中的操作不消失，压缩结束恢复随安静态隐去
 - 输入坞尾部呼吸缝 10 → 20pt（AI 窗对话底部间距）：滚到底时末条消息底边与坞顶的可见间距加倍——10pt 用户体感「太挤」（真穿透设计下再往上滚消息即自然穿入玻璃坞下被 blur 采样，呼吸缝即视觉安全垫）；
 - 手动压缩语义重设计（AI 窗上下文管理，行为变化）：手动压缩改为「历史全部压缩 + 豁免最后一轮」——全部未压缩消息合并进单份摘要（与 Claude Code `/compact` 等主流产品的手动语义对齐，经官方文档 / 源码实证调研），但最后一个 user 消息起的最后一轮（含内嵌工具调用与结果，轮边界与 `trimmedContextMessages` 分轮规则一致）保持原文，当前对话上下文高保真、后续回复不建立在二次摘要之上；删除原「水位未超标时只压最旧 6 条」的兜底分支（不匹配任何用户心智模型的孤立设计，用户实测吐槽触发）；仅剩最近一轮无可压时给出明确 toast 反馈「早期对话均已压缩（最近一轮保持原文）」而非静默；自动压缩语义不变（水位 ≥70% 触发、从最旧压到 ≤40%、≥6 条防碎片）；一次性输入成本 = 全部历史 token（与 /compact 同款），摘要输出恒 ≤2000 token
