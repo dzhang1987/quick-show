@@ -8,8 +8,8 @@ import SwiftUI
 /// Wave 3 结构（2026-10 视觉质感专项）：
 /// - 左侧会话窄栏（⌘B 显隐，展开时窗口整体加宽，见 AIWindowManager.setSidebarVisible）
 /// - 消息列表铺满窗口主体：AI 回复无气泡铺底排版；落定助手消息下方常驻弱显示操作行（复制/重新生成）
-/// - 输入坞浮岛化：overlay 悬浮于消息列表之上；滚动区底缘 26pt 渐隐带止于坞顶，
-///   内容在到达坞之前收没，绝不露出被裁的半截内容（2026-10 重设计取代 blur-through）
+/// - 输入坞浮岛化：overlay 悬浮于消息列表之上；真穿透——滚动内容自然穿入玻璃坞
+///   下方，坞体实时 blur 采样透出模糊内容（2026-10 再设计，恢复 blur-through）
 /// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 激活态 accent rim（安静态零描边）
 /// - 输入坞安静/激活渐进披露：安静态（无草稿/未悬停）收敛为纯输入行，低频工具（剪贴板/
 ///   水位/压缩）隐去；控件语言为纯灰图标 + hover 圆底（图钉同款克制），chip 为弱化小字，
@@ -65,10 +65,10 @@ struct AIChatView: View {
     /// 输入坞实测总高（生长区 + 输入卡 + 底缝，即 inputArea 完整高度）：
     /// 由 inputArea 最外层 background 内 GeometryReader 的 onAppear/onChange 直写
     /// （macOS 13 无 onGeometryChange；preference 冒泡在本上下文实测中断不可用，
-    /// 事件直写已被实证可靠），供渐隐带锚点 / 消息列表尾部留白 / 空态 overlay /
-    /// 导出 toast / 浏览导航统一消费——渐隐带 fadeEnd 恒锚定真实坞顶（穿透衔接不脱开），
-    /// 尾部留白随坞体动态生长。值单向流入布局计算，绝不反向影响坞体布局（无反馈环）；
-    /// 初值 chatDockHeightFallback 首帧兜底，实测后校准；<0.5pt 去抖跳过。
+    /// 事件直写已被实证可靠），供消息列表尾部留白 / 空态 overlay / 导出 toast /
+    /// 浏览导航统一消费——尾部留白 = 实测坞高 + 呼吸缝，随坞体动态生长；真穿透设计下
+    /// 滚动内容穿入坞底由玻璃 blur 采样。值单向流入布局计算，绝不反向影响坞体布局
+    /// （无反馈环）；初值 chatDockHeightFallback 首帧兜底，实测后校准；<0.5pt 去抖跳过。
     @State private var dockTotalHeight: CGFloat = Theme.Layout.chatDockHeightFallback
     /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
     @State private var hasClipboardText = false
@@ -387,10 +387,10 @@ struct AIChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。
-        // 滚动区底缘 26pt 渐隐带锚定 inputArea 实测总高 = 真实坞顶（见 SessionMessageList
-        // 的 mask），内容渐隐没入玻璃坞下（穿透衔接），不再从坞下露出被裁的半截内容。
-        // 列表尾部留白 = 实测坞高 + 渐隐带 + 呼吸缝，保证滚到底时末条消息完整露出
-        // 渐隐带上缘——坞体生长（队列胶囊等在坞顶向上生长、工具行换态）遮挡带随之动态跟随。
+        // 真穿透：滚动内容自然穿入玻璃坞下方，坞体实时 blur 采样透出模糊内容；
+        // 列表尾部留白 = 实测坞高 + 呼吸缝，保证滚到底时末条消息完整露出坞顶上方
+        // （见 SessionMessageList）——坞体生长（队列胶囊等在坞顶向上生长、工具行换态）
+        // 留白随之动态跟随。
         .overlay(alignment: .bottom) {
             inputArea
         }
@@ -722,12 +722,13 @@ struct AIChatView: View {
             // 内容裁剪进玻璃形状，挂早了浮层会被输入卡顶缘切断（机制见组件头注）
             .contextRingDetailHost()
             // 抽屉展开/收起动画：0.25s easeOut 滑入滑出（本特性私有节拍，令牌见
-            // AIChatDrawerPanel.swift 头注）；渐隐带经 dockTotalHeight 实测自动跟随抽屉顶。
+            // AIChatDrawerPanel.swift 头注）；尾部留白经 dockTotalHeight 实测自动跟随抽屉顶。
             .animation(.easeOut(duration: AIChatDrawerMetrics.slideDuration), value: interaction.request?.id)
         }
         // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
         // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部。
-        // 顶部零 padding：坞顶上方过渡由滚动区底缘渐隐带承担；底部 12pt 为坞与窗缘的呼吸缝
+        // 顶部零 padding：真穿透后坞顶上方无任何过渡带，内容直接滚到玻璃坞下；
+        // 底部 12pt 为坞与窗缘的呼吸缝
         .padding(.bottom, Theme.Spacing.xxl)
         // 坞体总高实测（生长区 + 输入卡 + 底缝）：background GeometryReader 不占布局、
         // 只在坞高变化（胶囊增删/工具行换态）时求值，事件级频率非逐帧。

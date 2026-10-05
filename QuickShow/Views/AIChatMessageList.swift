@@ -20,8 +20,8 @@ struct SessionMessageList: View {
     let onTapImage: (ChatImageAttachment) -> Void
     @Binding var scrollSnapshots: [UUID: ScrollSnapshot]
     let scrollCoordinator: ChatScrollCoordinator
-    /// 输入坞生长区实测高度（父级统一传入）：尾部留白、底缘渐隐带与浏览导航的底部预算同步叠加，
-    /// 遮挡带随坞体向上生长动态跟随。生长区只属于当前活跃会话的输入坞，但 pendingQueue
+    /// 输入坞实测总高（父级统一传入）：尾部留白与浏览导航的底部预算同步叠加，
+    /// 随坞体向上生长动态跟随。生长区只属于当前活跃会话的输入坞，但 pendingQueue
     /// 本就按会话隔离读取，高度值对全部常驻实例统一应用（非活跃会话 opacity=0 不可见）。
     let dockTotalHeight: CGFloat
 
@@ -85,14 +85,6 @@ struct SessionMessageList: View {
         // onAppear/onDisappear 哨兵的可靠感知层。
         GeometryReader { viewport in
         ScrollViewReader { proxy in
-            // 底缘渐隐带的绝对位置（换算为渐变 location 比例，钉死数学、不依赖布局分配）：
-            // 顶部→fadeStart 全不透明；fadeStart→fadeEnd 26pt 渐隐；fadeEnd→底部（坞区）全透明。
-            // fadeEnd 锚定 inputArea 实测总高 = 真实坞顶：渐隐带与坞体恒衔接（内容渐隐没入
-            // 玻璃坞下的穿透感），静态预算脱开断层与工具行动态超估算漂移一并根治。
-            let viewportHeight = max(viewport.size.height, 1)
-            let dockBand = dockTotalHeight
-            let fadeEndLocation = min(max((viewportHeight - dockBand) / viewportHeight, 0), 1)
-            let fadeStartLocation = min(max((viewportHeight - dockBand - Theme.Layout.chatFadeMaskHeight) / viewportHeight, 0), 1)
             ScrollView(.vertical, showsIndicators: false) {
                 // 手动虚拟化容器（VStack 全行常驻）：LazyVStack 在 macOS 13 上回收远行
                 // 的高度估算归零/失准，实例化-回收的「估算↔真实」差一次性结算成 doc 骤变
@@ -166,20 +158,20 @@ struct SessionMessageList: View {
                     // 尾部整体作为 LazyVStack 的单个子视图：把原先 4 个尾部子项的 4×36pt 组间距收敛为
                     // 1 个，其余 3×36 的叠加被消除。
                     //
-                    // 间距算术：本子视图与「末条消息组」之间仍有 1×chatGroupGap(36)。
-                    // 尾部总留白 = dockTotalHeight（实测坞高）+ 渐隐带 26 + 呼吸缝 4：
-                    // 36 + (坞高+30−18−36) + 18 + 1 = 坞高+31，末条消息底边恒在渐隐带
-                    // fadeStart 之上完整可见（与坞体真实高度解耦，工具行动态变化自动跟随）。
-                    // （2026-10：静态 90/110 预算时代末条悬在渐隐带深区被压、渐隐带与
-                    // 坞体脱开断层 → 由实测坞高单一真实来源根治。）
+                     // 间距算术：本子视图与「末条消息组」之间仍有 1×chatGroupGap(36)。
+                     // 尾部总留白 = dockTotalHeight（实测坞高）+ 呼吸缝 10：
+                     // 36 + (坞高+10−18−36) + 18 + 1 = 坞高+11——滚到底时末条消息底边停在坞顶
+                     // 上方 11pt 完整可见；再往上滚则自然穿入玻璃坞下被实时 blur 采样（真穿透）。
+                    // （与坞体真实高度解耦，工具行动态变化自动跟随；2026-10 静态预算时代的
+                    // 末条被压/遮挡断层由实测坞高单一真实来源根治。）
                     VStack(spacing: 0) {
-                        // 坞区让位留白：实测坞总高 + 渐隐带 + 呼吸缝，扣除外层组间距(36)
+                        // 坞区让位留白：实测坞总高 + 呼吸缝，扣除外层组间距(36)
                         // 与容差带(18)——两者分别由本子视图外/内承担，此处只补差额。
                         // 留白随坞体生长/收缩平滑过渡（与坞内动画同时长）；pinned 时由
                         // coordinator 的内容高度路径自动保持贴底，unpinned 不受干扰
                         // （用户阅读位置主权最高）。
                         Color.clear
-                            .frame(height: max(dockTotalHeight + Theme.Layout.chatFadeMaskHeight + Theme.Layout.chatDockTailBreathing - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
+                            .frame(height: max(dockTotalHeight + Theme.Layout.chatDockTailBreathing - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
                             .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                         // 容差带（18pt，嵌入坞区留白内部）
                         Color.clear
@@ -200,23 +192,9 @@ struct SessionMessageList: View {
                 .background(ChatScrollBridgeView(sessionId: sessionId, coordinator: scrollCoordinator))
             }
             .coordinateSpace(name: scrollSpaceName)
-            // 底缘渐隐带（2026-10 重设计）：滚动内容在坞顶上方 26pt 内渐隐收没，
-            // 坞下不再露出被裁的半截内容（替代生硬裁切）。
-            // 关键纪律：mask 只挂 ScrollView 本体——导航 overlay 挂在其后（见下方两个
-            // .overlay），坞在更外层 mainColumn overlay，均不被罩住。
-            // 实现双保险（修复顶部 ~130px 暗带事故）：
-            // ① 遮罩色用不透明白而非黑——mask 在某些渲染路径按亮度解释（黑=暗=半透明遮蔽），
-            //    白色在 alpha/亮度两种语义下恒为「全显示」；
-            // ② 单条 LinearGradient 绝对 stops 替代 VStack 三段堆叠——渐隐带位置由视口高度
-            //    数学换算钉死，不依赖 flexible 视图的布局分配（macOS 13 黑盒行为排除）。
-            .mask(
-                LinearGradient(stops: [
-                    .init(color: .white, location: 0),
-                    .init(color: .white, location: fadeStartLocation),
-                    .init(color: .clear, location: fadeEndLocation),
-                    .init(color: .clear, location: 1)
-                ], startPoint: .top, endPoint: .bottom)
-            )
+            // 真穿透（2026-10 再设计）：底缘渐隐带 mask 已退役——滚动内容不再在坞顶收没，
+            // 而是自然穿入玻璃坞下方，由坞体（26+ Liquid Glass / <26 ultraThinMaterial）
+            // 实时 blur 采样透出模糊内容。尾部留白保证末条消息可完整滚到坞顶上方（见上）。
             .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
             // 首帧视口自适应：把视口高度注入环境，供消息内 AssistantMarkdownView 估算「一屏块数」。
             .environment(\.chatViewportHeight, viewport.size.height)
@@ -274,7 +252,7 @@ struct SessionMessageList: View {
             }
             // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套 → Dock 放大刻度轨）：
             // unpinned（浏览态）且活跃时显示，0.15s 淡入淡出；贴底时整体隐藏。
-            // 两件套各自挂 overlay（均在 mask 之后，不被渐隐罩住）：
+            // 两件套各自挂 overlay（浮于滚动内容之上，真穿透后内容与坞/导航同层互不遮罩）：
             // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick，
             //   静止紧凑密排、光标接近时按余弦钟形衰减放大推开（详见 ChatTickRail）；
             // ② ↓ 回底钮：坞正上方、右缘贴统一右基准线。

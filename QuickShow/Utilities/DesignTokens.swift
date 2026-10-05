@@ -371,20 +371,20 @@ enum Theme {
         // AI 对话浮岛输入坞：坞体真实高度不做静态预算，由 inputArea 整体实测直写
         // （GeometryReader onAppear/onChange 事件路径，先例同原生长区高度键）。本常量
         // 仅作布局链建立前的首帧兜底（输入行 44 + 工具行 ≈32 + 底缝 12），实测后立即
-        // 校准——渐隐带 fadeEnd 锚定实测坞顶恒衔接（穿透感），尾部留白 = 实测坞高 + 渐隐带 + 呼吸缝。
-        // （2026-10：静态 90/110 预算曾一常量双职锚定渐隐带与尾部留白，工具行高度动态
+        // 校准——尾部留白 = 实测坞高 + 呼吸缝，真穿透设计下滚动内容穿入坞底被玻璃
+        // 实时 blur 采样。
+        // （2026-10：静态 90/110 预算时代一常量双职锚定渐隐带与尾部留白，工具行高度动态
         // 超估算导致末条消息被坞体压制、渐隐带与坞体脱开断层 → 改为实测单一真实来源）
         static let chatDockHeightFallback: CGFloat = 88
-        // 尾部留白在渐隐带（chatFadeMaskHeight）之上的额外呼吸缝：滚到底时末条消息
-        // 脱离渐隐带全透明区后与渐隐带上缘的可见间距
-        static let chatDockTailBreathing: CGFloat = 4
+        // 尾部留白在坞顶之上的呼吸缝：滚到底时末条消息底边与坞顶的可见间距
+        // （真穿透：再往上滚，消息即自然穿入玻璃坞下被 blur 采样）
+        static let chatDockTailBreathing: CGFloat = 10
         // AI 对话思考过程（reasoning）展开区限高，超出内部滚动
         static let reasoningMaxHeight: CGFloat = 160
 
         // —— 2026-10 AI 窗视觉重设计 ——
         static let chatTopBarHeight: CGFloat = 36      // 顶栏高（28→36，图钉归入顶栏节奏）
         static let chatInputHeight: CGFloat = 44       // 输入行高（56→44，坞体收紧）
-        static let chatFadeMaskHeight: CGFloat = 26    // 滚动区底缘渐隐带（止于坞顶）
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
         static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
         // 右缘刻度轨 tick：默认 10×2 圆头；当前条 16×3 accent 点亮。
