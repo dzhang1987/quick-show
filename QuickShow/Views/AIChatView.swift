@@ -118,11 +118,9 @@ struct AIChatView: View {
     /// 输入框唤出即自动聚焦（windowDidBecomeKey 兜底），"聚焦"恒为真、无法作披露信号，
     /// 故渐进披露的诚实触发源 = 坞区 hover + 内容存在（草稿/附件/队列/生成中）。
     @State private var dockHovered = false
-    /// 窗口 key 态：输入卡激活 rim 的门控之一（与 dockQuiet 共同决定，见 dockRimActive；
-    /// 窗口 key 时输入框必被抬为第一响应者，见 ChatInputTextView 的 windowDidBecomeKey 兜底；
-    /// isKeyWindow 近似足够，不侵入事件链）。
-    @State private var windowIsKey = false
     /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip / 思考 chip 的 hover 提亮）。
+    /// （窗口 key 态已下沉到 DockFocusRim 自持——原先 windowIsKey 挂在根视图，
+    /// 每次焦点翻转都带着全部常驻会话树重算，是聚焦/失焦卡顿的结构性根源。）
     @State private var attachHovered = false
     @State private var clipboardHovered = false
     @State private var chipHovered = false
@@ -219,7 +217,6 @@ struct AIChatView: View {
             refreshEnvironment()
             installKeyMonitor()
             pinned = AIWindowManager.shared.isPinned
-            windowIsKey = NSApp.keyWindow is AIPanel
             // 抽屉 UI 在场登记：逻辑层据此决定发布请求还是安全兜底（拒绝/取消）
             interaction.markUIActive(true)
         }
@@ -228,15 +225,15 @@ struct AIChatView: View {
             // UI 离场：挂起中的抽屉请求被唤醒为兜底结果（确认→拒绝 / 提问→取消），防泄漏
             interaction.markUIActive(false)
         }
-        // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
+        // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）。
+        // 性能：只响应 AI 窗自身成为 key——其他任意窗口（设置窗等）激活不再触发
+        // 环境刷新与 @State 写入，避免无关焦点事件扇出根 body 全量重算；
+        // pinned 幂等写入（值未变不写），防止聚焦重放无效化视图树。
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard note.object is AIPanel else { return }
             refreshEnvironment()
-            pinned = AIWindowManager.shared.isPinned
-            // 输入卡激活 rim 门控：只在 AI 窗自身成为 key 时计入（其他窗口激活不误触）
-            if note.object is AIPanel { windowIsKey = true }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
-            if note.object is AIPanel { windowIsKey = false }
+            let currentPinned = AIWindowManager.shared.isPinned
+            if pinned != currentPinned { pinned = currentPinned }
         }
         // 外部清空输入（发送 / ⌘K / 重试）经 state.inputText 变化同步空态。
         // 组字期间 ChatInputNSTextView 的 setMarkedText 回调已实时同步 state.inputText（见 syncInputState），
@@ -611,10 +608,6 @@ struct AIChatView: View {
             && !dockHovered
     }
 
-    /// 激活态描边：坞体激活且窗口 key 时才点亮 accent 环（旧版仅按窗口 key 常亮，
-    /// 空态下形成横贯底部的整圈彩色轮廓带——全图唯一彩色轮廓即源于此）。
-    private var dockRimActive: Bool { windowIsKey && !dockQuiet }
-
     /// 低频工具组（压缩/水位/剪贴板）显隐：安静态隐去（保留占位、纯透明渐变、布局零跳动）；
     /// 唯水位逼近上限时破格常显——需要警示的时刻不沉默。
     private var showDockSecondaryTools: Bool { !dockQuiet || watermarkBreaksThrough }
@@ -706,16 +699,10 @@ struct AIChatView: View {
             ))
             // 激活态 rim：坞体激活（悬停/输入/附件/生成中/抽屉在场）且窗口 key 时叠加
             // accent 低透明度环，材质对状态有响应；安静态零描边。
+            // 性能：rim 由 DockFocusRim 自持窗口 key 态——焦点切换只重算这个小视图，
+            // 不再触发 AIChatView 根 body 全量重算（原先 dockRimActive 读根级 windowIsKey）。
             // allowsHitTesting(false) 防描边层吞掉坞内控件点击
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                    .strokeBorder(
-                        Theme.Colors.accent.opacity(dockRimActive ? Theme.Colors.dockFocusRimOpacity : 0),
-                        lineWidth: 1
-                    )
-                    .allowsHitTesting(false)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockRimActive)
-            )
+            .overlay(DockFocusRim(quiet: dockQuiet))
             // 双层阴影：接触影贴身定锚 + 环境影拉开纵深（旧单层贴身影 = 卡片糊在底板上）
             .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity), radius: Theme.Shadow.dockContactRadius, y: Theme.Shadow.dockContactY)
             .shadow(color: .black.opacity(Theme.Shadow.dockAmbientOpacity), radius: Theme.Shadow.dockAmbientRadius, y: Theme.Shadow.dockAmbientY)
@@ -3573,6 +3560,37 @@ private struct UnconfiguredGuideView: View {
         }
         .padding(Theme.Spacing.panel)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - 输入坞激活 rim（焦点性能隔离）
+
+/// 输入坞激活 rim：自持窗口 key 态监听的小视图。
+/// 性能设计：焦点切换（聚焦/失焦）只重算本视图——原先 windowIsKey 挂在 AIChatView 根视图，
+/// 每次焦点翻转都会带着全部常驻会话树（12 会话 × 消息 × 行级 diff）重算一遍，
+/// 是「聚焦/失焦卡顿两三秒」的结构性根源；隔离后根 body 与焦点事件彻底解耦。
+/// 安静语义不变：坞体激活（悬停/输入/附件/生成中/抽屉在场）且窗口 key 才点亮 accent 环。
+private struct DockFocusRim: View {
+    let quiet: Bool
+    @State private var windowIsKey = false
+
+    private var active: Bool { windowIsKey && !quiet }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+            .strokeBorder(
+                Theme.Colors.accent.opacity(active ? Theme.Colors.dockFocusRimOpacity : 0),
+                lineWidth: 1
+            )
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: active)
+            .onAppear { windowIsKey = NSApp.keyWindow is AIPanel }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+                if note.object is AIPanel { windowIsKey = true }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+                if note.object is AIPanel { windowIsKey = false }
+            }
     }
 }
 
