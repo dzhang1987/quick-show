@@ -11,6 +11,7 @@
   - **焦点通知过滤**：`didBecomeKey` 只响应 AI 窗自身（`note.object is AIPanel` 前置 guard）——其他窗口激活不再触发环境刷新与 `@State` 写入；`pinned` 幂等写入（值未变不写）；根级 `didResignKey` 监听随 `windowIsKey` 移除而整个删除
   - **rim 隔离**：`windowIsKey` 从根视图移除，输入坞激活 rim 下沉为自持焦点监听的独立小视图 `DockFocusRim`（`quiet` 判据经参数传入保持原语义，安静 / 激活视觉行为不变）——焦点切换只重算这个小视图，与整棵会话树彻底解耦
   - **实测对比**（重会话：44 行间公式 + 209 行内公式 + 5 代码块 + PDF 预览卡，122KB）：修复前三轮聚焦切换主线程忙碌 0.55s+（公式重栅格化 108 帧 / Markdown 重解析 44 帧）；修复后 9520 采样仅 1 帧忙碌（约 0.2ms / 次），且与会话体量无关
+- 公式 LaTeX 转译结果缓存（渲染热路径专项）：`MathRasterizer.rasterize / lookup` 每次调用都先跑 `MathLatexTranspiler.transpile`（9 层字符串 / 正则处理，位图缓存命中也逃不掉）——重渲染（焦点翻转 / 流式 body 重算 / `updateNSView` 重调）时同一段 LaTeX 反复全量转译是纯浪费；本次加转译结果字典缓存（NSLock 线程安全——主线程与光栅化 / 预热队列并发调用，超 4096 条整表清空防膨胀），重复转译变字典命中，公式位图缓存命中路径真正变便宜
 
 ## [1.13.0] - 2026-10-05
 

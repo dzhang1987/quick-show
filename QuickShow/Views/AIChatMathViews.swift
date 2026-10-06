@@ -473,7 +473,32 @@ enum MathRasterizer {
 //   matrix/pmatrix/bmatrix/vmatrix/Vmatrix/cases/aligned/split/eqalign 环境。
 enum MathLatexTranspiler {
 
+    /// 转译结果缓存：rasterize/lookup 每次调用都先转译（缓存命中也逃不掉），
+    /// 重渲染（焦点翻转/流式 body 重算/updateNSView 重调）时同一段 LaTeX
+    /// 反复走 9 层字符串处理是纯浪费——字典命中让缓存命中路径真正变便宜。
+    /// （性能：主线程公式重栅格化热路径；线程安全——主线程与光栅化队列并发调用。）
+    private static var transpileCache: [String: String] = [:]
+    private static let transpileCacheLock = NSLock()
+
     static func transpile(_ latex: String) -> String {
+        transpileCacheLock.lock()
+        if let hit = transpileCache[latex] {
+            transpileCacheLock.unlock()
+            return hit
+        }
+        transpileCacheLock.unlock()
+
+        let result = transpileUncached(latex)
+
+        transpileCacheLock.lock()
+        // 简单防膨胀：超限整表清空（公式总量有限，重建成本低）
+        if transpileCache.count > 4096 { transpileCache.removeAll(keepingCapacity: true) }
+        transpileCache[latex] = result
+        transpileCacheLock.unlock()
+        return result
+    }
+
+    private static func transpileUncached(_ latex: String) -> String {
         var result = latex
         // 1. 分数命令族：统一降级为 \frac（命令边界：后一个字符不是字母才替换）
         result = replaceCommand(result, command: "\\dfrac", with: "\\frac")
