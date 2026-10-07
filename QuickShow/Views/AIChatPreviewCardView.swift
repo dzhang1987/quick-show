@@ -50,6 +50,27 @@ enum PreviewCardProvider: RichCardProvider {
 struct AIChatPreviewCardView: View {
     let payload: PreviewCardPayload
 
+    /// 文件存在性记忆化：StateObject 的 wrappedValue 为 autoclosure，只在卡片视图
+    /// 首次实例化时探测一次磁盘，此后整个生命周期复用——杜绝流式 / 父视图每帧渲染
+    /// 反复 FileManager.fileExists 探测。
+    private final class FileExistenceMemo: ObservableObject {
+        let exists: Bool
+        init(path: String) {
+            exists = FileManager.default.fileExists(atPath: path)
+        }
+    }
+
+    @StateObject private var fileMemo: FileExistenceMemo
+
+    /// 视口可见性：仅当卡片进入视口（onAppear）才实例化 QLPreviewView 并启动预览，
+    /// 离开视口（onDisappear）随之释放——首帧全量渲染不再同时唤醒多张 QuickLook 生成器。
+    @State private var isVisible = false
+
+    init(payload: PreviewCardPayload) {
+        self.payload = payload
+        _fileMemo = StateObject(wrappedValue: FileExistenceMemo(path: payload.path))
+    }
+
     /// 文档族（文本 / 表格 / PDF）预览区高度：300pt 下长文档看不到完整语义单元
     /// （.md 表格约 5.5 行且末行截断、PDF 页底被裁），520pt 约一屏可读。
     private static let documentPreviewHeight: CGFloat = 520
@@ -80,10 +101,8 @@ struct AIChatPreviewCardView: View {
         return Self.mediaPreviewHeight
     }
 
-    /// 渲染期文件是否仍存在：历史回放时文件可能已被清理，此处仅做只读探测。
-    private var fileExists: Bool {
-        FileManager.default.fileExists(atPath: payload.path)
-    }
+    /// 渲染期文件是否仍存在：历史回放时文件可能已被清理，此处取生命周期内记忆化结果。
+    private var fileExists: Bool { fileMemo.exists }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -131,10 +150,19 @@ struct AIChatPreviewCardView: View {
     @ViewBuilder
     private var content: some View {
         if fileExists {
-            QuickLookPreviewContainer(
-                url: URL(fileURLWithPath: payload.path),
-                title: payload.fileName
-            )
+            // 可见性闸门：视口内才实例化 representable（makeNSView 随之惰性化）；
+            // 视口外渲染透明等高占位——外层 frame 保证尺寸恒定、零布局跳动，
+            // 且 QLPreviewView 本身已清背景，占位态观感与加载态一致。
+            ZStack {
+                if isVisible {
+                    QuickLookPreviewContainer(
+                        url: URL(fileURLWithPath: payload.path),
+                        title: payload.fileName
+                    )
+                } else {
+                    Color.clear
+                }
+            }
             .frame(height: previewHeight)
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
             .overlay(
@@ -143,6 +171,8 @@ struct AIChatPreviewCardView: View {
             )
             .padding(.horizontal, Theme.Spacing.xxl)
             .padding(.bottom, Theme.Spacing.lg)
+            .onAppear { isVisible = true }
+            .onDisappear { isVisible = false }
         } else {
             missingState
         }

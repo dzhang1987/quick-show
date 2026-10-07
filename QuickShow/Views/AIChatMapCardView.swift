@@ -196,7 +196,7 @@ private struct MapCardActionButton: View {
             )
         }
         .buttonStyle(.plain)
-        .help(help)
+        .qsHelp(help)
     }
 }
 

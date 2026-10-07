@@ -72,6 +72,96 @@ struct SessionMessageList: View {
     /// 嵌在坞区留白内部，置于真正底部上方此距离。
     private let bottomTolerance: CGFloat = 18
 
+    // MARK: - 容器级 hover 分发（消除逐叶子 onHover 跟踪区风暴）
+
+    /// hover 分发几何缓存（引用类型：每帧回写不触发 SwiftUI 重渲染）。
+    /// 行 frame 与最近一次光标位置均为 `scrollSpaceName` 视口坐标系（与行级几何信号一致），
+    /// 光标位置由列表唯一 `onContinuousHover` 写入，frame 由 `updateRowFrames` 写入。
+    private final class RowHoverGeometry {
+        /// message.id → 行 frame（视口坐标系；滚动时随内容移动）
+        var frames: [UUID: CGRect] = [:]
+        /// 最近一次 `.active` 光标位置（视口坐标系）；nil = 指针不在列表内
+        var location: CGPoint?
+        /// 指针是否在列表内容范围内（`.ended` 后置 false）
+        var pointerInside = false
+    }
+
+    @State private var hoverGeometry = RowHoverGeometry()
+    /// 当前被悬停的消息行 id（列表唯一 hover 真源）：由 `onContinuousHover` +
+    /// 行几何映射维护，改变化才写 @State（鼠标移动不触发逐帧重渲染）。
+    /// 原先行级 `contentShape + onHover` 的逐行跟踪区由此单一分发器取代。
+    @State private var hoveredMessageID: UUID?
+
+    // MARK: - 初始化（A3：首帧虚拟化种子）
+
+    /// 初始虚拟化窗口半径（行数）：以恢复的阅读锚点为中心实渲染，其余行等高占位。
+    private static let initialWindowRadius = 8
+    /// 会话行数低于此阈值不做初始虚拟化（全量实渲染更简单且成本可忽略）。
+    private static let initialVirtualizationThreshold = 30
+    /// 占位行初始估算高度（pt）：仅首帧用，进入视口后由实测高度覆盖。
+    private static let initialRowHeightEstimate: CGFloat = 96
+
+    init(
+        sessionId: UUID,
+        isActive: Bool,
+        state: AIChatState,
+        messages: [ChatMessage],
+        onTapImage: @escaping (ChatImageAttachment) -> Void,
+        scrollSnapshots: Binding<[UUID: ScrollSnapshot]>,
+        scrollCoordinator: ChatScrollCoordinator,
+        dockTotalHeight: CGFloat
+    ) {
+        self.sessionId = sessionId
+        self.isActive = isActive
+        self.state = state
+        self.messages = messages
+        self.onTapImage = onTapImage
+        self._scrollSnapshots = scrollSnapshots
+        self.scrollCoordinator = scrollCoordinator
+        self.dockTotalHeight = dockTotalHeight
+
+        // A3：用已恢复的 scrollPosition 估算初始可视窗口 + 占位高度，
+        // 避免 ChatVirtualRow 的「首见无缓存恒实渲染」在冷启动首帧全量建树。
+        let seed = Self.initialVirtualization(
+            messages: messages,
+            snapshot: scrollSnapshots.wrappedValue[sessionId]
+        )
+        self._virtualWindowIds = State(initialValue: seed.window)
+        self._rowHeights = State(initialValue: seed.heights)
+    }
+
+    /// 基于已恢复的 scrollPosition 估算初始可视窗口（锚点附近 ±12 行）与全行占位高度。
+    /// 有非贴底快照时取锚点；其余（贴底快照 / 无快照）取尾部——与 restoreScroll 的
+    /// 贴底默认一致，消除首启首帧的占位校准跳变。返回空集 = 不做虚拟化（全量实渲染）。
+    private static func initialVirtualization(
+        messages: [ChatMessage],
+        snapshot: ScrollSnapshot?
+    ) -> (window: Set<UUID>, heights: [UUID: CGFloat]) {
+        guard messages.count > initialVirtualizationThreshold else { return ([], [:]) }
+
+        let anchorIndex: Int
+        if let snapshot, !snapshot.isPinned,
+           let topID = snapshot.topVisibleMessageID,
+           let idx = messages.firstIndex(where: { $0.id == topID }) {
+            anchorIndex = idx
+        } else {
+            // 贴底快照 / scrollPosition 不可用（无快照）→ 初始窗口置于尾部：
+            // restoreScroll 在这两种情况下都走贴底，窗口与落点一致。
+            anchorIndex = messages.count - 1
+        }
+
+        let lower = max(0, anchorIndex - initialWindowRadius)
+        let upper = min(messages.count - 1, anchorIndex + initialWindowRadius)
+        var window = Set<UUID>()
+        var heights: [UUID: CGFloat] = [:]
+        heights.reserveCapacity(messages.count)
+        for (index, message) in messages.enumerated() {
+            heights[message.id] = initialRowHeightEstimate
+            if index >= lower && index <= upper { window.insert(message.id) }
+        }
+        return (window, heights)
+    }
+
     private var isStreamingSession: Bool { state.isStreaming(sessionId: sessionId) }
 
     // ⚠️ 刻意移除「首帧骨架 → 下一 runloop 再建真实内容」的两段式切换。
@@ -130,11 +220,14 @@ struct SessionMessageList: View {
                                     // 不折叠不隐藏。opacity 不改布局，虚拟化等高占位机制不受影响；
                                     // contentFade 渐变让压缩完成瞬间的区域弱化本身就是反馈。
                                     let isSummarized = state.compactionInfo?.summarizedIDs.contains(message.id.uuidString) ?? false
+                                    // 行级 hover：由容器级分发器映射后注入（本行是否被悬停）。
+                                    let rowHovered = hoveredMessageID == message.id
                                     ChatMessageRow(
                                         message: message,
                                         isSummarized: isSummarized,
                                         canRegenerate: message.id == lastRegeneratableAssistantId,
                                         canEditLastRound: message.id == lastEditableUserMessageId,
+                                        rowHovered: rowHovered,
                                         onRetry: { if isActive { state.retryLast() } },
                                         onRegenerate: { if isActive { state.retryLast() } },
                                         onWithdraw: { if isActive { state.withdrawLastRound() } },
@@ -144,6 +237,9 @@ struct SessionMessageList: View {
                                         onTapImage: onTapImage
                                     )
                                     .equatable()
+                                    // 行内块（代码块/工具结果复制钮）经环境读取行级 hover，
+                                    // 避免逐块注册跟踪区；仅命中行随 rowHovered 变化重绘。
+                                    .environment(\.messageRowHovered, rowHovered)
                                     .opacity(isSummarized ? Theme.Colors.summarizedRowOpacity : 1)
                                     .animation(.easeOut(duration: Theme.Motion.contentFade), value: isSummarized)
                                     .transition(isInitialHistoryLoad
@@ -195,6 +291,27 @@ struct SessionMessageList: View {
                 }
                 .animation(isInitialHistoryLoad ? nil : .easeOut(duration: Theme.Motion.contentFade),
                            value: messages.count)
+                // 列表唯一 hover 跟踪面（取代逐行/逐块 onHover 跟踪区）：
+                // 光标位置以 `.named(scrollSpaceName)`（视口坐标系，与行 frame 同空间）上报，
+                // 映射到包含光标的行 id → hoveredMessageID；指针移出/离开内容即清除。
+                .onContinuousHover(coordinateSpace: .named(scrollSpaceName)) { phase in
+                    switch phase {
+                    case .active(let location):
+                        // 只有活跃会话（allowsHitTesting 为真）参与 hover 分发；非活跃会话
+                        // 树 opacity 0 但仍可能收到跟踪区事件，提前短路避免无谓计算/状态写。
+                        guard isActive else { return }
+                        hoverGeometry.location = location
+                        hoverGeometry.pointerInside = true
+                        resolveHoveredMessageID()
+                    case .ended:
+                        hoverGeometry.pointerInside = false
+                        if hoveredMessageID != nil {
+                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                hoveredMessageID = nil
+                            }
+                        }
+                    }
+                }
                 .padding(.top, Theme.Spacing.section)
                 .chatReadingColumn()
                 // AppKit 滚动桥：必须挂在 ScrollView 内容闭包内部（此处是内容根视图），
@@ -361,11 +478,15 @@ struct SessionMessageList: View {
     private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
         guard viewportHeight > 0, !frames.isEmpty else { return }
         // 列宽变化即整体失效行高缓存：行 frame 宽度统一 = 内容列宽，任取一行即可代表。
-        // 清空后本帧随后的回写会按新宽度重测填充（ChatVirtualRow 对 rowHeights[id]==nil
-        // 恒实渲染，天然支持全行回落重测）；大范围实渲染是一次性 settle 开销，属预期。
+        // A3：首次回写不清缓存——初始虚拟化已按 scrollPosition 预置了占位估算高度，
+        // 首次建立列宽基线时若清空会立即退回「全行实渲染」。仅在真正发生列宽变化时失效。
         let probeWidth = frames.values.first?.width ?? 0
-        if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 1 {
-            rowHeights.removeAll()
+        if let cachedWidth = cachedColumnWidth {
+            if abs(cachedWidth - probeWidth) > 1 {
+                rowHeights.removeAll()
+                cachedColumnWidth = probeWidth
+            }
+        } else {
             cachedColumnWidth = probeWidth
         }
         var bestID: UUID?
@@ -392,6 +513,26 @@ struct SessionMessageList: View {
             }
         }
         if ids != virtualWindowIds { virtualWindowIds = ids }
+        // hover 分发几何：缓存本帧行 frame（引用类型，不触发重渲染），并按最新光标位置
+        // 重新解析命中行——用户滚动（光标不动、内容位移）时 hover 目标随之更新，防 stale。
+        hoverGeometry.frames = frames
+        resolveHoveredMessageID()
+    }
+
+    /// 按「最近一次光标位置 + 最新行 frame」解析命中的消息行 id。
+    /// 位置与 frame 同处 `scrollSpaceName` 视口坐标系；无命中（指针在行外/尾部留白）
+    /// 即置 nil。改变化才写 @State（鼠标移动/滚动均不逐帧重渲染）。
+    private func resolveHoveredMessageID() {
+        let hit: UUID?
+        if hoverGeometry.pointerInside, let location = hoverGeometry.location {
+            hit = hoverGeometry.frames.first { $0.value.contains(location) }?.key
+        } else {
+            hit = nil
+        }
+        guard hit != hoveredMessageID else { return }
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+            hoveredMessageID = hit
+        }
     }
 
     /// 挂载（首次 / LRU 重挂载）时恢复（唯一调用点：ScrollView.onAppear）：
@@ -503,7 +644,7 @@ struct SessionMessageList: View {
                         y: Theme.Shadow.dockAmbientY)
         }
         .buttonStyle(.plain)
-        .help("回到底部")
+        .qsHelp("回到底部")
     }
 
     // MARK: - 分组 / 可重生成

@@ -71,6 +71,7 @@
 		5ED9778EAB65A148653771F9 /* SettingsGeneralForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA8FD61001FFBE03FF9530C6 /* SettingsGeneralForms.swift */; };
 		6113DF015E84E4580BEEB38B /* github-dark.min.css in Resources */ = {isa = PBXBuildFile; fileRef = F5D74E5480F19A9FCF5818B9 /* github-dark.min.css */; };
 		639C00823A1B6B8F3373A250 /* MarkdownCodeBlock.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1CA12043DFFB7C8ACCC6093 /* MarkdownCodeBlock.swift */; };
+		63D7F9B5283EF596F868C63A /* CachedHitTestHostingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53EB1E102791E34CC9A90250 /* CachedHitTestHostingView.swift */; };
 		640D3F057DB8B50921CB80C1 /* MarkdownASTCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = C755B39DA45592E57B2206C6 /* MarkdownASTCache.swift */; };
 		662D5535C9FECDDE70809C93 /* CalendarEventEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6899045187A73D4B76895FE6 /* CalendarEventEditView.swift */; };
 		68A4DFC9590BBC63D9C0E292 /* AIChatMessageList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BC88919D5EAE9E17E6C437E /* AIChatMessageList.swift */; };
@@ -234,6 +235,7 @@
 		4CB3F9819E7541B279D9C3FB /* PanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelManager.swift; sourceTree = "<group>"; };
 		4EBFCA705B22FA81D696553E /* AskUserToolViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserToolViews.swift; sourceTree = "<group>"; };
 		50CF0F2EA78ECAACDCE0E67F /* DeviceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceProvider.swift; sourceTree = "<group>"; };
+		53EB1E102791E34CC9A90250 /* CachedHitTestHostingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CachedHitTestHostingView.swift; sourceTree = "<group>"; };
 		57013FDF715F8B5844F318F0 /* BuiltInTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInTools.swift; sourceTree = "<group>"; };
 		5822253DCCE3035ACFC217BB /* atom-one-light.min.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = "atom-one-light.min.css"; sourceTree = "<group>"; };
 		593FA64731993CAEC270C733 /* AIChatService+Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+Config.swift"; sourceTree = "<group>"; };
@@ -400,6 +402,7 @@
 				02C56336313E564A9C58442B /* AppState.swift */,
 				6E96296DA3CAB83BC3CB9374 /* AppState+Actions.swift */,
 				3BA2EFE2F727CEF5B0BEBC55 /* AppState+Forwarding.swift */,
+				53EB1E102791E34CC9A90250 /* CachedHitTestHostingView.swift */,
 				34CBD4C89D5A33D444B5AA62 /* CalendarStore.swift */,
 				D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */,
 				A717A5076D26657EA117861F /* HotKeyManager.swift */,
@@ -637,7 +640,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_33AECA88-F1B3-4784-BCCF-E0763DE79E71" /* Resources */ = {
+		"TEMP_DE619EA9-E536-4203-BAAA-BA369D5CF932" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -860,6 +863,7 @@
 				18E95A73AD38D54A5F11FFD3 /* AsyncMathBlockView.swift in Sources */,
 				5B33242FC8FA6D78307F318E /* AudioProvider.swift in Sources */,
 				48869261FB3AFE69DE9E7264 /* BuiltInTools.swift in Sources */,
+				63D7F9B5283EF596F868C63A /* CachedHitTestHostingView.swift in Sources */,
 				E5E4986AAB0D5EB1606D3B0A /* CalendarEventDetailView.swift in Sources */,
 				662D5535C9FECDDE70809C93 /* CalendarEventEditView.swift in Sources */,
 				159E3E3CAC278CD785E62232 /* CalendarGridViews.swift in Sources */,

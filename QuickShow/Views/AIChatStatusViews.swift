@@ -53,7 +53,7 @@ struct QueuedInputCapsule: View {
                 .opacity(hovered ? 1 : 0)
                 .allowsHitTesting(hovered)
                 .accessibilityHidden(!hovered)
-                .help("撤回该条到输入框")
+                .qsHelp("撤回该条到输入框")
             }
             .padding(.horizontal, Theme.Spacing.xl)
             .padding(.vertical, Theme.Spacing.md)
@@ -72,7 +72,7 @@ struct QueuedInputCapsule: View {
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
         // 固定文案后附队列项完整文本（单行截断的补偿：多行长文经 tooltip 全量可读）
-        .help((isSteering
+        .qsHelp((isSteering
               ? "转向：本轮生成中即时注入、修正方向 · 点击取回编辑"
               : "追问：本轮回复完成后自动追加一轮 · 点击取回编辑")
               + "\n" + displayText)
@@ -107,7 +107,7 @@ struct ClipboardAttachmentCapsule: View {
                     .foregroundColor(Theme.Colors.contentTertiary)
             }
             .buttonStyle(.plain)
-            .help("移除剪贴板附加")
+            .qsHelp("移除剪贴板附加")
         }
         .padding(.horizontal, Theme.Spacing.xxl)
         .padding(.vertical, Theme.Spacing.md)
@@ -151,7 +151,7 @@ struct WelcomeView: View {
                     )
                 }
                 .buttonStyle(.plain)
-                .help("把剪贴板文本附加为对话上下文")
+                .qsHelp("把剪贴板文本附加为对话上下文")
             }
         }
         .padding(Theme.Spacing.panel)

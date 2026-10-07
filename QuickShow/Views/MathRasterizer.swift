@@ -36,8 +36,9 @@ enum MathRasterizer {
     private static var cache: [CacheKey: Rasterized] = [:]
     /// 插入序（LRU）：命中/写入移到尾部，超上限从头部淘汰，防位图缓存无界增长。
     private static var cacheOrder: [CacheKey] = []
-    /// 缓存条数上限。
-    private static let cacheLimit = 512
+    /// 缓存条数上限（2048：公式密集大会话里唯一「公式 × 字号 × 明暗 × display」组合数远小于文本块，
+/// 512 在滚动回窗时轻易击穿 → 后台重排版风暴；2048 用位图小幅内存换滚动稳定）。
+    private static let cacheLimit = 2048
     /// 保护 cache / cacheOrder / inFlight 的互斥锁（主线程与后台队列并发访问）。
     private static let lock = NSLock()
     /// 串行化 SwiftMath 排版/光栅化：主线程同步路径与后台预热可能并发，内核非线程安全。
@@ -276,7 +277,7 @@ enum MathRasterizer {
 
     /// 批量预热：后台串行逐个「查缓存 → 未命中则光栅化入缓存」，全程不阻塞主线程。
     /// 供选中会话时按会话 latex 集合预热（块级 isDisplay=true / 行内 false 各调一次）。
-    /// B3：单次预热预算 = cacheLimit/2。块级与行内各调一次共用同一 512 LRU 池，
+    /// B3：单次预热预算 = cacheLimit/2（当前 1024）。块级与行内各调一次共用同一 2048 LRU 池，
     /// 若两类都全量预热（如行内 ~600）会相互驱逐，使文档最前（首屏）的条目最先被淘汰。
     /// 列表按文档顺序排列，取前缀即「块级/首屏段落优先」；溢出部分不预热，
     /// 交由按需异步路径兜底（B1/B2 已保证其不阻塞主线程且与预热去重）。

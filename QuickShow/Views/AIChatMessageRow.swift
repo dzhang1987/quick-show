@@ -4,6 +4,24 @@ import AppKit
 import Combine
 import SwiftUI
 
+// MARK: - 行级 hover 环境值（容器级分发）
+
+/// 当前消息行是否被容器级 hover 分发器命中。由 `AIChatMessageList` 的唯一
+/// `onContinuousHover`（覆盖整个消息列表）按行几何映射后写入，取代原先每个行/每个
+/// 行内块各自注册 NSTrackingArea 的逐叶子 `onHover`（鼠标移动 hit-test 风暴主因）。
+/// 默认 false：任何非消息列表渲染路径（预览/测试）保持无 hover 语义。
+private struct MessageRowHoveredKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    /// 所在消息行是否处于 hover（供行内块如代码块/工具结果复制钮揭示使用）。
+    var messageRowHovered: Bool {
+        get { self[MessageRowHoveredKey.self] }
+        set { self[MessageRowHoveredKey.self] = newValue }
+    }
+}
+
 struct ChatMessageRow: View, Equatable {
     let message: ChatMessage
     /// 是否已被压缩摘要化（纯显示态：驱动整行降档透明度；行内不直接消费，
@@ -13,6 +31,10 @@ struct ChatMessageRow: View, Equatable {
     let canRegenerate: Bool
     /// 是否为会话内最后一条 user 消息且可撤回/编辑（父视图计算，含生成中禁用语义）。
     let canEditLastRound: Bool
+    /// 行级 hover 态：由容器级 hover 分发器（AIChatMessageList）按行几何映射后注入，
+    /// 替代原先行内 `contentShape + onHover` 的逐行跟踪区。参与 Equatable，使 hover 命中
+    /// 行（至多 1~2 行）重绘、其余行被 `.equatable()` 短路。
+    let rowHovered: Bool
     let onRetry: () -> Void
     let onRegenerate: () -> Void
     /// 撤回最后一轮（数据层删除该轮并把文本+图片回填输入框）。
@@ -30,9 +52,9 @@ struct ChatMessageRow: View, Equatable {
             && lhs.isSummarized == rhs.isSummarized
             && lhs.canRegenerate == rhs.canRegenerate
             && lhs.canEditLastRound == rhs.canEditLastRound
+            && lhs.rowHovered == rhs.rowHovered
     }
 
-    @State private var rowHovered = false
     @State private var copied = false
     /// 就地编辑态（仅 canEditLastRound 的 user 行可进入）。
     /// 仅作协调开关（showsActionRow 隐藏操作行、content 分派到 MessageEditBubble）；
@@ -63,10 +85,10 @@ struct ChatMessageRow: View, Equatable {
             }
         }
         .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+        // 命中区保留：右键菜单/整行命中仍覆盖整行（contentShape 不注册跟踪区）。
+        // hover 由 AIChatMessageList 的容器级分发器驱动（rowHovered 属性注入），
+        // 本行不再注册 onHover 跟踪区——逐叶子跟踪区是鼠标移动 hit-test 风暴主因。
         .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { rowHovered = hovering }
-        }
         .contextMenu { rowContextMenu }
     }
 
@@ -347,7 +369,7 @@ struct ReasoningDisclosureView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(expanded ? "收起思考过程" : "展开思考过程")
+            .qsHelp(expanded ? "收起思考过程" : "展开思考过程")
 
             if expanded {
                 ScrollView(.vertical, showsIndicators: false) {
@@ -445,7 +467,7 @@ struct CompactionBoundaryCard: View {
                 .onHover { hovering in
                     withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
                 }
-                .help(isCompacting ? "正在压缩早期对话…" : (expanded ? "收起压缩摘要" : "查看压缩摘要"))
+                .qsHelp(isCompacting ? "正在压缩早期对话…" : (expanded ? "收起压缩摘要" : "查看压缩摘要"))
                 featheredDivider
             }
 

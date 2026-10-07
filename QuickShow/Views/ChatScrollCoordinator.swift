@@ -71,6 +71,18 @@ final class ChatScrollCoordinator {
     private var lastUserScrollWheelAt: [UUID: Date] = [:]
     /// 全局滚轮监听 token：首个会话 attach 时 lazy 安装一次，随 app 生命周期常驻。
     private var scrollWheelMonitor: Any?
+
+    /// 滚轮 hit-test 按点缓存（P0-1）：触控板滚动 60~120Hz 且手势期间鼠标位置不变，
+    /// 逐事件对 `contentView.hitTest`（全 SwiftUI 树递归命中）求一次恒同结果，纯浪费。
+    /// 缓存「窗口 + 窗口内坐标点 → 命中视图」，点未变直接复用；窗口/点变化才重测。
+    /// 视图弱引用：不因缓存延长已销毁 SwiftUI 视图树的存活；失效（nil）时自然重测。
+    /// 仅在 attach/unbind 生命周期节点清空（几何/视图树可能重建）。
+    private struct ScrollHitTestCache {
+        weak var window: NSWindow?
+        let point: NSPoint
+        weak var hit: NSView?
+    }
+    private var hitTestCache: ScrollHitTestCache?
     /// 用户滚轮事件的关联时窗：滚轮事件与其驱动的 bounds 变化在同一事件派发
     /// 栈内落定（实证同步），0.15s 仅为 runloop 抖动余量。
     private let userScrollRecencyWindow: TimeInterval = 0.15
@@ -104,6 +116,8 @@ final class ChatScrollCoordinator {
         pinStates[sessionId] = nil
         navVisibleStates[sessionId] = nil
         lastUserScrollWheelAt[sessionId] = nil
+        // 会话卸载（切换/面板隐藏/视图销毁）：视图树几何可能变，hit-test 缓存作废。
+        hitTestCache = nil
     }
 
     /// pin 态唯一写入口：class 真源即时生效（判定路径同帧可读，零延迟），
@@ -134,6 +148,8 @@ final class ChatScrollCoordinator {
         // 空转无害（noteUserScrollWheel 遍历空字典即返回），故无需随 unbind 拆卸。
         installScrollWheelMonitorIfNeeded()
         if attached[sessionId]?.view === scrollView, observers[sessionId] != nil { return }
+        // 底层 NSScrollView 变化（桥重建/会话重挂）：视图树节点已换，hit-test 缓存作废。
+        hitTestCache = nil
         if let old = observers[sessionId] {
             NotificationCenter.default.removeObserver(old.bounds)
             NotificationCenter.default.removeObserver(old.frame)
@@ -177,9 +193,25 @@ final class ChatScrollCoordinator {
     /// 命中判定与事件派发同一条 hit-test 路径：哪个会话的 scrollView 被命中，
     /// 滚轮就滚哪个、时间戳就记哪个——多会话并存路由自洽；命中坞/输入框/
     /// 隐藏会话时不记录，列表同期被动 clamp 不误判。
+    ///
+    /// P0-1 性能：命中结果按（窗口, 窗口内坐标点）缓存——触控板 60~120Hz 滚动、
+    /// 手势期间鼠标位置不变，逐事件重跑全 SwiftUI 树递归 hit-test 是纯浪费。
+    /// 点未变且缓存命中视图仍存活时直接复用；点变/缓存失效才重测并回填。
+    /// 不改路由与时间戳语义：仅决定「命中谁」，写 `lastUserScrollWheelAt` 照旧。
     private func noteUserScrollWheel(_ event: NSEvent) {
-        guard let window = event.window, let contentView = window.contentView,
-              let hit = contentView.hitTest(event.locationInWindow) else { return }
+        guard let window = event.window, let contentView = window.contentView else { return }
+        let point = event.locationInWindow
+        let hit: NSView?
+        if let cache = hitTestCache,
+           cache.window === window,
+           NSEqualPoints(cache.point, point),
+           let cachedHit = cache.hit {
+            hit = cachedHit
+        } else {
+            hit = contentView.hitTest(point)
+            hitTestCache = ScrollHitTestCache(window: window, point: point, hit: hit)
+        }
+        guard let hit else { return }
         for (sessionId, box) in attached {
             guard let sv = box.view, sv.window === window else { continue }
             if hit === sv || hit.isDescendant(of: sv) {

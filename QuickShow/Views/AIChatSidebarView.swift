@@ -78,7 +78,7 @@ struct AIChatSidebarView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("新建会话（⌘N）")
+            .qsHelp("新建会话（⌘N）")
         }
         .frame(width: AIChatLayout.sidebarWidth)
         .frame(maxHeight: .infinity)
@@ -126,7 +126,7 @@ struct AIChatSidebarView: View {
                         .foregroundColor(Theme.Colors.contentTertiary)
                 }
                 .buttonStyle(.plain)
-                .help("清除搜索")
+                .qsHelp("清除搜索")
             }
         }
         .padding(.horizontal, Theme.Spacing.lg)
@@ -400,6 +400,6 @@ private struct BreathingDot: View {
         .onDisappear {
             if hovered { NSCursor.pop() }
         }
-        .help("点击中止生成")
+        .qsHelp("点击中止生成")
     }
 }

@@ -104,7 +104,7 @@ struct ToolConfirmationDrawerContent: View {
                     .onHover { hovering in
                         withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { toggleHovered = hovering }
                     }
-                    .help(argumentsExpanded ? "收起参数" : "展开查看完整参数")
+                    .qsHelp(argumentsExpanded ? "收起参数" : "展开查看完整参数")
                 }
             }
 

@@ -50,7 +50,67 @@ import Foundation
 //   matrix/pmatrix/bmatrix/vmatrix/Vmatrix/cases/aligned/split/eqalign 环境。
 enum MathLatexTranspiler {
 
+    // MARK: 转译结果缓存（加锁：主线程 + 后台预热队列并发访问）
+
+    /// `[原始 latex: 转译 latex]` 静态 LRU 缓存。转译是纯字符串处理、同输入同输出（稳定），
+    /// 缓存语义安全。`transpile` 被主线程（rasterize/lookup/rasterizeAsync）与后台预热队列
+    /// （MathRasterizer.prefetch → enqueueRasterize 前）共同调用，故与 AST 缓存同款用锁保护。
+    /// 命中路径仅剩「取锁 + 字典查找 + LRU touch」，把回窗时的整串正则/替换降为一次字典查询。
+    private static var transpileCache: [String: String] = [:]
+    /// LRU 次序（尾部=最近使用；与 MathRasterizer 位图缓存同款手工 LRU）。
+    private static var transpileOrder: [String] = []
+    /// 条目数上限（公式种类远少于文本块，2048 足以覆盖大会话全部唯一公式）。
+    private static let transpileEntryLimit = 2048
+    /// 内容字符预算（原始 + 转译后字符数之和）：防畸形巨型输入把缓存撑大。
+    private static let transpileCharBudget = 1_000_000
+    /// 当前缓存内容总字符数（预算淘汰用）。
+    private static var transpileCharTotal = 0
+    private static let transpileLock = NSLock()
+
+    /// 转译入口：先查静态 LRU 缓存，命中直接返回；未命中计算后写回（按条数/字符预算做 LRU 淘汰）。
     static func transpile(_ latex: String) -> String {
+        transpileLock.lock()
+        if let cached = transpileCache[latex] {
+            touchTranspileLocked(latex)
+            transpileLock.unlock()
+            return cached
+        }
+        transpileLock.unlock()
+
+        let result = computeTranspiled(latex)
+
+        transpileLock.lock()
+        if transpileCache[latex] != nil {
+            touchTranspileLocked(latex)   // 并发下已被他人写入：不重复计数
+        } else {
+            transpileCache[latex] = result
+            transpileOrder.append(latex)
+            transpileCharTotal += latex.count + result.count
+            evictTranspileIfNeededLocked()
+        }
+        transpileLock.unlock()
+        return result
+    }
+
+    /// 锁内把 key 移到 LRU 尾部（最近使用）。
+    private static func touchTranspileLocked(_ latex: String) {
+        guard let index = transpileOrder.firstIndex(of: latex) else { return }
+        transpileOrder.remove(at: index)
+        transpileOrder.append(latex)
+    }
+
+    private static func evictTranspileIfNeededLocked() {
+        while transpileOrder.count > transpileEntryLimit || transpileCharTotal > transpileCharBudget {
+            guard !transpileOrder.isEmpty else { break }
+            let oldest = transpileOrder.removeFirst()
+            if let value = transpileCache.removeValue(forKey: oldest) {
+                transpileCharTotal -= oldest.count + value.count
+            }
+        }
+    }
+
+    /// 实际转译（纯字符串处理，无副作用）。结果对同一输入稳定，故可安全缓存。
+    private static func computeTranspiled(_ latex: String) -> String {
         var result = latex
         // 1. 分数命令族：统一降级为 \frac（命令边界：后一个字符不是字母才替换）
         result = replaceCommand(result, command: "\\dfrac", with: "\\frac")

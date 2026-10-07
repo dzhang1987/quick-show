@@ -144,7 +144,7 @@ private struct ToolCallRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(expanded ? "收起详情" : "展开参数与结果")
+        .qsHelp(expanded ? "收起详情" : "展开参数与结果")
     }
 
     // MARK: 展开区（参数 + 结果）
@@ -221,8 +221,14 @@ private struct ToolCallResultBlock: View {
     @Binding var showFullResult: Bool
     let truncateLimit: Int
 
-    @State private var hovered = false
+    /// 行级 hover（容器级分发器经环境注入）：驱动复制钮揭示。
+    /// 原先是结果滚动区整体的 onHover 跟踪区（消息树内逐叶子注册的主要来源之一）；
+    /// 上收为行级后，块内不再注册跟踪区。
+    @Environment(\.messageRowHovered) private var rowHovered
     @State private var copied = false
+
+    /// 复制钮揭示态 = 所在消息行 hover；复制成功反馈期间保持可见。
+    private var showsCopyButton: Bool { rowHovered || copied }
 
     /// 美化后的完整结果文本。
     private var prettyResult: String { ToolJSONText.pretty(result) }
@@ -243,8 +249,8 @@ private struct ToolCallResultBlock: View {
                     .font(Theme.Typography.text(10, .semibold))
                     .foregroundColor(Theme.Colors.contentTertiary)
                 Spacer(minLength: 0)
-                // hover 渐显复制钮（与 CodeBlockView 同一语言）
-                if hovered || copied {
+                // hover 渐显复制钮（与 CodeBlockView 同一语言；由行级 hover 驱动）
+                if showsCopyButton {
                     Button(action: copyResult) {
                         HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: copied ? "checkmark" : "square.on.square")
@@ -265,6 +271,8 @@ private struct ToolCallResultBlock: View {
                 }
             }
             .frame(minHeight: 14)
+            // 揭示/隐去与旧 withAnimation(contentFade) 观感一致（只动画透明度）。
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: showsCopyButton)
 
             // 失败 / 拒绝：先给一行可读摘要（从 {"ok":false,"error":...} 提取）
             if showsErrorSummary, let error = ToolJSONText.errorMessage(from: result) {
@@ -296,9 +304,6 @@ private struct ToolCallResultBlock: View {
                 RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                     .fill(Theme.Colors.surfaceBadge)
             )
-            .onHover { hovering in
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
-            }
 
             // 超长结果的展开 / 收起入口
             if isTruncatable {

@@ -19,12 +19,6 @@ struct AIChatInputDock: View {
     /// 坞体实测总高（单向写回父级：供消息列表尾部留白 / 空态 overlay / toast 位置消费；
     /// 值单向流出、绝不反向影响坞体布局，无反馈环）。
     @Binding var dockTotalHeight: CGFloat
-    /// 剪贴板是否有可用文本（父级持有，随窗口激活/hover 刷新；控制剪贴板钮可用态）。
-    let hasClipboardText: Bool
-    /// 剪贴板是否有可用图片（父级持有，控制 ⊕ 菜单「剪贴板导入」可用态）。
-    let hasClipboardImage: Bool
-    /// 进入坞区时刷新剪贴板可用态（父级 refreshClipboardAvailability）。
-    let onRefreshClipboard: () -> Void
     /// 附加剪贴板文本（父级 attachClipboard）。
     let onAttachClipboard: () -> Void
     /// 导出整段对话 Markdown（父级 exportConversation）。
@@ -32,7 +26,7 @@ struct AIChatInputDock: View {
     /// ESC 兜底出口（父级 handleEscape：抽屉 → 重命名 → 中止 → 关窗）。
     let onEscape: () -> Void
 
-    /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
+    /// 输入框占位文案（快捷键语义由各控件 .qsHelp() tooltip 承担，占位只留一句）。
     private let inputPlaceholder = "问点什么…"
 
     /// 输入内容空态：独立于 state.inputText 的回写通道（IME 组字期间由 setMarkedText 回调驱动）。
@@ -49,11 +43,10 @@ struct AIChatInputDock: View {
     /// 输入框唤出即自动聚焦（windowDidBecomeKey 兜底），"聚焦"恒为真、无法作披露信号，
     /// 故渐进披露的诚实触发源 = 坞区 hover + 内容存在（草稿/附件/队列/生成中）。
     @State private var dockHovered = false
-    /// 窗口 key 态：输入卡激活 rim 的门控之一（与 dockQuiet 共同决定，见 dockRimActive；
-    /// 窗口 key 时输入框必被抬为第一响应者，见 ChatInputTextView 的 windowDidBecomeKey 兜底；
-    /// isKeyWindow 近似足够，不侵入事件链）。
-    @State private var windowIsKey = false
     /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip / 思考 chip 的 hover 提亮）。
+    /// （窗口 key 态已下沉到 DockFocusRim 自持——原先 windowIsKey 挂在坞级 @State，
+    /// 每次焦点翻转都带着整个输入坞视图重算（含 representable diff），是聚焦/失焦
+    /// 卡顿的触发器之一；隔离后焦点切换只重算那个 30 行小视图。）
     @State private var attachHovered = false
     @State private var clipboardHovered = false
     @State private var chipHovered = false
@@ -69,18 +62,16 @@ struct AIChatInputDock: View {
         inputArea
             // 挂载即拉取模型列表并补窗口 key 初值（窗口可能已 key，onAppear 先于通知时兜底）。
             .onAppear {
-                modelList = AIChatService.shared.modelList
-                windowIsKey = NSApp.keyWindow is AIPanel
+                refreshModelList()
             }
-            // AI 窗成为/失去 key：输入卡激活 rim 门控 + 模型列表刷新（设置窗口改动后即时生效）；
-            // 只在 AI 窗自身变化时计入（其他窗口激活不误触，onAppear 已补初值）。
+            // AI 窗成为 key：刷新模型列表（设置窗口改动后即时生效）；
+            // 只在 AI 窗自身变化时计入（其他窗口激活不误触）。
+            // （焦点态 rim 的 windowIsKey 已下沉 DockFocusRim，此回调不再写坞级 @State。）
             .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
                 guard note.object is AIPanel else { return }
-                windowIsKey = true
-                modelList = AIChatService.shared.modelList
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
-                if note.object is AIPanel { windowIsKey = false }
+                DispatchQueue.main.async {
+                    refreshModelList()
+                }
             }
             // 外部清空输入（发送 / ⌘K / 重试）经 state.inputText 变化同步空态。
             // 组字期间 ChatInputNSTextView 的 setMarkedText 回调已实时同步 state.inputText（见 syncInputState），
@@ -122,10 +113,6 @@ struct AIChatInputDock: View {
             && interaction.request == nil
             && !dockHovered
     }
-
-    /// 激活态描边：坞体激活且窗口 key 时才点亮 accent 环（旧版仅按窗口 key 常亮，
-    /// 空态下形成横贯底部的整圈彩色轮廓带——全图唯一彩色轮廓即源于此）。
-    private var dockRimActive: Bool { windowIsKey && !dockQuiet }
 
     /// 低频工具组（压缩/水位/剪贴板）显隐：安静态隐去（保留占位、纯透明渐变、布局零跳动）；
     /// 两类破格常显，同源同档：水位逼近上限（需要警示的时刻不沉默）+ 压缩进行中
@@ -220,16 +207,10 @@ struct AIChatInputDock: View {
             ))
             // 激活态 rim：坞体激活（悬停/输入/附件/生成中/抽屉在场）且窗口 key 时叠加
             // accent 低透明度环，材质对状态有响应；安静态零描边。
-            // allowsHitTesting(false) 防描边层吞掉坞内控件点击
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                    .strokeBorder(
-                        Theme.Colors.accent.opacity(dockRimActive ? Theme.Colors.dockFocusRimOpacity : 0),
-                        lineWidth: 1
-                    )
-                    .allowsHitTesting(false)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockRimActive)
-            )
+            // 性能：rim 由 DockFocusRim 自持窗口 key 态——焦点切换只重算这个小视图，
+            // 不再触发整个输入坞 body 重算（原先 dockRimActive 读坞级 windowIsKey）。
+            // allowsHitTesting(false) 在 DockFocusRim 内部实现（防描边层吞点击）。
+            .overlay(DockFocusRim(quiet: dockQuiet))
             // 双层阴影：接触影贴身定锚 + 环境影拉开纵深（旧单层贴身影 = 卡片糊在底板上）
             .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity), radius: Theme.Shadow.dockContactRadius, y: Theme.Shadow.dockContactY)
             .shadow(color: .black.opacity(Theme.Shadow.dockAmbientOpacity), radius: Theme.Shadow.dockAmbientRadius, y: Theme.Shadow.dockAmbientY)
@@ -244,7 +225,7 @@ struct AIChatInputDock: View {
             // AIChatDrawerPanel.swift 头注）；尾部留白经 dockTotalHeight 实测自动跟随抽屉顶。
             .animation(.easeOut(duration: AIChatDrawerMetrics.slideDuration), value: interaction.request?.id)
         }
-        // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .help() tooltip 承担，
+        // 浮岛坞与消息列同限宽、同居中；快捷键提示条已删（提示由各控件 .qsHelp() tooltip 承担，
         // 清空会话入口移入 ⊕ 菜单），坞体即输入区全部。
         // 顶部零 padding：真穿透后坞顶上方无任何过渡带，内容直接滚到玻璃坞下；
         // 底部 12pt 为坞与窗缘的呼吸缝
@@ -263,10 +244,9 @@ struct AIChatInputDock: View {
             }
         )
         .chatReadingColumn()
-        // 坞区 hover：进入时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径），
-        // 同时驱动坞体安静→激活切换（低频工具组淡入、accent rim 点亮）
+        // 坞区 hover：驱动坞体安静→激活切换（低频工具组淡入、accent rim 点亮）。
+        // B2：不再于 hover 时主动读取 NSPasteboard（剪贴板改为显式点击时按需读取）。
         .onHover { hovering in
-            if hovering { onRefreshClipboard() }
             dockHovered = hovering
         }
     }
@@ -276,6 +256,13 @@ struct AIChatInputDock: View {
         if abs(height - dockTotalHeight) > 0.5 {
             dockTotalHeight = height
         }
+    }
+
+    /// B3：模型列表仅在内容变化时刷新（AIChatService.modelList 非 @Published，
+    /// 窗口激活/挂载时按需拉取；缓存比对避免同值重复赋值触发无谓重渲染）。
+    private func refreshModelList() {
+        let latest = AIChatService.shared.modelList
+        if latest != modelList { modelList = latest }
     }
 
     /// 输入卡内容（连续玻璃体的下半部分）：文本区 + 底部工具行
@@ -354,7 +341,6 @@ struct AIChatInputDock: View {
             } label: {
                 Label("剪贴板导入", systemImage: "photo.on.rectangle")
             }
-            .disabled(!hasClipboardImage)
 
             Button {
                 chooseImageFiles()
@@ -391,7 +377,7 @@ struct AIChatInputDock: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { attachHovered = hovering }
         }
-        .help("添加图片附件（可粘贴/拖入）· 导出对话 · 清空会话（⌘K）")
+        .qsHelp("添加图片附件（可粘贴/拖入）· 导出对话 · 清空会话（⌘K）")
     }
 
     /// 模型 chip：显示当前会话绑定模型（未绑定时回落全局默认），点击弹下拉切换。
@@ -437,7 +423,7 @@ struct AIChatInputDock: View {
             .onHover { hovering in
                 withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { chipHovered = hovering }
             }
-            .help("切换本会话模型（下一轮对话生效）")
+            .qsHelp("切换本会话模型（下一轮对话生效）")
         }
     }
 
@@ -509,7 +495,7 @@ struct AIChatInputDock: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { thinkingChipHovered = hovering }
         }
-        .help("调整思考强度（本会话生效）")
+        .qsHelp("调整思考强度（本会话生效）")
     }
 
     /// chip 标题：默认态只露「思考」二字（弱化），选定档位后紧凑显示「思考·高」式后缀。
@@ -535,24 +521,22 @@ struct AIChatInputDock: View {
 
     /// 剪贴板附加钮：低频功能，安静态随低频工具组整体隐去（见 showDockSecondaryTools）；
     /// 克制语言：静止纯灰图标无底无 rim（与图钉同款），hover 才出圆底提亮。
+    /// B2：可用态不再依赖窗口激活时的主动探测（已移除）；恒可点，点击时按需读取剪贴板。
     private var clipboardButton: some View {
         Button {
             onAttachClipboard()
         } label: {
             Image(systemName: "doc.on.clipboard")
                 .font(Theme.Typography.text(13, .medium))
-                .foregroundColor(hasClipboardText
-                                 ? (clipboardHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
-                                 : Theme.Colors.idleText.opacity(0.5))
+                .foregroundColor(clipboardHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                .background(Circle().fill(clipboardHovered && hasClipboardText ? Theme.Colors.iconHoverBg : Color.clear))
+                .background(Circle().fill(clipboardHovered ? Theme.Colors.iconHoverBg : Color.clear))
         }
         .buttonStyle(.plain)
-        .disabled(!hasClipboardText)
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { clipboardHovered = hovering }
         }
-        .help("附加剪贴板内容作为上下文")
+        .qsHelp("附加剪贴板内容作为上下文")
     }
 
     private var sendButton: some View {
@@ -572,7 +556,7 @@ struct AIChatInputDock: View {
         }
         .buttonStyle(.plain)
         .disabled(!state.isStreaming && !canSend)
-        .help(state.isStreaming ? "中止生成" : "发送（⏎）· 追问（⌥⏎）")
+        .qsHelp(state.isStreaming ? "中止生成" : "发送（⏎）· 追问（⌥⏎）")
     }
 
     // MARK: - 状态与动作
@@ -687,5 +671,42 @@ struct AIChatInputDock: View {
             }
         }
         return handled
+    }
+}
+
+// MARK: - 输入坞激活 rim（焦点性能隔离）
+
+/// 输入坞激活 rim：自持窗口 key 态监听的小视图（参考 perf/ai-window-focus-lag 分支思路移植）。
+/// 性能设计：焦点切换（聚焦/失焦）只重算本视图——原先 windowIsKey 挂在输入坞 @State，
+/// 每次焦点翻转都会带着整个输入坞视图（含 representable diff）重算一遍；
+/// 隔离后坞 body 与焦点事件彻底解耦。
+/// 安静语义不变：坞体激活（悬停/输入/附件/生成中/抽屉在场）且窗口 key 才点亮 accent 环。
+private struct DockFocusRim: View {
+    let quiet: Bool
+    @State private var windowIsKey = false
+
+    private var active: Bool { windowIsKey && !quiet }
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+            .strokeBorder(
+                Theme.Colors.accent.opacity(active ? Theme.Colors.dockFocusRimOpacity : 0),
+                lineWidth: 1
+            )
+            .allowsHitTesting(false)
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: active)
+            .onAppear { windowIsKey = NSApp.keyWindow is AIPanel }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+                guard note.object is AIPanel else { return }
+                DispatchQueue.main.async {
+                    if !windowIsKey { windowIsKey = true }
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)) { note in
+                guard note.object is AIPanel else { return }
+                DispatchQueue.main.async {
+                    if windowIsKey { windowIsKey = false }
+                }
+            }
     }
 }

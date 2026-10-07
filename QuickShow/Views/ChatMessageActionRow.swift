@@ -96,7 +96,7 @@ struct ChatActionIconButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(help)
+        .qsHelp(help)
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }

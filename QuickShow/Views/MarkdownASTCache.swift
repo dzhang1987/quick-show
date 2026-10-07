@@ -63,3 +63,73 @@ enum MarkdownASTCache {
         }
     }
 }
+
+// MARK: - Markdown 渲染进度缓存（主线程专用，无锁）
+
+/// 单条助手消息的**已渲染块数**进度缓存：key 与 `MarkdownASTCache` 同空间（消息 content 字符串），
+/// 值为 `[String: Int]`（content → 已构建块数）。
+///
+/// 存在意义：`ChatVirtualRow` 的「实渲染 ↔ 等高占位」切换（窗口外切占位）会**销毁**
+/// `AssistantMarkdownView` 的 `@State visibleBlockCount`——长消息每次滚回视口都从
+/// `settledInitialBlocks`(40) 重新起步，再以 16ms/批推进；大会话滚动时行不断进出窗口，
+/// 批次风暴可持续数十秒（行高逐批变化又触发全列表重估）。本缓存让重挂载的消息直接
+/// 恢复到既有渲染进度，从根上消除「重挂载塌回首批」的批次风暴。
+///
+/// 线程约定：**仅主线程读写**（调用点全部是 `AssistantMarkdownView` 的 body / 批次推进）。
+/// AST 缓存因后台公式预热线程读写才用 `NSLock`；本缓存不参与预热，刻意保持无锁。
+/// 淘汰策略与 `MarkdownASTCache` 完全一致：条目数上限 + 内容字符预算的 LRU
+/// （命中移到尾部，淘汰从头部；多会话来回时热条目不被误踢）。
+enum MarkdownRenderProgressCache {
+    private static var cache: [String: Int] = [:]
+    /// LRU 次序（尾部=最近使用）。
+    private static var cacheOrder: [String] = []
+    /// 条目数上限（与 AST 缓存对齐：256）。
+    private static let cacheEntryLimit = 256
+    /// 内容总字符预算（与 AST 缓存对齐：4M）。
+    private static let cacheCharBudget = 4_000_000
+    /// 当前缓存内容的总字符数（预算淘汰用）。
+    private static var cacheCharTotal = 0
+
+    /// 取 content 的已渲染块数；无进度返回 nil。命中刷新 LRU。
+    static func progress(for content: String) -> Int? {
+        guard let value = cache[content] else { return nil }
+        touch(content)
+        return value
+    }
+
+    /// 记录 content 的已渲染块数。**单调不减**：仅在新值更大时写入（分批推进只会前进），
+    /// 合法值（>0）才入缓存，避免流式/空内容污染。
+    static func record(_ count: Int, for content: String) {
+        guard count > 0 else { return }
+        if let existing = cache[content] {
+            guard count > existing else {
+                touch(content)
+                return
+            }
+            cache[content] = count
+            touch(content)
+        } else {
+            cache[content] = count
+            cacheOrder.append(content)
+            cacheCharTotal += content.count
+            evictIfNeeded()
+        }
+    }
+
+    /// 把 key 移到 LRU 尾部（最近使用）。
+    private static func touch(_ content: String) {
+        guard let index = cacheOrder.firstIndex(of: content) else { return }
+        cacheOrder.remove(at: index)
+        cacheOrder.append(content)
+    }
+
+    private static func evictIfNeeded() {
+        while cacheOrder.count > cacheEntryLimit || cacheCharTotal > cacheCharBudget {
+            guard !cacheOrder.isEmpty else { break }
+            let oldest = cacheOrder.removeFirst()
+            if cache.removeValue(forKey: oldest) != nil {
+                cacheCharTotal -= oldest.count
+            }
+        }
+    }
+}

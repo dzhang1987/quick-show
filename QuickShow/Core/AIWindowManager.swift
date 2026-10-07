@@ -14,6 +14,28 @@ final class AIPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
+    /// F2：becomeKeyWindow（Swift 名 `becomeKey()`）→ `_setCursorForCurrentMouseLocation` →
+    /// 光标 hit-test 在**同一次同步调用栈内**直接命中大 SwiftUI 树；若此刻视图图脏/未温，
+    /// responderNode 懒获取会原地强制全图重建（~1.5s）+ display cycle 布局刷新（~1.9s）。
+    /// 这里用一个极短的同步抑制窗口包住 `super.becomeKey()`：期内
+    /// `CachedHitTestHostingView.hitTest` 不触碰视图图（只回本 pass 缓存或 nil），
+    /// 把可能的强制重建挪到其后的 display cycle。覆盖 makeKey / makeKeyAndOrderFront
+    /// 触发的 becomeKey（统一走本覆写）。
+    /// 风险：光标可能短暂显示旧形状，下一次 mouseMoved（8ms 节流内）即纠正——纯装饰性偏差。
+    override func becomeKey() {
+        let t0 = CACurrentMediaTime()
+        QSFocusLogger.log("AIPanel.becomeKey START")
+        if BecomeKeyHitTestGate.isEnabled {
+            BecomeKeyHitTestGate.isSuppressed = true
+            defer { BecomeKeyHitTestGate.isSuppressed = false }
+            super.becomeKey()
+        } else {
+            super.becomeKey()
+        }
+        let t1 = CACurrentMediaTime()
+        QSFocusLogger.log(String(format: "AIPanel.becomeKey END (耗时: %.2fms)", (t1 - t0) * 1000))
+    }
+
     /// ESC 阶段 ⓪：输入坞抽屉在场时优先取消抽屉（权限 = 拒绝 / 提问 = 取消；
     /// 返回 true = 已消费本次 ESC，保持窗口打开）
     var onCancelDrawer: (() -> Bool)?
@@ -57,6 +79,22 @@ final class AIPanel: NSPanel {
     }
 
     override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown {
+            let t0 = CACurrentMediaTime()
+            QSFocusLogger.log(String(format: "AIPanel.sendEvent leftMouseDown START at (%.1f, %.1f)", event.locationInWindow.x, event.locationInWindow.y))
+            super.sendEvent(event)
+            let t1 = CACurrentMediaTime()
+            QSFocusLogger.log(String(format: "AIPanel.sendEvent leftMouseDown END (耗时: %.2fms)", (t1 - t0) * 1000))
+            return
+        }
+        // mouseMoved 节流合并：SwiftUI 对每个 mouseMoved 都做全树 hitTest（HoverEvent →
+        // HitTestBindingResponder 从根全树递归，调研已源码级确证）。窗口级丢弃中间帧、
+        // 仅转发每 8ms 最新一帧 + 尾帧补发，把全树递归频率压到 ~120Hz。
+        // 其余事件类型一律直通（时序敏感，零节流）。
+        if event.type == .mouseMoved, Self.isMouseThrottleEnabled {
+            throttleMouseMoved(event)
+            return
+        }
         if event.type == .keyDown {
             // ESC 优先：输入框聚焦时仍走 AI 窗两阶段语义，不落入 field editor 的 cancelOperation
             if event.keyCode == 53 {
@@ -80,6 +118,66 @@ final class AIPanel: NSPanel {
             }
         }
         super.sendEvent(event)
+    }
+
+    // MARK: - mouseMoved 节流合并状态
+
+    /// 8ms ≈ 120Hz，高于 60Hz 显示刷新，hover 观感无差；右缘刻度轨 onContinuousHover
+    /// 依赖 mouseMoved，120Hz 输入足够流畅。若实测刻度轨 hover 有滞感，可下调至 0.006。
+    private static var mouseThrottleInterval: TimeInterval { 0.008 }
+    /// 上次真正转发给 super 的单调时间（CACurrentMediaTime，单调递增，不受挂钟调整影响）。
+    private var lastMouseForwardTime: TimeInterval = 0
+    /// 窗口内被丢弃、仅保留的「最后一帧」鼠标事件（尾帧补发，保证 hover 终态不错位）。
+    private var pendingMouseEvent: NSEvent?
+    /// 尾帧补发任务；新事件到达时先取消再重挂，防补发堆积。
+    private var pendingMouseWorkItem: DispatchWorkItem?
+
+    private func throttleMouseMoved(_ event: NSEvent) {
+        let now = CACurrentMediaTime()
+        if now - lastMouseForwardTime >= Self.mouseThrottleInterval {
+            // 节流窗口已过：取消可能残留的尾帧补发，立即转发本次事件（首帧零延迟）。
+            cancelPendingMouseForward()
+            lastMouseForwardTime = now
+            super.sendEvent(event)
+        } else {
+            // 窗口内：丢弃本帧，仅保留最后一帧，并挂 8ms 后的尾帧补发（旧任务先取消）。
+            pendingMouseEvent = event
+            cancelPendingMouseForward()
+            let work = DispatchWorkItem { [weak self] in
+                guard let self else { return }
+                let pending = self.pendingMouseEvent
+                self.pendingMouseEvent = nil
+                self.pendingMouseWorkItem = nil
+                guard let pending else { return }
+                self.lastMouseForwardTime = CACurrentMediaTime()
+                self.forwardDirectly(pending)
+            }
+            pendingMouseWorkItem = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.mouseThrottleInterval, execute: work)
+        }
+    }
+
+    /// 转发给 NSWindow 原始实现（`super.sendEvent` 不能在逃逸闭包内直接调用，包一层）。
+    private func forwardDirectly(_ event: NSEvent) {
+        super.sendEvent(event)
+    }
+
+    /// 取消并清空尾帧补发任务 + 待发事件（新事件到达时调用，防补发堆积）。
+    private func cancelPendingMouseForward() {
+        pendingMouseWorkItem?.cancel()
+        pendingMouseWorkItem = nil
+        pendingMouseEvent = nil
+    }
+
+    /// 节流关断兜底：环境变量优先，其次 UserDefaults 同名键（`open` 启动路径用）。
+    private static var isMouseThrottleEnabled: Bool {
+        if let raw = ProcessInfo.processInfo.environment["QUICKSHOW_MOUSE_THROTTLE"] {
+            return raw.lowercased() != "off"
+        }
+        if let raw = UserDefaults.standard.string(forKey: "QUICKSHOW_MOUSE_THROTTLE") {
+            return raw.lowercased() != "off"
+        }
+        return true
     }
 
     override func keyDown(with event: NSEvent) {
@@ -114,9 +212,23 @@ final class AIPanel: NSPanel {
         onEscapeClose?()
     }
 
+    /// F5：resignKey 与 becomeKey 对称抑制——`super.resignKey()` 内部同样触发
+    /// `_setCursorForCurrentMouseLocation` → hitTest 全树递归；抑制期内
+    /// CachedHitTestHostingView.hitTest 不触碰视图图（回缓存或 nil）。
     override func resignKey() {
-        super.resignKey()
+        let t0 = CACurrentMediaTime()
+        QSFocusLogger.log("AIPanel.resignKey START")
+        if BecomeKeyHitTestGate.isEnabled {
+            BecomeKeyHitTestGate.isSuppressed = true
+            defer { BecomeKeyHitTestGate.isSuppressed = false }
+            super.resignKey()
+        } else {
+            super.resignKey()
+        }
+        let t1 = CACurrentMediaTime()
         onResignKey?()
+        let t2 = CACurrentMediaTime()
+        QSFocusLogger.log(String(format: "AIPanel.resignKey END (super耗时: %.2fms, onResignKey耗时: %.2fms, 总耗时: %.2fms)", (t1 - t0) * 1000, (t2 - t1) * 1000, (t2 - t0) * 1000))
     }
 }
 
@@ -127,15 +239,58 @@ final class AIPanel: NSPanel {
 final class AIWindowManager {
     static let shared = AIWindowManager()
 
+    /// macOS 26+ 整窗玻璃材质选择：
+    /// - 默认 false：走传统 NSVisualEffectView vibrancy 路径（PanelHostingConfigurator
+    ///   + SwiftUI liquidPanelBackground——Apple 长期优化的合成路径，性能可靠）。
+    /// - 手动开（QUICKSHOW_GLASS=on）：走 NSGlassEffectView Liquid Glass 整窗"看穿"特效
+    ///   （26 beta 早期 WindowServer 合成成本高，性能待 Apple 后续版本优化）。
+    private static var isGlassEnabled: Bool {
+        if let raw = ProcessInfo.processInfo.environment["QUICKSHOW_GLASS"] {
+            return raw.lowercased() == "on"
+        }
+        if let raw = UserDefaults.standard.string(forKey: "QUICKSHOW_GLASS") {
+            return raw.lowercased() == "on"
+        }
+        return false
+    }
+
+    /// 隐藏模式开关（性能诊断 A/B）：`QUICKSHOW_HIDE_MODE=orderout`（环境变量优先，
+    /// UserDefaults 兜底）走传统 orderOut 脱窗隐藏；默认 alpha 视觉隐藏（F1）。
+    private static var useOrderOutHide: Bool {
+        if let raw = ProcessInfo.processInfo.environment["QUICKSHOW_HIDE_MODE"] {
+            return raw.lowercased() == "orderout"
+        }
+        if let raw = UserDefaults.standard.string(forKey: "QUICKSHOW_HIDE_MODE") {
+            return raw.lowercased() == "orderout"
+        }
+        return false
+    }
+
     private var panel: AIPanel?
     private var previousApp: NSRunningApplication?
     private var isDismissing: Bool = false
     // 隐藏代次令牌：作废迟到的旧淡出 completion（与 PanelManager 同款防抖）
     private var hideGeneration = 0
+    // 延迟变 key 代次令牌：防止过期的延迟 makeKey 在隐藏后触发（与 hideGeneration 同款）
+    private var keyGeneration: UInt = 0
     // 窗口位置/大小存档通知观察者令牌（singleton 常驻，无需移除）
     private var frameObservers: [NSObjectProtocol] = []
     // frame 落盘防抖（拖动/缩放每帧都触发 didMove/didResize，合并写盘）
     private var frameSaveWorkItem: DispatchWorkItem?
+
+    // A1：数据未加载完时的挂起显示请求（后台加载完成后回主线程补显示）。
+    private var pendingShow = false
+    // A2：面板是否已「首次上屏」。与 panel==nil 解耦——预热会让 panel 提前存在，
+    // 但首显仍按原语义满 alpha 直接上屏（不播窗口级淡入，规避历史冷启动白屏竞态）。
+    private var hasPresented = false
+
+    // F1：逻辑可见真源。orderOut/orderFront 脱窗-再上屏会制造「失活环境翻转 + 脱窗」
+    // 两个脏化源（重聚焦的 becomeKeyWindow→setCursor 光标 hit-test 撞上脏视图图 →
+    // responderNode 懒获取原地强制全图重建 ~1.5s）。改为失焦只做视觉隐藏（alpha 0 +
+    // 不接收鼠标），窗口此后恒 `isVisible == true`，显隐判定一律读本标志。
+    // 读写点：isPanelVisible / toggle() / performHide(guard) / setSidebarVisible(guard) /
+    // presentPanel(置 true) / performHide completion(置 false)。
+    private var isLogicallyVisible = false
 
     // MARK: - 钉住 / 位置持久化
 
@@ -149,8 +304,9 @@ final class AIWindowManager {
     /// 是否已钉住常驻（show() 时从 UserDefaults 恢复）。
     private(set) var isPinned: Bool = UserDefaults.standard.bool(forKey: AIWindowManager.pinnedKey)
 
-    /// 面板当前是否可见（供流式完成通知判断）。
-    var isPanelVisible: Bool { panel?.isVisible ?? false }
+    /// 面板当前是否可见（供流式完成通知判断）。F1：读逻辑标志而非 `panel.isVisible`
+    /// （orderOut 退役后窗口恒 isVisible，物理可见性不再反映用户可见语义）。
+    var isPanelVisible: Bool { isLogicallyVisible }
     /// 面板当前是否为 key 窗口（供流式完成通知判断）。
     var isPanelKey: Bool { panel?.isKeyWindow ?? false }
 
@@ -160,14 +316,50 @@ final class AIWindowManager {
 
     /// 全局热键 / I 键统一切换：可见则关，不可见则显示居中
     func toggle() {
-        if let panel = panel, panel.isVisible {
+        if isLogicallyVisible {
             hide()
         } else {
             show()
         }
     }
 
+    /// 全局热键 / I 键统一显隐入口。
     func show() {
+        // A1：会话数据未后台加载完时挂起本次显示——绝不退回主线程同步全量解码。
+        // 启动即后台预加载，正常热路径 isLoaded 已为真，走同步快路径零额外延迟；
+        // 冷启动抢跑场景挂到加载完成回调（主线程），加载完补显示。
+        MainActor.assumeIsolated {
+            if ChatSessionStore.shared.isLoaded {
+                presentPanel()
+            } else {
+                pendingShow = true
+                ChatSessionStore.shared.whenLoaded { [weak self] in
+                    guard let self, self.pendingShow else { return }
+                    self.pendingShow = false
+                    self.presentPanel()
+                }
+            }
+        }
+    }
+
+    /// A2 预热：App 启动后主队列 idle 时调用。等后台数据就绪后预构建 AI 面板
+    /// （不显示、不激活），并强制一次整树布局——把首显的建树/布局成本移出 show() 路径，
+    /// 使首次 show() 只剩 setFrame + orderFront。幂等：已构建则跳过。
+    func prewarm() {
+        MainActor.assumeIsolated {
+            ChatSessionStore.shared.startBackgroundLoad()
+            ChatSessionStore.shared.whenLoaded { [weak self] in
+                guard let self, self.panel == nil else { return }
+                let panel = self.ensurePanel()
+                panel.contentView?.layoutSubtreeIfNeeded()
+                // 建树+布局在预热期完成；无需 CA flush——面板不抢 key 焦点，
+                // controlActiveState 不翻转，树不脏化，首帧 orderFront 即热路径。
+            }
+        }
+    }
+
+    /// 实际呈现面板（原 show() 主体）。仅在会话数据已加载完成时调用。
+    private func presentPanel() {
         // 主面板可见则先淡出（两者互斥可见性，焦点最终交给 AI 窗，不自动回主面板）。
         // 先读取主面板记录的「原应用」，切窗后 AI 窗继承同一焦点归还目标。
         let handoffApp = PanelManager.shared.focusReturnApp
@@ -178,11 +370,12 @@ final class AIWindowManager {
         // 恢复持久化的钉住态（用户可能在其他入口改过）。
         isPinned = UserDefaults.standard.bool(forKey: Self.pinnedKey)
 
-        // A（冷启动白屏修复）：区分首建与复用。首建面板满 alpha 直接上屏、
+        // A（冷启动白屏修复）：区分首显与复用。首显面板满 alpha 直接上屏、
         // 不播窗口级淡入——0.08s 的 animator alpha 动画与 SwiftUI 首帧建树的
         // CA 事务提交在同一时间窗竞态，冷启动必现主内容区消息行卡在近零透明度
         // （白屏 + 幽灵残影，切会话重渲染才恢复）；复用热路径内容已就绪，保留淡入。
-        let isFreshlyBuilt = self.panel == nil
+        // A2 预热后 panel 可能已存在，故用 hasPresented 而非 panel==nil 判定首显。
+        let isFirstPresentation = !hasPresented
         let panel = ensurePanel()
         let screen = ScreenHelper.activeScreen
         // 有有效存档则恢复记忆的位置/大小；否则走居中默认尺寸（首启）。
@@ -206,25 +399,77 @@ final class AIWindowManager {
 
         isDismissing = false
         hideGeneration += 1
+        // F1：进入逻辑可见态（窗口恒在屏，显隐由 alpha/鼠标接收表达）。
+        isLogicallyVisible = true
         panel.ignoresMouseEvents = false
+
+        // ▶ 聚焦性能打点 0：入口
+        let t0 = CFAbsoluteTimeGetCurrent()
 
         // B（冷启动白屏修复）：上屏前强制完成 SwiftUI 建树与布局，
         // 不让离屏半建状态随 orderFront 上屏后与渲染事务竞态
         panel.contentView?.layoutSubtreeIfNeeded()
+        let t1 = CFAbsoluteTimeGetCurrent()
 
-        // A：alpha 必须先于 orderFront 设置（复用路径 0→1 淡入；首建满 alpha）
-        panel.alphaValue = isFreshlyBuilt ? 1.0 : 0.0
+        // A：alpha 必须先于 orderFront 设置（复用路径 0→1 淡入；首次上屏满 alpha）
+        panel.alphaValue = isFirstPresentation ? 1.0 : 0.0
 
-        // 窗口先上屏，避免冷启动首帧卡顿
-        panel.makeKeyAndOrderFront(nil)
-        panel.makeKey()
-        NSApp.activate(ignoringOtherApps: true)
+        // ▶ 不强 key 焦点：仅 orderFront 浮到顶层，不触发 makeKey → 不翻转
+        // controlActiveState → SwiftUI 树不脏化 → CA 零成本。用户点输入框时窗口
+        // 自然变 key（NSPanel 默认点击即变 key），此时 controlActiveState 翻转的
+        // 300ms CA 成本被用户"点击→打字"的天然延时容忍吸收。
+        panel.orderFront(nil)
+        let t2 = CFAbsoluteTimeGetCurrent()
+        let t3 = t2  // makeKey/activate 已移除，保持计时字段对齐
+        hasPresented = true
 
-        if !isFreshlyBuilt {
+        // ▶ 延迟变 key：200ms 后在后台静默 makeKey。窗口先闪现（瞬时），
+        // 用户观察内容 + 移动鼠标时 300ms CA 提交悄然完成。点击输入框时
+        // 窗口已是 key 态 → 打字也瞬时。若用户提前点击则走自然变 key 路径。
+        keyGeneration &+= 1
+        let expectedGen = keyGeneration
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self, weak panel] in
+            guard let self = self, let panel = panel,
+                  self.keyGeneration == expectedGen,
+                  self.isLogicallyVisible,
+                  !self.isDismissing,
+                  !panel.isKeyWindow else { return }
+            panel.makeKey()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+
+        if !isFirstPresentation {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = Theme.Motion.panelFadeIn
                 ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
                 panel.animator().alphaValue = 1.0
+            }
+        }
+        let t4 = CFAbsoluteTimeGetCurrent()
+        // ▶ 聚焦性能打点（无 makeKey 路径：controlActiveState 不变，CA 无脏树提交）
+        writeFocusTiming(t0, t1, t2, t3, t4, tag: "CODE")
+    }
+
+    /// 聚焦性能打点辅助：写入 /tmp/qs_focus_timing.log
+    private func writeFocusTiming(_ t0: CFAbsoluteTime, _ t1: CFAbsoluteTime, _ t2: CFAbsoluteTime,
+                                  _ t3: CFAbsoluteTime, _ t4: CFAbsoluteTime, tag: String, t5: CFAbsoluteTime? = nil) {
+        let total = (t5 ?? t4) - t0
+        let msg: String
+        if let t5 = t5 {
+            msg = String(format: "[QS-FOCUS %@] code=%.1fms caCommit=%.1fms e2e=%.1fms\n",
+                         tag, (t4-t0)*1000, (t5-t4)*1000, total*1000)
+        } else {
+            msg = String(format: "[QS-FOCUS %@] layout=%.1fms orderFront=%.1fms makeKey=%.1fms rest=%.1fms total=%.1fms\n",
+                         tag, (t1-t0)*1000, (t2-t1)*1000, (t3-t2)*1000, (t4-t3)*1000, total*1000)
+        }
+        if let data = msg.data(using: .utf8) {
+            let url = URL(fileURLWithPath: "/tmp/qs_focus_timing.log")
+            if let fh = try? FileHandle(forUpdating: url) {
+                fh.seekToEndOfFile()
+                fh.write(data)
+                fh.closeFile()
+            } else {
+                try? data.write(to: url, options: .atomic)
             }
         }
     }
@@ -237,7 +482,7 @@ final class AIWindowManager {
     /// - Parameter restoreFocus: true = 主动关窗（ESC/热键），归还焦点；
     ///   false = 被动失焦（切走 / 被本 App 其他窗口抢 key），焦点已自然转移，不夺回。
     private func performHide(restoreFocus: Bool) {
-        guard let panel = panel, panel.isVisible, !isDismissing else { return }
+        guard let panel = panel, isLogicallyVisible, !isDismissing else { return }
         // 危险工具确认 sheet 抢占 key 状态时父窗会 resignKey，属本窗内交互，
         // 不视为被动切走（sheet 关闭后焦点自然回归父窗）
         if panel.attachedSheet != nil { return }
@@ -263,9 +508,18 @@ final class AIWindowManager {
             panel.animator().alphaValue = 0.0
         } completionHandler: { [weak self] in
             guard let self = self, self.isDismissing, self.hideGeneration == token else { return }
-            panel.orderOut(nil)
-            panel.alphaValue = 1.0
-            panel.ignoresMouseEvents = false
+            // 隐藏模式开关（性能诊断 A/B）：
+            // - alpha（默认，F1）：不 orderOut，终态 alpha 0 + ignoresMouseEvents 保持 true，
+            //   窗口恒在屏——保 SwiftUI 树温热；代价：玻璃窗恒在屏使 WindowServer 保留
+            //   整窗 blur 合成链（玻璃模式下可能反向加重聚焦合成成本，实验对比用）。
+            // - orderout（QUICKSHOW_HIDE_MODE=orderout）：传统脱窗——窗口完全退出合成，
+            //   WindowServer 零占用；代价：重新上屏触发脱窗-再上屏环境翻转（树脏化源）。
+            if Self.useOrderOutHide {
+                panel.orderOut(nil)
+                panel.alphaValue = 1.0
+                panel.ignoresMouseEvents = false
+            }
+            self.isLogicallyVisible = false
             self.isDismissing = false
         }
     }
@@ -296,7 +550,7 @@ final class AIWindowManager {
     /// 保持当前左上角（若贴右缘则保右缘），宽度 ±sidebarWidth，clamp 到屏幕内。
     func setSidebarVisible(_ visible: Bool) {
         UserDefaults.standard.set(visible, forKey: Self.sidebarVisibleKey)
-        guard let panel, panel.isVisible else { return }
+        guard let panel, isLogicallyVisible else { return }
         let screen = panel.screen ?? ScreenHelper.activeScreen
         let visibleFrame = screen.visibleFrame
         let delta = AIChatLayout.sidebarWidth * (visible ? 1 : -1)
@@ -386,23 +640,33 @@ final class AIWindowManager {
         let screen = ScreenHelper.activeScreen
         let frame = ScreenHelper.centeredFrame(for: targetAIChatSize(on: screen), on: screen)
         let panel = AIPanel(contentRect: frame)
+        // F1：预热（prewarm）会在未 show 时提前建面板——初始即视觉隐藏，避免一个
+        // 可见的空窗闪现。首次 presentPanel 会按首显语义设 alpha 并复位鼠标接收。
+        panel.alphaValue = 0
+        panel.ignoresMouseEvents = true
 
         // 内容视图：AIChatView（Lane C 交付）。
         // AIChatView/AIChatState 为 @MainActor，本管理器非隔离——面板构建恒在主线程，
         // 用 assumeIsolated 同步桥接（编译期隔离检查合规，运行期零开销）
+        // 用 CachedHitTestHostingView 包一层：同一 runloop pass 内复用 hitTest 结果，
+        // 消除聚焦时 becomeKeyWindow→setCursor 对 AI 大 SwiftUI 树的全树递归命中（详见该类注释）。
         let hostingView = MainActor.assumeIsolated {
-            NSHostingView(rootView: AIChatView(
+            CachedHitTestHostingView(rootView: AIChatView(
                 state: AIChatState.shared,
                 onOpenSettings: { (NSApp.delegate as? AppDelegate)?.openSettings() },
                 onClose: { [weak self] in self?.hide() }
-            ))
+            )
+            .environment(\.controlActiveState, ControlActiveState.key))
         }
         // 整窗 Liquid Glass 实验（2026-10 质感专项）：26+ 恢复 NSGlassEffectView 整窗玻璃。
         // 当年移除主因是 NSGlassEffectView+NSHostingView+Button 测量死锁；现按社区成熟规避落地：
         // ① hostingView.sizingOptions=[] 禁其反推窗口尺寸；② 玻璃组装全程零时长动画上下文
         // （玻璃隐式动画会打断 SwiftUI 建树 → AttributeGraph 崩溃）；③ 先组装、最后挂 contentView。
         // <26 降级路径保持原状（hostingView 直接作 contentView + 根图层圆角裁剪）。
-        if #available(macOS 26.0, *) {
+        // 性能诊断开关（QUICKSHOW_GLASS=off，环境变量优先/UserDefaults 兜底）：旁路整窗
+        // 玻璃，走 <26 降级路径（hostingView 直接作 contentView + SwiftUI 层材质背景）
+        // ——用于 A/B 玻璃合成成本（WindowServer 侧 blur 采样不在本进程主线程堆栈里）。
+        if #available(macOS 26.0, *), Self.isGlassEnabled {
             hostingView.sizingOptions = []
             let glass = NSGlassEffectView()
             glass.style = .regular          // 文字为主 → regular（自适应明暗保可读性）
@@ -417,25 +681,41 @@ final class AIWindowManager {
                 glass.contentView = hostingView   // 唯一受保证的装载方式（勿 addSubview）
             })
             // hosting 填满玻璃 + resize 热区挂载均依赖 autoresizing 跟随
-            hostingView.autoresizingMask = [.width, .height]
+            hostingView.autoresizingMask = [NSView.AutoresizingMask.width, .height]
             // 窗口级圆角裁剪容器（2026-10 方角残影修复）：WindowServer 在方形窗口矩形上
             // 合成 behind-window 玻璃材质，拖动/缩放重栅格化后方形玻璃从圆角缺口露出。
             // 玻璃经 GlassClipContainerView 裁剪后再作 contentView（见 GlassSurface.swift）。
             let clip = GlassClipContainerView(cornerRadius: Theme.Radius.panel)
             clip.frame = NSRect(origin: .zero, size: frame.size)
-            glass.autoresizingMask = [.width, .height]
+            glass.autoresizingMask = [NSView.AutoresizingMask.width, .height]
             clip.addSubview(glass)
             panel.contentView = clip
         } else {
-            PanelHostingConfigurator.configure(hostingView, cornerRadius: Theme.Radius.panel)
-            panel.contentView = hostingView
+            // 26+ 默认材质路径：NSVisualEffectView 做整窗毛玻璃背景（Apple 长期优化的合成
+            // 路径，性能远优于 NSGlassEffectView）。SwiftUI 层 liquidPanelBackground 在 26+
+            // 填 .clear（透出玻璃），NSVisualEffectView 提供背后模糊。
+            let bg = NSVisualEffectView()
+            bg.autoresizingMask = [NSView.AutoresizingMask.width, .height]
+            bg.material = .fullScreenUI
+            bg.blendingMode = .withinWindow
+            bg.state = .active
+            bg.wantsLayer = true
+            bg.layer?.cornerRadius = Theme.Radius.panel
+            bg.layer?.cornerCurve = .continuous
+            bg.layer?.masksToBounds = true
+            bg.frame = NSRect(origin: .zero, size: frame.size)
+
+            hostingView.frame = bg.bounds
+            hostingView.autoresizingMask = [NSView.AutoresizingMask.width, .height]
+            bg.addSubview(hostingView)
+            panel.contentView = bg
         }
         panel.invalidateShadow()
 
         // 边缘 resize 热区：直接挂在内容视图最上层（真实 AppKit 命中测试，中心区域放行给 SwiftUI）。
         let resizeView = WindowResizeHotZoneView()
         resizeView.frame = hostingView.bounds
-        resizeView.autoresizingMask = [.width, .height]
+        resizeView.autoresizingMask = [NSView.AutoresizingMask.width, .height]
         hostingView.addSubview(resizeView)
 
         // 位置/大小持久化：NSWindow.didMove / didResize 时落盘。
@@ -458,6 +738,20 @@ final class AIWindowManager {
             // 同上：缩放改变窗口形状后阴影需随圆角轮廓重算
             self?.panel?.invalidateShadow()
             self?.scheduleFrameSave()
+        })
+        frameObservers.append(center.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            QSFocusLogger.log(">> NSApplication.didResignActive (App 失活)")
+        })
+        frameObservers.append(center.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            QSFocusLogger.log(">> NSApplication.didBecomeActive (App 激活)")
         })
 
         // 接线：ESC 三阶段（⓪ 抽屉 → ① 中止流式 → ② 关窗，直连交互中心与 AIChatState）

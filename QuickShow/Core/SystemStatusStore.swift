@@ -23,6 +23,9 @@ final class SystemStatusStore: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     private weak var facade: AppState?
 
+    /// 微标刷新防重叠闸门：后台查询在途时跳过下一轮 5s tick。仅主线程读写。
+    private var badgesRefreshInFlight = false
+
     /// CoreAudio 属性监听：键盘/控制中心等外部调音量、切换默认输出设备（AirPods 接入）时
     /// 实时同步音量状态；HAL 事件高频触发，先在主线程节流再去后台队列读值。
     /// （facade init 调用一次，对齐原 init 顺序）
@@ -114,22 +117,40 @@ final class SystemStatusStore: ObservableObject {
     }
 
     private func refreshBadges(facade: AppState) {
-        if facade.showBattery {
-            batteryInfo = SystemStatusProvider.shared.getBatteryInfo()
-        }
-        if facade.showWiFi {
-            wifiInfo = SystemStatusProvider.shared.getWiFiInfo()
-        }
-        if facade.showBluetooth {
-            bluetoothDevices = SystemStatusProvider.shared.getBluetoothDevices()
-        } else {
-            bluetoothDevices = []
-        }
-        if facade.showAudio {
-            audioInfo = SystemStatusProvider.shared.getAudioInfo()
-        }
-        if facade.showDND {
-            dndInfo = SystemStatusProvider.shared.getDNDInfo()
+        // 主线程同步快照展示开关（对齐 refreshAll），后台不得读 @AppStorage / @Published
+        let wantBattery = facade.showBattery
+        let wantWiFi = facade.showWiFi
+        let wantBluetooth = facade.showBluetooth
+        let wantAudio = facade.showAudio
+        let wantDND = facade.showDND
+
+        // 防重叠闸门：上一轮后台查询未回主线程前跳过本轮 tick，避免慢查询在 5s 节奏上堆叠。
+        // 读写均在主线程（tick sink 与回主线程完成回调），无数据竞争。
+        guard !badgesRefreshInFlight else { return }
+        badgesRefreshInFlight = true
+
+        BackgroundQueues.statusRefresh.async { [weak self] in
+            // —— 后台执行所有可能阻塞的同步系统查询 ——
+            var battery: BatteryInfo?
+            if wantBattery { battery = SystemStatusProvider.shared.getBatteryInfo() }
+            var wifi: WiFiInfo?
+            if wantWiFi { wifi = SystemStatusProvider.shared.getWiFiInfo() }
+            let bluetooth = wantBluetooth ? SystemStatusProvider.shared.getBluetoothDevices() : []
+            var audio: AudioInfo?
+            if wantAudio { audio = SystemStatusProvider.shared.getAudioInfo() }
+            var dnd: DNDInfo?
+            if wantDND { dnd = SystemStatusProvider.shared.getDNDInfo() }
+
+            // —— 回主线程统一赋值 @Published，并释放闸门 ——
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let battery { self.batteryInfo = battery }
+                if let wifi { self.wifiInfo = wifi }
+                self.bluetoothDevices = bluetooth
+                if let audio { self.audioInfo = audio }
+                if let dnd { self.dndInfo = dnd }
+                self.badgesRefreshInFlight = false
+            }
         }
     }
 

@@ -9,7 +9,7 @@ import SwiftUI
 /// 就地编辑态：气泡原地「展开」为编辑器——同底色/圆角/内边距，无跳变感。
 /// 顶部为可单张移除的图片附件条（粘贴可追加）；中间为 IME 安全编辑框
 /// （⏎ 确认 / ⇧⏎ 换行 / ESC 取消，高度随内容自适应、封顶滚动）；
-/// 底部为操作钮（快捷键语义由 .help() tooltip 承担，对齐全窗提示纪律）。
+/// 底部为操作钮（快捷键语义由 .qsHelp() tooltip 承担，对齐全窗提示纪律）。
 struct MessageEditBubble: View {
     /// 编辑对象：原消息文本/图片作为草稿初值（进入编辑态时锁定，编辑期间不变）。
     let message: ChatMessage
@@ -62,14 +62,14 @@ struct MessageEditBubble: View {
 
             HStack(spacing: Theme.Spacing.md) {
                 editBubbleButton(title: "取消", tint: Theme.Colors.contentSecondaryStrong, action: cancelEdit)
-                    .help("取消编辑（ESC）")
+                    .qsHelp("取消编辑（ESC）")
                 editBubbleButton(
                     title: "重发",
                     tint: canConfirmEdit ? Theme.Colors.accent : Theme.Colors.contentTertiary,
                     action: confirmEdit
                 )
                 .disabled(!canConfirmEdit)
-                .help("确认并重发（⏎）")
+                .qsHelp("确认并重发（⏎）")
             }
         }
         .padding(.horizontal, Theme.Spacing.xxl)

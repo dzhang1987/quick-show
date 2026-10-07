@@ -18,6 +18,16 @@ final class ChatSessionStore: ObservableObject {
         didSet { persistCurrentId() }
     }
 
+    /// 首次后台加载是否已完成（会话列表 + 当前会话 id + 滚动位置）。
+    /// 视图/窗口在未完成时挂起等待（见 whenLoaded），绝不在主线程同步全量解码。
+    @Published private(set) var isLoaded = false
+    /// 后台加载进行中标记（防重入）。
+    private var isLoading = false
+    /// 加载完成回调队列（show()/prewarm 在未加载完时挂起等待，加载完成后主线程回调）。
+    private var loadedCallbacks: [() -> Void] = []
+    /// 滚动位置内存缓存（后台加载填充；视图初始化同步读取，避免主线程读盘）。
+    private(set) var scrollPositions: [UUID: PersistedScrollPosition] = [:]
+
     private let fileManager = FileManager.default
     /// 每会话文件的目录。
     private let directoryURL: URL
@@ -60,7 +70,59 @@ final class ChatSessionStore: ObservableObject {
         legacyFileURL = base.appendingPathComponent("AIChatSession.json")
         migrationMarkerURL = directoryURL.appendingPathComponent(".migrated")
 
-        load()
+        // A1：启动即后台预加载，把全量 Data(contentsOf:) + JSONDecoder 解码移出主线程。
+        // 加载完成前 isLoaded=false，读取方（show()/prewarm）经 whenLoaded 等待。
+        startBackgroundLoad()
+    }
+
+    // MARK: - 加载生命周期（A1：后台预加载 + 完成语义）
+
+    /// 启动后台预加载（幂等）。App 启动即调用；视图/窗口侧亦可调用兜底。
+    func startBackgroundLoad() {
+        guard !isLoaded, !isLoading else { return }
+        isLoading = true
+        let directory = directoryURL
+        let legacy = legacyFileURL
+        let marker = migrationMarkerURL
+        let key = currentIdKey
+        let scrollName = Self.scrollPositionsFileName
+        let draftsName = Self.draftsFileName
+        DispatchQueue.global(qos: .userInitiated).async {
+            // 纯文件 IO + 解码，全程不触碰 @MainActor 状态。
+            let result = ChatSessionStore.readFromDisk(
+                directoryURL: directory,
+                legacyFileURL: legacy,
+                migrationMarkerURL: marker,
+                currentIdKey: key,
+                draftsFileName: draftsName,
+                scrollPositionsFileName: scrollName
+            )
+            DispatchQueue.main.async { [weak self] in
+                self?.applyLoadResult(result)
+            }
+        }
+    }
+
+    /// 加载完成回调（已完成则主线程同步立即回调）。回调队列在 applyLoadResult 中一次性排空。
+    func whenLoaded(_ callback: @escaping () -> Void) {
+        if isLoaded { callback(); return }
+        loadedCallbacks.append(callback)
+    }
+
+    /// 后台产物回主线程落定：写内存真源、恢复当前会话、发布完成。
+    private func applyLoadResult(_ result: LoadResult) {
+        sessions = result.sessions
+        if let id = result.currentSessionId {
+            currentSessionId = id
+        } else {
+            currentSessionId = result.sessions.first?.id
+        }
+        scrollPositions = result.scrollPositions
+        isLoading = false
+        isLoaded = true
+        let callbacks = loadedCallbacks
+        loadedCallbacks.removeAll()
+        callbacks.forEach { $0() }
     }
 
     // MARK: - 查询
@@ -276,8 +338,8 @@ final class ChatSessionStore: ObservableObject {
         .sorted { $0.updatedAt > $1.updatedAt }
     }
 
-    /// 由首条用户消息截断出的临时标题（~20 字）。
-    static func makeTemporaryTitle(from text: String) -> String {
+    /// 由首条用户消息截断出的临时标题（~20 字）。纯函数，`nonisolated` 供后台迁移路径调用。
+    nonisolated static func makeTemporaryTitle(from text: String) -> String {
         let cleaned = text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -369,23 +431,16 @@ final class ChatSessionStore: ObservableObject {
 
     // MARK: - 会话滚动位置落盘
 
-    /// 读取全部会话滚动位置。key 非法条目丢弃；文件不存在 / 解码失败返回空。
+    /// 读取全部会话滚动位置（同步返回内存缓存，零磁盘 IO）。磁盘读取已在后台加载时完成，
+    /// 视图初始化（AIChatView.init）读取此缓存即可，避免主线程 Data(contentsOf:)。
     func loadScrollPositions() -> [UUID: PersistedScrollPosition] {
-        guard let data = try? Data(contentsOf: scrollPositionsFileURL),
-              let raw = try? JSONDecoder().decode([String: PersistedScrollPosition].self, from: data) else {
-            return [:]
-        }
-        var result: [UUID: PersistedScrollPosition] = [:]
-        for (key, value) in raw {
-            guard let id = UUID(uuidString: key) else { continue }
-            result[id] = value
-        }
-        return result
+        scrollPositions
     }
 
     /// 原子写全部会话滚动位置（视图层在切走/卸载等低频时机调用）。
-    /// 静默失败：位置记忆非关键数据，恢复路径有贴底兜底。
+    /// 同步更新内存缓存；静默失败：位置记忆非关键数据，恢复路径有贴底兜底。
     func persistScrollPositions(_ positions: [UUID: PersistedScrollPosition]) {
+        scrollPositions = positions
         do {
             try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
             let raw = Dictionary(uniqueKeysWithValues: positions.map { ($0.key.uuidString, $0.value) })
@@ -396,25 +451,45 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
-    // MARK: - 内部：加载与迁移
+    // MARK: - 内部：后台加载与迁移
 
-    /// 启动加载：先迁移旧单会话，再读取全部会话文件并恢复当前会话。
-    private func load() {
-        try? fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
-        migrateLegacyIfNeeded()
+    /// 后台加载产物（纯数据，回主线程后 apply）。
+    private struct LoadResult {
+        var sessions: [ChatSession]
+        var currentSessionId: UUID?
+        var scrollPositions: [UUID: PersistedScrollPosition]
+    }
 
-        let files = (try? fileManager.contentsOfDirectory(
+    /// 后台线程执行的完整加载：迁移旧单会话 → 读取全部会话文件 → 解码 → 排序去重
+    /// → 恢复当前会话 id + 滚动位置缓存。纯函数、不触碰 @MainActor 状态。
+    nonisolated private static func readFromDisk(
+        directoryURL: URL,
+        legacyFileURL: URL,
+        migrationMarkerURL: URL,
+        currentIdKey: String,
+        draftsFileName: String,
+        scrollPositionsFileName: String
+    ) -> LoadResult {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        migrateLegacyIfNeeded(
+            fm: fm,
+            directoryURL: directoryURL,
+            legacyFileURL: legacyFileURL,
+            migrationMarkerURL: migrationMarkerURL
+        )
+
+        let files = (try? fm.contentsOfDirectory(
             at: directoryURL,
             includingPropertiesForKeys: nil
         )) ?? []
 
         // 显式跳过草稿文件：drafts.json 与真实会话同目录，若不排除会被尝试解码为 ChatSession
-        // （当前靠解码失败静默跳过，属隐式依赖）。显式排除更确定，也为草稿数据语义正名。
-        // scroll_positions.json 同理（滚动位置持久层）。
+        // （靠解码失败静默跳过属隐式依赖）。scroll_positions.json 同理（滚动位置持久层）。
         var loaded: [ChatSession] = files
             .filter { $0.pathExtension == "json"
-                && $0.lastPathComponent != Self.draftsFileName
-                && $0.lastPathComponent != Self.scrollPositionsFileName }
+                && $0.lastPathComponent != draftsFileName
+                && $0.lastPathComponent != scrollPositionsFileName }
             .compactMap { url -> ChatSession? in
                 guard let data = try? Data(contentsOf: url) else { return nil }
                 return try? JSONDecoder().decode(ChatSession.self, from: data)
@@ -424,22 +499,34 @@ final class ChatSessionStore: ObservableObject {
         // 仅加载时收敛——已按 updatedAt 降序排序，取首次出现即保留最新那条；运行时 mutate 路径不变。
         var seenIds = Set<UUID>()
         loaded = loaded.filter { seenIds.insert($0.id).inserted }
-        sessions = loaded
+
+        let positions = readScrollPositionsFromDisk(
+            fm: fm,
+            url: directoryURL.appendingPathComponent(scrollPositionsFileName)
+        )
 
         let stored = UserDefaults.standard.string(forKey: currentIdKey).flatMap(UUID.init(uuidString:))
+        let current: UUID?
         if let stored, loaded.contains(where: { $0.id == stored }) {
-            currentSessionId = stored
+            current = stored
         } else {
-            currentSessionId = loaded.first?.id
+            current = loaded.first?.id
         }
+        return LoadResult(sessions: loaded, currentSessionId: current, scrollPositions: positions)
     }
 
     /// 旧文件迁移：仅尝试一次（标记文件）；迁移后保留旧文件不删除。
-    private func migrateLegacyIfNeeded() {
-        guard !fileManager.fileExists(atPath: migrationMarkerURL.path) else { return }
+    /// 迁移产出的会话文件直接写入磁盘，随后由 readFromDisk 的目录扫描一并读入。
+    nonisolated private static func migrateLegacyIfNeeded(
+        fm: FileManager,
+        directoryURL: URL,
+        legacyFileURL: URL,
+        migrationMarkerURL: URL
+    ) {
+        guard !fm.fileExists(atPath: migrationMarkerURL.path) else { return }
         defer { try? Data().write(to: migrationMarkerURL) }
 
-        guard fileManager.fileExists(atPath: legacyFileURL.path),
+        guard fm.fileExists(atPath: legacyFileURL.path),
               let data = try? Data(contentsOf: legacyFileURL),
               let stored = try? JSONDecoder().decode([ChatMessage].self, from: data),
               !stored.isEmpty else {
@@ -461,15 +548,35 @@ final class ChatSessionStore: ObservableObject {
         let firstUser = restored.first { $0.role == .user }?.content ?? ""
         let now = Date()
         let session = ChatSession(
-            title: Self.makeTemporaryTitle(from: firstUser),
+            title: makeTemporaryTitle(from: firstUser),
             createdAt: now,
             updatedAt: now,
             pinned: false,
             titleNeedsSummary: true,
             messages: restored
         )
-        sessions = [session]
-        persist(session)
-        currentSessionId = session.id
+        if let encoded = try? JSONEncoder().encode(session) {
+            try? encoded.write(
+                to: directoryURL.appendingPathComponent("\(session.id.uuidString).json"),
+                options: .atomic
+            )
+        }
+    }
+
+    /// 纯磁盘读取滚动位置（后台调用；主线程经 loadScrollPositions() 读缓存）。
+    nonisolated private static func readScrollPositionsFromDisk(
+        fm: FileManager,
+        url: URL
+    ) -> [UUID: PersistedScrollPosition] {
+        guard let data = try? Data(contentsOf: url),
+              let raw = try? JSONDecoder().decode([String: PersistedScrollPosition].self, from: data) else {
+            return [:]
+        }
+        var result: [UUID: PersistedScrollPosition] = [:]
+        for (key, value) in raw {
+            guard let id = UUID(uuidString: key) else { continue }
+            result[id] = value
+        }
+        return result
     }
 }

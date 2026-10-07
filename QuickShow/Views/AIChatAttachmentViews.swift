@@ -116,13 +116,13 @@ private struct PendingAttachmentThumb: View {
                 .buttonStyle(.plain)
                 .offset(x: 4, y: -4)
                 .transition(.opacity)
-                .help("移除该图片")
+                .qsHelp("移除该图片")
             }
         }
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
-        .help(attachment.fileName ?? "图片附件")
+        .qsHelp(attachment.fileName ?? "图片附件")
     }
 
     @ViewBuilder
@@ -175,7 +175,7 @@ struct MessageImageThumbs: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help("点击放大查看")
+                .qsHelp("点击放大查看")
             }
         }
     }

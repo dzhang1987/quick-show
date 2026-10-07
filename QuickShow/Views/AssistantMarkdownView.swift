@@ -78,11 +78,28 @@ struct AssistantMarkdownView: View, Equatable {
     private static let maxInitialBlocks = 16
     /// 后续每批块数（16ms 逐批：摊销更平滑）。
     private static let blockBatchSize = 12
+    /// A5：落定态（useCache=true）首批块数——不再一次性同步渲染全部块，
+    /// 避免超长助手消息在首帧/重挂载时一次性布局数千块。约覆盖 1~2 屏。
+    private static let settledInitialBlocks = 40
+    /// A5：落定态后续每批块数（比流式批更大，尽快补齐全文）。
+    private static let settledBatchSize = 24
+    /// 重挂载恢复时的目标批数：进度缓存命中（= 曾被渲染过）的消息，剩余块同 runloop
+    /// 分 2~3 个大步长批次连续补齐，不再走 16ms/批的渐进等待，避免单帧卡顿。
+    private static let recoveryBatchCount = 3
+    /// 恢复态首批种子上限：命中进度也**不一次性付清**——先建至多 64 块，余量再分批推进，
+    /// 避免超长消息（数百块）回窗单事务全量建树造成布局风暴。
+    private static let recoverySeedCap = 64
+    /// 恢复态单批块数上限：每 runloop 推进不超过此值（单帧建树成本有界），连续推进不 sleep 16ms。
+    private static let recoveryBatchCap = 64
     /// 已构建块数游标；-1 = 未种子化（首帧按视口高度算初始值，或从进度缓存恢复）。
-    /// 消息身份变化时随视图重建重置——但 LazyVStack **滚动中的反实例化**也会静默重置
-    /// 本游标（长消息塌回首批 → document 高度骤减 → 视口被 clamp 拽走），恢复见
-    /// MarkdownRenderProgressCache。
+    /// 消息身份变化时随视图重建重置；`ChatVirtualRow` 的实渲染↔等高占位切换（窗口外）
+    /// 亦会销毁本游标——恢复由 `MarkdownRenderProgressCache` 承担：种子化时若命中既有
+    /// 进度，直接渲染到 `min(progress, total)`，不回到首批重新渐进。
     @State private var visibleBlockCount = -1
+    /// 本次实例是否正从渲染进度缓存恢复：命中缓存的消息批次推进走「同 runloop 大批」
+    /// （不 sleep 16ms），真正首见的消息保留 16ms 渐进。仅在 `visibleBlockCount < 0`
+    /// （尚未种子化）时判定并置位一次，是视图私有 @State，不参与 Equatable。
+    @State private var isRecoveringFromProgress = false
 
     /// 视口高度（由 `SessionMessageList` 注入）：首帧成本只与屏幕大小成正比，与会话体量无关。
     @Environment(\.chatViewportHeight) private var viewportHeight
@@ -99,22 +116,60 @@ struct AssistantMarkdownView: View, Equatable {
         return min(total, max(minInitialBlocks, min(byViewport, maxInitialBlocks)))
     }
 
-    /// 当前有效可见块数。**落定态（useCache=true）一律全量渲染**——滚动稳定优先于
-    /// 渲染速度（用户决策）：渐进渲染的逐批高度增长（16ms/批）会让 doc 高度持续
-    /// 震荡，视口在上方时 LazyVStack 的偏移补偿不可靠 → 「上滚跳消息」；流式中间态
-    /// （useCache=false）保持游标渐进（流式增量渲染性能不受影响，内容持续增长时
-    /// 视口在底部跟随，高度增长不破坏阅读位置）。LazyVStack 惰性实例化保证挂载/
-    /// 切会话只构建视口附近几条消息——全量渲染的成本仅作用于视口附近长消息
-    /// （每条 ~50-150ms 一次性布局）。
+    /// 当前有效可见块数（流式与落定均渐进，避免一次性同步渲染全部块）。
+    /// A5：落定态（useCache=true）首批至少 settledInitialBlocks（~40），随后 batchSize 逐批补齐；
+    /// 流式中间态（useCache=false）沿用视口自适应的较小首批（流式增量渲染更敏感）。
+    /// 游标 `visibleBlockCount` 为 -1 时：
+    /// - 先尝试从 `MarkdownRenderProgressCache` 恢复——但**限量播种** `min(progress, 64, total)`，
+    ///   余量交同 runloop 大批补齐（不回到首批重新渐进，也不单事务全量建树）；
+    /// - 无进度（真正首见）才按首批种子化，走 16ms 渐进。
     private func effectiveVisibleCount(seededInitial: Int, total: Int) -> Int {
-        if useCache { return total }
-        let base = visibleBlockCount < 0 ? seededInitial : visibleBlockCount
-        return min(base, total)
+        if visibleBlockCount >= 0 {
+            return min(visibleBlockCount, total)
+        }
+        if useCache, let progress = MarkdownRenderProgressCache.progress(for: content), progress > 0 {
+            return min(min(progress, Self.recoverySeedCap), total)
+        }
+        let firstBatch: Int
+        if useCache {
+            firstBatch = min(total, max(seededInitial, Self.settledInitialBlocks))
+        } else {
+            firstBatch = seededInitial
+        }
+        return min(firstBatch, total)
     }
 
-    /// 游标推进落点（仅流式中间态使用：落定态 effective 恒为全量，哨兵/task 短路）。
+    /// 当前批大小（落定态更大批，尽快补齐；流式态小批更平滑）。
+    private var batchSize: Int {
+        useCache ? Self.settledBatchSize : Self.blockBatchSize
+    }
+
+    /// 种子化时判定「是否从既有渲染进度恢复」：仅在尚未种子化（游标 -1）且进度缓存命中时
+    /// 置位一次。命中后剩余块走同 runloop 大批补齐（见 `stepSize`），与真正首见的 16ms 渐进区分。
+    private func markRecoveringFromProgressIfNeeded() {
+        guard !isRecoveringFromProgress, visibleBlockCount < 0,
+              useCache, (MarkdownRenderProgressCache.progress(for: content) ?? 0) > 0 else { return }
+        isRecoveringFromProgress = true
+    }
+
+    /// 单次推进步长：恢复态用「剩余 / N」的大步长（同 runloop 连续补齐，不 sleep 16ms），
+    /// 但单批硬上限 `recoveryBatchCap`（64）——单帧建树成本有界，余量下一 runloop 继续；
+    /// 首见态保持既有小批（落定 24 / 流式 12）。
+    private func stepSize(from current: Int, total: Int) -> Int {
+        guard isRecoveringFromProgress else { return batchSize }
+        let remaining = total - current
+        let byRecovery = Int((Double(remaining) / Double(Self.recoveryBatchCount)).rounded(.up))
+        return min(Self.recoveryBatchCap, max(Self.settledBatchSize, byRecovery))
+    }
+
+    /// 游标推进落点（落定态与流式态共用：哨兵/task 逐批推进可见块数）。
+    /// 落定态回写渲染进度缓存（递增、单调），供行重挂载时恢复；流式态（useCache=false）
+    /// 内容高频增长，写缓存只会污染 key 空间，故不写。
     private func advanceVisibleCount(to value: Int) {
         visibleBlockCount = value
+        if useCache {
+            MarkdownRenderProgressCache.record(value, for: content)
+        }
     }
 
     var body: some View {
@@ -142,8 +197,9 @@ struct AssistantMarkdownView: View, Equatable {
                     .id(visibleCount)
                     .onAppear {
                         DispatchQueue.main.async {
+                            markRecoveringFromProgressIfNeeded()
                             let current = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
-                            advanceVisibleCount(to: min(current + Self.blockBatchSize, blocks.count))
+                            advanceVisibleCount(to: min(current + stepSize(from: current, total: blocks.count), blocks.count))
                         }
                     }
             }
@@ -157,13 +213,20 @@ struct AssistantMarkdownView: View, Equatable {
         .frame(maxWidth: .infinity, alignment: .leading)
         // 可靠分批推进兜底（容器必然被 realize，不受 LazyVStack 实现化粘滞影响）：
         // 与哨兵并存最多只是更快；增量基于 live 有效块数，不会回退。
+        // - 首见消息：sleep 16ms 后推进一小批（渐进渲染，保持原有观感）。
+        // - 进度缓存恢复的消息：不等待，直接以「剩余/N」大步长推进，2~3 批到位（防批次风暴）。
         .task(id: visibleCount) {
+            markRecoveringFromProgressIfNeeded()
             let current = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
             guard current < blocks.count else { return }
+            if isRecoveringFromProgress {
+                advanceVisibleCount(to: min(current + stepSize(from: current, total: blocks.count), blocks.count))
+                return
+            }
             try? await Task.sleep(nanoseconds: 16_000_000)
             let after = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
             guard !Task.isCancelled, after < blocks.count else { return }
-            advanceVisibleCount(to: min(after + Self.blockBatchSize, blocks.count))
+            advanceVisibleCount(to: min(after + batchSize, blocks.count))
         }
     }
 }

@@ -63,10 +63,6 @@ struct AIChatView: View {
     /// 滚动内容穿入坞底由玻璃 blur 采样。值单向流入布局计算，绝不反向影响坞体布局
     /// （无反馈环）；初值 chatDockHeightFallback 首帧兜底，实测后校准；<0.5pt 去抖跳过。
     @State private var dockTotalHeight: CGFloat = Theme.Layout.chatDockHeightFallback
-    /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
-    @State private var hasClipboardText = false
-    /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
-    @State private var hasClipboardImage = false
     /// 会话滚动控制中枢：每会话滚动事件「来源判定」（用户输入 vs 程序化/内容变化）+
     /// 程序化滚动仲裁。class 引用稳定，常驻会话经 bind/unbind 注册各自的处理闭包。
     @State private var scrollCoordinator = ChatScrollCoordinator()
@@ -76,13 +72,12 @@ struct AIChatView: View {
     /// 滚动位置/贴底跟随/流式状态随视图树天然保留，位置记忆不再依赖 scrollTo 时序。
     /// 超上限 K 时淘汰尾部会话（其视图卸载，重挂载时用 scrollSnapshots 兜底恢复）。
     @State private var residentSessionIds: [UUID] = []
-    /// LRU 常驻上限：12。用户会话数通常在 10 以内，提高上限使绝大多数会话全程常驻，
-    /// 切换回到纯 opacity 切换、零整树重建（消除重挂载卡顿与锚点恢复需求）。
-    /// 内存代价见报告：每常驻会话 = 其视图树 + 已实现化的 NSTextField 池（消息行），
-    /// 公式位图不常驻于会话（在 MathRasterizer 共享 LRU 缓存，上限 512）；解析 AST 走全局
-    /// 64 条/600k 字符预算缓存。上限 12 时最坏约「12 × 各会话已实现行」，仍由 LazyVStack
-    /// 视口附近实现化约束（本机 macOS 13 实现化偏粘滞，见报告评估）。
-    private let residentSessionLimit = 12
+    /// LRU 常驻上限：1（仅活跃会话）。其余会话不建树，切换时按需重建——
+    /// 由 MarkdownASTCache / 高亮 LRU / 逐会话 rowHeights 快照兜底，重建成本可控。
+    /// 性能实证：常驻树数量直接决定聚焦期全树布局成本（12 常驻=2196 帧采样 →
+    /// 3 常驻=748 帧 → 1 常驻≈活跃树本身）；聚焦/失焦不再连带重算非活跃会话树。
+    /// 切换回被淘汰会话靠 scrollSnapshots 恢复阅读位置（见 restoreScroll）。
+    private let residentSessionLimit = 1
     /// 按会话保存的滚动快照：仅 LRU 驱逐后的重挂载恢复需要（常驻会话靠视图树天然保留位置）。
     @State private var scrollSnapshots: [UUID: ScrollSnapshot] = [:]
     /// 各会话 latex 预热去重签名：签名未变则跳过重复收集/预热（见 prefetchMathLatex）。
@@ -194,10 +189,17 @@ struct AIChatView: View {
             // UI 离场：挂起中的抽屉请求被唤醒为兜底结果（确认→拒绝 / 提问→取消），防泄漏
             interaction.markUIActive(false)
         }
-        // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
+        // B1：只在 AI 窗自身成为 key 时刷新（设置窗等本 App 其他窗口激活不误触；
+        // 也避免无关窗口激活触发无谓的环境重算）。
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
-            refreshEnvironment()
-            pinned = AIWindowManager.shared.isPinned
+            guard note.object is AIPanel else { return }
+            // F3：异步化执行环境与钉住状态同步，确保 becomeKeyWindow 同步调用栈内
+            // 零 @State 写入，绝不弄脏根节点，保证紧随的事件路由 hit-test 命中温热图。
+            DispatchQueue.main.async {
+                refreshEnvironment()
+                let latestPinned = AIWindowManager.shared.isPinned
+                if latestPinned != pinned { pinned = latestPinned }
+            }
         }
         // 抽屉关闭（request 由非 nil 变 nil）后把焦点还回主输入框：
         // 提问面板的自由输入条持焦期间点提交/取消，焦点随抽屉移除悬空，须主动归还。
@@ -325,7 +327,9 @@ struct AIChatView: View {
                             .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                     } else if activeSessionMessagesEmpty {
                         WelcomeView(
-                            hasClipboardText: hasClipboardText,
+                            // B2：已移除聚焦时主动探测剪贴板；欢迎页剪贴板快捷入口不再动态展示
+                            // （显式入口保留在输入坞的剪贴板/⊕ 菜单，点击时按需读取）。
+                            hasClipboardText: false,
                             onAttachClipboard: { attachClipboard() }
                         )
                         .padding(.bottom, dockTotalHeight)
@@ -343,9 +347,6 @@ struct AIChatView: View {
             AIChatInputDock(
                 state: state,
                 dockTotalHeight: $dockTotalHeight,
-                hasClipboardText: hasClipboardText,
-                hasClipboardImage: hasClipboardImage,
-                onRefreshClipboard: { refreshClipboardAvailability() },
                 onAttachClipboard: { attachClipboard() },
                 onExportConversation: { exportConversation() },
                 onEscape: { handleEscape() }
@@ -434,7 +435,7 @@ struct AIChatView: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { pinHovered = hovering }
         }
-        .help(pinned ? "已常驻置顶 (点击解除)" : "点击常驻置顶")
+        .qsHelp(pinned ? "已常驻置顶 (点击解除)" : "点击常驻置顶")
     }
 
     // MARK: - 消息列表
@@ -447,6 +448,14 @@ struct AIChatView: View {
         ZStack(alignment: .top) {
             ForEach(residentSessionIds, id: \.self) { sid in
                 let isActive = sid == state.store.currentSessionId
+                // R1：非活跃会话树退出布局/渲染走查（key 态变化全树布局 ~1.8s 的主来源 =
+                // 3 棵 opacity(0) 常驻树仍参与布局遍历）。用 `.hidden()`（`_HiddenModifier`，
+                // 始终挂在同一视图上）替代 `.opacity(0)`——保留视图身份与 @State（区别于
+                // `if` 插拔），但不参与布局与渲染。
+                // 例外：后台**流式中**会话保留 `.opacity(0)`——其贴底跟随依赖底层
+                // NSScrollView 的实测几何（ChatScrollCoordinator 的 frame 路径），隐藏
+                // 可能令几何退化为 0 而误判；流式会话内容高度持续变化，风险最大。
+                let isStreaming = state.isStreaming(sessionId: sid)
                 SessionMessageList(
                     sessionId: sid,
                     isActive: isActive,
@@ -461,8 +470,12 @@ struct AIChatView: View {
                     scrollCoordinator: scrollCoordinator,
                     dockTotalHeight: dockTotalHeight
                 )
-                .opacity(isActive ? 1 : 0)
+                .modifier(InactiveSessionVisibility(isActive: isActive, isStreaming: isStreaming))
                 .allowsHitTesting(isActive)
+                // S5：不可见子树 accessibility 剪枝——LRU 非活跃会话整棵树对无障碍
+                // 本质不可见，却会被 SwiftUI 纳入 AccessibilityViewGraph 全树遍历
+                // （实测占主线程可观的样本）。结构性不可见即从无障碍树摘除。
+                .accessibilityHidden(!isActive)
             }
         }
         // 空态布局兜底：常驻会话全空时 SessionMessageList 均为 EmptyView，
@@ -542,25 +555,19 @@ struct AIChatView: View {
         }
     }
 
-    /// 刷新非 @Published 的外部环境：端点配置 + 剪贴板可用性（模型列表已随坞体自持刷新）。
+    /// 刷新非 @Published 的外部环境：端点配置（模型列表已随坞体自持刷新）。
+    /// B2：不再在窗口激活时主动读取 NSPasteboard（原 string + containsImage 可阻塞 XPC，
+    /// 是聚焦迟滞来源之一）；剪贴板文本/图片改为用户显式操作时按需读取。
     private func refreshEnvironment() {
-        configured = state.hasConfiguredEndpoint
-        refreshClipboardAvailability()
+        // F3：等值门控——becomeKey 调用栈内同步派发时，非 @Published 的 configured 常在
+        // 重聚焦时并无变化；无条件赋值会弄脏根节点、加重紧随的光标 hit-test。
+        let latestConfigured = state.hasConfiguredEndpoint
+        if latestConfigured != configured { configured = latestConfigured }
     }
 
-    /// 单独刷新剪贴板可用态（轻量，供 hover/窗口激活调用）。
-    private func refreshClipboardAvailability() {
-        let clipboard = NSPasteboard.general
-        let text = clipboard.string(forType: .string)
-        hasClipboardText = !(text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        hasClipboardImage = PasteboardImageExtractor.containsImage(clipboard)
-    }
-
-    /// 附加剪贴板文本；失败（空剪贴板）时同步弱化按钮，做轻反馈。
+    /// 附加剪贴板文本（空剪贴板静默无动作）。
     private func attachClipboard() {
-        if !state.attachClipboard() {
-            hasClipboardText = false
-        }
+        _ = state.attachClipboard()
     }
 
     /// 导出整段对话 Markdown 到剪贴板，浮出轻量成功反馈（不阻塞；世代令牌防连续导出被提前收起）。
@@ -672,5 +679,58 @@ struct AIChatView: View {
             interaction.cancelQuestions()
         }
         return true
+    }
+}
+
+// MARK: - R1：非活跃会话可见性
+
+/// 非活跃常驻会话的可见性处置：始终作为同一视图上的 modifier（身份/@State 保留），
+/// 区别于 `if` 插拔。
+/// - 活跃：原样；
+/// - 非活跃且流式中：`.opacity(0)`（后台贴底跟随依赖 AppKit 实测几何，隐藏有风险）；
+/// - 非活跃且非流式：`.hidden()`（退出布局与渲染走查）。
+private struct InactiveSessionVisibility: ViewModifier {
+    let isActive: Bool
+    let isStreaming: Bool
+
+    func body(content: Content) -> some View {
+        if isActive {
+            content
+        } else if isStreaming {
+            content.opacity(0)
+        } else {
+            content.hidden()
+        }
+    }
+}
+
+// MARK: - R2：tooltip 全关开关
+
+/// tooltip 全关开关：`QUICKSHOW_TOOLTIPS=off`（环境变量优先，UserDefaults 兜底）。
+/// 语义**全有/全无**——`.help()` 的数量与鼠标风暴无关（一次 key 变化一次查找），
+/// 本开关只用于实验隔离「tooltip 体系触碰 responder 图导致的重建 ~0.5s」：
+/// 关闭时整窗 AI 消息树不再建立任何 tooltip 关联。
+private enum QSHelpSwitch {
+    static var isEnabled: Bool {
+        if let raw = ProcessInfo.processInfo.environment["QUICKSHOW_TOOLTIPS"] {
+            return raw.lowercased() != "off"
+        }
+        if let raw = UserDefaults.standard.string(forKey: "QUICKSHOW_TOOLTIPS") {
+            return raw.lowercased() != "off"
+        }
+        return true
+    }
+}
+
+extension View {
+    /// R2：包一层可关断的 `.help`。开关开启（默认）等价 `.help(text)`；关闭则不附加任何
+    /// tooltip 修饰器。AI 窗消息树相关调用点统一改用本方法。
+    @ViewBuilder
+    func qsHelp(_ text: String) -> some View {
+        if QSHelpSwitch.isEnabled {
+            self.help(text)
+        } else {
+            self
+        }
     }
 }

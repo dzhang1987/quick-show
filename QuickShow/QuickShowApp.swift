@@ -42,6 +42,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         // 预热悬浮面板，确保快捷键唤醒零延迟
         PanelManager.shared.setup(with: state)
+
+        // A1：启动即后台预加载 AI 会话数据（全量解码移出主线程）。
+        ChatSessionStore.shared.startBackgroundLoad()
+        // A2：主队列 idle 时预热 AI 对话窗（后台数据就绪后预构建，不显示不激活），
+        // 把首显的建树/布局成本移出 show() 交互路径。
+        AIWindowManager.shared.prewarm()
         
         // 双路分流：热键回调携带实际命中的触发类型——AI 类型 → AI 窗，其余 → 主面板
         HotKeyManager.shared.onTrigger = { [weak state] type in

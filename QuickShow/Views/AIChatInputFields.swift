@@ -204,12 +204,18 @@ struct ChatInputTextView: NSViewRepresentable {
         @objc private func windowDidBecomeKey(_ note: Notification) {
             guard let window = note.object as? NSWindow,
                   window === textView?.window else { return }
-            // 侧栏行内重命名等文本控件已持焦点时让位，不抢占第一响应者
-            // （重命名 TextField 的 field editor 也是 NSTextView；区别于本输入框）
-            if let responder = window.firstResponder as? NSTextView, responder !== textView {
-                return
+            // 异步化聚焦：让鼠标点击派发流程自然完成第一响应者确立；
+            // 快捷键呼出或外部切窗时在下一帧稳妥兜底，避免与同步事件派发冲突。
+            DispatchQueue.main.async { [weak textView, weak window] in
+                guard let textView, let window else { return }
+                // 侧栏行内重命名等文本控件已持焦点时让位，不抢占第一响应者
+                if let responder = window.firstResponder as? NSTextView, responder !== textView {
+                    return
+                }
+                if window.firstResponder !== textView {
+                    window.makeFirstResponder(textView)
+                }
             }
-            window.makeFirstResponder(textView)
         }
 
         /// 抽屉关闭后焦点归还：其他文本控件（如侧栏重命名 field editor）持焦时同样让位。
@@ -234,6 +240,22 @@ final class ChatInputNSTextView: NSTextView {
     var onRecallFirst: (() -> Void)?
     /// 内容状态变化回调（IME 组字/取消组字时 textDidChange 不触发，需单独通知 placeholder）。
     var onContentStateChanged: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let t0 = CACurrentMediaTime()
+        let ok = super.becomeFirstResponder()
+        let t1 = CACurrentMediaTime()
+        QSFocusLogger.log(String(format: "ChatInputNSTextView.becomeFirstResponder: %d (耗时: %.2fms)", ok ? 1 : 0, (t1 - t0) * 1000))
+        return ok
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let t0 = CACurrentMediaTime()
+        let ok = super.resignFirstResponder()
+        let t1 = CACurrentMediaTime()
+        QSFocusLogger.log(String(format: "ChatInputNSTextView.resignFirstResponder: %d (耗时: %.2fms)", ok ? 1 : 0, (t1 - t0) * 1000))
+        return ok
+    }
 
     /// IME 组字更新：marked text 变化不触发 textDidChange，这里主动通知空态变化。
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {

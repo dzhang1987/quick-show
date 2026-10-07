@@ -12,8 +12,14 @@ struct CodeBlockView: View {
     let language: String?
     let code: String
 
-    @State private var hovered = false
+    /// 行级 hover（由消息列表容器级分发器经环境注入）：驱动复制钮揭示。
+    /// 原先是本块整体 contentShape + onHover 注册跟踪区——代码块在大会话里数量多，
+    /// 是逐叶子跟踪区的主要来源；上收为行级后，块内不再注册任何跟踪区。
+    @Environment(\.messageRowHovered) private var rowHovered
     @State private var copied = false
+
+    /// 复制钮揭示态 = 所在消息行 hover。复制成功反馈（copied）期间保持可见。
+    private var showsCopyButton: Bool { rowHovered || copied }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
@@ -26,7 +32,7 @@ struct CodeBlockView: View {
                 Spacer(minLength: 0)
                 // 布局稳定化：按钮常驻布局（header 行高度恒定），hover 仅切换透明度，
                 // 不触发布局变化。
-                // 显隐由 hovered 单独驱动；copied 仅是复制成功的瞬时内容反馈
+                // 显隐由行级 hover（showsCopyButton）单独驱动；copied 仅是复制成功的瞬时内容反馈
                 // （鼠标离开时按钮随 hovered 隐去，不会残留悬空的第二按钮）。
                 Button(action: copyCode) {
                     HStack(spacing: Theme.Spacing.xs) {
@@ -45,11 +51,13 @@ struct CodeBlockView: View {
                 }
                 .buttonStyle(.plain)
                 .fixedSize()
-                .opacity(hovered ? 1 : 0)
-                .allowsHitTesting(hovered)
-                .accessibilityHidden(!hovered)
+                .opacity(showsCopyButton ? 1 : 0)
+                .allowsHitTesting(showsCopyButton)
+                .accessibilityHidden(!showsCopyButton)
             }
             .frame(minHeight: 14)
+            // 揭示/隐去与旧 withAnimation(contentFade) 观感一致（只动画透明度）。
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: showsCopyButton)
 
             // 高亮状态与渲染内聚于子视图（见 CodeBlockText）：hover 变化引起的
             // 父 body 重算会被 SwiftUI 子视图值 diff 短路，大段高亮文本永不重建。
@@ -67,9 +75,6 @@ struct CodeBlockView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                 .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
-        }
     }
 
     private func copyCode() {
