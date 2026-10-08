@@ -56,6 +56,11 @@ struct AIChatSidebarView: View {
                 .padding(.bottom, Theme.Spacing.lg)
 
             sessionList
+                // 列表事务剥离：子树 animation 恒 nil —— 行插拔（搜索分支切换/置顶迁移/
+                // 删除）绝不进入动画事务。SwiftUI 在动画事务内移除视图会保留「待移除
+                // 副本」（裸 CALayer），完成回调被流式更新/双域窗口动画搅黄即永久孤儿化
+                // → 选中残影（命中透明、绘制冻结、行重建刷不掉）。无事务即无副本。
+                .transaction { $0.animation = nil }
 
             // 底部新对话按钮
             Rectangle()
@@ -98,9 +103,7 @@ struct AIChatSidebarView: View {
             // （行仍在则鼠标微动即恢复；行已删则必须清）。
             let sequence = groupedIDSequence
             guard sequence != lastGroupedIDSequence else { return }
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                hoveredSessionId = nil
-            }
+            hoveredSessionId = nil
             lastGroupedIDSequence = sequence
         }
     }
@@ -235,15 +238,11 @@ struct AIChatSidebarView: View {
             onAbort: { onAbortStreaming(session.id) },
             // 单悬停：enter 覆盖式置位（新 enter 自动顶掉旧行残留）；exit 仅匹配自身才清除
             onHoverStart: {
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                    hoveredSessionId = session.id
-                }
+                hoveredSessionId = session.id
             },
             onHoverEnd: { id in
                 guard hoveredSessionId == id else { return }
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                    hoveredSessionId = nil
-                }
+                hoveredSessionId = nil
             }
         )
     }

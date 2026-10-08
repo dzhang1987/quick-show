@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- 侧栏选中态残影根治（同一时刻两行琥珀高亮，残影行刷不掉：换选中/⌘B/窗口隐显/置顶迁移/新建会话全部存活）——根因：SwiftUI「待移除副本」孤儿 CALayer。侧栏 hover 提亮/悬停清理三处 `withAnimation` 在行插拔（⌘F 搜索分支切换 / 置顶跨组迁移 / 删除）瞬间制造动画事务，事务完成回调被 50ms 流式更新或 ⌘B 双域窗口动画搅黄时，被移除行保留的副本层永久孤儿化（实证特征：命中测试透明 = 裸 layer 不参与 hitTest；绘制冻结不随 `currentSessionId` 更新；跟随列表布局；行销毁重建刷不掉。数据层经查零重复 id、零跨组重复渲染，与早前「重复 id 会话文件 → ForEach 身份冲突」事故同症不同因）；修复 = ①删除侧栏数据路径全部 `withAnimation`（hover 提亮/悬停清理变瞬时，损失仅 0.15s 文字淡变）②列表容器 `.transaction(Transaction(animation: nil))` 事务剥离——行插拔构造上不再进入任何动画事务（含外部环境事务），「待移除副本」无源，残影一族不可能再生；屏上既有残影随重启清除（孤儿层是运行进程内存）
 - AI 窗聚焦/失焦卡顿根治（卡顿随会话变大而加剧，用户实测反馈驱动）：
   - **聚焦路径全量去重**（`AIChatView`）：`didBecomeKeyNotification` 过滤非 AIPanel 窗口（系统弹窗 / 其他 App 激活不再误触发整窗刷新）；`refreshEnvironment` 幂等化——值不变不写 @State，杜绝恒等写入触发全列消息 diff；剪贴板探测延迟到 runloop 闲时（聚焦瞬间不抢主线程）
   - **消息列表保活单元 Equatable 收敛**（`SessionMessageList`）：`ForEach` 加 `.equatable()`，`==` 只比 sessionId / isActive / 坞高 / 消息数 / 首尾消息 id / 末条状态与内容长度——父体重建时未变化会话整体跳过 body 重估（此前每次聚焦都重放全部 LRU 常驻会话的布局）
