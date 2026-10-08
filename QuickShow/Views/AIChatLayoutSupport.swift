@@ -7,6 +7,11 @@ import SwiftUI
 extension Notification.Name {
     /// 抽屉关闭后请求主输入框恢复第一响应者（AIChatView 发布，ChatInputTextView 观察）。
     static let aiChatRefocusInput = Notification.Name("aiChat.refocusInput")
+    /// AI 窗呼出完成后强制主输入框接管第一响应者（AIWindowManager.show 发布，ChatInputTextView 观察）。
+    /// 区别于 refocusInput 的让位语义：NSWindow 隐藏不清 firstResponder，侧栏搜索/重命名
+    /// 持焦后关窗会让复开时的 didBecomeKey 兜底永久让位；「呼出即打字」是硬预期，
+    /// 此处无条件聚焦（抽屉展开期间例外，焦点留给抽屉交互）。
+    static let aiChatForceFocusInput = Notification.Name("aiChat.forceFocusInput")
 }
 
 // MARK: - 单条消息

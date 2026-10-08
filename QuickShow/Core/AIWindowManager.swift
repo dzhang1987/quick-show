@@ -220,6 +220,18 @@ final class AIWindowManager {
         panel.makeKey()
         NSApp.activate(ignoringOtherApps: true)
 
+        // 呼出必聚焦：上屏 + 激活完成后（下一轮主线程调度）强制主输入框接管第一响应者。
+        // 依赖兜底不可靠——复用路径 makeNSView 的一次性聚焦不再执行；didBecomeKey
+        // 观察者遇残留 field editor（侧栏控件持焦后关窗，隐藏不清 firstResponder）
+        // 按让位守卫直接放弃。此处是「每次呼出输入框必有光标」的唯一确定性入口。
+        // 抽屉态（ChatInteractionCenter）是 MainActor 隔离，须在本 Task 上下文读取；
+        // 抽屉展开中（AI 提问/权限确认）不发布——焦点留给抽屉的输入交互。
+        Task { @MainActor [weak self, weak panel] in
+            guard let self, let panel, panel.isVisible, !self.isDismissing else { return }
+            guard ChatInteractionCenter.shared.request == nil else { return }
+            NotificationCenter.default.post(name: .aiChatForceFocusInput, object: panel)
+        }
+
         if !isFreshlyBuilt {
             NSAnimationContext.runAnimationGroup { ctx in
                 ctx.duration = Theme.Motion.panelFadeIn

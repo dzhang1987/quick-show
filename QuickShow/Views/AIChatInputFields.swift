@@ -195,6 +195,13 @@ struct ChatInputTextView: NSViewRepresentable {
                 name: .aiChatRefocusInput,
                 object: nil
             )
+            // AI 窗呼出后的强制聚焦（AIWindowManager.show 发布，见 forceFocusInputRequested）
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(forceFocusInputRequested(_:)),
+                name: .aiChatForceFocusInput,
+                object: nil
+            )
         }
 
         func stopObservingWindow() {
@@ -218,6 +225,18 @@ struct ChatInputTextView: NSViewRepresentable {
             if let responder = window.firstResponder as? NSTextView, responder !== textView {
                 return
             }
+            window.makeFirstResponder(textView)
+        }
+
+        /// AI 窗呼出后的强制聚焦（AIWindowManager.show 在上屏+激活后发布）：
+        /// 无条件接管第一响应者，清掉面板隐藏期间残留的侧栏 field editor 焦点。
+        /// didBecomeKey 兜底的让位守卫只适用于窗口已可见时的用户交互（重命名中
+        /// 不抢焦），不适用于「呼出即打字」场景——残留让位会让输入框永远拿不到光标。
+        /// 抽屉展开期间不发布的例外在 AIWindowManager 发布侧把关
+        /// （MainActor 上下文读 ChatInteractionCenter 抽屉态）。
+        @objc private func forceFocusInputRequested(_ note: Notification) {
+            guard let textView, let window = textView.window,
+                  note.object as? NSWindow === window else { return }
             window.makeFirstResponder(textView)
         }
     }
