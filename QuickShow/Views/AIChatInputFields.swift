@@ -248,7 +248,7 @@ final class ChatInputNSTextView: NSTextView {
     }
 
     // 无 Edit 菜单的轻量应用里，文本系统的标准编辑键等效可能不被派发——
-    // 显式接住，保证 ⌘V 粘贴 / ⌘C 拷贝 / ⌘X 剪切 / ⌘A 全选任何环境下可用
+    // 显式接住，保证 ⌘V 粘贴 / ⌘C 拷贝 / ⌘X 剪切 / ⌘A 全选 / ⌘Z 撤销任何环境下可用
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.type == .keyDown, event.modifierFlags.contains(.command) {
             switch event.keyCode {
@@ -256,6 +256,16 @@ final class ChatInputNSTextView: NSTextView {
             case 8: copy(nil); return true        // C
             case 7: cut(nil); return true         // X
             case 0: selectAll(nil); return true   // A
+            case 6: // Z：⌘Z 撤销 / ⇧⌘Z 重做（与 ⌘V 同理显式接住，不依赖菜单键等效派发）
+                if event.modifierFlags.contains(.shift) {
+                    if undoManager?.canRedo == true {
+                        undoManager?.redo()
+                        return true
+                    }
+                } else if undoManager?.canUndo == true {
+                    undoManager?.undo()
+                    return true
+                }
             case 51:                              // ⌫
                 // ⌘⌫：仅空输入框（且非 IME 组字中）消费为「撤回队首」——撤回后文字回填进
                 // 输入框，心智自洽；有文字时放行，保留系统 ⌘⌫「删到行首」语义，不吞正常编辑。
@@ -347,6 +357,7 @@ struct ChatInlineEditTextView: NSViewRepresentable {
             coordinator.syncState(tv)
         }
         textView.isRichText = false
+        textView.allowsUndo = true
         textView.isEditable = true
         textView.isSelectable = true
         textView.drawsBackground = false

@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appMenuItem.submenu = appMenu
 
         // 标准 Edit 菜单：无它则文本系统（设置窗口表单 / AI 输入框）的
-        // ⌘C/⌘V/⌘X/⌘A 键等效派发链路缺失，粘贴等基础操作失效
+        // ⌘C/⌘V/⌘X/⌘A/⌘Z 键等效派发链路缺失，粘贴、撤销等基础操作失效
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
         let editMenu = NSMenu(title: "编辑")
@@ -132,6 +132,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        editMenu.addItem(.separator())
+        // Undo/Redo：文本系统的 ⌘Z/⇧⌘Z 键等效派发依赖主菜单存在对应 keyEquivalent 的菜单项
+        // （与 ⌘C/⌘V 同理）；target 为 nil 走响应链，NSTextView 依据 canUndo/canRedo 自动启用禁用
+        editMenu.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "Z")
         editMenuItem.submenu = editMenu
 
         NSApp.mainMenu = mainMenu

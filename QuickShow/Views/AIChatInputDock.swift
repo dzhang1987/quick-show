@@ -49,10 +49,9 @@ struct AIChatInputDock: View {
     /// 窗口 key 时输入框必被抬为第一响应者，见 ChatInputTextView 的 windowDidBecomeKey 兜底；
     /// isKeyWindow 近似足够，不侵入事件链）。
     @State private var windowIsKey = false
-    /// 输入坞微胶囊 hover 态（⊕ / 模型 chip / 思考 chip 的 hover 提亮）。
+    /// 输入坞微胶囊 hover 态（⊕ / 生成 chip 的 hover 提亮）。
     @State private var attachHovered = false
     @State private var chipHovered = false
-    @State private var thinkingChipHovered = false
 
     /// 会话配置变化戳（"modelId|level"）：state 的会话级模型/思考档位是读 store 的计算属性，
     /// 且 state 的消息扇出管线按 messages 去重（只改模型/档位时消息数组不变、不扇出）——
@@ -83,7 +82,7 @@ struct AIChatInputDock: View {
             .onChange(of: state.inputText) { newValue in
                 inputEmpty = newValue.isEmpty
             }
-            // 会话级模型/思考档位变化 → 模型/思考 chip 跟随刷新（触发器为何必要的说明
+            // 会话级模型/思考档位变化 → 生成 chip 跟随刷新（触发器为何必要的说明
             // 见 sessionConfigStamp 注释；切会话路径由父级 messages 扇出管线天然覆盖）。
             .onReceive(
                 state.store.$sessions
@@ -265,7 +264,7 @@ struct AIChatInputDock: View {
     }
 
     /// 输入卡内容（连续玻璃体的下半部分）：文本区 + 底部工具行
-    /// （⊕ 附件 / 模型 chip / 思考 chip ║ 低频工具组 / 发送）；安静/激活两态语义见 dockQuiet。
+    /// （⊕ 附件 / 生成 chip ║ 低频工具组 / 发送）；安静/激活两态语义见 dockQuiet。
     /// 玻璃面/描边/阴影由外层连续体容器统一施加，本视图只排版内容。
     private var inputCardContent: some View {
         VStack(spacing: 0) {
@@ -294,13 +293,12 @@ struct AIChatInputDock: View {
             }
             .frame(height: Theme.Layout.chatInputHeight)
 
-            // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 模型 chip / 思考 chip /
+            // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 生成 chip（模型+思考合并入口）/
             // 水位圆环（低频工具组随 showDockSecondaryTools 显隐）；
             // 右组 = 发送钮。元素间距统一 lg(8)。
             HStack(spacing: Theme.Spacing.lg) {
                 attachMenuButton
-                modelChip
-                thinkingChip
+                generationChip
                 // 低频工具组（水位圆环：水位/详情/压缩三合一，AIChatContextRingView）：
                 // 安静态整体隐去——保留占位、纯透明度渐变、布局零跳动；
                 // 悬停/输入/附件/生成中淡入；两类破格常显：水位 >0.8（警戒亮弧语义在
@@ -361,65 +359,123 @@ struct AIChatInputDock: View {
         } label: {
             Image(systemName: "plus")
                 .font(Theme.Typography.text(13, .medium))
-                .foregroundColor(attachHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
+                // 静止态与生成 chip 同层（contentTertiary）：iconRest(0.60) 是图钉/水位环的
+                // 「可读下限」，在工具行里偏亮打破左组统一灰阶；hover 提亮不变
+                .foregroundColor(attachHovered ? Theme.Colors.iconHover : Theme.Colors.contentTertiary)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
                 .background(Circle().fill(attachHovered ? Theme.Colors.iconHoverBg : Color.clear))
+                // hover 必须挂 label 内部：Menu 接管事件派发，外层 onHover 不触发（与生成 chip 同修）
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { attachHovered = hovering }
+                }
         }
         .buttonStyle(.plain)
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { attachHovered = hovering }
-        }
         .help("添加图片附件（可粘贴/拖入）· 导出对话 · 清空会话（⌘K）")
     }
 
-    /// 模型 chip：显示当前会话绑定模型（未绑定时回落全局默认），点击弹下拉切换。
-    /// 选中写入会话级绑定（state.setSessionModel），不再写全局；仅多模型时显示，单模型弱化隐藏。
-    /// 弱化小字语言：无胶囊底无 rim 的三级灰小字常驻（当前模型名需可瞥见），hover 才出圆底提亮。
-    @ViewBuilder
-    private var modelChip: some View {
-        if modelList.count > 1 {
-            Menu {
-                ForEach(modelList) { model in
-                    Button {
-                        state.setSessionModel(model.modelId)
-                    } label: {
-                        if model.modelId == effectiveModelId {
-                            Label(model.name, systemImage: "checkmark")
-                        } else {
-                            Text(model.name)
-                        }
-                    }
+    /// 生成 chip（模型 + 思考强度合并入口）：SwiftUI Button + 点击构建 AppKit NSMenu 弹出。
+    /// 为何放弃 SwiftUI Menu：.menuStyle(.borderlessButton) 的 Menu 其 label 不走实时 SwiftUI 渲染
+    /// 管线——label 内挂的 .onHover 被丢弃（chip 无 hover 反馈），body 重算也不落到 label 上
+    ///（思考信号条永不出现，尽管数据链路完好）；两个症状同根。Button 的 label 是真 SwiftUI 视图：
+    /// hover 可靠触发、body 重算实时刷新；菜单侧交给原生 NSMenu，选中勾用 NSMenuItem.state 系统
+    /// 绘制（跨版本可靠，同时解决 macOS 26 丢弃菜单 Button label icon 导致的零选中标识）。
+    /// 常驻弱化小字语言：brain 图标 + 多模型露模型名 / 单模型露「思考」（退化为思考入口）。
+    /// 思考档位被手动覆盖时整 chip 默认色轻提亮到 contentTertiary（「已覆盖」信号），
+    /// 并在文字后挂 ThinkingLevelBars 信号条直观读出档位；默认态（跟随模型）不显示信号条。
+    private var generationChip: some View {
+        Button {
+            showGenerationMenu()
+        } label: {
+            HStack(spacing: Theme.Spacing.xs) {
+                // 统一 brain 图标：模型与思考强度同属「生成参数」，一个心智入口一个符号
+                Image(systemName: "brain")
+                    .font(Theme.Typography.text(8, .medium))
+                Text(modelList.count > 1 ? currentModelName : "思考")
+                    .font(Theme.Typography.text(10, .regular))
+                    .lineLimit(1)
+                // 思考覆盖信号条：仅手动覆盖档位时挂载，随 hover 动画同步淡变；
+                // 前导再加一档间距——与模型名拉开，读作独立后缀信号而非文字的一部分
+                if let level = state.currentThinkingLevel {
+                    ThinkingLevelBars(level: level, litColor: generationChipForeground)
+                        .padding(.leading, Theme.Spacing.xs)
                 }
-            } label: {
-                HStack(spacing: Theme.Spacing.xs) {
-                    Text(currentModelName)
-                        .font(Theme.Typography.text(11, .regular))
-                        .lineLimit(1)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(Theme.Typography.text(8, .medium))
-                        .foregroundColor(Theme.Colors.idleText)
-                }
-                .foregroundColor(chipHovered ? Theme.Colors.iconHover : Theme.Colors.contentTertiary)
-                .padding(.horizontal, Theme.Spacing.lg)
-                .padding(.vertical, Theme.Spacing.xxxs)
-                .frame(height: Theme.Layout.iconButtonSize)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(chipHovered ? Theme.Colors.iconHoverBg : Color.clear)
-                )
             }
-            .buttonStyle(.plain)
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
+            .foregroundColor(generationChipForeground)
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.xxxs)
+            .frame(height: Theme.Layout.iconButtonSize)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(chipHovered ? Theme.Colors.iconHoverBg : Color.clear)
+            )
             .onHover { hovering in
                 withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { chipHovered = hovering }
             }
-            .help("切换本会话模型（下一轮对话生效）")
         }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .help("切换本会话模型与思考强度")
+    }
+
+    /// 点击 chip 弹出生成菜单：每次点击构建（模型列表/选中态天然最新），
+    /// 结构 = 「模型」分组（仅多模型）+「思考强度」分组；选中项用 NSMenuItem.state 系统原生勾选。
+    private func showGenerationMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false // 否则 isEnabled=false 的分组标题会被自动启用机制干扰
+
+        // NSMenuItem.target 是弱引用、action 必须是 @objc 方法，closure 不能直接做 target——
+        // 用 GenerationMenuAction proxy 承接，局部数组持有：popUp 模态跟踪至菜单关闭，生命周期安全
+        var actions: [GenerationMenuAction] = []
+        /// 建一个带勾选态的可点 item（动作走 proxy）
+        func addItem(_ title: String, isOn: Bool, handler: @escaping () -> Void) {
+            let action = GenerationMenuAction(handler: handler)
+            actions.append(action)
+            let item = NSMenuItem(title: title, action: #selector(GenerationMenuAction.invoke), keyEquivalent: "")
+            item.target = action
+            item.state = isOn ? .on : .off
+            menu.addItem(item)
+        }
+        /// 建一个分组小标题（系统 disabled 灰字渲染）
+        func addHeader(_ title: String) {
+            let header = NSMenuItem(title: title, action: nil, keyEquivalent: "")
+            header.isEnabled = false
+            menu.addItem(header)
+        }
+
+        // 「模型」分组：仅多模型可选时出现；选中写入会话级绑定（setSessionModel），不写全局
+        if modelList.count > 1 {
+            addHeader("模型")
+            for model in modelList {
+                addItem(model.name, isOn: model.modelId == effectiveModelId) { [state] in
+                    state.setSessionModel(model.modelId)
+                }
+            }
+            menu.addItem(.separator())
+        }
+
+        // 「思考强度」分组：nil = 默认（跟随当前模型自身默认）；
+        // 「关闭」档仅当当前生效模型允许关闭思考时出现（如不可关则不显示该档）
+        addHeader("思考强度")
+        addItem("默认", isOn: state.currentThinkingLevel == nil) { [state] in
+            state.setThinkingLevel(nil)
+        }
+        for level in ThinkingLevel.allCases where level != .off || state.canDisableThinking(for: effectiveModelId) {
+            addItem(thinkingLevelTitle(level), isOn: state.currentThinkingLevel == level) { [state] in
+                state.setThinkingLevel(level)
+            }
+        }
+
+        // 用户刚点击 chip，鼠标即在锚点处；popUp 模态跟踪期间 actions 随栈帧存活
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    /// 生成 chip 前景色三态：hover 提亮 iconHover > 思考已覆盖 contentTertiary > 默认弱化 idleText。
+    private var generationChipForeground: Color {
+        if chipHovered { return Theme.Colors.iconHover }
+        return state.currentThinkingLevel == nil ? Theme.Colors.idleText : Theme.Colors.contentTertiary
     }
 
     /// 当前生效模型 id：会话级绑定优先，未绑定（nil）回落全局默认模型。
@@ -434,77 +490,7 @@ struct AIChatInputDock: View {
         return effectiveModelId.isEmpty ? "模型" : effectiveModelId
     }
 
-    /// 思考强度 chip：会话级档位（默认 = 跟随当前模型自身默认），与模型 chip 同弱化小字语言。
-    /// 默认态三级灰小字，选定档位后提到二级对比度——一眼可辨「已覆盖」，但不再是白粗胶囊。
-    /// 「关闭」档仅当当前生效模型允许关闭思考时出现（如 GLM-5.3 不可关则不显示该档）。
-    private var thinkingChip: some View {
-        Menu {
-            Button {
-                state.setThinkingLevel(nil)
-            } label: {
-                if state.currentThinkingLevel == nil {
-                    Label("默认", systemImage: "checkmark")
-                } else {
-                    Text("默认")
-                }
-            }
-            ForEach(ThinkingLevel.allCases, id: \.self) { level in
-                if level != .off || state.canDisableThinking(for: effectiveModelId) {
-                    Button {
-                        state.setThinkingLevel(level)
-                    } label: {
-                        if state.currentThinkingLevel == level {
-                            Label(thinkingLevelTitle(level), systemImage: "checkmark")
-                        } else {
-                            Text(thinkingLevelTitle(level))
-                        }
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: Theme.Spacing.xs) {
-                Text(thinkingChipTitle)
-                    .font(Theme.Typography.text(11, .regular))
-                    .lineLimit(1)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(Theme.Typography.text(8, .medium))
-                    .foregroundColor(Theme.Colors.idleText)
-            }
-            .foregroundColor(thinkingChipHovered
-                             ? Theme.Colors.iconHover
-                             : (state.currentThinkingLevel == nil
-                                ? Theme.Colors.contentTertiary
-                                : Theme.Colors.contentSecondaryStrong))
-            .padding(.horizontal, Theme.Spacing.lg)
-            .padding(.vertical, Theme.Spacing.xxxs)
-            .frame(height: Theme.Layout.iconButtonSize)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(thinkingChipHovered ? Theme.Colors.iconHoverBg : Color.clear)
-            )
-        }
-        .buttonStyle(.plain)
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { thinkingChipHovered = hovering }
-        }
-        .help("调整思考强度（本会话生效）")
-    }
-
-    /// chip 标题：默认态只露「思考」二字（弱化），选定档位后紧凑显示「思考·高」式后缀。
-    private var thinkingChipTitle: String {
-        guard let level = state.currentThinkingLevel else { return "思考" }
-        switch level {
-        case .off: return "思考·关"
-        case .low: return "思考·低"
-        case .medium: return "思考·中"
-        case .high: return "思考·高"
-        }
-    }
-
-    /// 菜单档位名（中文全字，与 chip 缩略后缀区分场景）。
+    /// 菜单档位名（中文全字，用于「思考强度」分组菜单项）。
     private func thinkingLevelTitle(_ level: ThinkingLevel) -> String {
         switch level {
         case .off: return "关闭"
@@ -645,4 +631,54 @@ struct AIChatInputDock: View {
         }
         return handled
     }
+}
+
+// MARK: - 思考强度信号条
+
+/// 思考强度信号条：3 根递增高度的迷你竖条（蜂窝信号隐喻），点亮根数 = 档位
+///（低 1 / 中 2 / 高 3）；「关」档三根全熄灭但保留暗轮廓——读出「强度为零」而非渲染缺失。
+/// 点亮色跟随 chip 当前前景（覆盖态 contentTertiary / hover iconHover），随 hover 动画同步淡变；
+/// 仅思考档位被手动覆盖时由 generationChip 挂载，默认态（跟随模型）不出现。
+private struct ThinkingLevelBars: View {
+    /// 当前覆盖档位（仅 currentThinkingLevel != nil 时本视图才会存在）
+    let level: ThinkingLevel
+    /// 点亮条颜色：与 chip 前景同源，hover 提亮时同步提亮
+    let litColor: Color
+
+    /// 熄灭条固定暗色（primary 0.28）：保留可见轮廓，但绝不与点亮混淆
+    private let dimColor = Color.primary.opacity(0.28)
+
+    /// 点亮根数映射档位
+    private var litCount: Int {
+        switch level {
+        case .off: return 0
+        case .low: return 1
+        case .medium: return 2
+        case .high: return 3
+        }
+    }
+
+    var body: some View {
+        // 条宽 3 / 间距 2 / 高 4·6·8 递增（整体 13pt 宽、8pt 高）：
+        // 深色玻璃上再小即隐形，此量级在 24pt chip 内与 10pt 文字旁 1 米可辨，bottom 对齐出信号递升感
+        HStack(alignment: .bottom, spacing: 2) {
+            ForEach(0..<3, id: \.self) { index in
+                Capsule(style: .continuous)
+                    .fill(index < litCount ? litColor : dimColor)
+                    .frame(width: 3, height: CGFloat(4 + index * 2))
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+// MARK: - 生成菜单动作代理
+
+/// NSMenuItem 动作代理：NSMenuItem.target 是弱引用、action 必须是 @objc 方法，
+/// closure 不能直接做 target——本类持 closure 转发。构建菜单时由局部数组持有
+///（popUp 模态跟踪至菜单关闭，期间 proxy 存活，生命周期安全）。
+private final class GenerationMenuAction: NSObject {
+    let handler: () -> Void
+    init(handler: @escaping () -> Void) { self.handler = handler }
+    @objc func invoke() { handler() }
 }

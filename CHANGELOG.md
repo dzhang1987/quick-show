@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- 输入框撤销 / 重做支持（AI 窗主输入框与就地编辑框，快捷键 `⌘Z` / `⇧⌘Z`）：主菜单 Edit 菜单补入「撤销 / 重做」菜单项——`allowsUndo` 虽一直开启，但 AppKit 文本系统的 ⌘Z 键等效派发依赖主菜单存在对应 keyEquivalent 的菜单项，缺失即死键（与早年 ⌘V 粘贴失效同因）；`ChatInputNSTextView.performKeyEquivalent` 与 ⌘V/⌘C 同模式显式接住 ⌘Z/⇧⌘Z 双保险（`canUndo` / `canRedo` 为 false 时不消费、放行给系统）；就地编辑框（`ChatInlineEditTextView`）补上遗漏的 `allowsUndo = true`，与主输入框共享同一 NSTextView 子类的快捷键处理
+
 ### Removed
 
 - 剪贴板附加上下文功能整链移除（用户决策：真实 agent 产品无此交互惯例，附加文本作提问背景的场景由直接粘贴进输入框覆盖）：
@@ -13,6 +17,7 @@
 
 ### Changed
 
+- 模型选择与思考强度合并为单一「生成 chip」入口（输入坞工具行，用户多轮实测反馈驱动）：原模型 chip + 思考 chip 两个下拉合并为一个——chip 常驻 brain 图标 + 模型名（单模型时模型名无信息量，退化为「思考」二字），点击弹原生 NSMenu 双分组（「模型」组仅多模型时出现 /「思考强度」组含默认·关·低·中·高，选中项 `NSMenuItem.state` 系统原生勾选，「关」档保留 canDisableThinking 门控）；思考档位被手动覆盖时模型名后挂三根递增信号条（点亮根数 = 档位：低 1 / 中 2 / 高 3，「关」三根全熄灭留暗轮廓），默认态（跟随模型）不显示、整 chip 轻提亮示「已覆盖」；工具行视觉同步弱化统一：chip 字号 11→10、默认色降 idleText 灰（覆盖态轻提亮 contentTertiary）、⊕ 附件钮静止色 iconRest(0.60)→contentTertiary(0.55) 与 chip 同层、原 chevron.up.chevron.down 双箭头图标换为 brain 语义图标并前置
 - 窗口档位体系调整（低分屏适配，用户截图反馈驱动）：
   - **`.auto` 选档改「容得下就选最大」级联**（`ScreenHelper`）：取代旧「宽 ≥1600 或高 ≥1000」阈值——旧阈值把 1280~1512 宽的屏幕一律压进舒适档（内容宽仅 240pt，而监控卡行内容最小需 ~285pt 横向预算，天然溢出变形）；现为屏幕能容纳该档展开窗（窗高 + 垂直居中上移 centerLift 26 + 上下系统边距 46×2）即从标准档逐级向下试探选定，1280×720 只要能容纳标准档（740×520）即用标准档，不再被误降档
   - **舒适/极简档高度修正**（`Theme.Layout`）：舒适展开 460→512、极简紧凑 230→258、极简展开 400→494——旧值为全局字号上调前的陈旧账目，内容实高超窗高后被根帧 `.frame(maxWidth: .infinity, maxHeight: .infinity)` 默认 .center 对齐**双向居中裁剪**（顶日期徽章、底监控卡同裁）；新值按标准档 520 的同账同余量修正（垂直账本逐项核算：徽章 ~34 + 时钟 窗宽×0.183 + 呼吸 + 状态栏 ~35 + 监控占位 259.5）
@@ -25,6 +30,7 @@
 
 ### Fixed
 
+- 生成 chip hover 失效 / 思考信号条不显示 / 下拉菜单零选中标识三症同根根治（SwiftUI `Menu` + `.menuStyle(.borderlessButton)` 的 label 不走实时 SwiftUI 渲染管线）——症状链：chip 无 hover 反馈（label 内挂的 `.onHover` 被丢弃，悬停胶囊底与提亮从不出现）；思考档位覆盖后信号条永不显示（body 重算不落到 label 上——数据链路经排查完好：`ChatSession` 为 struct、`@Published sessions` 正常发射、`sessionConfigStamp` 刷新触发器工作，@2x 截图实测 chip 上零竖条痕迹）；macOS 26 系统菜单渲染丢弃菜单内 Button label 的 icon（12 个选项零选中标识）。修复：chip 从 SwiftUI Menu 重写为 SwiftUI Button + 点击构建 AppKit NSMenu 弹出（`popUp(positioning:at: NSEvent.mouseLocation, in: nil)`，`autoenablesItems = false`）——Button 的 label 是真 SwiftUI 视图，hover 可靠触发、body 重算实时刷新（信号条出现，用户实测确认）；选中勾改由 `NSMenuItem.state` 系统原生绘制；NSMenuItem target 弱引用问题以 `GenerationMenuAction` proxy（NSObject + @objc invoke）承接、局部数组持有至模态 popUp 结束随栈释放；排障过程中的中间方案（Picker `.inline` 单选、`.onHover` 移入 label 内部）均不奏效——label 的渲染路径不因修饰符位置或菜单内容形态而改变
 - 思考过程（reasoning）流式展示冻结（开启思考发问后折叠区摘要全程停在「思考中…」不随增量滚动，思考结束后一次性突现全部思考文案，正文流式正常）——根因：`SessionMessageList` Equatable 8 字段 O(1) 签名（聚焦卡顿根治引入）只覆盖正文通道（末条 `content.count`），漏掉与正文独立流式的 reasoning 通道：纯思考期正文恒为空串、8 字段全程不变，`.equatable()` 误判相等跳过整棵子树 body 重放，思考折叠区收不到 reasoning 增量、`rendered` 停在初始空值、摘要回退「思考中…」；正文开流 content.count 变化才打开闸 → 思考内容全量突现（数据层 50ms 合帧冲刷、行级 `ChatMessageRow.Equatable`、250ms 节流与收尾对账均无辜）；修复：`==` 签名补入 `messages.last?.reasoning?.count`，与 content.count 同取舍（比长度不比全文、保持 O(1)）——纯思考期 reasoning 增长本身即打开 diff 闸，折叠区摘要按 250ms 节流滚动、收尾全量对账原样兜底，不再依赖「正文与思考同帧到达」的时序巧合
 - 低分辨率（1280×720 等）主窗状态区布局变形根治（用户截图三处红框：日期徽章顶部被裁、番茄行预设胶囊压成逐字竖排、网速「9 KB/s」逐字折行 / 复制内网 IP 钮贴边遮挡）——三层独立根因逐层修复（选档错位与档高陈旧两条根因见上方 Changed，此处为第三条与防御层）：
   - **行降载改由布局真值裁决**（`PerformanceCard` / `FocusWorkCard`）：每条可降载行包一层 `ViewThatFits(in: .horizontal)` 变体阶梯（网速行 4 档 / 番茄行 4 档 / 内存行、磁盘行、头部行、工具条各 2 档），从最全到最简逐级排列，布局系统按各变体**理想宽**与实际可用宽比对、选中第一个放得下的；取代先前「窗口宽纯算术推导每卡内容宽 + 手写阈值常量」的估算机制——该机制两处阈值估错（番茄行理想 ~291pt vs 标准档可用 280pt、网速行 ~307pt vs 300pt，均被判定为「放得下」照常渲染，再被 HStack 压缩成逐字竖排与尾省略号，用户截图实证）。零魔法数字、无 @State、无 PreferenceKey 回喂（纯布局期选择，不触本宿主含 Button 的测量死锁链），`ExpandedMonitoringView` 随之不再下发 `contentWidth`；窗口 resize / 档位切换即时重估
