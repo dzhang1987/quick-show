@@ -11,8 +11,7 @@ import SwiftUI
 /// - 输入坞浮岛化：overlay 悬浮于消息列表之上；真穿透——滚动内容自然穿入玻璃坞
 ///   下方，坞体实时 blur 采样透出模糊内容（2026-10 再设计，恢复 blur-through）
 /// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 激活态 accent rim（安静态零描边）
-/// - 输入坞安静/激活渐进披露：安静态（无草稿/未悬停）收敛为纯输入行，低频工具（剪贴板/
-///   水位/压缩）隐去；控件语言为纯灰图标 + hover 圆底（图钉同款克制），chip 为弱化小字，
+/// - 输入坞安静/激活渐进披露：安静态（无草稿/未悬停）收敛为纯输入行，低频工具（水位/压缩）隐去；控件语言为纯灰图标 + hover 圆底（图钉同款克制），chip 为弱化小字，
 ///   发送钮仅在可发送瞬间实心强调色（空态 = 无底灰箭头）——空态视觉重心让回中部引导区
 /// - 浏览导航（2026-10 重设计，取代竖排双↓胶囊簇）：右缘刻度轨（每条用户消息一枚 tick，
 ///   当前条 accent 点亮；hover 弹预览胶囊、点击跳转）+ 坞正上方 ↓ 回底钮；离开底部
@@ -63,8 +62,6 @@ struct AIChatView: View {
     /// 滚动内容穿入坞底由玻璃 blur 采样。值单向流入布局计算，绝不反向影响坞体布局
     /// （无反馈环）；初值 chatDockHeightFallback 首帧兜底，实测后校准；<0.5pt 去抖跳过。
     @State private var dockTotalHeight: CGFloat = Theme.Layout.chatDockHeightFallback
-    /// 剪贴板是否有可用文本（控制剪贴板按钮弱化不可点）。
-    @State private var hasClipboardText = false
     /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
     @State private var hasClipboardImage = false
     /// 会话滚动控制中枢：每会话滚动事件「来源判定」（用户输入 vs 程序化/内容变化）+
@@ -326,10 +323,7 @@ struct AIChatView: View {
                             .padding(.bottom, dockTotalHeight)
                             .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                     } else if activeSessionMessagesEmpty {
-                        WelcomeView(
-                            hasClipboardText: hasClipboardText,
-                            onAttachClipboard: { attachClipboard() }
-                        )
+                        WelcomeView()
                         .padding(.bottom, dockTotalHeight)
                         .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
                     }
@@ -345,10 +339,8 @@ struct AIChatView: View {
             AIChatInputDock(
                 state: state,
                 dockTotalHeight: $dockTotalHeight,
-                hasClipboardText: hasClipboardText,
                 hasClipboardImage: hasClipboardImage,
                 onRefreshClipboard: { refreshClipboardAvailability() },
-                onAttachClipboard: { attachClipboard() },
                 onExportConversation: { exportConversation() },
                 onEscape: { handleEscape() }
             )
@@ -545,7 +537,7 @@ struct AIChatView: View {
         }
     }
 
-    /// 刷新非 @Published 的外部环境：端点配置 + 图钉 + 剪贴板可用性（模型列表已随坞体自持刷新）。
+    /// 刷新非 @Published 的外部环境：端点配置 + 图钉 + 剪贴板图片可用性（模型列表已随坞体自持刷新）。
     /// 三类值均做幂等守卫（未变不写 @State，零 body 重求值）；剪贴板读取推至下一 runloop
     /// ——pasteboard IPC 不阻塞聚焦帧，焦点动画/rim 切换即时完成。
     private func refreshEnvironment() {
@@ -558,22 +550,11 @@ struct AIChatView: View {
         }
     }
 
-    /// 单独刷新剪贴板可用态（轻量，供 hover/窗口激活调用）。
+    /// 单独刷新剪贴板图片可用态（轻量，供 hover/窗口激活调用）。
     /// 幂等守卫：值未变不写 @State，避免无意义的 body 重求值级联。
     private func refreshClipboardAvailability() {
-        let clipboard = NSPasteboard.general
-        let text = clipboard.string(forType: .string)
-        let newHasText = !(text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        let newHasImage = PasteboardImageExtractor.containsImage(clipboard)
-        if newHasText != hasClipboardText { hasClipboardText = newHasText }
+        let newHasImage = PasteboardImageExtractor.containsImage(NSPasteboard.general)
         if newHasImage != hasClipboardImage { hasClipboardImage = newHasImage }
-    }
-
-    /// 附加剪贴板文本；失败（空剪贴板）时同步弱化按钮，做轻反馈。
-    private func attachClipboard() {
-        if !state.attachClipboard() {
-            hasClipboardText = false
-        }
     }
 
     /// 导出整段对话 Markdown 到剪贴板，浮出轻量成功反馈（不阻塞；世代令牌防连续导出被提前收起）。

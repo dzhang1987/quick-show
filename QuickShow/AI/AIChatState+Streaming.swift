@@ -6,7 +6,7 @@ extension AIChatState {
 
     // MARK: - 发送 / 中止
 
-    /// 发送当前输入（含剪贴板上下文与图片附件）。
+    /// 发送当前输入（含图片附件）。
     /// 仅约束「当前会话」不可并发发送（同一会话上下文无法承载两轮并发）；
     /// 其他会话的进行中生成不受影响（并行生成核心语义）。
     func send() {
@@ -19,9 +19,8 @@ extension AIChatState {
         }
 
         let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let clip = clipboardAttachment
         let images = imageAttachments
-        guard !userInput.isEmpty || clip != nil || !images.isEmpty else { return }
+        guard !userInput.isEmpty || !images.isEmpty else { return }
 
         guard hasConfiguredEndpoint else {
             appendLocalFailure("尚未配置 AI 服务，请在设置中填写 Base URL 与 API Key。")
@@ -38,9 +37,9 @@ extension AIChatState {
         }
         let ctx = StreamContext()
 
-        // 1) 追加用户消息（含剪贴板附加与图片），清空输入与附件。
+        // 1) 追加用户消息（含图片附件），清空输入与附件。
         // 落盘合并：三次变更先只改内存（persist: false），首个流式合帧时再统一落盘一次。
-        var userContent = composeUserContent(input: userInput, clipboard: clip)
+        var userContent = userInput
         if userContent.isEmpty, !images.isEmpty { userContent = "请查看图片。" }
         let userMessage = ChatMessage(role: .user, content: userContent, state: .done, images: images)
         let isFirstUserMessage = session.messages.allSatisfy { $0.role != .user }
@@ -53,7 +52,6 @@ extension AIChatState {
         }
 
         inputText = ""
-        clipboardAttachment = nil
         imageAttachments = []
         // 发送即消费草稿：立即从内存与磁盘移除该会话草稿，不留残留。
         discardCurrentDraft()

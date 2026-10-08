@@ -570,7 +570,7 @@ extension SessionMessageList: Equatable {
     /// 末条长度须覆盖正文与 reasoning 两条独立流式通道：纯思考期正文恒为空，
     /// 漏掉 reasoning 长度会让 .equatable() 误判相等、思考折叠区整段冻结在「思考中…」。
     /// 配合父级 .equatable()：父级 body 重求值时未变的常驻会话跳过整棵子树，
-    /// 聚焦/失焦/剪贴板/pin 等非消息变化不再冲刷 12 棵会话的 ForEach + 虚拟化。
+    /// 聚焦/失焦/pin 等非消息变化不再冲刷 12 棵会话的 ForEach + 虚拟化。
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.sessionId == rhs.sessionId
             && lhs.isActive == rhs.isActive

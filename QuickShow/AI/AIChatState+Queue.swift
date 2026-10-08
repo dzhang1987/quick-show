@@ -6,15 +6,14 @@ extension AIChatState {
 
     // MARK: - 待注入队列（steering / follow-up 内部实现）
 
-    /// 生成中 ⏎ 的单一收口：把当前输入（含剪贴板附加与图片）作为 steering 入当前会话队列。
+    /// 生成中 ⏎ 的单一收口：把当前输入（含图片）作为 steering 入当前会话队列。
     /// UI 层负责清空输入框，此处只入队、不消费输入态。
     func enqueueSteering() {
         let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let clip = clipboardAttachment
         let images = imageAttachments
-        guard !userInput.isEmpty || clip != nil || !images.isEmpty else { return }
+        guard !userInput.isEmpty || !images.isEmpty else { return }
         guard let sessionId = currentSessionId else { return }
-        var content = composeUserContent(input: userInput, clipboard: clip)
+        var content = userInput
         if content.isEmpty, !images.isEmpty { content = "请查看图片。" }
         pendingQueues[sessionId, default: []].append(
             QueuedChatInput(id: UUID(), kind: .steering, text: content, images: images)

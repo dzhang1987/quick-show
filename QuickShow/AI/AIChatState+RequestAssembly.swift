@@ -15,22 +15,6 @@ extension AIChatState {
         refreshCompactionInfo()
     }
 
-    /// 组合用户消息：有剪贴板附件时按约定格式拼接。
-    func composeUserContent(input: String, clipboard: String?) -> String {
-        guard let clipboard, !clipboard.isEmpty else { return input }
-        let clipped = String(clipboard.prefix(clipboardLimit))
-        return """
-        以下是我附加的剪贴板内容：
-        <<<剪贴板开始>>>
-        \(clipped)
-        <<<剪贴板结束>>>
-
-        我的问题：\(input)
-        """
-    }
-
-
-
     /// 构造发往服务端的消息数组：system prompt 在最前，其次为早期对话的压缩摘要，
     /// 最后是未压缩上下文（按 token 水位截断兜底；system 不参与丢弃）。
     func buildRequestMessages(for sessionId: UUID) -> [ChatCompletionMessage] {

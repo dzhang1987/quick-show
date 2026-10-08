@@ -9,7 +9,7 @@ import SwiftUI
 ///      .help——与 tick 预览胶囊同款理由：自绘浮层与系统 tooltip 语义冗余）；
 ///   3. 点击即压缩：整环是一枚按钮，触发 onCompact。
 ///
-/// 视觉纪律（与图钉/剪贴板/发送同一克制语言）：
+/// 视觉纪律（与图钉/发送同一克制语言）：
 /// - 静止纯灰无底：亮弧 iconRest、轨道再降透明度，无渐变无发光无多余色彩；
 /// - hover 才出圆底提亮（iconHoverBg + iconHover），不常驻 rim；
 /// - 警戒破格：ratio > 0.8 亮弧转 statusWarning（阈值与调用侧 showDockSecondaryTools

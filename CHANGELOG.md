@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+### Removed
+
+- 剪贴板附加上下文功能整链移除（用户决策：真实 agent 产品无此交互惯例，附加文本作提问背景的场景由直接粘贴进输入框覆盖）：
+  - **数据层**（`AIChatState` 及其 extensions）：`clipboardAttachment` 状态、`attachClipboard()` / `removeClipboardAttachment()`、8000 字符截断上限（`clipboardLimit`）、`composeUserContent(input:clipboard:)` 的 `<<<剪贴板开始/结束>>>` 拼接协议；`send()` / `enqueueSteering()` / `editAndResendLast()` / `clearDraft()` 中的剪贴板参与与清空同步移除（发送门控判据回归「文本或图片」）
+  - **UI 层**：输入坞剪贴板附加钮（低频工具组中「剪贴板」一枚）、生长区「已附加剪贴板 N 字」胶囊（`ClipboardAttachmentCapsule` 整组件删除）、空态欢迎页「附加剪贴板内容」快捷入口（`WelcomeView` 瘦身为纯引导页）；`AIChatView` 的 `hasClipboardText` 状态与 `attachClipboard()` 出口删除，`refreshClipboardAvailability` 收敛为仅刷新图片可用态（hover / 窗口激活刷新路径保留，继续服务 ⊕ 菜单「剪贴板导入」可用态）
+  - **保留项**（与「作为上下文」无关的剪贴板能力）：⌘V 粘贴图片 / ⊕ 菜单「剪贴板导入」图片附件、`X` 键剪贴板纯文本化、AI 工具 `read_clipboard` / `write_clipboard`（LLM 主动调用语义，非上下文注入）、复制消息 / 导出对话到剪贴板
+
 ### Changed
 
 - 窗口档位体系调整（低分屏适配，用户截图反馈驱动）：

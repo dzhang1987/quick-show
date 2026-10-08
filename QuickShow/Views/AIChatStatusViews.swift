@@ -1,4 +1,4 @@
-// 从 AIChatView.swift 机械拆分：输入坞状态与空态视图（队列胶囊 / 剪贴板胶囊 / 欢迎页 / 未配置引导）。
+// 从 AIChatView.swift 机械拆分：输入坞状态与空态视图（队列胶囊 / 欢迎页 / 未配置引导）。
 
 import AppKit
 import Combine
@@ -86,44 +86,9 @@ struct QueuedInputCapsule: View {
     }
 }
 
-// MARK: - 剪贴板胶囊
-
-struct ClipboardAttachmentCapsule: View {
-    let charCount: Int
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.lg) {
-            Image(systemName: "doc.on.clipboard.fill")
-                .font(Theme.Typography.text(11, .medium))
-                .foregroundColor(Theme.Colors.accent)
-            Text("已附加剪贴板 \(charCount) 字")
-                .font(Theme.Typography.text(11, .medium))
-                .foregroundColor(Theme.Colors.contentSecondaryStrong)
-            Spacer(minLength: 0)
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(Theme.Typography.text(12))
-                    .foregroundColor(Theme.Colors.contentTertiary)
-            }
-            .buttonStyle(.plain)
-            .help("移除剪贴板附加")
-        }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.vertical, Theme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                .fill(Theme.Colors.surfaceButton)
-        )
-    }
-}
-
 // MARK: - 空态欢迎页（已配置、无消息）
 
 struct WelcomeView: View {
-    let hasClipboardText: Bool
-    let onAttachClipboard: () -> Void
-
     var body: some View {
         VStack(spacing: Theme.Spacing.xl) {
             Image(systemName: "sparkles")
@@ -132,27 +97,6 @@ struct WelcomeView: View {
             Text("有什么想问的？")
                 .font(Theme.Typography.text(Theme.Typography.toast, .medium))
                 .foregroundColor(Theme.Colors.contentSecondaryStrong)
-
-            // 剪贴板快捷引用：有可用文本时给一个轻入口
-            if hasClipboardText {
-                Button(action: onAttachClipboard) {
-                    HStack(spacing: Theme.Spacing.sm) {
-                        Image(systemName: "doc.on.clipboard")
-                            .font(Theme.Typography.text(11, .medium))
-                        Text("附加剪贴板内容")
-                            .font(Theme.Typography.text(11, .medium))
-                    }
-                    .foregroundColor(Theme.Colors.contentTertiary)
-                    .padding(.horizontal, Theme.Spacing.xxl)
-                    .padding(.vertical, Theme.Spacing.md)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                            .fill(Theme.Colors.surfaceButton)
-                    )
-                }
-                .buttonStyle(.plain)
-                .help("把剪贴板文本附加为对话上下文")
-            }
         }
         .padding(Theme.Spacing.panel)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

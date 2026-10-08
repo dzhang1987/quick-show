@@ -50,7 +50,7 @@ enum CompactionOutcome: Equatable {
 }
 
 /// AI 会话门面：串联 ChatSessionStore（多会话数据层）与 AIChatService（网络层），
-/// 负责流式发送、中断、重试、图片/剪贴板附加与 LLM 标题摘要。
+/// 负责流式发送、中断、重试、图片附加与 LLM 标题摘要。
 /// 对外保留旧 AIChatView 的调用点（messages / inputText / isStreaming / send 等），
 /// 消息读写全部落到「当前会话」，⌘K 清空语义为清空当前会话消息。
 /// 全程 @MainActor，保证网络回调与 SwiftUI 状态更新都落在主线程。
@@ -72,8 +72,6 @@ final class AIChatState: ObservableObject {
     /// 置于 state 层：AIChatState.shared 单例引用恒稳定，keyMonitor 闭包不再捕获 View struct 的
     /// @State 链（结构重构后该捕获链失效导致 ESC 无法消费重命名态）。
     @Published var renamingSessionId: UUID? = nil
-    /// 剪贴板附加上下文（非 nil 表示已附加）。
-    @Published var clipboardAttachment: String?
     /// 待发送图片附件（Wave 2 附件 UI 消费；发送后清空）。
     @Published var imageAttachments: [ChatImageAttachment] = []
     /// 当前会话是否生成中（视图层旧调用点语义不变；由 syncStreamingState 维护）。
@@ -141,8 +139,6 @@ final class AIChatState: ObservableObject {
     /// 合帧间隔：约 50ms，把视图失效频率从 token 速率降到 ≤20 次/秒。
     let flushInterval: UInt64 = 50_000_000
 
-    /// 剪贴板附加的字符上限（超出静默截断）。
-    let clipboardLimit = 8000
     /// 上下文截断：最多保留的 user/assistant 消息条数（100 轮）。
     let contextMessageLimit = 200
     /// 字符 → token 粗略换算：2 字符 ≈ 1 token（用于水位估算与 token 预算换算）。
@@ -375,20 +371,7 @@ final class AIChatState: ObservableObject {
         resetContextWatermark(for: session.id)
     }
 
-    // MARK: - 剪贴板 / 图片附加
-
-    /// 读取系统剪贴板文本作为附加上下文；空剪贴板返回 false。
-    func attachClipboard() -> Bool {
-        guard let text = NSPasteboard.general.string(forType: .string) else { return false }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return false }
-        clipboardAttachment = String(text.prefix(clipboardLimit))
-        return true
-    }
-
-    func removeClipboardAttachment() {
-        clipboardAttachment = nil
-    }
+    // MARK: - 图片附加
 
     /// 添加图片附件（Wave 2 拖拽/粘贴入口调用；内部统一转 JPEG base64）。
     func addImageAttachment(_ attachment: ChatImageAttachment) {

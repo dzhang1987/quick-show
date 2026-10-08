@@ -34,7 +34,7 @@ extension AIChatState {
         store.removeMessages(from: lastUser.id, in: session.id)
         resetContextWatermark(for: session.id)
 
-        // 回填文本与图片附件（含缩略图），UI 可继续显示与编辑；剪贴板附加不在此契约内，保持原状。
+        // 回填文本与图片附件（含缩略图），UI 可继续显示与编辑。
         inputText = lastUser.content
         imageAttachments = lastUser.images
         return true
@@ -57,10 +57,9 @@ extension AIChatState {
         store.removeMessages(from: lastUser.id, in: session.id)
         resetContextWatermark(for: session.id)
 
-        // 放回输入暂存后走同一发送链路；清空剪贴板附加，确保重发内容严格等于 UI 传入的文本+图片。
+        // 放回输入暂存后走同一发送链路，重发内容严格等于 UI 传入的文本+图片。
         inputText = text
         imageAttachments = images
-        clipboardAttachment = nil
         send()
     }
 

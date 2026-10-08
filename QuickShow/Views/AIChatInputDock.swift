@@ -6,7 +6,7 @@ import SwiftUI
 
 // MARK: - 浮岛输入坞
 
-/// 浮岛输入坞：输入卡（文本区 + 底部工具行）、生长区（队列/附件/剪贴板胶囊）、
+/// 浮岛输入坞：输入卡（文本区 + 底部工具行）、生长区（队列/附件胶囊）、
 /// 抽屉连续玻璃体与坞体实测高度上报。由父级 AIChatView 以 overlay(alignment: .bottom)
 /// 悬浮于消息列表之上；坞内状态（安静/激活、环境 modelList、会话配置戳、窗口 key 态）
 /// 全部私有化随本组件保活——父级只注入会话状态与既有出口闭包。
@@ -19,14 +19,10 @@ struct AIChatInputDock: View {
     /// 坞体实测总高（单向写回父级：供消息列表尾部留白 / 空态 overlay / toast 位置消费；
     /// 值单向流出、绝不反向影响坞体布局，无反馈环）。
     @Binding var dockTotalHeight: CGFloat
-    /// 剪贴板是否有可用文本（父级持有，随窗口激活/hover 刷新；控制剪贴板钮可用态）。
-    let hasClipboardText: Bool
     /// 剪贴板是否有可用图片（父级持有，控制 ⊕ 菜单「剪贴板导入」可用态）。
     let hasClipboardImage: Bool
-    /// 进入坞区时刷新剪贴板可用态（父级 refreshClipboardAvailability）。
+    /// 进入坞区时刷新剪贴板图片可用态（父级 refreshClipboardAvailability）。
     let onRefreshClipboard: () -> Void
-    /// 附加剪贴板文本（父级 attachClipboard）。
-    let onAttachClipboard: () -> Void
     /// 导出整段对话 Markdown（父级 exportConversation）。
     let onExportConversation: () -> Void
     /// ESC 兜底出口（父级 handleEscape：抽屉 → 重命名 → 中止 → 关窗）。
@@ -53,9 +49,8 @@ struct AIChatInputDock: View {
     /// 窗口 key 时输入框必被抬为第一响应者，见 ChatInputTextView 的 windowDidBecomeKey 兜底；
     /// isKeyWindow 近似足够，不侵入事件链）。
     @State private var windowIsKey = false
-    /// 输入坞微胶囊 hover 态（⊕ / 剪贴板 / 模型 chip / 思考 chip 的 hover 提亮）。
+    /// 输入坞微胶囊 hover 态（⊕ / 模型 chip / 思考 chip 的 hover 提亮）。
     @State private var attachHovered = false
-    @State private var clipboardHovered = false
     @State private var chipHovered = false
     @State private var thinkingChipHovered = false
 
@@ -115,7 +110,6 @@ struct AIChatInputDock: View {
         // state.inputText 非空即有草稿，首帧即正确（见 inputEmpty 声明处注释）。
         inputEmpty
             && state.inputText.isEmpty
-            && state.clipboardAttachment == nil
             && state.imageAttachments.isEmpty
             && state.pendingQueue.isEmpty
             && !state.isStreaming
@@ -127,7 +121,7 @@ struct AIChatInputDock: View {
     /// 空态下形成横贯底部的整圈彩色轮廓带——全图唯一彩色轮廓即源于此）。
     private var dockRimActive: Bool { windowIsKey && !dockQuiet }
 
-    /// 低频工具组（压缩/水位/剪贴板）显隐：安静态隐去（保留占位、纯透明渐变、布局零跳动）；
+    /// 低频工具组（压缩/水位）显隐：安静态隐去（保留占位、纯透明渐变、布局零跳动）；
     /// 两类破格常显，同源同档：水位逼近上限（需要警示的时刻不沉默）+ 压缩进行中
     /// （进行中的操作不消失——2026-10 用户决策：压缩中圆环转不定态 spinner，必须留在
     /// 视口内；压缩结束恢复随安静态隐去）。
@@ -139,16 +133,15 @@ struct AIChatInputDock: View {
     /// 发送钮实心态判据：可发送或生成中（驱动 禁用灰箭头 ⇄ 实心强调色 的淡变）。
     private var sendButtonSolid: Bool { state.isStreaming || canSend }
 
-    /// 生长区是否在场（队列/附件/剪贴板任一非空）：与 inputArea 生长区容器的 if 判据同源。
+    /// 生长区是否在场（队列/附件任一非空）：与 inputArea 生长区容器的 if 判据同源。
     private var hasDockGrowth: Bool {
         !state.pendingQueue.isEmpty
             || !state.imageAttachments.isEmpty
-            || state.clipboardAttachment != nil
     }
 
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-            // 生长区（输入卡上方：队列胶囊 / 附件条 / 剪贴板胶囊）：容器化以便整段实测高度
+            // 生长区（输入卡上方：队列胶囊 / 附件条）：容器化以便整段实测高度
             // （background 内 GeometryReader + preference，macOS 13 无 onGeometryChange；
             // 先例见 ChatReadingColumn 的宽度读取）。间距语义与三段直接并列完全等价——
             // 段间 lg 收进内层，末段与输入卡的 lg 仍由外层承担，三段全空时容器整体缺席，
@@ -173,13 +166,6 @@ struct AIChatInputDock: View {
                     if !state.imageAttachments.isEmpty {
                         ImageAttachmentStrip(attachments: state.imageAttachments) { id in
                             state.removeImageAttachment(id: id)
-                        }
-                    }
-
-                    // 剪贴板附加胶囊：非 nil 时显示，可一键移除
-                    if let clip = state.clipboardAttachment {
-                        ClipboardAttachmentCapsule(charCount: clip.count) {
-                            state.removeClipboardAttachment()
                         }
                     }
                 }
@@ -211,7 +197,7 @@ struct AIChatInputDock: View {
             }
             // 功能层：输入坞是典型控件面（输入条/发送/附件/模型 chip），26+ 官方 Liquid Glass，
             // <26 退化为 ultraThinMaterial + 0.5pt 描边；坞悬浮于消息流之上，玻璃采样到真实
-            // 内容流（blur-through）。纪律：坞内控件（⊕/chip/发送/剪贴板）绝不再用 glassEffect
+            // 内容流（blur-through）。纪律：坞内控件（⊕/chip/发送）绝不再用 glassEffect
             // （glass-on-glass），一律纯灰图标 hover 出圆底（与图钉同一克制语言）。
             // <26 降级描边随安静/激活换档：安静态降到 cardStroke(0.09) 近无感，激活态回 0.14。
             .modifier(GlassSurface(
@@ -263,7 +249,7 @@ struct AIChatInputDock: View {
             }
         )
         .chatReadingColumn()
-        // 坞区 hover：进入时刷新剪贴板可用态（覆盖"先复制、后移动鼠标到窗口"的常见路径），
+        // 坞区 hover：进入时刷新剪贴板图片可用态（覆盖"先复制图片、后移动鼠标到窗口"的常见路径），
         // 同时驱动坞体安静→激活切换（低频工具组淡入、accent rim 点亮）
         .onHover { hovering in
             if hovering { onRefreshClipboard() }
@@ -310,7 +296,7 @@ struct AIChatInputDock: View {
 
             // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 模型 chip / 思考 chip /
             // 水位圆环（低频工具组随 showDockSecondaryTools 显隐）；
-            // 右组 = 剪贴板（hover 坞浮现）+ 发送钮。元素间距统一 lg(8)。
+            // 右组 = 发送钮。元素间距统一 lg(8)。
             HStack(spacing: Theme.Spacing.lg) {
                 attachMenuButton
                 modelChip
@@ -333,11 +319,6 @@ struct AIChatInputDock: View {
                     .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                 }
                 Spacer(minLength: 0)
-                clipboardButton
-                    .opacity(showDockSecondaryTools ? 1 : 0)
-                    .allowsHitTesting(showDockSecondaryTools)
-                    .accessibilityHidden(!showDockSecondaryTools)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                 sendButton
             }
             .padding(.horizontal, Theme.Spacing.xl)
@@ -533,28 +514,6 @@ struct AIChatInputDock: View {
         }
     }
 
-    /// 剪贴板附加钮：低频功能，安静态随低频工具组整体隐去（见 showDockSecondaryTools）；
-    /// 克制语言：静止纯灰图标无底无 rim（与图钉同款），hover 才出圆底提亮。
-    private var clipboardButton: some View {
-        Button {
-            onAttachClipboard()
-        } label: {
-            Image(systemName: "doc.on.clipboard")
-                .font(Theme.Typography.text(13, .medium))
-                .foregroundColor(hasClipboardText
-                                 ? (clipboardHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
-                                 : Theme.Colors.idleText.opacity(0.5))
-                .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
-                .background(Circle().fill(clipboardHovered && hasClipboardText ? Theme.Colors.iconHoverBg : Color.clear))
-        }
-        .buttonStyle(.plain)
-        .disabled(!hasClipboardText)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { clipboardHovered = hovering }
-        }
-        .help("附加剪贴板内容作为上下文")
-    }
-
     private var sendButton: some View {
         Button {
             if state.isStreaming {
@@ -579,7 +538,6 @@ struct AIChatInputDock: View {
 
     private var canSend: Bool {
         !state.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            || state.clipboardAttachment != nil
             || !state.imageAttachments.isEmpty   // 纯图片也可发送
     }
 
@@ -611,12 +569,11 @@ struct AIChatInputDock: View {
         clearDraft()
     }
 
-    /// 清空草稿态（文本 / 剪贴板附加 / 图片附件）——与 state.send() 正常分支内清空同款。
+    /// 清空草稿态（文本 / 图片附件）——与 state.send() 正常分支内清空同款。
     /// 同时丢弃已持久化的会话草稿（steering / follow-up 入队不会经 state.send() 消费输入态）。
     private func clearDraft() {
         state.discardCurrentDraft()
         state.inputText = ""
-        state.clipboardAttachment = nil
         state.imageAttachments = []
     }
 
