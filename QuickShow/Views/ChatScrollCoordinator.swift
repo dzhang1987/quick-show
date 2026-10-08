@@ -437,8 +437,9 @@ struct ChatScrollBridgeView: NSViewRepresentable {
 
 // MARK: - 手动虚拟化行容器
 
-/// 行级「实渲染 ↔ 等高占位」切换容器：窗口内（或首见无缓存）实渲染；窗口外用缓存
-/// 高度的**等高占位**。占位高度 = 实测缓存高度 → 切换零位移 → document 高度恒稳。
+/// 行级「实渲染 ↔ 等高占位」切换容器：窗口内实渲染；窗口外用缓存高度的**等高占位**；
+/// 首见未测量且在窗口外的行用估算高度占位（冷启动不实渲染全行，防约束求解器递归崩溃）。
+/// 占位高度 = 实测缓存高度 → 切换零位移 → document 高度恒稳。
 /// 这是 LazyVStack 黑盒行估算的替代：macOS 13 上 LazyVStack 回收远行的估算归零/
 /// 失准，实例化-回收的「估算↔真实」差一次性结算成万级 pt 的 doc 骤变（日志定证
 /// -14306 → 视口瞬移 14053 = 「上滚跳过数条消息」的最终根因，塌缩瞬间零子视图
@@ -451,13 +452,16 @@ struct ChatVirtualRow<Content: View>: View {
     let inWindow: Bool
     @ViewBuilder let content: () -> Content
 
+    private static var estimatedHeight: CGFloat { 100 }
+
     var body: some View {
         Group {
-            // 首见（无缓存）恒实渲染：几何信号测得高度回写缓存后，离开窗口才切占位。
-            if inWindow || rowHeights[messageId] == nil {
+            if inWindow {
                 content()
             } else if let height = rowHeights[messageId] {
                 Color.clear.frame(height: height)
+            } else {
+                Color.clear.frame(height: Self.estimatedHeight)
             }
         }
         // 实渲染 ↔ 占位是内容等效替换：禁动画防闪烁与 CA 事务竞态（历史白屏族防线）。

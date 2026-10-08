@@ -6,8 +6,8 @@ import SwiftMath
 // MARK: - 段落/公式高度持久缓存（跨重建查表，首帧免测量）
 
 /// 全局测量缓存（独立枚举、非 MainActor、NSLock 保护，锁内只做字典操作）：
-/// 1. 段落高度：跨 LRU 逐出重建复用，消除 `NSTextField.layoutSubtreeIfNeeded` 的重复测量
-///    （这是历史「重挂载首帧最大成本」）。
+/// 1. 段落高度：跨 LRU 逐出重建复用，消除首帧重复测量（历史「重挂载首帧最大成本」；
+///    段落高度现由 boundingRect 纯文本测量得出，不触碰视图层级）。
 /// 2. 块级公式高度：供 `AsyncMathBlockView` 占位直接锁定真实高度，消除占位→位图回填的高度跳变。
 /// 键含内容 hash / 宽度桶 / 外观 / 字号 / 字重，内容变则键变，天然自洽。
 enum MathLayoutCache {

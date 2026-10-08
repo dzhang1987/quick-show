@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -637,7 +637,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_33AECA88-F1B3-4784-BCCF-E0763DE79E71" /* Resources */ = {
+		"TEMP_DFEBE2BE-28F1-4EE3-AD6B-1EDC288FA8FC" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -659,8 +659,6 @@
 			dependencies = (
 			);
 			name = SwiftMath;
-			packageProductDependencies = (
-			);
 			productName = SwiftMath;
 			productReference = 0E743B480470624A4287B53E /* libSwiftMath.a */;
 			productType = "com.apple.product-type.library.static";
@@ -677,8 +675,6 @@
 			dependencies = (
 			);
 			name = HighlightrKit;
-			packageProductDependencies = (
-			);
 			productName = HighlightrKit;
 			productReference = 11C47863F2E3FDEDECD77402 /* libHighlightrKit.a */;
 			productType = "com.apple.product-type.library.static";
@@ -698,8 +694,6 @@
 				135C32D5292F69C79A3C1477 /* PBXTargetDependency */,
 			);
 			name = QuickShow;
-			packageProductDependencies = (
-			);
 			productName = QuickShow;
 			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
 			productType = "com.apple.product-type.application";
@@ -726,6 +720,7 @@
 				};
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -733,9 +728,6 @@
 				en,
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = 9B0F05138AE231E7D18DDCA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (

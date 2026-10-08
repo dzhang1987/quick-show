@@ -14,6 +14,13 @@
 
 ### Fixed
 
+- AI 窗聚焦/失焦卡顿根治（卡顿随会话变大而加剧，用户实测反馈驱动）：
+  - **聚焦路径全量去重**（`AIChatView`）：`didBecomeKeyNotification` 过滤非 AIPanel 窗口（系统弹窗 / 其他 App 激活不再误触发整窗刷新）；`refreshEnvironment` 幂等化——值不变不写 @State，杜绝恒等写入触发全列消息 diff；剪贴板探测延迟到 runloop 闲时（聚焦瞬间不抢主线程）
+  - **消息列表保活单元 Equatable 收敛**（`SessionMessageList`）：`ForEach` 加 `.equatable()`，`==` 只比 sessionId / isActive / 坞高 / 消息数 / 首尾消息 id / 末条状态与内容长度——父体重建时未变化会话整体跳过 body 重估（此前每次聚焦都重放全部 LRU 常驻会话的布局）
+- 冷启动打开公式密集会话卡死 → 崩溃根治（三层连环根因，逐层独立构成性修复）：
+  - **首帧全行实渲染**（`ChatScrollCoordinator.ChatVirtualRow`）：`rowHeights` 无缓存时旧实现恒实渲染——冷启动全列 N 行同时进入布局，约束求解递归深至 AppKit 异常；改为「未测量且在窗口外 = 100pt 估算占位」，实渲染仅保留给窗口内行
+  - **虚拟化窗口预置**（`AIChatMessageList.seedVirtualWindowIfNeeded`）：onAppear 按快照（pinned 态 + 顶部锚点消息）预置 `virtualWindowIds`——首帧即命中视口行，geometry 反馈循环收敛前的可见闪烁消除
+  - **布局期视图侧效应清零**（`MathParagraphView.sizeThatFits`）：旧实现在 SwiftUI 布局遍历内调 `invalidateIntrinsicContentSize` / `preferredMaxLayoutWidth` / `layoutSubtreeIfNeeded`——沿视图树冒泡 `setNeedsUpdateConstraints`，AppKit 在布局周期内收到约束失效即抛 NSInternalInconsistencyException（EXC_BREAKPOINT 崩溃日志帧 19-20 实证）；改为 `NSAttributedString.boundingRect` 纯文本测量（TextKit 排版计算、零视图层级触碰，布局遍历内安全）+ cell 垂直内边距常数补回；coordinator 内存缓存与 `MathLayoutCache` 全局持久缓存及稳定性判定原样保留——公式再多、行再密，这条崩溃路径构造上不可能再触发（不依赖时序、行数、门槛值）
 - 会话滚动卡死回归（上述列宽变化引爆，两层根因连环修复，滚动判别根基重构）：
   - **pin 判定从「几何方向 + 容差猜测」重构为「滚轮事件来源判别」**（`ChatScrollCoordinator`）：新增 `NSEvent` 本地 `scrollWheel` 监听（只观察不消费，hit-test 与事件派发同路径路由到具体会话 + 0.15s 关联时窗）。用户上滚立即解除底部跟随——触控板容差带内的小 delta 滚动也生效，根治「上滚攒不过 18pt 容差线、被 pinned 逐帧 `scrollPinnedToBottom` 拽回」的滚动卡死；流式内容塌缩时 AppKit 的被动 clamp（bounds 通知在 `documentView.setFrame` 调用栈内同步投出且**先于** frame 通知，任何程序化遮蔽窗原理上罩不住——独立 AppKit harness 实证）不再被误判为用户输入，流式贴底跟随全程保持；底部 rubber-band 越界区回收的 movedUp 显式豁免（回弹后跟随不丢）；非用户来源的下行滚动永不改写 pin（历史「塌缩瞬移 → pin 误恢复 → 回填拽回」bug 族被构造性消灭，不再是几何守卫的妥协）。已知保守取舍：滚动条拖拽 / 键盘滚动不产生滚轮事件，不改写跟随态（回底由 ↓ 按钮 / 发送跳底覆盖）
   - **虚拟化行高缓存增加列宽维度**（`AIChatMessageList`）：`rowHeights` 新增伴随 `cachedColumnWidth`，内容列宽变化 >1pt 即清空缓存全行重测——修复列宽变化后「占位高 ≠ 实渲染高」打破虚拟化恒等式，导致的 document 高度持续抖动与全列反复重排（主线程 CPU 风暴、滚动间歇性冻住）；触发源覆盖窗口 resize / ⌘B 侧栏切换 / 冷启动首帧宽度修正

@@ -54,7 +54,7 @@ struct MathBlockView: NSViewRepresentable {
 // MARK: - 含行内公式的段落视图
 
 /// 含行内公式的段落：包 NSTextField（wrapsLabel），NSAttributedString 内嵌 NSTextAttachment。
-/// 通过 sizeThatFits 把 proposed width 设为 preferredMaxLayoutWidth 后重新测量高度。
+/// 高度由 sizeThatFits 内纯文本测量（boundingRect）得出，测量全程不触碰视图层级。
 struct MathParagraphView: NSViewRepresentable {
     let inlines: [InlineToken]
     var baseSize: CGFloat = 13
@@ -191,15 +191,19 @@ struct MathParagraphView: NSViewRepresentable {
             weightRaw: Self.weightRaw(weight)
         )
         if hasContent, let cachedHeight = MathLayoutCache.paragraphHeight(for: globalKey) {
-            nsView.preferredMaxLayoutWidth = width
             context.coordinator.measuredWidth = width
             context.coordinator.measuredHeight = cachedHeight
             return CGSize(width: width, height: cachedHeight)
         }
-        nsView.preferredMaxLayoutWidth = width
-        nsView.invalidateIntrinsicContentSize()
-        nsView.layoutSubtreeIfNeeded()
-        let height = max(nsView.fittingSize.height, nsView.intrinsicContentSize.height)
+        // 纯文本测量：boundingRect 不触碰视图层级，可在 SwiftUI 布局遍历内安全调用。
+        // ⚠ 绝不可在此 invalidateIntrinsicContentSize / 写 preferredMaxLayoutWidth /
+        // layoutSubtreeIfNeeded —— 这些都会沿视图树冒泡 setNeedsUpdateConstraints，
+        // AppKit 在布局周期内收到约束失效即抛 NSInternalInconsistencyException 崩溃。
+        let textSize = nsView.attributedStringValue.boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading]
+        )
+        let height = ceil(textSize.height) + Self.cellVerticalInset
         if hasContent {
             context.coordinator.measuredWidth = width
             context.coordinator.measuredHeight = height
@@ -212,6 +216,9 @@ struct MathParagraphView: NSViewRepresentable {
         }
         return CGSize(width: width, height: height)
     }
+
+    /// NSTextField cell 上下内边距近似（borderless label 量级）；纯文本测量需手动补回。
+    private static let cellVerticalInset: CGFloat = 2
 
     /// `Font.Weight` → 稳定整数（全局缓存 key 用）。
     private static func weightRaw(_ weight: Font.Weight) -> Int {

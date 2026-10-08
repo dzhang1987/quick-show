@@ -194,10 +194,12 @@ struct AIChatView: View {
             // UI 离场：挂起中的抽屉请求被唤醒为兜底结果（确认→拒绝 / 提问→取消），防泄漏
             interaction.markUIActive(false)
         }
-        // 回到/激活 AI 窗口时刷新配置与剪贴板可用态（设置窗口改动后可即时生效）
+        // 回到 AI 窗口时刷新配置/图钉/剪贴板可用态（设置窗口改动后可即时生效）；
+        // 只响应 AIPanel——非本窗的 key 变化不触发重渲染（历史根因：Settings/主面板
+        // becomeKey 全量冲刷 12 棵常驻会话树，公式/卡片越多越卡）。
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+            guard note.object is AIPanel else { return }
             refreshEnvironment()
-            pinned = AIWindowManager.shared.isPinned
         }
         // 抽屉关闭（request 由非 nil 变 nil）后把焦点还回主输入框：
         // 提问面板的自由输入条持焦期间点提交/取消，焦点随抽屉移除悬空，须主动归还。
@@ -461,6 +463,7 @@ struct AIChatView: View {
                     scrollCoordinator: scrollCoordinator,
                     dockTotalHeight: dockTotalHeight
                 )
+                .equatable()
                 .opacity(isActive ? 1 : 0)
                 .allowsHitTesting(isActive)
             }
@@ -542,18 +545,28 @@ struct AIChatView: View {
         }
     }
 
-    /// 刷新非 @Published 的外部环境：端点配置 + 剪贴板可用性（模型列表已随坞体自持刷新）。
+    /// 刷新非 @Published 的外部环境：端点配置 + 图钉 + 剪贴板可用性（模型列表已随坞体自持刷新）。
+    /// 三类值均做幂等守卫（未变不写 @State，零 body 重求值）；剪贴板读取推至下一 runloop
+    /// ——pasteboard IPC 不阻塞聚焦帧，焦点动画/rim 切换即时完成。
     private func refreshEnvironment() {
-        configured = state.hasConfiguredEndpoint
-        refreshClipboardAvailability()
+        let newConfigured = state.hasConfiguredEndpoint
+        if newConfigured != configured { configured = newConfigured }
+        let newPinned = AIWindowManager.shared.isPinned
+        if newPinned != pinned { pinned = newPinned }
+        DispatchQueue.main.async {
+            self.refreshClipboardAvailability()
+        }
     }
 
     /// 单独刷新剪贴板可用态（轻量，供 hover/窗口激活调用）。
+    /// 幂等守卫：值未变不写 @State，避免无意义的 body 重求值级联。
     private func refreshClipboardAvailability() {
         let clipboard = NSPasteboard.general
         let text = clipboard.string(forType: .string)
-        hasClipboardText = !(text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
-        hasClipboardImage = PasteboardImageExtractor.containsImage(clipboard)
+        let newHasText = !(text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        let newHasImage = PasteboardImageExtractor.containsImage(clipboard)
+        if newHasText != hasClipboardText { hasClipboardText = newHasText }
+        if newHasImage != hasClipboardImage { hasClipboardImage = newHasImage }
     }
 
     /// 附加剪贴板文本；失败（空剪贴板）时同步弱化按钮，做轻反馈。

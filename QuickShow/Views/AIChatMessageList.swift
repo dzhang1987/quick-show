@@ -214,6 +214,7 @@ struct SessionMessageList: View {
                 updateRowFrames(frames, viewportHeight: viewport.size.height)
             }
             .onAppear {
+                seedVirtualWindowIfNeeded()
                 bindScrollCoordinator()
                 // 首帧布局完成后的下一 runloop：补消费跳底信号（空会话首建/重建窗口期
                 // 发布的瞬时信号不再丢失）→ 恢复位置（snapshot 锚点 / 贴底）→ 解除装载态。
@@ -316,6 +317,24 @@ struct SessionMessageList: View {
         )
     }
 
+    /// 冷启动/LRU 重挂载时预置虚拟化窗口：ChatVirtualRow 改为「未测量且窗口外 =
+    /// 估算占位」后，空 virtualWindowIds 意味着首帧全行占位——geometry 反馈循环虽能
+    /// 在 1-2 帧后收敛，但预置可让 frame 1 直接命中视口行、减少可见闪烁。
+    private func seedVirtualWindowIfNeeded() {
+        guard virtualWindowIds.isEmpty, !messages.isEmpty else { return }
+        let snapshot = scrollSnapshots[sessionId]
+        let pinned = snapshot?.isPinned ?? true
+        if !pinned,
+           let anchor = snapshot?.topVisibleMessageID,
+           let idx = messages.firstIndex(where: { $0.id == anchor }) {
+            let lo = max(0, idx - 7)
+            let hi = min(messages.count, idx + 8)
+            virtualWindowIds = Set(messages[lo..<hi].map(\.id))
+        } else {
+            virtualWindowIds = Set(messages.suffix(15).map(\.id))
+        }
+    }
+
     /// 消费式跳底信号补消费：挂载/重建时 state.scrollJumpRequests 里存在「新于挂载时刻」
     /// 的未消费信号即补跳底（瞬时发布-订阅事件在视图不在场的窗口期不再丢失——空会话
     /// 首条发送时 EmptyView 无挂载点、发送白屏重建期间同理）。旧于挂载时刻的信号
@@ -361,8 +380,8 @@ struct SessionMessageList: View {
     private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
         guard viewportHeight > 0, !frames.isEmpty else { return }
         // 列宽变化即整体失效行高缓存：行 frame 宽度统一 = 内容列宽，任取一行即可代表。
-        // 清空后本帧随后的回写会按新宽度重测填充（ChatVirtualRow 对 rowHeights[id]==nil
-        // 恒实渲染，天然支持全行回落重测）；大范围实渲染是一次性 settle 开销，属预期。
+        // 清空后 virtualWindowIds 内的行（视口 ±2 屏）仍实渲染、按新宽度回写缓存；
+        // 窗口外行切换为估算占位（100pt），进入窗口时再实渲染重测。
         let probeWidth = frames.values.first?.width ?? 0
         if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 1 {
             rowHeights.removeAll()
@@ -539,5 +558,25 @@ struct SessionMessageList: View {
         MessageListDerivations.lastEditableUserMessageId(messages: messages,
                                                          isActive: isActive,
                                                          isGenerating: state.isGenerating)
+    }
+}
+
+// MARK: - 会话列表 Equatable（视图级 diff 防线）
+
+extension SessionMessageList: Equatable {
+    /// 忽略闭包/Binding/class 引用（语义跨渲染恒稳），仅按数据身份判定相等——
+    /// 与 ChatMessageRow.Equatable 同一模式。消息数组改用 O(1) 身份签名
+    /// （count + 首尾 id + 尾条 state/长度），避免全量逐元素 O(n) 比较。
+    /// 配合父级 .equatable()：父级 body 重求值时未变的常驻会话跳过整棵子树，
+    /// 聚焦/失焦/剪贴板/pin 等非消息变化不再冲刷 12 棵会话的 ForEach + 虚拟化。
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.sessionId == rhs.sessionId
+            && lhs.isActive == rhs.isActive
+            && lhs.dockTotalHeight == rhs.dockTotalHeight
+            && lhs.messages.count == rhs.messages.count
+            && lhs.messages.first?.id == rhs.messages.first?.id
+            && lhs.messages.last?.id == rhs.messages.last?.id
+            && lhs.messages.last?.state == rhs.messages.last?.state
+            && lhs.messages.last?.content.count == rhs.messages.last?.content.count
     }
 }
