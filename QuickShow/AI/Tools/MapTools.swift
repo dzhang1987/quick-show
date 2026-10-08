@@ -97,17 +97,17 @@ private func formatDuration(_ seconds: Double) -> String {
     if minutes >= 60 {
         let hours = minutes / 60
         let remainder = minutes % 60
-        return remainder == 0 ? "\(hours) 小时" : "\(hours) 小时 \(remainder) 分钟"
+        return remainder == 0 ? String(localized: "\(hours) 小时") : String(localized: "\(hours) 小时 \(remainder) 分钟")
     }
-    return "\(minutes) 分钟"
+    return String(localized: "\(minutes) 分钟")
 }
 
 /// 出行方式中文名
 private func modeDisplayName(_ mode: MapRouteMode) -> String {
     switch mode {
-    case .walking: return "步行"
-    case .driving: return "驾车"
-    case .transit: return "公交"
+    case .walking: return String(localized: "步行")
+    case .driving: return String(localized: "驾车")
+    case .transit: return String(localized: "公交")
     }
 }
 
@@ -116,7 +116,7 @@ private func modeDisplayName(_ mode: MapRouteMode) -> String {
 /// 地址 → 坐标（高德优先，MapKit / CLGeocoder 兜底）
 final class GeocodeTool: AITool {
     let name = "geocode"
-    let displayName = "地址解析"
+    let displayName = String(localized: "地址解析")
     let category: ToolCategory = .map
     /// 纯读 + 网络查询，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -151,7 +151,7 @@ final class GeocodeTool: AITool {
 /// 关键词搜索地点（高德 POI 优先，MKLocalSearch 兜底）
 final class SearchPlacesTool: AITool {
     let name = "search_places"
-    let displayName = "地点搜索"
+    let displayName = String(localized: "地点搜索")
     let category: ToolCategory = .map
     /// 纯读 + 网络查询，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -203,7 +203,7 @@ final class SearchPlacesTool: AITool {
 /// 路线规划：步行 / 驾车走「高德优先 + MKDirections 兜底」，公交仅高德提供
 final class PlanRouteTool: AITool {
     let name = "plan_route"
-    let displayName = "路线规划"
+    let displayName = String(localized: "路线规划")
     let category: ToolCategory = .map
     /// 纯读 + 网络查询，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -257,14 +257,14 @@ final class PlanRouteTool: AITool {
             ["instruction": step.instruction, "distanceMeters": step.distanceMeters]
         }
         var originMarker = coordinateJSON(origin)
-        originMarker["title"] = "起点"
+        originMarker["title"] = String(localized: "起点")
         var destinationMarker = coordinateJSON(destination)
-        destinationMarker["title"] = "终点"
+        destinationMarker["title"] = String(localized: "终点")
         let markers: [[String: Any]] = [originMarker, destinationMarker]
         let card: [String: Any] = [
             "type": "map",
             "data": [
-                "title": "\(modeDisplayName(mode))路线 · \(formatDistance(route.distanceMeters)) · 约 \(formatDuration(route.durationSeconds))",
+                "title": String(localized: "\(modeDisplayName(mode))路线 · \(formatDistance(route.distanceMeters)) · 约 \(formatDuration(route.durationSeconds))"),
                 "markers": markers,
                 "route": [
                     "points": route.points.map(coordinateJSON),
@@ -289,7 +289,7 @@ final class PlanRouteTool: AITool {
 /// 直接渲染地图卡片（标记点 / 折线 / 中心点任选）
 final class ShowMapTool: AITool {
     let name = "show_map"
-    let displayName = "展示地图"
+    let displayName = String(localized: "展示地图")
     let category: ToolCategory = .map
     /// 纯读展示，无网络与共享状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe

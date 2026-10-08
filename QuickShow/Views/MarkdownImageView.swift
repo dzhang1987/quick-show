@@ -177,7 +177,7 @@ struct MarkdownImageView: View {
     /// 失败：弱化色圆角块内显示 alt 文本 + url 小字链接。
     private var failureView: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text(alt.isEmpty ? "图片无法加载" : alt)
+            Text(alt.isEmpty ? String(localized: "图片无法加载") : alt)
                 .font(Theme.Typography.text(12))
                 .foregroundColor(Theme.Colors.contentSecondaryStrong)
                 .fixedSize(horizontal: false, vertical: true)

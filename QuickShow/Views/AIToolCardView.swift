@@ -144,7 +144,7 @@ private struct ToolCallRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(expanded ? "收起详情" : "展开参数与结果")
+        .help(expanded ? String(localized: "收起详情") : String(localized: "展开参数与结果"))
     }
 
     // MARK: 展开区（参数 + 结果）
@@ -249,7 +249,7 @@ private struct ToolCallResultBlock: View {
                         HStack(spacing: Theme.Spacing.xs) {
                             Image(systemName: copied ? "checkmark" : "square.on.square")
                                 .font(Theme.Typography.text(9.5, .medium))
-                            Text(copied ? "已复制" : "复制")
+                            Text(copied ? String(localized: "已复制") : String(localized: "复制"))
                                 .font(Theme.Typography.text(9.5, .medium))
                         }
                         .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
@@ -307,7 +307,7 @@ private struct ToolCallResultBlock: View {
                         showFullResult.toggle()
                     }
                 } label: {
-                    Text(showFullResult ? "收起结果" : "展开完整结果（\(prettyResult.count) 字符）")
+                    Text(showFullResult ? String(localized: "收起结果") : String(localized: "展开完整结果（\(prettyResult.count) 字符）"))
                         .font(Theme.Typography.text(10, .medium))
                         .foregroundColor(Theme.Colors.accent)
                 }
@@ -363,11 +363,11 @@ private struct ToolStatusBadge: View {
 
     private var label: String {
         switch status {
-        case .pending: return "排队中"
-        case .running: return "执行中"
-        case .done: return "完成"
-        case .failed: return "失败"
-        case .denied: return "已拒绝"
+        case .pending: return String(localized: "排队中")
+        case .running: return String(localized: "执行中")
+        case .done: return String(localized: "完成")
+        case .failed: return String(localized: "失败")
+        case .denied: return String(localized: "已拒绝")
         }
     }
 

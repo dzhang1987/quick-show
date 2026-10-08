@@ -21,7 +21,7 @@ struct GeneralSettingsForm: View {
                 appState.triggerType = newValue
                 // 互斥兜底在 AppState setter：被拒绝时实际生效值仍为旧值，与所选不同
                 if HotKeyManager.shared.currentType != newValue {
-                    conflictNotice = "与 AI 对话窗热键命中键冲突，已保持原设置。请在「快捷键设置」中调整双路热键"
+                    conflictNotice = String(localized: "与 AI 对话窗热键命中键冲突，已保持原设置。请在「快捷键设置」中调整双路热键")
                 } else {
                     conflictNotice = nil
                 }
@@ -110,7 +110,7 @@ struct GeneralSettingsForm: View {
                     HStack {
                         Text("一瞥模式显示时长")
                         Spacer()
-                        Text(String(format: "%.1f 秒", appState.glanceDuration))
+                        Text(String.localizedStringWithFormat(String(localized: "%.1f 秒"), appState.glanceDuration))
                             .foregroundColor(.secondary)
                     }
                     Slider(value: $appState.glanceDuration, in: 1.5...10.0, step: 0.5)
@@ -316,7 +316,7 @@ struct AboutSettingsForm: View {
             Section {
                 LabeledContent("开发团队", value: "cn.chiproad")
                 LabeledContent("技术架构", value: "Swift 5.9 · AppKit + SwiftUI")
-                LabeledContent("运行状态", value: "0 外部依赖 · 纯原生零泄漏")
+                LabeledContent("运行状态", value: String(localized: "0 外部依赖 · 纯原生零泄漏"))
                 LabeledContent("开源协议", value: "MIT License")
             } header: {
                 Text("软件信息")

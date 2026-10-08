@@ -198,7 +198,7 @@ struct ShortcutsSettingsForm: View {
                 appState.triggerType = newValue
                 // 互斥兜底在 AppState setter：被拒绝时实际生效值仍为旧值，与所选不同
                 if HotKeyManager.shared.currentType != newValue {
-                    conflictNotice = "与 AI 对话窗热键冲突，已保持原设置"
+                    conflictNotice = String(localized: "与 AI 对话窗热键冲突，已保持原设置")
                 } else {
                     conflictNotice = nil
                 }
@@ -213,7 +213,7 @@ struct ShortcutsSettingsForm: View {
             set: { newValue in
                 appState.aiTriggerType = newValue
                 if HotKeyManager.shared.aiTriggerType != newValue {
-                    conflictNotice = "与主面板热键冲突，已保持原设置"
+                    conflictNotice = String(localized: "与主面板热键冲突，已保持原设置")
                 } else {
                     conflictNotice = nil
                 }

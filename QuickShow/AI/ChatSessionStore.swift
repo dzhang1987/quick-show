@@ -94,7 +94,7 @@ final class ChatSessionStore: ObservableObject {
 
     /// 新建会话并设为当前。title 默认「新会话」（待首条消息生成临时标题）。
     @discardableResult
-    func createSession(title: String = "新会话") -> ChatSession {
+    func createSession(title: String = String(localized: "新会话")) -> ChatSession {
         let now = Date()
         let session = ChatSession(
             title: title,
@@ -136,7 +136,7 @@ final class ChatSessionStore: ObservableObject {
     /// 清空标题为待摘要状态（⌘K 清空后下一轮重新起标题）。
     func resetSessionTitle(id: UUID) {
         mutate(id, touch: false) { session in
-            session.title = "新会话"
+            session.title = String(localized: "新会话")
             session.titleNeedsSummary = true
         }
     }
@@ -234,7 +234,7 @@ final class ChatSessionStore: ObservableObject {
         var groups: [ChatSessionGroup] = []
         let pinned = sorted.filter { $0.pinned }
         if !pinned.isEmpty {
-            groups.append(ChatSessionGroup(id: "pinned", title: "置顶", sessions: pinned))
+            groups.append(ChatSessionGroup(id: "pinned", title: String(localized: "置顶"), sessions: pinned))
         }
 
         var remaining = sorted.filter { !$0.pinned }
@@ -246,21 +246,21 @@ final class ChatSessionStore: ObservableObject {
 
         let today = take { Calendar.current.isDateInToday($0.updatedAt) }
         if !today.isEmpty {
-            groups.append(ChatSessionGroup(id: "today", title: "今天", sessions: today))
+            groups.append(ChatSessionGroup(id: "today", title: String(localized: "今天"), sessions: today))
         }
 
         let yesterday = take { Calendar.current.isDateInYesterday($0.updatedAt) }
         if !yesterday.isEmpty {
-            groups.append(ChatSessionGroup(id: "yesterday", title: "昨天", sessions: yesterday))
+            groups.append(ChatSessionGroup(id: "yesterday", title: String(localized: "昨天"), sessions: yesterday))
         }
 
         let week = take { Self.isWithinLastWeek($0.updatedAt) }
         if !week.isEmpty {
-            groups.append(ChatSessionGroup(id: "week", title: "过去 7 天", sessions: week))
+            groups.append(ChatSessionGroup(id: "week", title: String(localized: "过去 7 天"), sessions: week))
         }
 
         if !remaining.isEmpty {
-            groups.append(ChatSessionGroup(id: "earlier", title: "更早", sessions: remaining))
+            groups.append(ChatSessionGroup(id: "earlier", title: String(localized: "更早"), sessions: remaining))
         }
         return groups
     }
@@ -281,7 +281,7 @@ final class ChatSessionStore: ObservableObject {
         let cleaned = text
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return "新会话" }
+        guard !cleaned.isEmpty else { return String(localized: "新会话") }
         return String(cleaned.prefix(20))
     }
 

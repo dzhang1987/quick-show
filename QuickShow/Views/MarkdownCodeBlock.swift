@@ -32,7 +32,7 @@ struct CodeBlockView: View {
                     HStack(spacing: Theme.Spacing.xs) {
                         Image(systemName: copied ? "checkmark" : "square.on.square")
                             .font(Theme.Typography.text(9.5, .medium))
-                        Text(copied ? "已复制" : "复制")
+                        Text(copied ? String(localized: "已复制") : String(localized: "复制"))
                             .font(Theme.Typography.text(9.5, .medium))
                     }
                     .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)

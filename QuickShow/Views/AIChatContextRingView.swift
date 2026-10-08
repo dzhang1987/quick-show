@@ -246,18 +246,18 @@ private struct ContextRingDetailCard: View {
                 .font(Theme.Typography.mono(Theme.Typography.caption))
                 .foregroundColor(Theme.Colors.contentTertiary)
             if let summarizedCount, summarizedCount > 0 {
-                Text("已压缩 \(summarizedCount) 条早期对话")
+                Text(String(localized: "已压缩 \(summarizedCount) 条早期对话"))
                     .font(Theme.Typography.text(Theme.Typography.caption))
                     .foregroundColor(Theme.Colors.contentTertiary)
             }
             // 失败持久行：压缩失败在消息流里没有落点（成功才有边界卡/区域降档），
             // 详情卡是唯一能「事后查证」的位置；成功后 outcome 翻转，此行自消
             if let compactionOutcome, case .failed(_, let reason) = compactionOutcome {
-                Text("上次压缩失败：\(reason)")
+                Text(String(localized: "上次压缩失败：\(reason)"))
                     .font(Theme.Typography.text(Theme.Typography.caption))
                     .foregroundColor(Theme.Colors.statusWarning)
             }
-            Text(isCompacting ? "正在压缩早期对话…" : "点击压缩早期对话（释放上下文）")
+            Text(isCompacting ? String(localized: "正在压缩早期对话…") : String(localized: "点击压缩早期对话（释放上下文）"))
                 .font(Theme.Typography.text(Theme.Typography.caption))
                 .foregroundColor(Theme.Colors.idleText)
         }

@@ -428,7 +428,7 @@ struct AIChatView: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { pinHovered = hovering }
         }
-        .help(pinned ? "已常驻置顶 (点击解除)" : "点击常驻置顶")
+        .help(pinned ? String(localized: "已常驻置顶 (点击解除)") : String(localized: "点击常驻置顶"))
     }
 
     // MARK: - 消息列表
@@ -587,8 +587,8 @@ struct AIChatView: View {
     /// 压缩 toast 文案：成功报本次条数（非累计值，更诚实）；失败带一句原因简述。
     private func compactionToastText(_ outcome: CompactionOutcome) -> String {
         switch outcome {
-        case .succeeded(_, let count, _): return "已压缩 \(count) 条早期对话"
-        case .failed(_, let reason): return "压缩失败：\(reason)"
+        case .succeeded(_, let count, _): return String(localized: "已压缩 \(count) 条早期对话")
+        case .failed(_, let reason): return String(localized: "压缩失败：\(reason)")
         }
     }
 

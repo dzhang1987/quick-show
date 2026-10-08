@@ -79,21 +79,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         
         let menu = NSMenu()
         
-        let showItem = NSMenuItem(title: "显示信息面板 (\(appState.triggerType.shortName))", action: #selector(togglePanel), keyEquivalent: "t")
+        let showItem = NSMenuItem(title: String(localized: "显示信息面板 (\(appState.triggerType.shortName))"), action: #selector(togglePanel), keyEquivalent: "t")
         showItem.keyEquivalentModifierMask = [.command, .shift]
         showItem.target = self
         menu.addItem(showItem)
         
         menu.addItem(NSMenuItem.separator())
         
-        let settingsItem = NSMenuItem(title: "偏好设置...", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: String(localized: "偏好设置..."), action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         settingsItem.target = self
         menu.addItem(settingsItem)
         
         menu.addItem(NSMenuItem.separator())
         
-        let quitItem = NSMenuItem(title: "退出 QuickShow", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: String(localized: "退出 QuickShow"), action: #selector(quitApp), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         quitItem.target = self
         menu.addItem(quitItem)
@@ -109,14 +109,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(appMenuItem)
         
         let appMenu = NSMenu()
-        let settingsItem = NSMenuItem(title: "偏好设置...", action: #selector(openSettings), keyEquivalent: ",")
+        let settingsItem = NSMenuItem(title: String(localized: "偏好设置..."), action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.keyEquivalentModifierMask = [.command]
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         
         appMenu.addItem(NSMenuItem.separator())
         
-        let quitItem = NSMenuItem(title: "退出 QuickShow", action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: String(localized: "退出 QuickShow"), action: #selector(quitApp), keyEquivalent: "q")
         quitItem.keyEquivalentModifierMask = [.command]
         quitItem.target = self
         appMenu.addItem(quitItem)
@@ -127,16 +127,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ⌘C/⌘V/⌘X/⌘A/⌘Z 键等效派发链路缺失，粘贴、撤销等基础操作失效
         let editMenuItem = NSMenuItem()
         mainMenu.addItem(editMenuItem)
-        let editMenu = NSMenu(title: "编辑")
-        editMenu.addItem(withTitle: "剪切", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "拷贝", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "粘贴", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "全选", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        let editMenu = NSMenu(title: String(localized: "编辑"))
+        editMenu.addItem(withTitle: String(localized: "剪切"), action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: String(localized: "拷贝"), action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: String(localized: "粘贴"), action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(withTitle: String(localized: "全选"), action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         editMenu.addItem(.separator())
         // Undo/Redo：文本系统的 ⌘Z/⇧⌘Z 键等效派发依赖主菜单存在对应 keyEquivalent 的菜单项
         // （与 ⌘C/⌘V 同理）；target 为 nil 走响应链，NSTextView 依据 canUndo/canRedo 自动启用禁用
-        editMenu.addItem(withTitle: "撤销", action: Selector(("undo:")), keyEquivalent: "z")
-        editMenu.addItem(withTitle: "重做", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(withTitle: String(localized: "撤销"), action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: String(localized: "重做"), action: Selector(("redo:")), keyEquivalent: "Z")
         editMenuItem.submenu = editMenu
 
         NSApp.mainMenu = mainMenu
@@ -158,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             window.titleVisibility = .hidden
             window.toolbar = nil
             window.isMovableByWindowBackground = true
-            window.title = "QuickShow 设置"
+            window.title = String(localized: "QuickShow 设置")
             window.center()
             // 整窗 Liquid Glass（对齐 macOS 27 系统设置「底玻璃、纸实底」）：
             // titled 标准窗口保留（交通灯/系统圆角/窗口阴影由系统 chrome 管理），

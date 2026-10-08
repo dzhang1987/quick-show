@@ -23,7 +23,7 @@ extension AIChatState {
         guard !userInput.isEmpty || !images.isEmpty else { return }
 
         guard hasConfiguredEndpoint else {
-            appendLocalFailure("尚未配置 AI 服务，请在设置中填写 Base URL 与 API Key。")
+            appendLocalFailure(String(localized: "尚未配置 AI 服务，请在设置中填写 Base URL 与 API Key。"))
             return
         }
 

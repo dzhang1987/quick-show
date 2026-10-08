@@ -156,7 +156,7 @@ struct AIChatSidebarView: View {
         if isSearching {
             let results = store.search(searchText)
             if results.isEmpty {
-                emptyState(icon: "magnifyingglass", text: "没有匹配的会话")
+                emptyState(icon: "magnifyingglass", text: String(localized: "没有匹配的会话"))
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
                     LazyVStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
@@ -169,7 +169,7 @@ struct AIChatSidebarView: View {
                 }
             }
         } else if store.sessions.isEmpty {
-            emptyState(icon: "bubble.left.and.bubble.right", text: "暂无对话\n⌘N 开启第一段对话")
+            emptyState(icon: "bubble.left.and.bubble.right", text: String(localized: "暂无对话\n⌘N 开启第一段对话"))
         } else {
             ScrollView(.vertical, showsIndicators: false) {
                 LazyVStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
@@ -323,7 +323,7 @@ private struct SessionRowView: View {
             // hover / 选中态渐显的 ⋯ 菜单
             if !isRenaming, isHovered || isSelected {
                 Menu {
-                    Button(session.pinned ? "取消置顶" : "置顶", action: onTogglePin)
+                    Button(session.pinned ? String(localized: "取消置顶") : String(localized: "置顶"), action: onTogglePin)
                     Button("重命名", action: onBeginRename)
                     Divider()
                     // 危险操作隔离分组，红色呈现（对齐桌面端惯例）

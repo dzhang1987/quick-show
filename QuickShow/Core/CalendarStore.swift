@@ -12,9 +12,9 @@ enum CalendarViewMode: Int, CaseIterable, Identifiable {
 
     var shortName: String {
         switch self {
-        case .month: return "月"
-        case .week: return "周"
-        case .day: return "日"
+        case .month: return String(localized: "月")
+        case .week: return String(localized: "周")
+        case .day: return String(localized: "日")
         }
     }
 }

@@ -30,37 +30,37 @@ enum TriggerType: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .doubleCmd: return "双击 Command (⌘ ⌘)"
-        case .doubleCtrl: return "双击 Control (⌃ ⌃)"
-        case .doubleOpt: return "双击 Option (⌥ ⌥)"
-        case .doubleShift: return "双击 Shift (⇧ ⇧)"
-        case .hotKeyCmdShiftT: return "组合键 ⌘ + Shift + T"
-        case .doubleLeftCmd: return "双击左侧 Command (左⌘ 左⌘)"
-        case .doubleRightCmd: return "双击右侧 Command (右⌘ 右⌘)"
-        case .doubleLeftCtrl: return "双击左侧 Control (左⌃ 左⌃)"
-        case .doubleRightCtrl: return "双击右侧 Control (右⌃ 右⌃)"
-        case .doubleLeftOpt: return "双击左侧 Option (左⌥ 左⌥)"
-        case .doubleRightOpt: return "双击右侧 Option (右⌥ 右⌥)"
-        case .doubleLeftShift: return "双击左侧 Shift (左⇧ 左⇧)"
-        case .doubleRightShift: return "双击右侧 Shift (右⇧ 右⇧)"
+        case .doubleCmd: return String(localized: "双击 Command (⌘ ⌘)")
+        case .doubleCtrl: return String(localized: "双击 Control (⌃ ⌃)")
+        case .doubleOpt: return String(localized: "双击 Option (⌥ ⌥)")
+        case .doubleShift: return String(localized: "双击 Shift (⇧ ⇧)")
+        case .hotKeyCmdShiftT: return String(localized: "组合键 ⌘ + Shift + T")
+        case .doubleLeftCmd: return String(localized: "双击左侧 Command (左⌘ 左⌘)")
+        case .doubleRightCmd: return String(localized: "双击右侧 Command (右⌘ 右⌘)")
+        case .doubleLeftCtrl: return String(localized: "双击左侧 Control (左⌃ 左⌃)")
+        case .doubleRightCtrl: return String(localized: "双击右侧 Control (右⌃ 右⌃)")
+        case .doubleLeftOpt: return String(localized: "双击左侧 Option (左⌥ 左⌥)")
+        case .doubleRightOpt: return String(localized: "双击右侧 Option (右⌥ 右⌥)")
+        case .doubleLeftShift: return String(localized: "双击左侧 Shift (左⇧ 左⇧)")
+        case .doubleRightShift: return String(localized: "双击右侧 Shift (右⇧ 右⇧)")
         }
     }
 
     var shortName: String {
         switch self {
-        case .doubleCmd: return "双击 ⌘"
-        case .doubleCtrl: return "双击 ⌃"
-        case .doubleOpt: return "双击 ⌥"
-        case .doubleShift: return "双击 ⇧"
-        case .hotKeyCmdShiftT: return "⌘⇧T"
-        case .doubleLeftCmd: return "双击左 ⌘"
-        case .doubleRightCmd: return "双击右 ⌘"
-        case .doubleLeftCtrl: return "双击左 ⌃"
-        case .doubleRightCtrl: return "双击右 ⌃"
-        case .doubleLeftOpt: return "双击左 ⌥"
-        case .doubleRightOpt: return "双击右 ⌥"
-        case .doubleLeftShift: return "双击左 ⇧"
-        case .doubleRightShift: return "双击右 ⇧"
+        case .doubleCmd: return String(localized: "双击 ⌘")
+        case .doubleCtrl: return String(localized: "双击 ⌃")
+        case .doubleOpt: return String(localized: "双击 ⌥")
+        case .doubleShift: return String(localized: "双击 ⇧")
+        case .hotKeyCmdShiftT: return String(localized: "⌘⇧T")
+        case .doubleLeftCmd: return String(localized: "双击左 ⌘")
+        case .doubleRightCmd: return String(localized: "双击右 ⌘")
+        case .doubleLeftCtrl: return String(localized: "双击左 ⌃")
+        case .doubleRightCtrl: return String(localized: "双击右 ⌃")
+        case .doubleLeftOpt: return String(localized: "双击左 ⌥")
+        case .doubleRightOpt: return String(localized: "双击右 ⌥")
+        case .doubleLeftShift: return String(localized: "双击左 ⇧")
+        case .doubleRightShift: return String(localized: "双击右 ⇧")
         }
     }
 

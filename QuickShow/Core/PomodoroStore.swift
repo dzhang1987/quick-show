@@ -32,7 +32,7 @@ final class PomodoroStore: ObservableObject {
                 if self.pomodoroRemainingSeconds == 0 {
                     self.pomodoroRunning = false
                     self.recordCompletion()
-                    facade.showToast("🎉 番茄专注时段已完成！")
+                    facade.showToast(String(localized: "🎉 番茄专注时段已完成！"))
                 }
             }
         }.store(in: &cancellables)

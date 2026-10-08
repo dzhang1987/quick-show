@@ -166,9 +166,9 @@ struct StatusBarView: View {
                     .buttonStyle(.plain)
                     .help(nowPlaying.isPlaying
                           ? (nowPlaying.artist.isEmpty
-                             ? "正在播放：\(nowPlaying.title)（点击激活来源应用）"
-                             : "正在播放：\(nowPlaying.title) - \(nowPlaying.artist)（点击激活来源应用）")
-                          : "已暂停：\(nowPlaying.title)（按 ⏎ 继续播放，点击激活来源应用）")
+                             ? String(localized: "正在播放：\(nowPlaying.title)（点击激活来源应用）")
+                             : String(localized: "正在播放：\(nowPlaying.title) - \(nowPlaying.artist)（点击激活来源应用）"))
+                          : String(localized: "已暂停：\(nowPlaying.title)（按 ⏎ 继续播放，点击激活来源应用）"))
                     // 曲目名限宽截断：底栏空间宝贵，杜绝挤压其他微标
                     .frame(maxWidth: appState.isExpanded ? 240 : 140, alignment: .leading)
                 }
@@ -280,7 +280,7 @@ struct StatusBarView: View {
                 }
                 .buttonStyle(.plain)
                 .onHover { isPinHovered = $0 }
-                .help(appState.mode == .pinned ? "已常驻显示 (点击或按 Space 解除)" : "点击常驻固定 (快捷键 Space)")
+                .help(appState.mode == .pinned ? String(localized: "已常驻显示 (点击或按 Space 解除)") : String(localized: "点击常驻固定 (快捷键 Space)"))
             }
             .fixedSize()
         }

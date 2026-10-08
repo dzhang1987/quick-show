@@ -122,7 +122,7 @@ private struct PendingAttachmentThumb: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
-        .help(attachment.fileName ?? "图片附件")
+        .help(attachment.fileName ?? String(localized: "图片附件"))
     }
 
     @ViewBuilder

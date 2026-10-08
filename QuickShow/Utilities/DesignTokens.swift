@@ -13,9 +13,9 @@ enum AppearanceMode: String, CaseIterable, Identifiable {
     
     var displayName: String {
         switch self {
-        case .auto: return "自动"
-        case .light: return "浅色"
-        case .dark: return "深色"
+        case .auto: return String(localized: "自动")
+        case .light: return String(localized: "浅色")
+        case .dark: return String(localized: "深色")
         }
     }
     
@@ -40,8 +40,8 @@ enum ThemeVariant: String, CaseIterable, Identifiable {
     
     var displayName: String {
         switch self {
-        case .standard: return "默认（黑曜石）"
-        case .amber: return "琥珀暖色"
+        case .standard: return String(localized: "默认（黑曜石）")
+        case .amber: return String(localized: "琥珀暖色")
         }
     }
 }

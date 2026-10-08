@@ -61,10 +61,10 @@ struct MessageEditBubble: View {
             .frame(height: editHeight)
 
             HStack(spacing: Theme.Spacing.md) {
-                editBubbleButton(title: "取消", tint: Theme.Colors.contentSecondaryStrong, action: cancelEdit)
+                editBubbleButton(title: String(localized: "取消"), tint: Theme.Colors.contentSecondaryStrong, action: cancelEdit)
                     .help("取消编辑（ESC）")
                 editBubbleButton(
-                    title: "重发",
+                    title: String(localized: "重发"),
                     tint: canConfirmEdit ? Theme.Colors.accent : Theme.Colors.contentTertiary,
                     action: confirmEdit
                 )

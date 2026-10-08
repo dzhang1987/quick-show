@@ -21,7 +21,7 @@ struct FocusWorkCard: View {
                 
                 Spacer()
                 
-                Text(appState.pomodoroRunning ? "专注中" : "就绪")
+                Text(appState.pomodoroRunning ? String(localized: "专注中") : String(localized: "就绪"))
                     .font(.system(size: Theme.Typography.caption, weight: .bold))
                     .foregroundColor(appState.pomodoroRunning ? .orange : Theme.Colors.idleText)
                     .padding(.horizontal, Theme.Spacing.md)
@@ -221,7 +221,7 @@ struct FocusWorkCard: View {
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: appState.pomodoroRunning ? "pause.fill" : "play.fill")
                         .font(.system(size: Theme.Typography.mini))
-                    Text(appState.pomodoroRunning ? "暂停" : "开始")
+                    Text(appState.pomodoroRunning ? String(localized: "暂停") : String(localized: "开始"))
                         .font(.system(size: Theme.Typography.footnote, weight: .semibold))
                         .lineLimit(1)
                 }

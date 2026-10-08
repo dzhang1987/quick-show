@@ -208,7 +208,7 @@ enum MarkdownInlineNS {
 
             case let .image(alt, url, _):
                 // AppKit/NSTextField 路径不做异步图片：降级为链接样式文本（公式+图片同段罕见）。
-                let label = alt.isEmpty ? "[图片]" : "[图片: \(alt)]"
+                let label = alt.isEmpty ? String(localized: "[图片]") : String(localized: "[图片: \(alt)]")
                 let piece = NSMutableAttributedString(
                     string: label,
                     attributes: [

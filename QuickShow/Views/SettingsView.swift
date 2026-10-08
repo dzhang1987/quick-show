@@ -14,6 +14,18 @@ enum SettingsTab: String, CaseIterable, Identifiable, Hashable {
     
     var id: String { rawValue }
     
+    /// 展示名：显式本地化（rawValue 保持中文稳定标识，供选择态使用）
+    var displayName: String {
+        switch self {
+        case .general: return String(localized: "通用")
+        case .statusBar: return String(localized: "一瞥底栏")
+        case .dashboard: return String(localized: "监控看板")
+        case .aiService: return String(localized: "AI 服务")
+        case .shortcuts: return String(localized: "快捷键设置")
+        case .about: return String(localized: "关于")
+        }
+    }
+    
     var iconName: String {
         switch self {
         case .general: return "gearshape.fill"
@@ -50,7 +62,7 @@ struct SettingsView: View {
             List(SettingsTab.allCases, selection: $selectedTab) { tab in
                 NavigationLink(value: tab) {
                     Label {
-                        Text(tab.rawValue)
+                        Text(tab.displayName)
                             .font(.system(size: Theme.Typography.badge, weight: .medium))
                     } icon: {
                         Image(systemName: tab.iconName)
@@ -97,7 +109,7 @@ struct SettingsView: View {
                 .formStyle(.grouped)
             }
             .scrollIndicators(.never, axes: .vertical)
-            .navigationTitle(selectedTab?.rawValue ?? "设置")
+            .navigationTitle(selectedTab?.displayName ?? String(localized: "设置"))
         }
         .frame(minWidth: 700, minHeight: 480)
         // AppKit 桥接层 legacy scroller 清扫：Form(.grouped) 底层 NSScrollView 在玻璃

@@ -69,7 +69,7 @@ extension AIChatState {
     func exportConversationMarkdown() -> String {
         let session = store.currentSession
         let rawTitle = session?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let title = rawTitle.isEmpty ? "新会话" : rawTitle
+        let title = rawTitle.isEmpty ? String(localized: "新会话") : rawTitle
 
         var blocks: [String] = ["# \(title)"]
 

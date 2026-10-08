@@ -8,7 +8,7 @@ import Foundation
 /// 标记 isInteractive = true：执行器对其豁免超时，无限静候用户作答。
 final class AskUserTool: AITool {
     let name = "ask_user"
-    let displayName = "向用户提问"
+    let displayName = String(localized: "向用户提问")
     let category: ToolCategory = .interaction
     /// 交互工具：挂起等待用户操作；默认 serial 执行策略不变。
     let isInteractive = true

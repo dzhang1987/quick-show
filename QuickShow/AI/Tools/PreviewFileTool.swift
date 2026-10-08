@@ -14,7 +14,7 @@ import Foundation
 /// 预览本地文件：结果携带 `preview_file` 富卡片信封，由 QuickLook 原生渲染。
 final class PreviewFileTool: AITool {
     let name = "preview_file"
-    let displayName = "预览文件"
+    let displayName = String(localized: "预览文件")
     let category: ToolCategory = .files
     /// 纯读文件元数据 + 交给 QuickLook 渲染，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe

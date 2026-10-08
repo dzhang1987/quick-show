@@ -99,17 +99,17 @@ struct AIChatMapCardView: View {
         HStack(spacing: Theme.Spacing.lg) {
             MapCardActionButton(
                 systemName: "map",
-                title: "在地图中打开",
+                title: String(localized: "在地图中打开"),
                 tint: Theme.Colors.accent,
-                help: "在系统地图 App 中查看"
+                help: String(localized: "在系统地图 App 中查看")
             ) {
                 openInMaps()
             }
             MapCardActionButton(
                 systemName: copied ? "checkmark" : "square.on.square",
-                title: copied ? "已复制" : "复制坐标",
+                title: copied ? String(localized: "已复制") : String(localized: "复制坐标"),
                 tint: copied ? Theme.Colors.accent : Theme.Colors.contentTertiary,
-                help: "复制中心点经纬度"
+                help: String(localized: "复制中心点经纬度")
             ) {
                 copyCoordinate()
             }

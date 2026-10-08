@@ -55,11 +55,11 @@ struct UserQuestionDrawerContent: View {
 
             // 按钮行：消极在左、积极在右
             HStack(spacing: Theme.Spacing.lg) {
-                DrawerActionButton(title: "取消", style: .secondary) {
+                DrawerActionButton(title: String(localized: "取消"), style: .secondary) {
                     ChatInteractionCenter.shared.cancelQuestions()
                 }
                 Spacer(minLength: 0)
-                DrawerActionButton(title: "提交答案", style: .primary, enabled: canSubmit) {
+                DrawerActionButton(title: String(localized: "提交答案"), style: .primary, enabled: canSubmit) {
                     submit()
                 }
             }
@@ -79,7 +79,7 @@ struct UserQuestionDrawerContent: View {
                     .font(Theme.Typography.text(Theme.Typography.caption, .semibold))
                     .foregroundColor(Theme.Colors.contentTertiary)
                     .lineLimit(1)
-                Text(question.multiple ? "多选" : "单选")
+                Text(question.multiple ? String(localized: "多选") : String(localized: "单选"))
                     .font(Theme.Typography.text(Theme.Typography.micro))
                     .foregroundColor(Theme.Colors.contentTertiary.opacity(0.75))
             }

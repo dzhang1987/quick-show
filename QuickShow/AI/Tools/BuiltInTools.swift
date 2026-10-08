@@ -58,7 +58,7 @@ private func resolveWhitelistedURL(_ rawPath: String) throws -> URL {
 /// 读取系统剪贴板文本，并检测是否包含图片
 final class ReadClipboardTool: AITool {
     let name = "read_clipboard"
-    let displayName = "读剪贴板"
+    let displayName = String(localized: "读剪贴板")
     let category: ToolCategory = .clipboard
     /// 纯读剪贴板，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -84,7 +84,7 @@ final class ReadClipboardTool: AITool {
 /// 将文本写入系统剪贴板
 final class WriteClipboardTool: AITool {
     let name = "write_clipboard"
-    let displayName = "写剪贴板"
+    let displayName = String(localized: "写剪贴板")
     let category: ToolCategory = .clipboard
     let description = "将指定文本写入系统剪贴板（覆盖现有内容）。"
     var parametersSchema: [String: Any] {
@@ -113,7 +113,7 @@ final class WriteClipboardTool: AITool {
 /// 获取宿主 Mac 的实时系统状态快照（CPU / 内存 / 电池 / 网络 / 磁盘）
 final class SystemStatusTool: AITool {
     let name = "get_system_status"
-    let displayName = "系统状态"
+    let displayName = String(localized: "系统状态")
     let category: ToolCategory = .system
     let description = "获取宿主 Mac 的实时系统状态快照，包括 CPU 使用率、内存、电池、网络与磁盘。可用 section 参数只取其中一项。"
     var parametersSchema: [String: Any] {
@@ -196,7 +196,7 @@ final class SystemStatusTool: AITool {
 /// 列出当前以常规方式运行的图形应用
 final class ListRunningAppsTool: AITool {
     let name = "list_running_apps"
-    let displayName = "运行中的应用"
+    let displayName = String(localized: "运行中的应用")
     let category: ToolCategory = .system
     /// 纯读运行中应用列表，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -227,7 +227,7 @@ final class ListRunningAppsTool: AITool {
 /// 按 Bundle Identifier 或应用名打开一个应用
 final class OpenAppTool: AITool {
     let name = "open_app"
-    let displayName = "打开应用"
+    let displayName = String(localized: "打开应用")
     let category: ToolCategory = .system
     let description = "打开指定应用。可通过 bundle_identifier 或 name 二选一指定目标。"
     var parametersSchema: [String: Any] {
@@ -282,7 +282,7 @@ final class OpenAppTool: AITool {
 /// 读取白名单目录内的文本文件（≤ 200KB）
 final class ReadFileTool: AITool {
     let name = "read_file"
-    let displayName = "读文件"
+    let displayName = String(localized: "读文件")
     let category: ToolCategory = .files
     /// 纯读白名单文件，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -330,7 +330,7 @@ final class ReadFileTool: AITool {
 /// 写入白名单目录内的文本文件（危险：可能覆盖内容）
 final class WriteFileTool: AITool {
     let name = "write_file"
-    let displayName = "写文件"
+    let displayName = String(localized: "写文件")
     let category: ToolCategory = .files
     let description = "将文本内容写入白名单目录内的文件（覆盖写入）。属于危险操作，执行前需用户确认。"
     var parametersSchema: [String: Any] {
@@ -365,7 +365,7 @@ final class WriteFileTool: AITool {
 /// 读取环境变量：优先自定义变量，其次进程环境
 final class GetEnvTool: AITool {
     let name = "get_env"
-    let displayName = "读环境变量"
+    let displayName = String(localized: "读环境变量")
     let category: ToolCategory = .environment
     /// 纯读环境变量，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -401,7 +401,7 @@ private let envVarsKey = "ai.envVars"
 /// 写入 QuickShow 自定义环境变量存储
 final class SetEnvTool: AITool {
     let name = "set_env"
-    let displayName = "写环境变量"
+    let displayName = String(localized: "写环境变量")
     let category: ToolCategory = .environment
     let description = "设置一个 QuickShow 自定义环境变量（存储于本地偏好，供 get_env 读取）。"
     var parametersSchema: [String: Any] {
@@ -430,7 +430,7 @@ final class SetEnvTool: AITool {
 /// 列出自定义变量名与进程环境变量名（不返回进程变量值，避免泄露敏感信息）
 final class ListEnvTool: AITool {
     let name = "list_env"
-    let displayName = "环境变量列表"
+    let displayName = String(localized: "环境变量列表")
     let category: ToolCategory = .environment
     /// 纯读环境变量名列表，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -452,7 +452,7 @@ final class ListEnvTool: AITool {
 /// 尽力而为返回宿主状态快照（窗口可见性、侧栏、模型、主题等）
 final class QuickShowStateTool: AITool {
     let name = "get_quickshow_state"
-    let displayName = "QuickShow 状态"
+    let displayName = String(localized: "QuickShow 状态")
     let category: ToolCategory = .system
     /// 纯读宿主状态快照，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -496,7 +496,7 @@ final class QuickShowStateTool: AITool {
 /// 执行 shell 命令（危险：可修改系统）
 final class RunShellTool: AITool {
     let name = "run_shell"
-    let displayName = "执行 Shell 命令"
+    let displayName = String(localized: "执行 Shell 命令")
     let category: ToolCategory = .system
     let description = "通过 zsh 执行一条 shell 命令，返回标准输出与标准错误的合并结果。可修改系统，属于危险工具。"
     var parametersSchema: [String: Any] {

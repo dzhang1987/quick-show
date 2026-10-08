@@ -29,13 +29,13 @@ enum ToolCategory: String, CaseIterable {
     /// 分组中文名
     var label: String {
         switch self {
-        case .clipboard: return "剪贴板"
-        case .system: return "系统状态"
-        case .files: return "文件"
-        case .environment: return "环境变量"
-        case .web: return "联网"
-        case .map: return "地图"
-        case .interaction: return "用户互动"
+        case .clipboard: return String(localized: "剪贴板")
+        case .system: return String(localized: "系统状态")
+        case .files: return String(localized: "文件")
+        case .environment: return String(localized: "环境变量")
+        case .web: return String(localized: "联网")
+        case .map: return String(localized: "地图")
+        case .interaction: return String(localized: "用户互动")
         }
     }
 }

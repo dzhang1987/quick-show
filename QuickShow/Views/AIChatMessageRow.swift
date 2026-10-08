@@ -347,7 +347,7 @@ struct ReasoningDisclosureView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help(expanded ? "收起思考过程" : "展开思考过程")
+            .help(expanded ? String(localized: "收起思考过程") : String(localized: "展开思考过程"))
 
             if expanded {
                 ScrollView(.vertical, showsIndicators: false) {
@@ -384,7 +384,7 @@ struct ReasoningDisclosureView: View {
             .components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        return paragraphs.last ?? "思考中…"
+        return paragraphs.last ?? String(localized: "思考中…")
     }
 }
 
@@ -418,7 +418,7 @@ struct CompactionBoundaryCard: View {
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: "arrow.counterclockwise")
                             .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                        Text(isCompacting ? "正在压缩…" : "已压缩早期对话（\(summarizedCount) 条）")
+                        Text(isCompacting ? String(localized: "正在压缩…") : String(localized: "已压缩早期对话（\(summarizedCount) 条）"))
                             .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
                         if !isCompacting {
                             Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -445,7 +445,7 @@ struct CompactionBoundaryCard: View {
                 .onHover { hovering in
                     withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
                 }
-                .help(isCompacting ? "正在压缩早期对话…" : (expanded ? "收起压缩摘要" : "查看压缩摘要"))
+                .help(isCompacting ? String(localized: "正在压缩早期对话…") : (expanded ? String(localized: "收起压缩摘要") : String(localized: "查看压缩摘要")))
                 featheredDivider
             }
 

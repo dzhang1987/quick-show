@@ -55,7 +55,7 @@ struct CalendarEventDetailView: View {
             }
             
             // 标题
-            Text(event.title ?? "日程")
+            Text(event.title ?? String(localized: "日程"))
                 .font(.system(size: Theme.Typography.badge, weight: .bold))
                 .foregroundColor(.primary)
                 .lineLimit(2)
@@ -67,12 +67,12 @@ struct CalendarEventDetailView: View {
                     detailRow(icon: "mappin.and.ellipse", text: location)
                 }
                 if let calendar = event.calendar {
-                    detailRow(icon: "calendar", text: "日历：\(calendar.title)")
+                    detailRow(icon: "calendar", text: String(localized: "日历：\(calendar.title)"))
                 }
                 if let attendees = event.attendees, !attendees.isEmpty {
                     let names = attendees.compactMap { $0.name }.prefix(3).joined(separator: "、")
-                    let suffix = attendees.count > 3 ? " 等 \(attendees.count) 人" : ""
-                    detailRow(icon: "person.2", text: "参会人：\(names)\(suffix)")
+                    let suffix = attendees.count > 3 ? " " + String(localized: "等 \(attendees.count) 人") : ""
+                    detailRow(icon: "person.2", text: String(localized: "参会人：\(names)\(suffix)"))
                 }
                 if let notes = event.notes, !notes.isEmpty {
                     detailRow(icon: "note.text", text: notes, lineLimit: 3)
@@ -106,7 +106,7 @@ struct CalendarEventDetailView: View {
     
     private var timeText: String {
         if event.isAllDay {
-            return Self.dateTimeFormatter.string(from: event.startDate).components(separatedBy: " ").prefix(2).joined(separator: " ") + " · 全天"
+            return Self.dateTimeFormatter.string(from: event.startDate).components(separatedBy: " ").prefix(2).joined(separator: " ") + " " + String(localized: "· 全天")
         }
         let start = Self.dateTimeFormatter.string(from: event.startDate)
         let endFormatter = DateFormatter()

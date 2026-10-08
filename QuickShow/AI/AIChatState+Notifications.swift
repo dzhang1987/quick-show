@@ -63,7 +63,7 @@ extension AIChatState {
         let summary = Self.plainSummary(lastAssistant)
 
         let sessionTitle = session?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var body = sessionTitle.isEmpty ? "回复已完成" : sessionTitle
+        var body = sessionTitle.isEmpty ? String(localized: "回复已完成") : sessionTitle
         if !summary.isEmpty {
             body += "\n" + summary
         }

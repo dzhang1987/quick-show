@@ -202,7 +202,7 @@ struct PerformanceCard: View {
             
             Spacer()
             
-            Text("\(String(format: "%.1f", appState.performanceInfo.memoryUsedGB))G / \(Int(appState.performanceInfo.memoryTotalGB))G")
+            Text(String(localized: "\(String(format: "%.1f", appState.performanceInfo.memoryUsedGB))G / \(Int(appState.performanceInfo.memoryTotalGB))G"))
                 .font(.system(size: Theme.Typography.caption, weight: .medium))
                 .foregroundStyle(Theme.Colors.contentTertiary)
                 .monospacedDigit()
@@ -256,7 +256,7 @@ struct PerformanceCard: View {
             Spacer()
             
             if appState.diskInfo.totalGB > 0 {
-                Text("\(Int(appState.diskInfo.freeGB))G 可用 / \(Int(appState.diskInfo.totalGB))G")
+                Text(String(localized: "\(Int(appState.diskInfo.freeGB))G 可用 / \(Int(appState.diskInfo.totalGB))G"))
                     .font(.system(size: Theme.Typography.caption, weight: .medium))
                     .foregroundColor(Theme.Colors.contentSecondaryStrong)
                     .monospacedDigit()

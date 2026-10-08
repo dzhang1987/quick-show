@@ -14,7 +14,7 @@ import Foundation
 /// 读取设备当前 GPS 定位（经纬度 + 大致地址）
 final class MyLocationTool: AITool {
     let name = "my_location"
-    let displayName = "我的位置"
+    let displayName = String(localized: "我的位置")
     let category: ToolCategory = .map
     /// 纯读定位，使用独立 CLLocationManager 实例、无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe

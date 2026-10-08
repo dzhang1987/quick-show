@@ -28,7 +28,7 @@ final class MediaStore: ObservableObject {
         guard hasNowPlayingSession else { return }
         SystemStatusProvider.shared.sendMediaCommand(.togglePlayPause)
         // 乐观提示：命令即发即弃无回执，约 100ms 内 stream 推送真实状态校正
-        facade?.showToast(nowPlayingInfo?.isPlaying == true ? "已暂停 ⏸" : "继续播放 ▶")
+        facade?.showToast(nowPlayingInfo?.isPlaying == true ? String(localized: "已暂停 ⏸") : String(localized: "继续播放 ▶"))
     }
 
     /// 上一首 (←)

@@ -6,6 +6,7 @@
 
 ### Added
 
+- 完整国际化（简体中文源语言 + English，界面语言跟随系统自动切换）：新建 String Catalog（`Localizable.xcstrings`，582 条 key，zh-Hans 源 / en 翻译，经 project.yml `developmentLanguage: zh-Hans` 声明，构建产物生成 `zh-Hans.lproj` / `en.lproj`）——SwiftUI 字面量（`Text`/`Label` 等 ~271 处）经 `LocalizedStringKey` 零代码改动自动查找 catalog；dynamic 类（三元表达式、枚举 `displayName`、自定义视图 String 参数）与 AppKit 类（`NSMenuItem`/`NSMenu`/toast/`panel.title` 等共 ~360 处、约 50 个文件，4 条并行 lane 改造）显式包裹 `String(localized:)`，插值文案经编译器格式串机制（`%lld`/`%@`）与 catalog 逐条对账；`Text(verbatim:)` 2 处改 `String(localized:)` 恢复本地化。范围决策（用户确认）：AI 工具 displayName / 类别 / 地图卡文案（UI 可见）翻译；发给 LLM 的工具 description / JSON schema / 系统提示词 / 工具执行错误（~180 处）与农历 / 天干地支 / 节气数据表保持中文；语言策略为跟随系统（无应用内切换）
 - 输入框撤销 / 重做支持（AI 窗主输入框与就地编辑框，快捷键 `⌘Z` / `⇧⌘Z`）：主菜单 Edit 菜单补入「撤销 / 重做」菜单项——`allowsUndo` 虽一直开启，但 AppKit 文本系统的 ⌘Z 键等效派发依赖主菜单存在对应 keyEquivalent 的菜单项，缺失即死键（与早年 ⌘V 粘贴失效同因）；`ChatInputNSTextView.performKeyEquivalent` 与 ⌘V/⌘C 同模式显式接住 ⌘Z/⇧⌘Z 双保险（`canUndo` / `canRedo` 为 false 时不消费、放行给系统）；就地编辑框（`ChatInlineEditTextView`）补上遗漏的 `allowsUndo = true`，与主输入框共享同一 NSTextView 子类的快捷键处理
 
 ### Removed

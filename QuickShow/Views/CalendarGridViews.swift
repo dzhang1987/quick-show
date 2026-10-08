@@ -154,16 +154,16 @@ struct CalendarPanelView: View {
         let anchor = appState.calendarAnchorDate
         switch appState.calendarViewMode {
         case .month:
-            return String(format: "%d 年 %d 月", cal.component(.year, from: anchor), cal.component(.month, from: anchor))
+            return String.localizedStringWithFormat(String(localized: "%d 年 %d 月"), cal.component(.year, from: anchor), cal.component(.month, from: anchor))
         case .week:
             let range = AppState.gridDateRange(anchor: anchor, mode: .week)
             let start = range.lowerBound
             let end = cal.date(byAdding: .day, value: -1, to: range.upperBound) ?? start
-            return String(format: "%d月%d日 – %d月%d日",
+            return String.localizedStringWithFormat(String(localized: "%d月%d日 – %d月%d日"),
                           cal.component(.month, from: start), cal.component(.day, from: start),
                           cal.component(.month, from: end), cal.component(.day, from: end))
         case .day:
-            return String(format: "%d 年 %d 月 %d 日",
+            return String.localizedStringWithFormat(String(localized: "%d 年 %d 月 %d 日"),
                           cal.component(.year, from: anchor), cal.component(.month, from: anchor), cal.component(.day, from: anchor))
         }
     }
@@ -173,7 +173,7 @@ struct CalendarPanelView: View {
         VStack(spacing: Theme.Spacing.xxs) {
             // 周标题（周一为首列，贴合中文习惯；表头不能比内容还弱——11pt + 二级强色）
             HStack(spacing: 0) {
-                ForEach(["一", "二", "三", "四", "五", "六", "日"], id: \.self) { d in
+                ForEach([String(localized: "一"), String(localized: "二"), String(localized: "三"), String(localized: "四"), String(localized: "五"), String(localized: "六"), String(localized: "日")], id: \.self) { d in
                     Text(d)
                         .font(.system(size: Theme.Typography.calendarWeekday, weight: .medium))
                         .foregroundColor(Theme.Colors.contentSecondaryStrong)
@@ -201,8 +201,8 @@ struct CalendarPanelView: View {
     private var selectedDayHeader: some View {
         let cal = Calendar.current
         let date = appState.selectedDate
-        let weekdays = ["", "周日", "周一", "周二", "周三", "周四", "周五", "周六"]
-        var parts = [String(format: "%d月%d日 %@", cal.component(.month, from: date), cal.component(.day, from: date), weekdays[cal.component(.weekday, from: date)])]
+        let weekdays = ["", String(localized: "周日"), String(localized: "周一"), String(localized: "周二"), String(localized: "周三"), String(localized: "周四"), String(localized: "周五"), String(localized: "周六")]
+        var parts = [String.localizedStringWithFormat(String(localized: "%d月%d日 %@"), cal.component(.month, from: date), cal.component(.day, from: date), weekdays[cal.component(.weekday, from: date)])]
         parts.append(LunarCalendar.dayText(for: date))
         if let festival = LunarCalendar.festival(for: date) { parts.append(festival) }
         if let term = LunarCalendar.solarTerm(for: date) { parts.append(term) }
@@ -336,7 +336,7 @@ struct CalendarEventRow: View {
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
             // 开始时间（全天日程显示「全天」）
-            Text(event.isAllDay ? "全天" : Self.timeFormatter.string(from: event.startDate))
+            Text(event.isAllDay ? String(localized: "全天") : Self.timeFormatter.string(from: event.startDate))
                 .font(.system(size: Theme.Typography.caption, weight: .semibold, design: .monospaced))
                 .foregroundColor(Theme.Colors.contentSecondaryStrong)
                 .frame(width: 34, alignment: .leading)
@@ -346,7 +346,7 @@ struct CalendarEventRow: View {
                 .fill(event.calendar.map { Color(cgColor: $0.cgColor) } ?? Theme.Colors.accent)
                 .frame(width: 3, height: 14)
             
-            Text(event.title ?? "日程")
+            Text(event.title ?? String(localized: "日程"))
                 .font(.system(size: Theme.Typography.body, weight: .medium))
                 .foregroundColor(.primary)
                 .lineLimit(1)

@@ -172,37 +172,37 @@ struct CheatSheetView: View {
             // 三列结构化快捷键分组 (满铺卡片网格)
             HStack(alignment: .top, spacing: Theme.Spacing.xl) {
                 // 列 1：基础交互
-                ShortcutGroupCard(title: "基础控制", shortcuts: [
-                    ("Tab", "展开 / 收起看板"),
-                    ("Space", "常驻图钉切换"),
-                    ("ESC", "退出 / 关闭面板"),
-                    ("⌘ ,", "偏好设置"),
-                    ("⌘ Q", "退出应用"),
-                    ("G", "切换日历视图"),
-                    ("1 / 2 / 3", "日历 月/周/日"),
-                    ("← / →", "日历翻页 / 媒体切歌")
+                ShortcutGroupCard(title: String(localized: "基础控制"), shortcuts: [
+                    ("Tab", String(localized: "展开 / 收起看板")),
+                    ("Space", String(localized: "常驻图钉切换")),
+                    ("ESC", String(localized: "退出 / 关闭面板")),
+                    ("⌘ ,", String(localized: "偏好设置")),
+                    ("⌘ Q", String(localized: "退出应用")),
+                    ("G", String(localized: "切换日历视图")),
+                    ("1 / 2 / 3", String(localized: "日历 月/周/日")),
+                    ("← / →", String(localized: "日历翻页 / 媒体切歌"))
                 ])
                 
                 // 列 2：效率工具
-                ShortcutGroupCard(title: "效率加速", shortcuts: [
-                    ("I", "AI 对话"),
-                    ("A", "防休眠阻止息屏"),
-                    ("C", "清理释放系统内存"),
-                    ("X", "剪贴板纯文本化"),
-                    ("O", "秒开系统下载目录"),
-                    ("L", "全屏锁屏离座")
+                ShortcutGroupCard(title: String(localized: "效率加速"), shortcuts: [
+                    ("I", String(localized: "AI 对话")),
+                    ("A", String(localized: "防休眠阻止息屏")),
+                    ("C", String(localized: "清理释放系统内存")),
+                    ("X", String(localized: "剪贴板纯文本化")),
+                    ("O", String(localized: "秒开系统下载目录")),
+                    ("L", String(localized: "全屏锁屏离座"))
                 ])
                 
                 // 列 3：系统控制（含媒体盲操，存在媒体会话时生效）
-                ShortcutGroupCard(title: "系统控制", shortcuts: [
-                    ("M", "一键静音 / 恢复"),
-                    ("↑ / ↓", "微调主音量 (±5%)"),
-                    ("P", "番茄钟播放 / 暂停"),
-                    ("D", "专注模式设置"),
-                    ("?", "速查卡片常驻开关"),
-                    ("⏎", "媒体播放 / 暂停"),
-                    ("← / →", "上一首 / 下一首"),
-                    (", / .", "快退 / 快进 15 秒")
+                ShortcutGroupCard(title: String(localized: "系统控制"), shortcuts: [
+                    ("M", String(localized: "一键静音 / 恢复")),
+                    ("↑ / ↓", String(localized: "微调主音量 (±5%)")),
+                    ("P", String(localized: "番茄钟播放 / 暂停")),
+                    ("D", String(localized: "专注模式设置")),
+                    ("?", String(localized: "速查卡片常驻开关")),
+                    ("⏎", String(localized: "媒体播放 / 暂停")),
+                    ("← / →", String(localized: "上一首 / 下一首")),
+                    (", / .", String(localized: "快退 / 快进 15 秒"))
                 ])
             }
             .padding(.horizontal, Theme.Spacing.xxxl)

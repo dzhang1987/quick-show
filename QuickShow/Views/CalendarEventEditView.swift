@@ -14,7 +14,7 @@ struct CalendarEventEditView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             // 标题行
             HStack {
-                Text(isNew ? "新建日程" : "编辑日程")
+                Text(isNew ? String(localized: "新建日程") : String(localized: "编辑日程"))
                     .font(.system(size: Theme.Typography.callout, weight: .bold))
                     .foregroundColor(.primary)
                 Spacer()
@@ -37,12 +37,12 @@ struct CalendarEventEditView: View {
             // 字段网格
             Grid(alignment: .leading, horizontalSpacing: Theme.Spacing.xl, verticalSpacing: Theme.Spacing.lg) {
                 GridRow {
-                    fieldLabel("标题")
+                    fieldLabel(String(localized: "标题"))
                     TextField("日程标题", text: $draft.title)
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    fieldLabel("全天")
+                    fieldLabel(String(localized: "全天"))
                     Toggle("", isOn: $draft.isAllDay)
                         .labelsHidden()
                         .toggleStyle(.switch)
@@ -50,29 +50,29 @@ struct CalendarEventEditView: View {
                         .frame(height: 18)
                 }
                 GridRow {
-                    fieldLabel("日期")
+                    fieldLabel(String(localized: "日期"))
                     DatePicker("", selection: $draft.startDate, displayedComponents: .date)
                         .labelsHidden()
                 }
                 if !draft.isAllDay {
                     GridRow {
-                        fieldLabel("开始")
+                        fieldLabel(String(localized: "开始"))
                         DatePicker("", selection: $draft.startDate, displayedComponents: .hourAndMinute)
                             .labelsHidden()
                     }
                     GridRow {
-                        fieldLabel("结束")
+                        fieldLabel(String(localized: "结束"))
                         DatePicker("", selection: $draft.endDate, displayedComponents: .hourAndMinute)
                             .labelsHidden()
                     }
                 }
                 GridRow {
-                    fieldLabel("地点")
+                    fieldLabel(String(localized: "地点"))
                     TextField("选填", text: $draft.location)
                         .textFieldStyle(.roundedBorder)
                 }
                 GridRow {
-                    fieldLabel("日历")
+                    fieldLabel(String(localized: "日历"))
                     Picker("", selection: $draft.calendarID) {
                         Text("默认日历").tag(nil as String?)
                         ForEach(writableCalendars, id: \.calendarIdentifier) { cal in
@@ -83,7 +83,7 @@ struct CalendarEventEditView: View {
                     .frame(maxWidth: 180)
                 }
                 GridRow {
-                    fieldLabel("备注")
+                    fieldLabel(String(localized: "备注"))
                     TextField("选填", text: $draft.notes)
                         .textFieldStyle(.roundedBorder)
                 }
@@ -107,7 +107,7 @@ struct CalendarEventEditView: View {
                 Button {
                     appState.saveEventEditing()
                 } label: {
-                    Text(isNew ? "创建" : "保存")
+                    Text(isNew ? String(localized: "创建") : String(localized: "保存"))
                         .font(.system(size: Theme.Typography.caption, weight: .bold))
                         .foregroundColor(draft.title.trimmingCharacters(in: .whitespaces).isEmpty ? Theme.Colors.idleText : Theme.Colors.solidButtonText)
                         .padding(.horizontal, Theme.Spacing.lg)

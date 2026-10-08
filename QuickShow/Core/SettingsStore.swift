@@ -12,10 +12,10 @@ enum PanelScaleOption: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .auto: return "自动（跟随当前屏幕智能自适应，推荐）"
-        case .standard: return "系统聚焦大号（宽 680 pt，红框聚焦标杆）"
-        case .compact: return "适中舒适（宽 540 pt）"
-        case .legacy: return "极简小巧（宽 440 pt）"
+        case .auto: return String(localized: "自动（跟随当前屏幕智能自适应，推荐）")
+        case .standard: return String(localized: "系统聚焦大号（宽 680 pt，红框聚焦标杆）")
+        case .compact: return String(localized: "适中舒适（宽 540 pt）")
+        case .legacy: return String(localized: "极简小巧（宽 440 pt）")
         }
     }
 }
@@ -37,16 +37,16 @@ enum WorldClockCity: String, CaseIterable, Identifiable {
 
     var displayName: String {
         switch self {
-        case .none: return "无"
-        case .beijing: return "北京"
-        case .tokyo: return "东京"
-        case .singapore: return "新加坡"
-        case .london: return "伦敦"
-        case .paris: return "巴黎"
-        case .berlin: return "柏林"
-        case .newYork: return "纽约"
-        case .sanFrancisco: return "旧金山"
-        case .sydney: return "悉尼"
+        case .none: return String(localized: "无")
+        case .beijing: return String(localized: "北京")
+        case .tokyo: return String(localized: "东京")
+        case .singapore: return String(localized: "新加坡")
+        case .london: return String(localized: "伦敦")
+        case .paris: return String(localized: "巴黎")
+        case .berlin: return String(localized: "柏林")
+        case .newYork: return String(localized: "纽约")
+        case .sanFrancisco: return String(localized: "旧金山")
+        case .sydney: return String(localized: "悉尼")
         }
     }
 

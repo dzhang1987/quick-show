@@ -1,6 +1,8 @@
 name: QuickShow
 options:
   bundleIdPrefix: cn.chiproad
+  # 应用源语言为简体中文：String Catalog key 即中文原文，英文为翻译目标
+  developmentLanguage: zh-Hans
   deploymentTarget:
     macOS: "13.0"
   xcodeVersion: "16.0"

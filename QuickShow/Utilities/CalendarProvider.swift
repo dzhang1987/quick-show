@@ -54,24 +54,28 @@ final class CalendarProvider {
             .sorted { $0.startDate < $1.startDate }
         
         guard let next = events.first else {
-            return CalendarEventInfo(hasEvent: false, title: "暂无紧邻日程", timeDescription: "尽情专注", isAuthorized: true)
+            return CalendarEventInfo(hasEvent: false, title: String(localized: "暂无紧邻日程"), timeDescription: String(localized: "尽情专注"), isAuthorized: true)
         }
         
         let timeDesc: String
         if next.startDate <= now && next.endDate > now {
             let leftMinutes = max(1, Int(next.endDate.timeIntervalSince(now) / 60))
-            timeDesc = "进行中 · 剩 \(leftMinutes) 分钟"
+            timeDesc = String(localized: "进行中 · 剩 \(leftMinutes) 分钟")
         } else {
             let startMinutes = max(1, Int(next.startDate.timeIntervalSince(now) / 60))
             let formatter = DateFormatter()
             formatter.dateFormat = "HH:mm"
             let startStr = formatter.string(from: next.startDate)
             if startMinutes < 60 {
-                timeDesc = "\(startStr) · 还有 \(startMinutes) 分钟"
+                timeDesc = String(localized: "\(startStr) · 还有 \(startMinutes) 分钟")
             } else {
                 let hours = startMinutes / 60
                 let remMin = startMinutes % 60
-                timeDesc = "\(startStr) · 还有 \(hours)小时\(remMin > 0 ? "\(remMin)分" : "")"
+                if remMin > 0 {
+                    timeDesc = String(localized: "\(startStr) · 还有 \(hours)小时\(remMin)分")
+                } else {
+                    timeDesc = String(localized: "\(startStr) · 还有 \(hours)小时")
+                }
             }
         }
         
@@ -79,7 +83,7 @@ final class CalendarProvider {
         
         return CalendarEventInfo(
             hasEvent: true,
-            title: next.title ?? "日历日程",
+            title: next.title ?? String(localized: "日历日程"),
             timeDescription: timeDesc,
             isAuthorized: true,
             meetingURL: meetingURL,

@@ -65,11 +65,11 @@ struct TimeDisplayView: View {
         let day = calendar.component(.day, from: date)
         let weekday = calendar.component(.weekday, from: date)
         
-        let weekdayNames = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"]
+        let weekdayNames = [String(localized: "星期日"), String(localized: "星期一"), String(localized: "星期二"), String(localized: "星期三"), String(localized: "星期四"), String(localized: "星期五"), String(localized: "星期六")]
         let weekdayStr = (weekday >= 1 && weekday <= 7) ? weekdayNames[weekday - 1] : ""
         let year = calendar.component(.year, from: date)
         
-        return "\(year)年\(month)月\(day)日 · \(weekdayStr)"
+        return String(localized: "\(year)年\(month)月\(day)日 · \(weekdayStr)")
     }
     
     var body: some View {

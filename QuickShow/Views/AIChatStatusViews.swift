@@ -28,7 +28,7 @@ struct QueuedInputCapsule: View {
                           ? "arrowshape.turn.up.right.fill"
                           : "arrowshape.turn.up.left.fill")
                         .font(Theme.Typography.text(10, .semibold))
-                    Text(isSteering ? "转向" : "追问")
+                    Text(isSteering ? String(localized: "转向") : String(localized: "追问"))
                         .font(Theme.Typography.text(10, .semibold))
                 }
                 .foregroundColor(isSteering ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
@@ -73,15 +73,15 @@ struct QueuedInputCapsule: View {
         }
         // 固定文案后附队列项完整文本（单行截断的补偿：多行长文经 tooltip 全量可读）
         .help((isSteering
-              ? "转向：本轮生成中即时注入、修正方向 · 点击取回编辑"
-              : "追问：本轮回复完成后自动追加一轮 · 点击取回编辑")
+              ? String(localized: "转向：本轮生成中即时注入、修正方向 · 点击取回编辑")
+              : String(localized: "追问：本轮回复完成后自动追加一轮 · 点击取回编辑"))
               + "\n" + displayText)
     }
 
     /// 展示文本：纯图片队列项给占位文案（对齐 send 的「请查看图片。」兜底语义）。
     private var displayText: String {
         if !item.text.isEmpty { return item.text }
-        if !item.images.isEmpty { return "图片 ×\(item.images.count)" }
+        if !item.images.isEmpty { return String(localized: "图片 ×\(item.images.count)") }
         return ""
     }
 }

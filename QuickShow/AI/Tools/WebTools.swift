@@ -8,7 +8,7 @@ import Foundation
 /// 联网搜索：调用 Tavily Search API，返回直接答案与相关网页摘要
 final class WebSearchTool: AITool {
     let name = "web_search"
-    let displayName = "网页搜索"
+    let displayName = String(localized: "网页搜索")
     let category: ToolCategory = .web
     /// 纯读联网搜索，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
@@ -130,7 +130,7 @@ final class WebSearchTool: AITool {
 /// 抓取并阅读网页：仅支持 text/html 与 text/plain，HTML 手写提取为纯文本
 final class FetchURLTool: AITool {
     let name = "fetch_url"
-    let displayName = "抓取网页"
+    let displayName = String(localized: "抓取网页")
     let category: ToolCategory = .web
     /// 纯读网页抓取，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe

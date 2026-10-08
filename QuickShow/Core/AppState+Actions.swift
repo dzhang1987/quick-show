@@ -31,7 +31,7 @@ extension AppState {
         resetGlanceTimer()
         let isMuted = SystemStatusProvider.shared.toggleMute()
         status.audioInfo.isMuted = isMuted
-        showToast(isMuted ? "已静音" : "已恢复音量 (\(status.audioInfo.volume)%)")
+        showToast(isMuted ? String(localized: "已静音") : String(localized: "已恢复音量 (\(status.audioInfo.volume)%)"))
     }
 
     func adjustVolume(by step: Int) {
@@ -39,14 +39,14 @@ extension AppState {
         let newVol = SystemStatusProvider.shared.adjustVolume(by: step)
         status.audioInfo.volume = newVol
         status.audioInfo.isMuted = false
-        showToast("音量: \(newVol)%")
+        showToast(String(localized: "音量: \(newVol)%"))
     }
 
     func toggleKeepAwake() {
         resetGlanceTimer()
         let active = SystemStatusProvider.shared.toggleKeepAwake()
         status.isKeepAwake = active
-        showToast(active ? "已开启防休眠 ☕️" : "已恢复系统节能")
+        showToast(active ? String(localized: "已开启防休眠 ☕️") : String(localized: "已恢复系统节能"))
     }
 
     func copyLocalIP() {
@@ -54,9 +54,9 @@ extension AppState {
         if let ip = SystemStatusProvider.shared.getLocalIPAddress() {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(ip, forType: .string)
-            showToast("已复制局域网 IP: \(ip)")
+            showToast(String(localized: "已复制局域网 IP: \(ip)"))
         } else {
-            showToast("未检测到有效局域网 IP")
+            showToast(String(localized: "未检测到有效局域网 IP"))
         }
     }
 
@@ -66,10 +66,10 @@ extension AppState {
         if let str = pb.string(forType: .string), !str.isEmpty {
             pb.clearContents()
             pb.setString(str, forType: .string)
-            let preview = str.trimmingCharacters(in: .whitespacesAndNewlines).prefix(14)
-            showToast("已纯文本化: \"\(preview)...\"")
+            let preview = String(str.trimmingCharacters(in: .whitespacesAndNewlines).prefix(14))
+            showToast(String(localized: "已纯文本化: \"\(preview)...\""))
         } else {
-            showToast("剪贴板为空")
+            showToast(String(localized: "剪贴板为空"))
         }
     }
 
@@ -82,14 +82,14 @@ extension AppState {
         resetGlanceTimer()
         let released = SystemStatusProvider.shared.optimizeMemory()
         monitoring.performanceInfo = SystemStatusProvider.shared.getSystemPerformanceInfo()
-        showToast(String(format: "已优化释放 %.0f MB 内存", released))
+        showToast(String.localizedStringWithFormat(String(localized: "已优化释放 %.0f MB 内存"), released))
     }
 
     // MARK: - 番茄钟控制
     func togglePomodoro() {
         resetGlanceTimer()
         pomodoro.pomodoroRunning.toggle()
-        showToast(pomodoro.pomodoroRunning ? "番茄钟已启动" : "番茄钟已暂停")
+        showToast(pomodoro.pomodoroRunning ? String(localized: "番茄钟已启动") : String(localized: "番茄钟已暂停"))
     }
 
     func resetPomodoro(durationMinutes: Int = 25) {
@@ -102,13 +102,13 @@ extension AppState {
         resetGlanceTimer()
         if pomodoro.pomodoroRemainingSeconds > 25 * 60 {
             resetPomodoro(durationMinutes: 5)
-            showToast("番茄钟: 5 分钟短休息")
+            showToast(String(localized: "番茄钟: 5 分钟短休息"))
         } else if pomodoro.pomodoroRemainingSeconds > 5 * 60 {
             resetPomodoro(durationMinutes: 45)
-            showToast("番茄钟: 45 分钟深度专注")
+            showToast(String(localized: "番茄钟: 45 分钟深度专注"))
         } else {
             resetPomodoro(durationMinutes: 25)
-            showToast("番茄钟: 25 分钟标准专注")
+            showToast(String(localized: "番茄钟: 25 分钟标准专注"))
         }
     }
 

@@ -57,14 +57,14 @@ struct ToolConfirmationDrawerContent: View {
 
             // 按钮行：消极在左、积极在右（拒绝远离主操作区）
             HStack(spacing: Theme.Spacing.lg) {
-                DrawerActionButton(title: "拒绝", style: .secondary) {
+                DrawerActionButton(title: String(localized: "拒绝"), style: .secondary) {
                     ChatInteractionCenter.shared.resolveConfirmation(.denied)
                 }
                 Spacer(minLength: 0)
-                DrawerActionButton(title: "本会话总是允许", style: .outlined) {
+                DrawerActionButton(title: String(localized: "本会话总是允许"), style: .outlined) {
                     ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
                 }
-                DrawerActionButton(title: "执行", style: .primary) {
+                DrawerActionButton(title: String(localized: "执行"), style: .primary) {
                     ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
                 }
             }
@@ -92,7 +92,7 @@ struct ToolConfirmationDrawerContent: View {
                         }
                     } label: {
                         HStack(spacing: Theme.Spacing.xs) {
-                            Text(argumentsExpanded ? "收起" : "完整参数")
+                            Text(argumentsExpanded ? String(localized: "收起") : String(localized: "完整参数"))
                                 .font(Theme.Typography.text(Theme.Typography.mini, .medium))
                             Image(systemName: "chevron.right")
                                 .font(Theme.Typography.text(8, .semibold))
@@ -104,7 +104,7 @@ struct ToolConfirmationDrawerContent: View {
                     .onHover { hovering in
                         withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { toggleHovered = hovering }
                     }
-                    .help(argumentsExpanded ? "收起参数" : "展开查看完整参数")
+                    .help(argumentsExpanded ? String(localized: "收起参数") : String(localized: "展开查看完整参数"))
                 }
             }
 

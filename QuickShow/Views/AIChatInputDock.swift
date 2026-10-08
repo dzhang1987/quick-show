@@ -29,7 +29,7 @@ struct AIChatInputDock: View {
     let onEscape: () -> Void
 
     /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
-    private let inputPlaceholder = "问点什么…"
+    private let inputPlaceholder = String(localized: "问点什么…")
 
     /// 输入内容空态：独立于 state.inputText 的回写通道（IME 组字期间由 setMarkedText 回调驱动）。
     /// 显隐判据须与 state.inputText.isEmpty 取与：@State 初值固定为 true 且首挂载无变化事件
@@ -393,7 +393,7 @@ struct AIChatInputDock: View {
                 // 统一 brain 图标：模型与思考强度同属「生成参数」，一个心智入口一个符号
                 Image(systemName: "brain")
                     .font(Theme.Typography.text(8, .medium))
-                Text(modelList.count > 1 ? currentModelName : "思考")
+                Text(modelList.count > 1 ? currentModelName : String(localized: "思考"))
                     .font(Theme.Typography.text(10, .regular))
                     .lineLimit(1)
                 // 思考覆盖信号条：仅手动覆盖档位时挂载，随 hover 动画同步淡变；
@@ -447,7 +447,7 @@ struct AIChatInputDock: View {
 
         // 「模型」分组：仅多模型可选时出现；选中写入会话级绑定（setSessionModel），不写全局
         if modelList.count > 1 {
-            addHeader("模型")
+            addHeader(String(localized: "模型"))
             for model in modelList {
                 addItem(model.name, isOn: model.modelId == effectiveModelId) { [state] in
                     state.setSessionModel(model.modelId)
@@ -458,8 +458,8 @@ struct AIChatInputDock: View {
 
         // 「思考强度」分组：nil = 默认（跟随当前模型自身默认）；
         // 「关闭」档仅当当前生效模型允许关闭思考时出现（如不可关则不显示该档）
-        addHeader("思考强度")
-        addItem("默认", isOn: state.currentThinkingLevel == nil) { [state] in
+        addHeader(String(localized: "思考强度"))
+        addItem(String(localized: "默认"), isOn: state.currentThinkingLevel == nil) { [state] in
             state.setThinkingLevel(nil)
         }
         for level in ThinkingLevel.allCases where level != .off || state.canDisableThinking(for: effectiveModelId) {
@@ -487,16 +487,16 @@ struct AIChatInputDock: View {
         if let matched = modelList.first(where: { $0.modelId == effectiveModelId }) {
             return matched.name
         }
-        return effectiveModelId.isEmpty ? "模型" : effectiveModelId
+        return effectiveModelId.isEmpty ? String(localized: "模型") : effectiveModelId
     }
 
     /// 菜单档位名（中文全字，用于「思考强度」分组菜单项）。
     private func thinkingLevelTitle(_ level: ThinkingLevel) -> String {
         switch level {
-        case .off: return "关闭"
-        case .low: return "低"
-        case .medium: return "中"
-        case .high: return "高"
+        case .off: return String(localized: "关闭")
+        case .low: return String(localized: "低")
+        case .medium: return String(localized: "中")
+        case .high: return String(localized: "高")
         }
     }
 
@@ -517,7 +517,7 @@ struct AIChatInputDock: View {
         }
         .buttonStyle(.plain)
         .disabled(!state.isStreaming && !canSend)
-        .help(state.isStreaming ? "中止生成" : "发送（⏎）· 追问（⌥⏎）")
+        .help(state.isStreaming ? String(localized: "中止生成") : String(localized: "发送（⏎）· 追问（⌥⏎）"))
     }
 
     // MARK: - 状态与动作
@@ -589,7 +589,7 @@ struct AIChatInputDock: View {
         panel.allowedContentTypes = [.image]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
-        panel.title = "选择图片"
+        panel.title = String(localized: "选择图片")
         guard panel.runModal() == .OK else { return }
         for url in panel.urls {
             if let attachment = ImageAttachmentProcessor.makeAttachment(fromFileURL: url) {

@@ -18,43 +18,43 @@ enum AIChatError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidBaseURL:
-            return "Base URL 无效，请在设置中检查 AI 服务地址。"
+            return String(localized: "Base URL 无效，请在设置中检查 AI 服务地址。")
         case .missingAPIKey:
-            return "尚未配置 API Key，请在设置中填写。"
+            return String(localized: "尚未配置 API Key，请在设置中填写。")
         case .missingModel:
-            return "尚未配置模型名称（Model），请在设置中填写。"
+            return String(localized: "尚未配置模型名称（Model），请在设置中填写。")
         case .invalidResponse:
-            return "服务端返回了无法识别的响应。"
+            return String(localized: "服务端返回了无法识别的响应。")
         case let .http(status, message):
             return AIChatError.humanReadableHTTP(status: status, message: message)
         case .timeout:
-            return "等待首个响应超时（120 秒），请检查网络或稍后重试。"
+            return String(localized: "等待首个响应超时（120 秒），请检查网络或稍后重试。")
         case let .network(message):
-            return "网络错误：\(message)"
+            return String(localized: "网络错误：\(message)")
         case let .streamError(message):
             // Responses 等协议在流内以事件形式报错，此处直接呈现服务端可读信息。
-            return message.isEmpty ? "流式响应异常中断。" : message
+            return message.isEmpty ? String(localized: "流式响应异常中断。") : message
         }
     }
 
     /// HTTP 状态码 → 用户可读中文提示（401/403/404/429/5xx 等）。
     private static func humanReadableHTTP(status: Int, message: String) -> String {
-        let suffix = message.isEmpty ? "" : "（\(message)）"
+        let suffix = message.isEmpty ? "" : String(localized: "（\(message)）")
         switch status {
         case 401:
-            return "API Key 无效或已过期（401），请在设置中重新填写。\(suffix)"
+            return String(localized: "API Key 无效或已过期（401），请在设置中重新填写。\(suffix)")
         case 403:
-            return "无权访问该模型或接口（403）。\(suffix)"
+            return String(localized: "无权访问该模型或接口（403）。\(suffix)")
         case 404:
-            return "接口地址不存在（404），请检查 Base URL 是否正确。\(suffix)"
+            return String(localized: "接口地址不存在（404），请检查 Base URL 是否正确。\(suffix)")
         case 408:
-            return "服务端请求超时（408），请稍后重试。\(suffix)"
+            return String(localized: "服务端请求超时（408），请稍后重试。\(suffix)")
         case 429:
-            return "请求过于频繁或额度不足（429），请稍后再试。\(suffix)"
+            return String(localized: "请求过于频繁或额度不足（429），请稍后再试。\(suffix)")
         case 500...599:
-            return "服务端错误（\(status)），请稍后重试。\(suffix)"
+            return String(localized: "服务端错误（\(status)），请稍后重试。\(suffix)")
         default:
-            return "请求失败（\(status)）。\(suffix)"
+            return String(localized: "请求失败（\(status)）。\(suffix)")
         }
     }
 }

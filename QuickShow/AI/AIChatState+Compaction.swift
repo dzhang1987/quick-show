@@ -108,7 +108,7 @@ extension AIChatState {
             if manual {
                 lastCompactionOutcome = .failed(
                     sessionId: sessionId,
-                    reason: "早期对话均已压缩（最近一轮保持原文）"
+                    reason: String(localized: "早期对话均已压缩（最近一轮保持原文）")
                 )
             }
             return
@@ -138,12 +138,12 @@ extension AIChatState {
             )
         } catch {
             // 网络/鉴权/超时等服务侧错误：不向用户暴露技术细节，一句简述即可
-            lastCompactionOutcome = .failed(sessionId: sessionId, reason: "服务请求失败")
+            lastCompactionOutcome = .failed(sessionId: sessionId, reason: String(localized: "服务请求失败"))
             return
         }
         let summary = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !summary.isEmpty else {
-            lastCompactionOutcome = .failed(sessionId: sessionId, reason: "服务返回了空摘要")
+            lastCompactionOutcome = .failed(sessionId: sessionId, reason: String(localized: "服务返回了空摘要"))
             return
         }
 
@@ -151,7 +151,7 @@ extension AIChatState {
         guard let latest = store.session(id: sessionId) else { return }
         let existingIDs = Set(latest.messages.map { $0.id.uuidString })
         guard plan.messageIDs.allSatisfy({ existingIDs.contains($0) }) else {
-            lastCompactionOutcome = .failed(sessionId: sessionId, reason: "会话内容已变化")
+            lastCompactionOutcome = .failed(sessionId: sessionId, reason: String(localized: "会话内容已变化"))
             return
         }
 

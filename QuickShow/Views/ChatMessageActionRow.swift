@@ -32,7 +32,7 @@ struct ChatMessageActionRow: View {
                 ChatActionIconButton(
                     systemName: copied ? "checkmark" : "square.on.square",
                     tint: copied ? Theme.Colors.accent : nil,
-                    help: "复制",
+                    help: String(localized: "复制"),
                     rowHovered: rowHovered,
                     action: onCopy
                 )
@@ -42,7 +42,7 @@ struct ChatMessageActionRow: View {
                 ChatActionIconButton(
                     systemName: "arrow.clockwise",
                     tint: nil,
-                    help: "重新生成",
+                    help: String(localized: "重新生成"),
                     rowHovered: rowHovered,
                     action: onRegenerate
                 )
@@ -53,14 +53,14 @@ struct ChatMessageActionRow: View {
                 ChatActionIconButton(
                     systemName: "pencil",
                     tint: nil,
-                    help: "编辑并重发",
+                    help: String(localized: "编辑并重发"),
                     rowHovered: rowHovered,
                     action: onBeginEdit
                 )
                 ChatActionIconButton(
                     systemName: "arrow.uturn.backward",
                     tint: nil,
-                    help: "撤回该轮（内容回填输入框）",
+                    help: String(localized: "撤回该轮（内容回填输入框）"),
                     rowHovered: rowHovered,
                     action: onWithdraw
                 )

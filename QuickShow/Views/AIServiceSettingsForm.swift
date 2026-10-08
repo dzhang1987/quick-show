@@ -14,8 +14,8 @@ enum AIProtocolOption: String, CaseIterable, Identifiable {
     
     var displayName: String {
         switch self {
-        case .chat: return "Chat Completions（通用兼容）"
-        case .responses: return "Responses（OpenAI 官方新协议）"
+        case .chat: return String(localized: "Chat Completions（通用兼容）")
+        case .responses: return String(localized: "Responses（OpenAI 官方新协议）")
         }
     }
 }
@@ -65,15 +65,15 @@ struct AIServiceSettingsForm: View {
             }
             
             Section {
-                // 占位文案用中性描述且以 verbatim 传入，避免 URL 被 Markdown 自动识别成蓝色链接；
+                // 占位文案用中性描述且以纯文本传入（String(localized:) 走 String 重载），避免 URL 被 Markdown 自动识别成蓝色链接；
                 // prompt 压成 contentTertiary 灰，与其他字段（如「输入 API Key」）的占位观感一致。
-                TextField("Base URL", text: $baseURL, prompt: Text(verbatim: "例如 api.openai.com/v1").foregroundColor(Theme.Colors.contentTertiary))
+                TextField("Base URL", text: $baseURL, prompt: Text(String(localized: "例如 api.openai.com/v1")).foregroundColor(Theme.Colors.contentTertiary))
                     .textFieldStyle(.roundedBorder)
             } header: {
                 Text("Base URL")
             } footer: {
-                // verbatim 纯文本：footer 中的示例地址不做 Markdown 链接着色，保持普通灰白说明文字。
-                Text(verbatim: "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方端点填 https://api.openai.com/v1；本地 Ollama / vLLM 填 http://localhost:端口/v1。")
+                // 纯文本：footer 中的示例地址不做 Markdown 链接着色，保持普通灰白说明文字。
+                Text(String(localized: "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方端点填 https://api.openai.com/v1；本地 Ollama / vLLM 填 http://localhost:端口/v1。"))
             }
             
             Section {
@@ -269,7 +269,7 @@ struct AIServiceSettingsForm: View {
                 HStack {
                     Text("打开 AI 对话窗")
                     Spacer()
-                    KeyBadge(key: "双击 ⌥ / I")
+                    KeyBadge(key: String(localized: "双击 ⌥ / I"))
                 }
             } header: {
                 Text("使用")
@@ -486,7 +486,7 @@ struct AIServiceSettingsForm: View {
                     existing.insert(id)
                 }
                 if availableModels.isEmpty {
-                    fetchError = "接口未返回任何模型。"
+                    fetchError = String(localized: "接口未返回任何模型。")
                 }
                 persistAvailableModels()
             } catch {

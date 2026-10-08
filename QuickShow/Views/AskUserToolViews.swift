@@ -92,11 +92,11 @@ struct AskUserQuestionsBlock: View {
                 .font(Theme.Typography.text(10, .semibold))
                 .foregroundColor(Theme.Colors.contentTertiary)
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text("共 \(summary.count) 个问题")
+                Text(String(localized: "共 \(summary.count) 个问题"))
                     .font(Theme.Typography.text(11, .medium))
                     .foregroundColor(Theme.Colors.contentSecondaryStrong)
                 ForEach(Array(summary.enumerated()), id: \.offset) { index, item in
-                    Text("\(index + 1). \(item.header)（\(item.optionCount) 个选项 · \(item.multiple ? "多选" : "单选")）")
+                    Text(String(localized: "\(index + 1). \(item.header)（\(item.optionCount) 个选项 · \(item.multiple ? String(localized: "多选") : String(localized: "单选"))）"))
                         .font(Theme.Typography.mono(11))
                         .foregroundColor(Theme.Colors.contentTertiary)
                         .lineLimit(1)
@@ -156,7 +156,7 @@ struct AskUserAnswersBlock: View {
                                 }
                             }
                             if !entry.custom.isEmpty {
-                                Text("补充：\(entry.custom)")
+                                Text(String(localized: "补充：\(entry.custom)"))
                                     .font(Theme.Typography.text(11))
                                     .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                     .fixedSize(horizontal: false, vertical: true)

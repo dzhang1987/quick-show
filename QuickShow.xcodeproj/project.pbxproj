@@ -114,6 +114,7 @@
 		A1FDBE8E1E5ED6AA004D88AB /* MarkdownParser+List.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5DD1A58827FCD3047A809B0 /* MarkdownParser+List.swift */; };
 		A26A5B040ACC1FAC54F57522 /* MapTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB8F7C9405E7B908FF1A9A77 /* MapTools.swift */; };
 		A2BB37E72F6E14AD44182149 /* MathLayoutCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28B054C54CC70DDF05EA318A /* MathLayoutCache.swift */; };
+		A2C7DF4473DC153D789F68D8 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 55AB67F36974558EB43B7923 /* Localizable.xcstrings */; };
 		A3E1307AC8680216CF70DC61 /* AIChatState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26F4BFA15BAE3D9FF3B340E9 /* AIChatState.swift */; };
 		A3FB31F1FE5755FC2B12689B /* DeviceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CF0F2EA78ECAACDCE0E67F /* DeviceProvider.swift */; };
 		A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AE831E93734F1F74D7F169 /* AIWindowManager.swift */; };
@@ -234,6 +235,7 @@
 		4CB3F9819E7541B279D9C3FB /* PanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelManager.swift; sourceTree = "<group>"; };
 		4EBFCA705B22FA81D696553E /* AskUserToolViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserToolViews.swift; sourceTree = "<group>"; };
 		50CF0F2EA78ECAACDCE0E67F /* DeviceProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceProvider.swift; sourceTree = "<group>"; };
+		55AB67F36974558EB43B7923 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		57013FDF715F8B5844F318F0 /* BuiltInTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BuiltInTools.swift; sourceTree = "<group>"; };
 		5822253DCCE3035ACFC217BB /* atom-one-light.min.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = "atom-one-light.min.css"; sourceTree = "<group>"; };
 		593FA64731993CAEC270C733 /* AIChatService+Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+Config.swift"; sourceTree = "<group>"; };
@@ -617,6 +619,7 @@
 			children = (
 				B7BF9C965803CBAE72E3577B /* Assets.xcassets */,
 				6EC8BA98E9C478A6D25D3962 /* Info.plist */,
+				55AB67F36974558EB43B7923 /* Localizable.xcstrings */,
 				80187D648ECC52984FCD6D2C /* QuickShowApp.swift */,
 				727AE6DE1B375F15B376972B /* AI */,
 				208989162C61EB5089E7CF98 /* Core */,
@@ -637,7 +640,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_92391C68-0096-4B33-BB18-919CF90B8B05" /* Resources */ = {
+		"TEMP_357D9AA8-58FA-4AD1-8991-89742D7E6558" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -721,11 +724,12 @@
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
 			compatibilityVersion = "Xcode 14.0";
-			developmentRegion = en;
+			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
 				Base,
 				en,
+				"zh-Hans",
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
 			projectDirPath = "";
@@ -744,6 +748,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F4BE6BFAA94DEC22AE533146 /* Assets.xcassets in Resources */,
+				A2C7DF4473DC153D789F68D8 /* Localizable.xcstrings in Resources */,
 				0FF0EAC1AC72FBE27721C977 /* MediaRemote in Resources */,
 				73C4F5FD7250B1905670B6FD /* atom-one-light.min.css in Resources */,
 				6113DF015E84E4580BEEB38B /* github-dark.min.css in Resources */,
