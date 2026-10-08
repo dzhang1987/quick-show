@@ -67,9 +67,16 @@ enum SystemActions {
     }
     
     // MARK: - 系统快捷应用打开
+    // NSWorkspace.open 打开 .app 对已运行的应用仅"显示"不必然前置激活；
+    // 统一走 openApplication + activates=true 确保目标应用窗口来到前台
+    private static func openAppActivating(_ appURL: URL) {
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        NSWorkspace.shared.openApplication(at: appURL, configuration: config)
+    }
+    
     static func openActivityMonitor() {
-        let url = URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")
-        NSWorkspace.shared.open(url)
+        openAppActivating(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app"))
     }
     
     static func openDownloadsFolder() {
@@ -79,9 +86,11 @@ enum SystemActions {
     }
     
     static func openCalendarApp() {
-        if let url = URL(string: "calshow://") {
-            NSWorkspace.shared.open(url)
-        }
+        // calshow:// 在部分 macOS 上无注册处理程序，会触发系统"未设定打开方式"报错弹窗；
+        // 改为按 bundle id 由 LaunchServices 解析日历 App 实际路径后直接打开，不依赖 scheme 与安装路径
+        let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.iCal")
+            ?? URL(fileURLWithPath: "/System/Applications/Calendar.app")
+        openAppActivating(appURL)
     }
     
     static func openNetworkSettings() {

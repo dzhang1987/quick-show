@@ -69,7 +69,9 @@ struct TimeDisplayView: View {
         let weekdayStr = (weekday >= 1 && weekday <= 7) ? weekdayNames[weekday - 1] : ""
         let year = calendar.component(.year, from: date)
         
-        return String(localized: "\(year)年\(month)月\(day)日 · \(weekdayStr)")
+        // localizedStringWithFormat 会按 locale 对数字做千位分组（2026 → 2,026，实测复现）；
+        // 用 String(format:)（printf 语义）渲染数值杜绝分组，模板仍查 xcstrings 表保留翻译
+        return String(format: String(localized: "%lld年%lld月%lld日 · %@"), year, month, day, weekdayStr)
     }
     
     var body: some View {

@@ -154,16 +154,16 @@ struct CalendarPanelView: View {
         let anchor = appState.calendarAnchorDate
         switch appState.calendarViewMode {
         case .month:
-            return String.localizedStringWithFormat(String(localized: "%d 年 %d 月"), cal.component(.year, from: anchor), cal.component(.month, from: anchor))
+            return String(format: String(localized: "%d 年 %d 月"), cal.component(.year, from: anchor), cal.component(.month, from: anchor))
         case .week:
             let range = AppState.gridDateRange(anchor: anchor, mode: .week)
             let start = range.lowerBound
             let end = cal.date(byAdding: .day, value: -1, to: range.upperBound) ?? start
-            return String.localizedStringWithFormat(String(localized: "%d月%d日 – %d月%d日"),
+            return String(format: String(localized: "%d月%d日 – %d月%d日"),
                           cal.component(.month, from: start), cal.component(.day, from: start),
                           cal.component(.month, from: end), cal.component(.day, from: end))
         case .day:
-            return String.localizedStringWithFormat(String(localized: "%d 年 %d 月 %d 日"),
+            return String(format: String(localized: "%d 年 %d 月 %d 日"),
                           cal.component(.year, from: anchor), cal.component(.month, from: anchor), cal.component(.day, from: anchor))
         }
     }
@@ -202,7 +202,7 @@ struct CalendarPanelView: View {
         let cal = Calendar.current
         let date = appState.selectedDate
         let weekdays = ["", String(localized: "周日"), String(localized: "周一"), String(localized: "周二"), String(localized: "周三"), String(localized: "周四"), String(localized: "周五"), String(localized: "周六")]
-        var parts = [String.localizedStringWithFormat(String(localized: "%d月%d日 %@"), cal.component(.month, from: date), cal.component(.day, from: date), weekdays[cal.component(.weekday, from: date)])]
+        var parts = [String(format: String(localized: "%d月%d日 %@"), cal.component(.month, from: date), cal.component(.day, from: date), weekdays[cal.component(.weekday, from: date)])]
         parts.append(LunarCalendar.dayText(for: date))
         if let festival = LunarCalendar.festival(for: date) { parts.append(festival) }
         if let term = LunarCalendar.solarTerm(for: date) { parts.append(term) }
