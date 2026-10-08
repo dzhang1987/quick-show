@@ -6,6 +6,9 @@ struct ExpandedMonitoringView: View {
     @ObservedObject var appState: AppState
     
     var body: some View {
+        // 卡内行降载不在此处预算宽度：两张卡片各自用 ViewThatFits 让布局系统按真值裁决，
+        // 外层只负责双列等分（严禁 GeometryReader/PreferenceKey 实测——本宿主含 Button
+        // 的测量链会死锁，PanelView 有案；ViewThatFits 是纯布局期选择，无回喂，不触该链）
         VStack(spacing: Theme.Spacing.lg) {
             // 细若游丝的微光渐隐分割线
             Rectangle()

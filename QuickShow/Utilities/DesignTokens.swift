@@ -313,12 +313,16 @@ enum Theme {
     // MARK: - 布局尺寸（面板尺寸档位的单一来源；ScreenHelper.metrics 引用此处，逻辑不搬）
     enum Layout {
         // 面板三档尺寸（标准/适中/极简）
+        // 高度账目（展开态内容实需）：hero 8 + 日期徽章 ~34 + 呼吸 ~10 + 分割 0.5
+        // + 状态栏上 10 + 状态栏 ~35 + 下 12 + 监控占位 259.5 + 时钟（窗宽×0.183 连续缩放）。
+        // 全局字号上调后旧高度即溢出账本：内容超高被根帧 .center 双向居中裁剪（顶徽章/底卡同裁），
+        // 故舒适/极简展开高修正为按标准档（520，已验证结余 ~14pt）同账同余量的值。
         static let standardCompact = NSSize(width: 680, height: 340)
         static let standardExpanded = NSSize(width: 740, height: 520)
         static let comfortCompact = NSSize(width: 540, height: 280)
-        static let comfortExpanded = NSSize(width: 620, height: 460)
-        static let legacyCompact = NSSize(width: 440, height: 230)
-        static let legacyExpanded = NSSize(width: 520, height: 400)
+        static let comfortExpanded = NSSize(width: 620, height: 512)
+        static let legacyCompact = NSSize(width: 440, height: 258)
+        static let legacyExpanded = NSSize(width: 520, height: 494)
         // 日历视图尺寸（按 G 任意状态直达日历档；与三档尺寸偏好同语义联动）
         static let standardCalendar = NSSize(width: 740, height: 640)
         static let comfortCalendar = NSSize(width: 620, height: 560)
@@ -356,6 +360,9 @@ enum Theme {
         static let metricValueWidth: CGFloat = 36    // 百分比数值右对齐宽度
         static let miniButtonSize: CGFloat = 20      // 重置钮
         static let iconButtonSize: CGFloat = 24      // 图钉/箭头按钮
+        // 番茄行紧凑档的统计小字宽上限：ViewThatFits 第二档（预设转紧凑字距）时，
+        // 统计小字让出横向预算给可点的预设胶囊，超出部分尾省略号
+        static let pomodoroStatsCompactWidth: CGFloat = 64
         static let dividerHeight: CGFloat = 0.5      // 微光分割线（严格 0.5pt）
         static let glanceProgressHeight: CGFloat = 2.5  // 一瞥倒计时微光进度条高（细若光丝，2x 屏 5px 清晰可辨）
 

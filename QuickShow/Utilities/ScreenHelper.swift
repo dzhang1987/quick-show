@@ -30,7 +30,7 @@ enum ScreenHelper {
                 calendarCellHeight: Theme.Layout.calendarCellStandard,
                 aiChatSize: Theme.Layout.standardAIChat
             )
-        case .compact: // 适中舒适（宽 540 / 高 280，展开 620 / 高 460，日历 620 / 高 560）
+        case .compact: // 适中舒适（宽 540 / 高 280，展开 620 / 高 512，日历 620 / 高 560）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.comfortCompact,
                 expandedSize: Theme.Layout.comfortExpanded,
@@ -38,7 +38,7 @@ enum ScreenHelper {
                 calendarCellHeight: Theme.Layout.calendarCellComfort,
                 aiChatSize: Theme.Layout.comfortAIChat
             )
-        case .legacy: // 极简小巧（宽 440 / 高 230，展开 520 / 高 400，日历 520 / 高 500）
+        case .legacy: // 极简小巧（宽 440 / 高 258，展开 520 / 高 494，日历 520 / 高 500）
             return PanelLayoutMetrics(
                 compactSize: Theme.Layout.legacyCompact,
                 expandedSize: Theme.Layout.legacyExpanded,
@@ -47,13 +47,18 @@ enum ScreenHelper {
                 aiChatSize: Theme.Layout.legacyAIChat
             )
         case .auto:
-            // 依据当前活跃屏幕有效宽高智能匹配最佳自然贴合档位
+            // 「容得下就选最大」级联：从标准档逐级向下试探，屏幕能容纳该档展开窗
+            // （窗高 + 垂直居中上移 centerLift 26 + 上下系统边距各 46：菜单栏/Dock/呼吸）
+            // 即选定——1280×720 这类小屏只要能容纳 standard 就用 standard，内容不再被
+            // 压进过小的窗格里换行/遮挡；只有真的放不下才降档。旧的 1600/1000 分辨率
+            // 阈值把 1280~1512 宽的屏幕一律压进舒适档，正是低分屏布局变形的选档根因。
             let width = screen.frame.width
             let height = screen.frame.height
-            
-            // 用户当前高分屏 1800 x 1169，或外接大屏 2560 x 1440
-            if width >= 1600 || height >= 1000 {
-                // 14/16寸高分屏与外接大屏：680 x 340 黄金高宽比，时间绝对主角
+            let verticalMargin = Theme.Layout.centerLift + 92
+
+            if width >= Theme.Layout.standardExpanded.width
+                && height >= Theme.Layout.standardExpanded.height + verticalMargin {
+                // 能容纳标准档：680 x 340 黄金高宽比，时间绝对主角
                 return PanelLayoutMetrics(
                     compactSize: Theme.Layout.standardCompact,
                     expandedSize: Theme.Layout.standardExpanded,
@@ -61,14 +66,22 @@ enum ScreenHelper {
                     calendarCellHeight: Theme.Layout.calendarCellStandard,
                     aiChatSize: Theme.Layout.standardAIChat
                 )
-            } else {
-                // 标准分辨率屏（<= 1512 宽且 < 1000 高）
+            } else if width >= Theme.Layout.comfortExpanded.width
+                && height >= Theme.Layout.comfortExpanded.height + verticalMargin {
                 return PanelLayoutMetrics(
                     compactSize: Theme.Layout.comfortCompact,
                     expandedSize: Theme.Layout.comfortExpanded,
                     calendarSize: Theme.Layout.comfortCalendar,
                     calendarCellHeight: Theme.Layout.calendarCellComfort,
                     aiChatSize: Theme.Layout.comfortAIChat
+                )
+            } else {
+                return PanelLayoutMetrics(
+                    compactSize: Theme.Layout.legacyCompact,
+                    expandedSize: Theme.Layout.legacyExpanded,
+                    calendarSize: Theme.Layout.legacyCalendar,
+                    calendarCellHeight: Theme.Layout.calendarCellLegacy,
+                    aiChatSize: Theme.Layout.legacyAIChat
                 )
             }
         }
