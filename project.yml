@@ -57,6 +57,7 @@ targets:
       path: QuickShow/Info.plist
       properties:
         # 版本号唯一真源在 project.yml：xcodegen 每次重写 Info.plist，手改 plist 会被打回默认 1.0
+        CFBundleAllowMixedLocalizations: true
         CFBundleShortVersionString: "1.13.0"
         CFBundleVersion: "1.13.0"
         LSUIElement: true
