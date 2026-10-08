@@ -567,6 +567,8 @@ extension SessionMessageList: Equatable {
     /// 忽略闭包/Binding/class 引用（语义跨渲染恒稳），仅按数据身份判定相等——
     /// 与 ChatMessageRow.Equatable 同一模式。消息数组改用 O(1) 身份签名
     /// （count + 首尾 id + 尾条 state/长度），避免全量逐元素 O(n) 比较。
+    /// 末条长度须覆盖正文与 reasoning 两条独立流式通道：纯思考期正文恒为空，
+    /// 漏掉 reasoning 长度会让 .equatable() 误判相等、思考折叠区整段冻结在「思考中…」。
     /// 配合父级 .equatable()：父级 body 重求值时未变的常驻会话跳过整棵子树，
     /// 聚焦/失焦/剪贴板/pin 等非消息变化不再冲刷 12 棵会话的 ForEach + 虚拟化。
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
@@ -578,5 +580,6 @@ extension SessionMessageList: Equatable {
             && lhs.messages.last?.id == rhs.messages.last?.id
             && lhs.messages.last?.state == rhs.messages.last?.state
             && lhs.messages.last?.content.count == rhs.messages.last?.content.count
+            && lhs.messages.last?.reasoning?.count == rhs.messages.last?.reasoning?.count
     }
 }
