@@ -44,7 +44,7 @@ struct AIChatQuickSwitcher: View {
 
             hintFooter
         }
-        .frame(width: 476)
+        .frame(width: 410)
         .background(
             ZStack {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
