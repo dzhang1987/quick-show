@@ -136,6 +136,7 @@ final class ChatInteractionCenter: ObservableObject {
             summary: Self.singleLineSummary(argumentsJSON)
         )
         request = .toolConfirmation(req)
+        notifyIfInactive(for: .toolConfirmation(req))
         // withCheckedContinuation 的闭包同步执行（无 await 间隙），request 与 continuation 不会错位
         return await withCheckedContinuation { continuation in
             confirmationContinuation = continuation
@@ -176,6 +177,7 @@ final class ChatInteractionCenter: ObservableObject {
         }
         let req = UserQuestionRequest(id: UUID(), questions: built)
         request = .userQuestions(req)
+        notifyIfInactive(for: .userQuestions(req))
         let response = await withCheckedContinuation { continuation in
             questionContinuation = continuation
         }
@@ -189,6 +191,7 @@ final class ChatInteractionCenter: ObservableObject {
     func markUIActive(_ active: Bool) {
         uiActive = active
         guard !active else { return }
+        clearPendingNotification()
         if let continuation = confirmationContinuation {
             confirmationContinuation = nil
             request = nil
@@ -205,6 +208,7 @@ final class ChatInteractionCenter: ObservableObject {
         guard case .toolConfirmation? = request, let continuation = confirmationContinuation else {
             return
         }
+        clearPendingNotification()
         confirmationContinuation = nil
         request = nil
         continuation.resume(returning: outcome)
@@ -217,6 +221,7 @@ final class ChatInteractionCenter: ObservableObject {
               let continuation = questionContinuation else {
             return
         }
+        clearPendingNotification()
         questionContinuation = nil
         request = nil
         continuation.resume(returning: response)
@@ -227,9 +232,60 @@ final class ChatInteractionCenter: ObservableObject {
         guard case .userQuestions? = request, let continuation = questionContinuation else {
             return
         }
+        clearPendingNotification()
         questionContinuation = nil
         request = nil
         continuation.resume(returning: nil)
+    }
+
+    // MARK: - 后台通知与撤销
+
+    /// 当 AI 窗口未在前台活跃时，向用户发送持久系统通知，提醒用户作答/授权
+    private func notifyIfInactive(for request: ChatDrawerRequest) {
+        let manager = AIWindowManager.shared
+        // 仅在窗口不可见或非 key 激活状态时提醒
+        guard !(manager.isPanelVisible && manager.isPanelKey) else { return }
+
+        let sessionId = AIChatState.shared.store.currentSessionId
+        switch request {
+        case .userQuestions(let req):
+            let title = String(localized: "QuickShow AI · 需要您回答")
+            let count = req.questions.count
+            let firstQ = req.questions.first?.question ?? ""
+            let body: String
+            if count > 1 {
+                body = String(format: String(localized: "AI 提出 %d 个问题待确认：\n%@"), count, firstQ)
+            } else {
+                body = String(format: String(localized: "AI 提问：\n%@"), firstQ)
+            }
+            AICompletionNotifier.shared.notifyInteraction(
+                id: req.id,
+                title: title,
+                body: body,
+                sessionId: sessionId
+            )
+        case .toolConfirmation(let req):
+            let title = String(localized: "QuickShow AI · 操作授权确认")
+            let body = String(format: String(localized: "请求执行工具「%@」：\n%@"), req.toolName, req.summary)
+            AICompletionNotifier.shared.notifyInteraction(
+                id: req.id,
+                title: title,
+                body: body,
+                sessionId: sessionId
+            )
+        }
+    }
+
+    /// 窗口失焦时调用：若当前存在未决的抽屉交互，确保向用户发送系统通知
+    func notifyPendingInteractionIfInactive() {
+        guard let request else { return }
+        notifyIfInactive(for: request)
+    }
+
+    /// 清除当前活跃抽屉在通知中心的待办通知
+    private func clearPendingNotification() {
+        guard let id = request?.id else { return }
+        AICompletionNotifier.shared.cancelInteractionNotification(id: id)
     }
 
     // MARK: - 会话内「总是允许」记忆

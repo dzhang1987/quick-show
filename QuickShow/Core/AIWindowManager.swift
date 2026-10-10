@@ -619,6 +619,10 @@ final class AIWindowManager {
         }
         panel.onResignKey = { [weak self] in
             guard let self else { return }
+            // 若当前存在未决的抽屉交互，失焦时确保向用户派发系统通知
+            MainActor.assumeIsolated {
+                ChatInteractionCenter.shared.notifyPendingInteractionIfInactive()
+            }
             // 钉住常驻：失焦不隐藏，保持 .statusBar 置顶层级。
             // 解钉后恢复失焦自动隐藏（当次不立即隐藏，等下次失焦/ESC）。
             if self.isPinned { return }

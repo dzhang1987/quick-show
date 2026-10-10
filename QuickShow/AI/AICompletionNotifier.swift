@@ -29,28 +29,37 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().delegate = self
     }
 
+    /// 统一请求通知授权（按需请求，支持 .timeSensitive 时效性通知）
+    private func requestAuthorizationIfNeeded(completion: @escaping (Bool) -> Void) {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .authorized, .provisional:
+                completion(true)
+            case .notDetermined:
+                var options: UNAuthorizationOptions = [.alert, .sound]
+                if #available(macOS 12.0, *) {
+                    options.insert(.timeSensitive)
+                }
+                center.requestAuthorization(options: options) { granted, _ in
+                    completion(granted)
+                }
+            default:
+                completion(false)
+            }
+        }
+    }
+
     /// 发送一条完成通知。未授权时按需请求；被拒后静默跳过。
     func notify(title: String, body: String, sessionId: UUID? = nil) {
         installDelegateIfNeeded()
         guard !suppressed else { return }
 
-        let center = UNUserNotificationCenter.current()
-        center.getNotificationSettings { [weak self] settings in
+        requestAuthorizationIfNeeded { [weak self] granted in
             guard let self else { return }
-            switch settings.authorizationStatus {
-            case .authorized, .provisional:
+            if granted {
                 self.deliver(title: title, body: body, sessionId: sessionId)
-            case .notDetermined:
-                // 首次真正需要发送时才请求授权
-                center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
-                    if granted {
-                        self.deliver(title: title, body: body, sessionId: sessionId)
-                    } else {
-                        self.suppressed = true
-                    }
-                }
-            default:
-                // .denied：本次会话不再请求/发送
+            } else {
                 self.suppressed = true
             }
         }
@@ -70,6 +79,51 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
         let identifier = "ai.completion.\(Date().timeIntervalSince1970)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request)
+    }
+
+    /// 发送一条需要用户交互的持久待办通知（ask_user 提问 / 危险工具确认）。
+    /// 设置 .timeSensitive 时效性，支持按 requestId 唯一标识和后续自动撤销。
+    func notifyInteraction(id: UUID, title: String, body: String, sessionId: UUID? = nil) {
+        installDelegateIfNeeded()
+        guard !suppressed else { return }
+
+        requestAuthorizationIfNeeded { [weak self] granted in
+            guard let self else { return }
+            if granted {
+                self.deliverInteraction(id: id, title: title, body: body, sessionId: sessionId)
+            } else {
+                self.suppressed = true
+            }
+        }
+    }
+
+    private func deliverInteraction(id: UUID, title: String, body: String, sessionId: UUID?) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.sound = .default
+        if #available(macOS 12.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+        var userInfo: [String: Any] = [
+            "target": "ai_chat",
+            "interactionId": id.uuidString
+        ]
+        if let sessionId {
+            userInfo["sessionId"] = sessionId.uuidString
+        }
+        content.userInfo = userInfo
+        let identifier = "ai.interaction.\(id.uuidString)"
+        let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
+        UNUserNotificationCenter.current().add(request)
+    }
+
+    /// 撤销指定的交互通知（抽屉已提交/取消/关闭时调用，保持通知中心干净）
+    func cancelInteractionNotification(id: UUID) {
+        let identifier = "ai.interaction.\(id.uuidString)"
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [identifier])
+        center.removePendingNotificationRequests(withIdentifiers: [identifier])
     }
 
     // MARK: - UNUserNotificationCenterDelegate
