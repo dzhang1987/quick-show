@@ -67,7 +67,7 @@ extension AIChatState {
         if !summary.isEmpty {
             body += "\n" + summary
         }
-        AICompletionNotifier.shared.notify(title: "QuickShow AI", body: body)
+        AICompletionNotifier.shared.notify(title: "QuickShow AI", body: body, sessionId: sessionId)
     }
 
     /// 通知正文摘要：粗略去 Markdown 标记、折叠空白，截断 ~80 字符。

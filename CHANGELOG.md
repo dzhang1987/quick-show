@@ -18,6 +18,14 @@
 
 ### Changed
 
+- 刻度轨放大模型重构（全刻度统一放大 + 对称推开 + 当前条独立明暗梯度，`ChatTickRail` / `Theme.Layout` / `Theme.Colors`）：
+  - **几何尺寸与布局统一**：废除当前条 16×3 与普通刻度 10×2 的尺寸差异，所有刻度几何基底统一为 10×2 圆头胶囊；轨体宽收敛为单一基础宽度的峰值放大宽；
+  - **消除锚点钉死感**：废除当前条固定 scale 1 钉死在位的旧机制，所有刻度统一参与余弦钟形权重放大与位移推开，绕轨体几何中心平滑对称生长，彻底消除光标掠过时当前条孤立静止的生硬割裂感；
+  - **当前条独立明暗梯度**：当前条保留 accent 色彩区分，并引入专属明暗梯度（静止 0.65、波峰 1.00、波谷 0.40），大小与明暗流动与普通刻度节奏完全同源，保持高辨识度的同时实现极致丝滑。
+- 实心操作按钮亮暗双模式配色自适应与高对比度重构（`ThemePalette` / `AIChatInputDock`）：为 `ThemePalette` 及 `Theme.Colors` 新增 `actionButtonFill` 和 `actionButtonForeground` 语义通道；琥珀暖色（Amber）主题暗色模式取高明度暖金（#F5B942 系）搭配深褐黑标，亮色模式取暖金琥珀橙（#BF5700 系）搭配纯白标（对比度达 4.8:1，告别发暗泥褐色）；默认标准主题暗色亮青配黑标、亮色深青蓝配白标；AI 聊天输入坞发送按钮适配该通道，确保在亮暗各模式及不同主题下图标对比度均稳居 4.5:1 以上。
+- AI 窗口多显示器独立位置记忆与多屏协同（`ScreenHelper` / `AIWindowManager`）：
+  - **硬件级显示器持久识别**：`NSScreen.persistentDisplayIdentifier` 优先从 CoreGraphics 获取 EDID 派生的物理 UUID（`CGDisplayCreateUUIDFromDisplayID`），跨系统重启与外接屏幕拔插绝对稳定；
+  - **同屏记忆位置，跨屏黄金分割居中**：`AIWindowManager` 实现多显示器相对坐标独立存档（`screenWindowFramesKey`）；当鼠标在哪个屏幕呼出时即在该屏幕恢复该屏幕专属的相对位置与尺寸；首次在未存档新屏幕唤出时继承最近偏好尺寸（`lastWindowSizeKey`）并居中弹出；拖动/缩放防抖落盘，无缝兼容旧单屏存档平滑迁移。
 - 模型选择与思考强度合并为单一「生成 chip」入口（输入坞工具行，用户多轮实测反馈驱动）：原模型 chip + 思考 chip 两个下拉合并为一个——chip 常驻 brain 图标 + 模型名（单模型时模型名无信息量，退化为「思考」二字），点击弹原生 NSMenu 双分组（「模型」组仅多模型时出现 /「思考强度」组含默认·关·低·中·高，选中项 `NSMenuItem.state` 系统原生勾选，「关」档保留 canDisableThinking 门控）；思考档位被手动覆盖时模型名后挂三根递增信号条（点亮根数 = 档位：低 1 / 中 2 / 高 3，「关」三根全熄灭留暗轮廓），默认态（跟随模型）不显示、整 chip 轻提亮示「已覆盖」；工具行视觉同步弱化统一：chip 字号 11→10、默认色降 idleText 灰（覆盖态轻提亮 contentTertiary）、⊕ 附件钮静止色 iconRest(0.60)→contentTertiary(0.55) 与 chip 同层、原 chevron.up.chevron.down 双箭头图标换为 brain 语义图标并前置
 - 窗口档位体系调整（低分屏适配，用户截图反馈驱动）：
   - **`.auto` 选档改「容得下就选最大」级联**（`ScreenHelper`）：取代旧「宽 ≥1600 或高 ≥1000」阈值——旧阈值把 1280~1512 宽的屏幕一律压进舒适档（内容宽仅 240pt，而监控卡行内容最小需 ~285pt 横向预算，天然溢出变形）；现为屏幕能容纳该档展开窗（窗高 + 垂直居中上移 centerLift 26 + 上下系统边距 46×2）即从标准档逐级向下试探选定，1280×720 只要能容纳标准档（740×520）即用标准档，不再被误降档
@@ -31,6 +39,9 @@
 
 ### Fixed
 
+- AI 生成完成通知点击精准打开 AI Chat 窗口与 Reopen 解耦根治（`QuickShowApp` / `AICompletionNotifier` / `AIChatState+Notifications`）：
+  - **会话精准导流**：通知载荷中携带 `sessionId`，用户在系统通知横幅点击后自动切换至对应会话，并在鼠标当前所在的物理屏幕直接呼出 AI Chat 窗口；
+  - **Reopen 误触主面板根除**：揭示系统点击通知横幅激活应用时的跨进程 XPC 异步机制（第一阶段即时派发 reopen，第二阶段约 300~600ms 跨进程 XPC 送达通知点击响应）。QuickShow 作为无 Dock 图标的常驻辅助应用（`LSUIElement`），在 `applicationShouldHandleReopen` 中彻底解除对主面板的误触呼出，将通知唤醒 100% 专职收口至 `UNUserNotificationCenterDelegate`，彻底消除了主面板与 AI 窗口同时弹出的时序竞争。
 - AI 窗呼出后主输入框自动获得输入焦点（呼出即打字）——根因：`AIWindowManager.show()` 仅做 `makeKeyAndOrderFront` / `makeKey` / `NSApp.activate` 三连，全程无一步显式把主输入框设为第一响应者，焦点依赖两个脆弱兜底：① `makeNSView` 里的一次性 async 聚焦仅首次建树时执行，面板复用（第二次以后打开）路径不再走；② `windowDidBecomeKey` 观察者带「其他 NSTextView 持焦即让位」守卫，而 NSWindow 隐藏不清 firstResponder——侧栏搜索 / 重命名持焦后关窗，复开时残留 field editor 使守卫永久拦截，主输入框拿不到光标只能手动点击；修复：`show()` 在上屏 + 激活完成后于 MainActor Task 发布 `aiChatForceFocusInput` 强制聚焦通知（面板不可见 / 正在收起 / 抽屉展开中三种情况不发布——抽屉展开时焦点留给抽屉交互），`ChatInputTextView.Coordinator` 收到后无条件 `makeFirstResponder` 接管第一响应者、清掉残留 field editor 焦点；「让位」语义仅保留给窗口已可见时的交互场景（抽屉关闭归还焦点 / 重命名不抢焦），与既有 `aiChatRefocusInput`（抽屉关闭后归还，带让位）分工明确
 - 日历打开链路三连修复（用户实测截图反馈驱动）：① 打开系统日历报「未设定用来打开 URL calshow:// 的应用程序」系统弹窗——根因：`openCalendarApp()` 用 `calshow://` scheme 唤起日历，而本机 LaunchServices 未注册该 scheme 的处理程序，`NSWorkspace.open` 直接弹系统报错框；修复：改按 bundle id `com.apple.iCal` 经 `NSWorkspace.urlForApplication(withBundleIdentifier:)` 解析实际安装路径后直接打开（不依赖 scheme 注册与安装路径），解析失败回退 `/System/Applications/Calendar.app` 固定路径 ② 打开的应用（系统日历 / 活动监视器）不前置到前台——根因：`NSWorkspace.open` 打开 .app 对已运行应用仅「显示」不必然激活置前；修复：新增 `openAppActivating()` 统一辅助——`NSWorkspace.openApplication(at:configuration:)` + `activates = true`，日历与活动监视器均接入，确保目标窗口来到前台 ③ 日期胶囊与日历视图标题的年份数字被千位分组（`2026` → `2,026`）——根因（独立 swift 脚本实测复现）：`String(localized:)` 的 Int 插值与 `String.localizedStringWithFormat` 均按 locale 对数字做千位分组渲染（zh_CN 分组分隔符为逗号），第一轮换汤未换药；修复：数值渲染统一改 `String(format:)`（printf 语义、永无分组），格式模板仍经 `String(localized:)` 查 xcstrings 表保留中英文翻译（英文翻译的位置参数格式 `%1$d` 实测兼容）——共 5 处：TimeDisplayView 日期胶囊 ×1 + CalendarGridViews 月/周/日视图标题与选中日信息行 ×4
 - 输入坞右键菜单全英文根治（`CFBundleAllowMixedLocalizations: true` 声明于 project.yml `info.properties`——Info.plist 唯一真源，xcodegen 每次重生成会打回手改）——根因：`ChatInputNSTextView` 未自定义 `menu(for:)`，右键弹出的是 AppKit 系统标准文本菜单（剪切/拷贝/粘贴/字体/拼写/服务全套，文案由框架提供而非应用源码），AppKit 渲染系统菜单时按「应用 bundle 声明的本地化语言 ∩ 系统语言」取框架资源；项目此前零本地化声明（`developmentRegion = en`、无任何 lproj），即使系统语言为简体中文也回退英文框架资源；声明允许混合本地化后，系统菜单跟随系统语言（中文系统显示中文，英文系统显示英文），应用自身的中文硬编码文案不受影响

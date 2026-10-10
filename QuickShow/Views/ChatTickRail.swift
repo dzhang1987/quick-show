@@ -10,8 +10,8 @@ import SwiftUI
 ///   容器几何不随放大变化，跟踪坐标无反馈漂移、无边界追逐振荡；
 /// - 放大态：每枚 tick 按「光标 → 静止中心」距离的余弦钟形得权重 w（Dock 经典衰减：
 ///   峰在光标正下方、radius 处平滑归零、域外恒 0）；槽心 = 静止中心 + 上方累计生长
-///   − 锚点前累计生长——**锚点（当前消息 tick）恒钉死在静止位、scale 恒 1**，不参与
-///   放大布局，成为波中的稳定零位；其余 tick 相对它彼此推开；
+///   − 全局生长一半（绕几何中心对称生长）——所有 tick（含当前消息 tick）均正常
+///   参与放大布局，彼此推开；
 /// - 明暗与大小共用同一条 w：不透明度 = rest + t×(lerp(dim, bright, w) − rest)，
 ///   光标正下方最亮、远端比静止更暗，两个维度同步流动；
 /// - 命中槽由相邻槽心中点切分（Voronoi），无缝相接、随放大同步长大——hover 判定与
@@ -21,8 +21,9 @@ struct ChatTickRailLayout {
         var center: CGFloat      // 槽心 y（容器静止坐标系；tick 视觉锚点）
         var frameTop: CGFloat    // 命中槽顶（相邻槽心中点切分，可溢出容器上下缘）
         var frameHeight: CGFloat // 命中槽高（槽间恒无缝）
-        var scale: CGFloat       // 放大倍率（1 = 静止/锚点）
-        var opacity: Double      // 明暗梯度输出（仅普通 tick 使用；accent 锚点忽略）
+        var scale: CGFloat       // 放大倍率（1 = 静止态）
+        var opacity: Double      // 普通刻度明暗梯度（rest 0.42 → dim 0.28 / bright 0.60）
+        var activeOpacity: Double // 选中刻度明暗梯度（rest 0.65 → dim 0.40 / bright 1.00）
     }
 
     let pitch: CGFloat
@@ -36,9 +37,7 @@ struct ChatTickRailLayout {
     let railBottom: CGFloat
     let slots: [Slot]
 
-    /// - pinnedIndex: 当前消息 tick 下标（accent 锚点）——恒 scale 1、位置钉死不动；
-    ///   nil 时退化为绕几何中心对称生长
-    init(count: Int, availableHeight: CGFloat, cursorY: CGFloat, amount: CGFloat, pinnedIndex: Int?) {
+    init(count: Int, availableHeight: CGFloat, cursorY: CGFloat, amount: CGFloat) {
         let tokens = Theme.Layout.self
         let n = max(count, 0)
         let avail = max(availableHeight, 1)
@@ -69,30 +68,32 @@ struct ChatTickRailLayout {
         let t = min(max(amount, 0), 1)
         let maxGain = tokens.chatTickMagnifyMaxScale - 1
         let radius = tokens.chatTickMagnifyRadius
-        let pinned = pinnedIndex.flatMap { $0 >= 0 && $0 < n ? $0 : nil }
         let colors = Theme.Colors.self
 
-        // 第一遍：各 tick 的权重 w（余弦钟形）→ scale / 不透明度 / 生长量
+        // 第一遍：各 tick 的权重 w（余弦钟形）→ scale / 不透明度 / 生长量（所有刻度统一参与放大）
         var scales: [CGFloat] = []
         scales.reserveCapacity(n)
         var opacities: [Double] = []
         opacities.reserveCapacity(n)
+        var activeOpacities: [Double] = []
+        activeOpacities.reserveCapacity(n)
         var growths: [CGFloat] = []
         growths.reserveCapacity(n)
         for i in 0..<n {
             let center = containerTop + p * (CGFloat(i) + 0.5)
             let d = abs(cursorY - center)
             let w: CGFloat = d < radius ? 0.5 * (1 + cos(.pi * d / radius)) : 0
-            // 锚点不参与放大布局：scale 恒 1（颜色恒 accent，不透明度输出不参与）
-            let scale = i == pinned ? 1 : 1 + maxGain * w * t
+            let scale = 1 + maxGain * w * t
             scales.append(scale)
             growths.append((scale - 1) * p)
-            // 明暗双维度：与大小共用同一 w 与渐入量 t（rest → lerp(dim, bright, w)）
+            // 明暗双维度：与大小共用同一 w 与渐入量 t（普通刻度 rest → lerp(dim, bright, w)）
             let target = colors.chatTickDimOpacity + (colors.chatTickBrightOpacity - colors.chatTickDimOpacity) * Double(w)
             opacities.append(colors.chatTickRestOpacity + Double(t) * (target - colors.chatTickRestOpacity))
+            // 选中刻度明暗梯度（方案 A：activeRest → lerp(activeDim, activeBright, w)）
+            let activeTarget = colors.chatTickActiveDimOpacity + (colors.chatTickActiveBrightOpacity - colors.chatTickActiveDimOpacity) * Double(w)
+            activeOpacities.append(colors.chatTickActiveRestOpacity + Double(t) * (activeTarget - colors.chatTickActiveRestOpacity))
         }
-        // 第二遍：槽心 = 静止中心 + 上方累计生长 − 锚点前累计生长（锚点钉死 = 零位）；
-        // 无锚点时退化为全局生长一半（绕几何中心对称生长）
+        // 第二遍：槽心 = 静止中心 + 上方累计生长 − 全局生长一半（绕几何中心对称生长）
         var growthAbove: [CGFloat] = []
         growthAbove.reserveCapacity(n)
         var running: CGFloat = 0
@@ -102,7 +103,7 @@ struct ChatTickRailLayout {
             running += growths[i]
             totalGrowth += growths[i]
         }
-        let pivot = pinned.map { growthAbove[$0] } ?? totalGrowth / 2
+        let pivot = totalGrowth / 2
         var centers: [CGFloat] = []
         centers.reserveCapacity(n)
         for i in 0..<n {
@@ -119,7 +120,8 @@ struct ChatTickRailLayout {
                 ? (centers[i] + centers[i + 1]) / 2
                 : centers[i] + (n > 1 ? (centers[i] - centers[i - 1]) / 2 : p * scales[i] / 2)
             result.append(Slot(center: centers[i], frameTop: top,
-                               frameHeight: bottom - top, scale: scales[i], opacity: opacities[i]))
+                               frameHeight: bottom - top, scale: scales[i],
+                               opacity: opacities[i], activeOpacity: activeOpacities[i]))
         }
         slots = result
         railTop = result[0].frameTop
@@ -143,7 +145,7 @@ struct ChatTickRailLayout {
 /// 每条用户消息一枚 tick，静止紧凑密排（pitch 按可用高度自适应收缩）；光标进入磁吸
 /// 跟踪带（轨体 + 上下各一个衰减半径 + 左伸接近带）后，光标附近的 tick 按余弦钟形
 /// 衰减实时放大并彼此推开、明暗同步流动；离开平滑收拢。hover 预览胶囊、点击直达、
-/// 当前条 accent 锚点（钉死不动）全部保留。
+/// 当前条 accent 高亮标记全部保留并正常参与放大。
 ///
 /// 丝滑的关键路径：
 /// - **跟踪面必须挂在覆盖整个交互区的共同祖先上**（历史根因：跟踪层曾是 tick 层
@@ -173,9 +175,9 @@ struct ChatTickRail: View {
     /// 被悬停 tick 的消息 id（预览胶囊锚点），由跟踪坐标派生
     @State private var hoveredTickId: UUID?
 
-    /// 轨体宽 = 当前条峰值放大后宽度（tick 右缘对齐，放大向左生长，右基准线钉死不动）
+    /// 轨体宽 = 刻度峰值放大后宽度（tick 右缘对齐，放大向左生长，右基准线钉死不动）
     private var railWidth: CGFloat {
-        Theme.Layout.chatTickActiveWidth * Theme.Layout.chatTickMagnifyMaxScale
+        Theme.Layout.chatTickWidth * Theme.Layout.chatTickMagnifyMaxScale
     }
 
     /// 跟踪带宽 = 轨体宽 + 左伸接近带（光标逼近即开始响应，Dock 同款「迎光标」）
@@ -189,8 +191,7 @@ struct ChatTickRail: View {
                 count: items.count,
                 availableHeight: geo.size.height,
                 cursorY: cursorY,
-                amount: magnifyAmount,
-                pinnedIndex: items.firstIndex(where: { $0.isCurrent })
+                amount: magnifyAmount
             )
             let radius = Theme.Layout.chatTickMagnifyRadius
             // 磁吸带 = 轨体 ± 一个衰减半径（几何区坐标）；不铺满全高——带外衰减恒零
@@ -243,18 +244,20 @@ struct ChatTickRail: View {
         hoveredTickId = newId
     }
 
-    /// 单枚 tick：默认 10×2 圆头；当前查看条 16×3 accent 点亮（锚点，钉死不动）；
-    /// 普通 tick 明暗随槽位梯度输出（光标正下方最亮、远端更暗）；点击直达该条消息。
+    /// 单枚 tick：基础 10×2 圆头（所有刻度几何尺寸统一，当前条仅以 accent 色彩区分）；
+    /// 明暗随槽位梯度输出（普通刻度 0.42→0.28/0.60，当前条 0.65→0.40/1.00）；点击直达该条消息。
     /// 命中区 = Voronoi 槽（随放大同步长大、槽间无缝），胶囊视觉锚定槽心、scaleEffect 放大。
     /// 动画作用域纪律：`.animation(_:value:)` 只罩颜色/胶囊/缩放内层（hover 变化帧才生效）；
     /// 槽位 offset/frame 外壳零动画修饰——光标移动帧的布局即时跟随，绝不橡胶延迟。
     @ViewBuilder
     private func tick(_ item: Item, slot: ChatTickRailLayout.Slot) -> some View {
         let hovered = hoveredTickId == item.id
-        let baseWidth = item.isCurrent ? Theme.Layout.chatTickActiveWidth : Theme.Layout.chatTickWidth
-        let baseHeight = item.isCurrent ? Theme.Layout.chatTickActiveHeight : Theme.Layout.chatTickHeight
+        let baseWidth = Theme.Layout.chatTickWidth
+        let baseHeight = Theme.Layout.chatTickHeight
+        let fillOpacity = item.isCurrent ? slot.activeOpacity : slot.opacity
+        let fillColor = item.isCurrent ? Theme.Colors.accent : Color.primary
         Capsule(style: .continuous)
-            .fill(item.isCurrent ? Theme.Colors.accent : Color.primary.opacity(slot.opacity))
+            .fill(fillColor.opacity(fillOpacity))
             .frame(width: baseWidth, height: baseHeight)
             .scaleEffect(slot.scale)
             .overlay(alignment: .trailing) {

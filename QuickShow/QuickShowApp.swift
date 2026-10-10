@@ -66,7 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        appState.show(mode: .glance)
+        // QuickShow 是状态栏/快捷键常驻工具（LSUIElement 无 Dock 图标），主面板统一由热键（如 ⌘⌘）与状态栏管理。
+        // 点击通知横幅激活应用时系统会自动向 NSApp 派发 reopen，此处绝对不能弹出主面板，
+        // 窗口唤醒全权交由 UNUserNotificationCenterDelegate 专职处理，彻底杜绝通知点击误开主面板。
         return true
     }
     

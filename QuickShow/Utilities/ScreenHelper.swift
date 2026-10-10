@@ -97,3 +97,22 @@ enum ScreenHelper {
         return NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 }
+
+// MARK: - NSScreen 物理显示器持久唯一标识扩展
+extension NSScreen {
+    /// 物理显示器持久唯一标识：
+    /// 优先从 CoreGraphics 获取 EDID 派生的物理 UUID（跨重启/接口插拔绝对稳定）；
+    /// 若不可用则降级为 DirectDisplayID 或 localizedName。
+    var persistentDisplayIdentifier: String {
+        if let id = deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID {
+            if let unmanagedUUID = CGDisplayCreateUUIDFromDisplayID(id) {
+                let uuid = unmanagedUUID.takeRetainedValue()
+                let uuidString = CFUUIDCreateString(nil, uuid) as String
+                return uuidString
+            }
+            return "display-\(id)"
+        }
+        return localizedName
+    }
+}
+

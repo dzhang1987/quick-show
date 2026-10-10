@@ -49,6 +49,8 @@ enum ThemeVariant: String, CaseIterable, Identifiable {
 // MARK: - 主题色板（变体间可变的颜色通道；未入板的令牌 = 全主题固定值）
 struct ThemePalette {
     let accent: Color               // 主强调色（CPU正常态/上传/蓝牙/pinned/链接/清理按钮）
+    let actionButtonFill: Color     // 实心操作钮底色（亮暗双模式自适应：琥珀暖金/科技青）
+    let actionButtonForeground: Color // 实心操作钮前景色（亮暗双模式自适应：确保对比度达标）
     let clockGradientTop: Color     // 主时钟渐变顶
     let clockGradientBottom: Color  // 主时钟渐变底
     let secondsGradientTop: Color   // 秒数渐变顶
@@ -63,19 +65,23 @@ struct ThemePalette {
         })
     }
     
-    /// 默认主题：现状值原样（中性黑白渐变 + 系统青强调）
+    /// 默认主题：现状值原样（中性黑白渐变 + 系统青强调；实心钮暗色亮青配黑标、亮色深青蓝配白标）
     static let standard = ThemePalette(
         accent: Color.cyan,
+        actionButtonFill: adaptive(dark: (0.15, 0.78, 0.88), light: (0.03, 0.52, 0.65)),
+        actionButtonForeground: adaptive(dark: (0.05, 0.05, 0.05), light: (1.0, 1.0, 1.0)),
         clockGradientTop: Color.primary,
         clockGradientBottom: Color.primary.opacity(0.9),
         secondsGradientTop: Color.primary.opacity(0.85),
         secondsGradientBottom: Color.primary.opacity(0.65)
     )
     
-    /// 琥珀暖色：暖金琥珀调（暗色取明亮金 #F5B942 系保证玻璃上发光感，
-    /// 亮色加深为烧琥珀 #B45309 系保证对比度；与番茄橙/警告红保持色相距离）
+    /// 琥珀暖色：暖金琥珀调（暗色取明亮金 #F5B942 系配高对比深褐黑标；
+    /// 亮色实心操作钮取暖金琥珀橙 #BF5700 配纯白标，对比度 4.8:1，告别发暗泥褐）
     static let amber = ThemePalette(
         accent: adaptive(dark: (0.96, 0.73, 0.26), light: (0.71, 0.33, 0.04)),
+        actionButtonFill: adaptive(dark: (0.96, 0.73, 0.26), light: (0.75, 0.35, 0.02)),
+        actionButtonForeground: adaptive(dark: (0.10, 0.07, 0.02), light: (1.0, 1.0, 1.0)),
         clockGradientTop: adaptive(dark: (0.99, 0.90, 0.71), light: (0.55, 0.32, 0.05)),
         clockGradientBottom: adaptive(dark: (0.94, 0.66, 0.24), light: (0.76, 0.45, 0.06)),
         secondsGradientTop: adaptive(dark: (0.99, 0.90, 0.71), light: (0.55, 0.32, 0.05)).opacity(0.85),
@@ -159,6 +165,8 @@ enum Theme {
         
         // 变体通道（计算属性，随 Theme.variant 切换；调用点无需感知主题存在）
         static var accent: Color { Theme.palette.accent }
+        static var actionButtonFill: Color { Theme.palette.actionButtonFill }
+        static var actionButtonForeground: Color { Theme.palette.actionButtonForeground }
         static var clockGradientTop: Color { Theme.palette.clockGradientTop }
         static var clockGradientBottom: Color { Theme.palette.clockGradientBottom }
         static var secondsGradientTop: Color { Theme.palette.secondsGradientTop }
@@ -200,10 +208,14 @@ enum Theme {
         static let chatInlineCodeFill = Color.primary.opacity(0.10)
         // 刻度轨明暗梯度（与大小放大共用同一条余弦权重曲线，大小与明暗同步流动）：
         // 静止 = rest；光标正下方 = bright；远端 = dim（比静止更暗——放大态下全轨变暗、
-        // 波峰提亮，梯度可辨）；当前条恒 accent、不受梯度调制（独立稳定锚点）
+        // 波峰提亮，梯度可辨）；当前条恒 accent、明暗与大小共用余弦权重同步流动
         static let chatTickRestOpacity: Double = 0.42
         static let chatTickBrightOpacity: Double = 0.60
         static let chatTickDimOpacity: Double = 0.28
+        // 选中刻度明暗梯度（方案 A：高辨识度基底，随光标波峰提亮、远端暗淡）：
+        static let chatTickActiveRestOpacity: Double = 0.65
+        static let chatTickActiveBrightOpacity: Double = 1.00
+        static let chatTickActiveDimOpacity: Double = 0.40
         /// 浏览导航浮层深底（预览胶囊 / 回底圆钮共用）：近不透明深面板，
         /// 玻璃上稳定承载白字，与坞/工具条同一家族
         static let chatNavFloatFill = aiAdaptive(dark: (0.15, 0.15, 0.165, 0.95), light: (0.98, 0.98, 0.985, 0.95))
@@ -400,13 +412,11 @@ enum Theme {
         // 显隐与跟随解耦的动机：pin 解除必须「上滚立即生效」（滚动卡死根治），
         // 显隐若直接绑 pin 就会在 1pt 上滚时冒 UI——太敏感。
         static let chatNavRevealDistance: CGFloat = 120
-        // 右缘刻度轨 tick：默认 10×2 圆头；当前条 16×3 accent 点亮。
+        // 右缘刻度轨 tick：基础 10×2 圆头（所有刻度几何尺寸统一，当前条仅以 accent 色彩区分）。
         // 排布为 Dock 放大模型（详见 AIChatView.ChatTickRail）：静止按 pitch 紧凑密排，
         // 光标进入右缘通道后按余弦钟形衰减实时放大并彼此推开，离开平滑收拢。
         static let chatTickWidth: CGFloat = 10
         static let chatTickHeight: CGFloat = 2
-        static let chatTickActiveWidth: CGFloat = 16
-        static let chatTickActiveHeight: CGFloat = 3
         static let chatTickTrailing: CGFloat = 4       // tick 右端距窗口右内缘
         // 刻度轨专用让位通道：阅读列（消息/坞/图钉/回底钮/顶栏图钉共用 ChatReadingColumn）
         // 左右双侧各内缩此值——右侧与刻度轨留足呼吸带（覆盖放大峰值宽度），左侧镜像对称，

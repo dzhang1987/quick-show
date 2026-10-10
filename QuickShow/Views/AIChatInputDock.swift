@@ -563,18 +563,18 @@ struct AIChatInputDock: View {
         state.imageAttachments = []
     }
 
-    /// 发送键底：可用 = 主题强调色实心（琥珀/青，全图最强图底反转——强调只在可发送瞬间登场），
+    /// 发送键底：可用 = 实心操作色（亮暗双模式自适应：琥珀暖金/科技青，全图最强图底反转——强调只在可发送瞬间登场），
     /// 流式 = 警告红；空态/禁用 = 无底（透明），杜绝空态下高亮实心色块抢夺视觉重心。
     private var sendButtonFill: Color {
         if state.isStreaming { return Theme.Colors.statusWarning.opacity(0.9) }
-        return canSend ? Theme.Colors.accent : Color.clear
+        return canSend ? Theme.Colors.actionButtonFill : Color.clear
     }
 
-    /// 发送键图标：实心强调色底上取深色（琥珀/青均属亮色底，深图标对比最稳），
+    /// 发送键图标：实心强调色底上自适应高对比前景色（亮暗双模式自适应：琥珀暖色亮色纯白/暗色深褐黑，对比度均 > 4.5:1），
     /// 流式红底用白色；禁用态 contentTertiary（≈4.7:1，灰箭头静止可读但不抢眼）。
     private var sendButtonForeground: Color {
         if state.isStreaming { return .white }
-        if canSend { return Color.black.opacity(0.72) }
+        if canSend { return Theme.Colors.actionButtonForeground }
         return Theme.Colors.contentTertiary
     }
 

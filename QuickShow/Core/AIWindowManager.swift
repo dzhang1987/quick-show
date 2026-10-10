@@ -141,8 +141,13 @@ final class AIWindowManager {
 
     /// 钉住键（常驻置顶：失焦不自动隐藏）。
     static let pinnedKey = "ai.pinned"
-    /// 窗口 frame 存档键（NSStringFromRect 落盘）。
+    /// 窗口 frame 存档键（旧单屏兼容落盘）。
     static let windowFrameKey = "ai.windowFrame"
+    /// 多屏幕独立窗口 frame 存档键（字典：[DisplayIdentifier: NSStringFromRect(relativeFrame)]）。
+    /// relativeFrame 记录的是相对于 screen.visibleFrame.origin 的相对偏移量与宽高。
+    static let screenWindowFramesKey = "ai.windowFramesByScreen"
+    /// 全局偏好尺寸存档键（供未存档的新屏幕首启时参考）。
+    static let lastWindowSizeKey = "ai.lastWindowSize"
     /// 最小尺寸（与边缘 resize 热区一致）。
     private let minWindowSize = NSSize(width: 480, height: 560)
 
@@ -185,13 +190,9 @@ final class AIWindowManager {
         let isFreshlyBuilt = self.panel == nil
         let panel = ensurePanel()
         let screen = ScreenHelper.activeScreen
-        // 有有效存档则恢复记忆的位置/大小；否则走居中默认尺寸（首启）。
-        if let restored = restoredFrame() {
-            panel.setFrame(restored, display: true)
-        } else {
-            let size = targetAIChatSize(on: screen)
-            panel.setFrame(ScreenHelper.centeredFrame(for: size, on: screen), display: true)
-        }
+        // 鼠标在哪个屏幕，AI Chat 窗口就得在哪弹出（方案 A：同屏记忆位置，跨屏黄金分割居中；继承尺寸偏好）
+        let frame = targetFrame(for: screen)
+        panel.setFrame(frame, display: true)
         panel.invalidateShadow()
 
         // 焦点纪律：优先继承主面板的「呼出前应用」，否则取当前最前台（排除自身）
@@ -341,36 +342,96 @@ final class AIWindowManager {
 
     // MARK: - 位置/大小持久化
 
-    /// 落盘当前窗口 frame（同步，用于隐藏前兜底）。
+    /// 落盘当前窗口 frame（同步，用于隐藏前兜底）：
+    /// 1. 识别当前窗口所在屏幕（基于硬件 UUID）；
+    /// 2. 计算相对坐标并保存到该屏幕专属存档中；
+    /// 3. 保存全局尺寸参考并保留旧键兼容。
     private func saveFrame() {
         frameSaveWorkItem?.cancel()
         frameSaveWorkItem = nil
         guard let panel else { return }
-        UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.windowFrameKey)
+        
+        let screen = panel.screen ?? ScreenHelper.activeScreen
+        let visibleFrame = screen.visibleFrame
+        let currentFrame = panel.frame
+        
+        // 相对于当前屏幕 visibleFrame.origin 的相对位置与尺寸
+        let relativeRect = NSRect(
+            x: currentFrame.origin.x - visibleFrame.origin.x,
+            y: currentFrame.origin.y - visibleFrame.origin.y,
+            width: currentFrame.width,
+            height: currentFrame.height
+        )
+        
+        let displayId = screen.persistentDisplayIdentifier
+        var dict = UserDefaults.standard.dictionary(forKey: Self.screenWindowFramesKey) as? [String: String] ?? [:]
+        dict[displayId] = NSStringFromRect(relativeRect)
+        UserDefaults.standard.set(dict, forKey: Self.screenWindowFramesKey)
+        
+        // 记录偏好尺寸供未存档新屏幕首启参考
+        UserDefaults.standard.set(NSStringFromSize(currentFrame.size), forKey: Self.lastWindowSizeKey)
+        // 旧单屏兼容落盘
+        UserDefaults.standard.set(NSStringFromRect(currentFrame), forKey: Self.windowFrameKey)
     }
 
     /// 防抖落盘：拖动/缩放期间 didMove/didResize 高频触发，合并为一次写盘。
     private func scheduleFrameSave() {
         frameSaveWorkItem?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let panel = self.panel else { return }
+            guard let self = self else { return }
             self.frameSaveWorkItem = nil
-            UserDefaults.standard.set(NSStringFromRect(panel.frame), forKey: Self.windowFrameKey)
+            self.saveFrame()
         }
         frameSaveWorkItem = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35, execute: work)
     }
 
-    /// 读取并校验存档 frame：需与任一屏幕可见区有 ≥100×100 实质交集，随后 clamp 到 [min, 屏幕可见区] 且完整可见。
-    private func restoredFrame() -> NSRect? {
-        guard let raw = UserDefaults.standard.string(forKey: Self.windowFrameKey), !raw.isEmpty else { return nil }
-        let rect = NSRectFromString(raw)
-        guard rect.width >= 1, rect.height >= 1 else { return nil }
-        guard let screen = NSScreen.screens.first(where: { screen in
-            let intersection = screen.visibleFrame.intersection(rect)
-            return intersection.width >= 100 && intersection.height >= 100
-        }) else { return nil }
-        return clampedFrame(rect, on: screen)
+    /// 计算指定屏幕下的最终窗口 frame（每个物理屏幕独立记忆自身最后位置与大小）：
+    /// - 优先读取该屏幕专属的相对位置与尺寸（在当前 visibleFrame 安全 clamp）；
+    /// - 兼容旧单屏历史存档迁移（若旧存档中心落在该屏幕）；
+    /// - 首次在该屏幕弹出：继承最近偏好尺寸（若有），并在目标屏幕视线黄金分割正中央弹出。
+    private func targetFrame(for screen: NSScreen) -> NSRect {
+        let displayId = screen.persistentDisplayIdentifier
+        let dict = UserDefaults.standard.dictionary(forKey: Self.screenWindowFramesKey) as? [String: String] ?? [:]
+        
+        // 1. 优先读取本屏幕专属记忆（相对坐标恢复）
+        if let raw = dict[displayId], !raw.isEmpty {
+            let relativeRect = NSRectFromString(raw)
+            if relativeRect.width >= 1 && relativeRect.height >= 1 {
+                let absoluteRect = NSRect(
+                    x: screen.visibleFrame.origin.x + relativeRect.origin.x,
+                    y: screen.visibleFrame.origin.y + relativeRect.origin.y,
+                    width: relativeRect.width,
+                    height: relativeRect.height
+                )
+                return clampedFrame(absoluteRect, on: screen)
+            }
+        }
+        
+        // 2. 兼容旧单屏存档迁移（若历史绝对坐标中心点正好处在本屏幕内）
+        if let oldRaw = UserDefaults.standard.string(forKey: Self.windowFrameKey), !oldRaw.isEmpty {
+            let oldRect = NSRectFromString(oldRaw)
+            if oldRect.width >= 1 && oldRect.height >= 1 {
+                let center = CGPoint(x: oldRect.midX, y: oldRect.midY)
+                if screen.frame.contains(center) {
+                    return clampedFrame(oldRect, on: screen)
+                }
+            }
+        }
+        
+        // 3. 首次在该屏幕弹出：继承最近偏好尺寸，并在目标屏幕黄金分割居中
+        let preferredSize: NSSize
+        if let rawSize = UserDefaults.standard.string(forKey: Self.lastWindowSizeKey), !rawSize.isEmpty {
+            let size = NSSizeFromString(rawSize)
+            preferredSize = NSSize(
+                width: min(max(size.width, minWindowSize.width), screen.visibleFrame.width),
+                height: min(max(size.height, minWindowSize.height), screen.visibleFrame.height)
+            )
+        } else {
+            preferredSize = targetAIChatSize(on: screen)
+        }
+        
+        return ScreenHelper.centeredFrame(for: preferredSize, on: screen)
     }
 
     /// 把 frame 夹到最小尺寸与指定屏幕可见区内（宽高 clamp + 完整可见）。

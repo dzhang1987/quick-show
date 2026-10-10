@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -29,7 +30,7 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     /// 发送一条完成通知。未授权时按需请求；被拒后静默跳过。
-    func notify(title: String, body: String) {
+    func notify(title: String, body: String, sessionId: UUID? = nil) {
         installDelegateIfNeeded()
         guard !suppressed else { return }
 
@@ -38,12 +39,12 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
             guard let self else { return }
             switch settings.authorizationStatus {
             case .authorized, .provisional:
-                self.deliver(title: title, body: body)
+                self.deliver(title: title, body: body, sessionId: sessionId)
             case .notDetermined:
                 // 首次真正需要发送时才请求授权
                 center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
                     if granted {
-                        self.deliver(title: title, body: body)
+                        self.deliver(title: title, body: body, sessionId: sessionId)
                     } else {
                         self.suppressed = true
                     }
@@ -55,11 +56,16 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    private func deliver(title: String, body: String) {
+    private func deliver(title: String, body: String, sessionId: UUID?) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = body
         content.sound = .default
+        var userInfo: [String: Any] = ["target": "ai_chat"]
+        if let sessionId {
+            userInfo["sessionId"] = sessionId.uuidString
+        }
+        content.userInfo = userInfo
         // 时间戳 identifier：多条完成通知互不覆盖
         let identifier = "ai.completion.\(Date().timeIntervalSince1970)"
         let request = UNNotificationRequest(identifier: identifier, content: content, trigger: nil)
@@ -74,7 +80,20 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        let userInfo = response.notification.request.content.userInfo
+        let rawSessionId = userInfo["sessionId"] as? String
+        let sessionId = rawSessionId.flatMap { UUID(uuidString: $0) }
+
         Task { @MainActor in
+            // 确保主面板关闭（防竞争残留）
+            PanelManager.shared.hidePanel(restoreFocus: false)
+
+            // 若通知绑定了会话，切换到该会话
+            if let sessionId {
+                AIChatState.shared.selectSession(id: sessionId)
+            }
+
+            // 在鼠标当前所在屏幕（点击通知的屏幕）直接唤出 AI Chat
             AIWindowManager.shared.show()
         }
         completionHandler()
