@@ -135,11 +135,25 @@ struct SessionMessageList: View {
                                         isSummarized: isSummarized,
                                         canRegenerate: message.id == lastRegeneratableAssistantId,
                                         canEditLastRound: message.id == lastEditableUserMessageId,
+                                        isEditing: state.editingMessageId == message.id,
+                                        onBeginEdit: {
+                                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                                state.editingMessageId = message.id
+                                            }
+                                        },
+                                        onCancelEdit: {
+                                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                                state.editingMessageId = nil
+                                            }
+                                        },
                                         onRetry: { if isActive { state.retryLast() } },
                                         onRegenerate: { if isActive { state.retryLast() } },
                                         onWithdraw: { if isActive { state.withdrawLastRound() } },
                                         onEditResend: { text, images in
-                                            if isActive { state.editAndResendLast(text: text, images: images) }
+                                            if isActive {
+                                                state.editingMessageId = nil
+                                                state.editAndResendLast(text: text, images: images)
+                                            }
                                         },
                                         onTapImage: onTapImage
                                     )

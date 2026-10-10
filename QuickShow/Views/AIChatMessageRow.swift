@@ -13,6 +13,10 @@ struct ChatMessageRow: View, Equatable {
     let canRegenerate: Bool
     /// 是否为会话内最后一条 user 消息且可撤回/编辑（父视图计算，含生成中禁用语义）。
     let canEditLastRound: Bool
+    /// 就地编辑态（由外部统一状态驱动：ESC 优先退出就地编辑）。
+    let isEditing: Bool
+    let onBeginEdit: () -> Void
+    let onCancelEdit: () -> Void
     let onRetry: () -> Void
     let onRegenerate: () -> Void
     /// 撤回最后一轮（数据层删除该轮并把文本+图片回填输入框）。
@@ -23,21 +27,16 @@ struct ChatMessageRow: View, Equatable {
 
     /// 仅按内容与可用操作标记判定相等：闭包语义跨渲染一致，忽略其对 diff 的干扰，
     /// 使 .equatable() 能在流式期间跳过未变更行。
-    /// 编辑态/对勾态等瞬态 UI 由 @State 承载（存储于视图值之外），不参与相等判定，
-    /// 既不被流式冲刷重置，也不会导致无关行重绘。
     static func == (lhs: ChatMessageRow, rhs: ChatMessageRow) -> Bool {
         lhs.message == rhs.message
             && lhs.isSummarized == rhs.isSummarized
             && lhs.canRegenerate == rhs.canRegenerate
             && lhs.canEditLastRound == rhs.canEditLastRound
+            && lhs.isEditing == rhs.isEditing
     }
 
     @State private var rowHovered = false
     @State private var copied = false
-    /// 就地编辑态（仅 canEditLastRound 的 user 行可进入）。
-    /// 仅作协调开关（showsActionRow 隐藏操作行、content 分派到 MessageEditBubble）；
-    /// 编辑草稿（文本/图片/高度）随 MessageEditBubble 生命周期创建与销毁。
-    @State private var editing = false
 
     var body: some View {
         // 消息内容 + 下方紧凑操作行（紧贴正文底部 3pt；用户消息整体右对齐）
@@ -57,7 +56,7 @@ struct ChatMessageRow: View, Equatable {
                     rowHovered: rowHovered,
                     onCopy: copyContent,
                     onRegenerate: onRegenerate,
-                    onBeginEdit: beginEdit,
+                    onBeginEdit: onBeginEdit,
                     onWithdraw: onWithdraw
                 )
             }
@@ -81,7 +80,7 @@ struct ChatMessageRow: View, Equatable {
         }
         if message.role == .user, canEditLastRound {
             if !message.content.isEmpty { Divider() }
-            Button { beginEdit() } label: {
+            Button { onBeginEdit() } label: {
                 Label("编辑并重发", systemImage: "pencil")
             }
             Button { onWithdraw() } label: {
@@ -95,7 +94,7 @@ struct ChatMessageRow: View, Equatable {
     /// - 用户：有文本可复制，或是可撤回/编辑的最后一轮
     /// 就地编辑态一律隐藏（编辑操作由编辑气泡内按钮承担）。
     private var showsActionRow: Bool {
-        if editing { return false }
+        if isEditing { return false }
         switch message.role {
         case .user:
             return !message.content.isEmpty || canEditLastRound
@@ -125,15 +124,13 @@ struct ChatMessageRow: View, Equatable {
         switch message.role {
         case .user:
             // 就地编辑态：气泡原地变为编辑器（仅最后一轮 user 消息可进入）
-            if editing {
+            if isEditing {
                 MessageEditBubble(
                     message: message,
                     onCommit: { text, images in
-                        // 与拆前 confirmEdit 逐字一致：视觉先行退出编辑态，再把新文本/图片交给数据层重发（不阻塞）。
-                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
                         onEditResend(text, images)
                     },
-                    onCancel: cancelEdit
+                    onCancel: onCancelEdit
                 )
             } else {
                 userBubble
@@ -182,17 +179,6 @@ struct ChatMessageRow: View, Equatable {
                     .fill(Theme.Colors.chatUserBubble)
             )
         }
-    }
-
-    /// 进入编辑态：轻量淡入切换；编辑草稿（文本/图片/高度）由 MessageEditBubble
-    /// 创建时以原消息文本/图片初始化，退出销毁即重置，父级无需手工复位。
-    private func beginEdit() {
-        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = true }
-    }
-
-    /// 取消编辑：退出编辑态，MessageEditBubble 随之销毁丢弃草稿，恢复原气泡。
-    private func cancelEdit() {
-        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { editing = false }
     }
 
     /// 是否处于生成中（sending/streaming）：思考折叠区据此做流式节流与收尾全量同步。
