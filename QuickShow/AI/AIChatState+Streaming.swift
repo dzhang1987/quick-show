@@ -259,20 +259,15 @@ extension AIChatState {
 
                         // 批结束后发生中止：不再处理后续工具段，跳出整个回路。
                         if ctx.abortRequested || Task.isCancelled {
-                            if callIndex < completedCalls.count {
-                                // 仍有未执行工具：标记失败占位并落定 aborted（等价旧「下一段顶部检查」）。
-                                self.failUnresolvedToolCalls(assistantID, in: sessionId)
-                                self.settle(assistantID, state: .aborted, in: sessionId)
-                            } else {
-                                // 本轮工具已全部落定，不再发起续请求（等价旧「for 循环后的中止检查」）。
-                                self.settle(assistantID, state: .done, in: sessionId)
-                            }
+                            self.failUnresolvedToolCalls(assistantID, in: sessionId)
+                            self.settle(assistantID, state: .aborted, in: sessionId)
                             break roundLoop
                         }
                     }
-                    // 工具执行期间发生中止：工具轮已全部落定，不再发起续请求。
+                    // 工具执行期间发生中止：跳出整个回路并落定 aborted。
                     if ctx.abortRequested || Task.isCancelled {
-                        self.settle(assistantID, state: .done, in: sessionId)
+                        self.failUnresolvedToolCalls(assistantID, in: sessionId)
+                        self.settle(assistantID, state: .aborted, in: sessionId)
                         break roundLoop
                     }
 
@@ -358,6 +353,10 @@ extension AIChatState {
         syncStreamingState()
         // 流结束后异步检查水位：达阈值则自动压缩（不阻塞输入；isCompacting 已天然防重入）。
         maybeAutoCompact(sessionId: sessionId)
+        // 当前会话流式结束时无条件清理二次确认状态，防止残留
+        if sessionId == currentSessionId {
+            cancelAbortConfirmation()
+        }
         guard didComplete else { return }
 
         // 后台完成未读：完成时非当前会话 → 标记未读（切回该会话即清除）。
@@ -387,45 +386,72 @@ extension AIChatState {
     // MARK: - ESC 二次确认终止守卫
 
     /// ESC 键触发大模型响应终止逻辑（双击确认守卫）：
-    /// - 若非生成中：返回 false（不消费，交给下一级关窗等逻辑）。
-    /// - 若生成中且当前处于 1.5s 确认窗口：返回 true（消费并立即执行终止与回填）。
-    /// - 若生成中但未在确认窗口：返回 true（消费本次 ESC，进入 1.5s 确认窗口，弹窗提示，不关窗）。
+    /// - 若处于流式生成生命周期中（生成中、中止中或抽屉刚取消抑制期）：恒定返回 true（消费本次 ESC，绝不关窗）。
+    ///   - 若处于抽屉刚取消的抑制期内或流式已处于 abortRequested 退出中：静默吸收，不弹 Toast，返回 true。
+    ///   - 若处于 1.5s 确认窗口：正式执行中止与回填，返回 true。
+    ///   - 否则首次按 ESC：进入 1.5s 确认窗口，弹窗提示，返回 true。
+    /// - 若非生成中且无挂起保护：返回 false（不消费，交给下一级关窗等逻辑）。
     @discardableResult
     func handleEscapeAbort() -> Bool {
-        guard isStreaming else {
+        // 范围控制：消息就地编辑或重命名中，由上层优先消费，不在此处处理
+        guard editingMessageId == nil, renamingSessionId == nil else {
             cancelAbortConfirmation()
             return false
         }
+        // 抽屉在场时由抽屉专属逻辑消费，此处不处理
+        guard ChatInteractionCenter.shared.request == nil else {
+            cancelAbortConfirmation()
+            return false
+        }
+
+        // 判定是否处于流式生成生命周期（生成中、或处于抽屉取消后的保护抑制期内）
+        let inSuppressWindow = Date() < suppressAbortConfirmationUntil
+        guard isStreaming || inSuppressWindow else {
+            cancelAbortConfirmation()
+            return false
+        }
+
+        // 保护分支：处于抽屉刚取消抑制期，或当前流式已经在 abortRequested 退出中：
+        // 静默消费本次 ESC，保持窗口打开，绝不误弹二次确认 Toast，也绝不穿透关窗
+        if inSuppressWindow {
+            cancelAbortConfirmation()
+            return true
+        }
+        if let sessionId = currentSessionId, let ctx = streamContexts[sessionId], ctx.abortRequested {
+            cancelAbortConfirmation()
+            return true
+        }
+
+        // 正常流式生成中的双击确认守卫
         if isAwaitingAbortConfirmation {
             // 第二次按 ESC：在有效窗口期内，正式执行终止
             cancelAbortConfirmation()
             abortAndRecallQueue()
             return true
         } else {
-            // 第一次按 ESC：进入 1.5 秒确认等待期，消费本次 ESC
+            // 第一次按 ESC：进入 1.5 秒确认等待期，消费本次 ESC 并弹提示
             requestAbortConfirmation()
             return true
         }
     }
 
-    /// 开启 1.5 秒二次 ESC 确认窗口
+    /// 开启 1.5 秒二次 ESC 确认窗口（基于 GCD 代次令牌，不受 RunLoop 模式影响，准时自动淡出）
     func requestAbortConfirmation() {
         guard isStreaming else { return }
-        abortConfirmationTimer?.invalidate()
+        abortConfirmationGeneration += 1
+        let generation = abortConfirmationGeneration
         withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
             isAwaitingAbortConfirmation = true
         }
-        abortConfirmationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.cancelAbortConfirmation()
-            }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.abortConfirmationGeneration == generation else { return }
+            self.cancelAbortConfirmation()
         }
     }
 
-    /// 取消/复位二次确认状态
+    /// 取消/复位二次确认状态（使代次递增作废挂起闭包，并动画隐藏 Toast）
     func cancelAbortConfirmation() {
-        abortConfirmationTimer?.invalidate()
-        abortConfirmationTimer = nil
+        abortConfirmationGeneration += 1
         if isAwaitingAbortConfirmation {
             withAnimation(.easeInOut(duration: Theme.Motion.toastOut)) {
                 isAwaitingAbortConfirmation = false

@@ -188,14 +188,16 @@ struct AIChatView: View {
         }
         .onDisappear {
             keyMonitor.remove()
+            state.cancelAbortConfirmation()
             // UI 离场：挂起中的抽屉请求被唤醒为兜底结果（确认→拒绝 / 提问→取消），防泄漏
             interaction.markUIActive(false)
         }
-        // 回到 AI 窗口时刷新配置/图钉/剪贴板可用态（设置窗口改动后可即时生效）；
+        // 回到 AI 窗口时刷新配置/图钉/剪贴板可用态并确保快捷键监听就绪（设置窗口改动后可即时生效）；
         // 只响应 AIPanel——非本窗的 key 变化不触发重渲染（历史根因：Settings/主面板
         // becomeKey 全量冲刷 12 棵常驻会话树，公式/卡片越多越卡）。
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
             guard note.object is AIPanel else { return }
+            installKeyMonitor()
             refreshEnvironment()
         }
         // 抽屉关闭（request 由非 nil 变 nil）后把焦点还回主输入框：
@@ -615,6 +617,7 @@ struct AIChatView: View {
     /// 新建会话（⌘N 与侧栏按钮共用）：若正处于行内重命名则先退出。
     private func newSession() {
         state.renamingSessionId = nil
+        state.cancelAbortConfirmation()
         _ = state.newSession()
     }
 
@@ -639,6 +642,12 @@ struct AIChatView: View {
     private func installKeyMonitor() {
         keyMonitor.isDrawerOpen = { ChatInteractionCenter.shared.request != nil }
         keyMonitor.onCancelDrawer = { _ = self.cancelActiveDrawerIfNeeded() }
+        keyMonitor.isEditingMessage = { AIChatState.shared.editingMessageId != nil }
+        keyMonitor.onCancelMessageEdit = {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                AIChatState.shared.editingMessageId = nil
+            }
+        }
         keyMonitor.isRenaming = { AIChatState.shared.renamingSessionId != nil }
         keyMonitor.onCancelRename = { AIChatState.shared.renamingSessionId = nil }
         keyMonitor.isZooming = { zoomedAttachment != nil }
@@ -658,13 +667,23 @@ struct AIChatView: View {
     }
 
     /// ESC 阶段语义（输入框聚焦时的兜底路径）：
-    /// ⓪ 抽屉在场 → 先取消抽屉（权限 = 拒绝 / 提问 = 取消）；
-    /// ① 行内重命名进行中 → 先取消重命名（不关窗、不中止流）；
-    /// ② 流式中 → 二次确认中止生成（消费 ESC 并弹提示/回填队列）；③ 否则关窗还焦点。
+    /// ⓪ 就地编辑进行中 → 先取消编辑；
+    /// ① 行内重命名进行中 → 先取消重命名；
+    /// ② 抽屉在场 → 方案 B 取消抽屉并连带急停本次大模型流式；
+    /// ③ 纯流式中 → 二次确认中止生成（消费 ESC 并弹提示/回填队列）；
+    /// ④ 否则关窗还焦点。
     private func handleEscape() {
-        if cancelActiveDrawerIfNeeded() { return }
+        if state.editingMessageId != nil {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                state.editingMessageId = nil
+            }
+            return
+        }
         if state.renamingSessionId != nil {
             state.renamingSessionId = nil
+            return
+        }
+        if cancelActiveDrawerIfNeeded() {
             return
         }
         if state.handleEscapeAbort() {
@@ -675,6 +694,7 @@ struct AIChatView: View {
 
     /// ESC 阶段 0（与窗口层 AIPanel / 按键监听 AIChatKeyMonitor 三条链路同一语义）：
     /// 抽屉在场时取消并消费本次 ESC；权限抽屉 = 拒绝，提问抽屉 = 取消。
+    /// 方案 B：抽屉在场按 ESC 连带彻底中止本次大模型流式生成，不让大模型继续生成后续回应。
     /// 返回 true = 已消费。request 由逻辑层清空，抽屉随动画收起。
     private func cancelActiveDrawerIfNeeded() -> Bool {
         guard let request = interaction.request else { return false }
@@ -683,6 +703,13 @@ struct AIChatView: View {
             interaction.resolveConfirmation(.denied)
         case .userQuestions:
             interaction.cancelQuestions()
+        }
+        // 方案 B：抽屉在场按 ESC 连带彻底中止大模型当前生成，避免模型继续啰嗦回应；
+        // 同步设置 0.5s 抑制期并清除二次确认状态，防止连击 ESC 穿透误弹 Toast
+        state.suppressAbortConfirmationUntil = Date().addingTimeInterval(0.5)
+        state.cancelAbortConfirmation()
+        if state.isStreaming {
+            state.abortAndRecallQueue()
         }
         return true
     }

@@ -6,7 +6,12 @@
 
 ### Added
 
-- AI 对话 ESC 终止大模型响应二次确认守卫（Double-ESC Guard，`AIChatState` / `AIWindowManager` / `AIChatView`）：为解决长文本与复杂工具调用生成期间，单次误碰 ESC 导致宝贵生成结果被误掐断的高代价非对称痛点，构建 1.5 秒双击确认保护机制——第 1 次按 ESC 时消费按键不关窗，在输入坞上方浮现磨砂玻璃胶囊（「⏹ 再次按 ESC 终止生成」/ 英文「Press ESC again to abort」）并开启 1.5 秒确认倒计时窗口；第 2 次按 ESC 确认急停并自动触发队列回填（`abortAndRecallQueue`）；超过 1.5 秒或模型自然完成回复时提示平滑淡出并自动复位；鼠标/触控板点击界面终止按钮仍保留单击即刻终止的高意图体验
+- AI 对话 ESC 终止大模型响应二次确认守卫与分层状态机（Double-ESC Guard 与方案 B 抽屉协同急停，`AIChatState` / `AIWindowManager` / `AIChatKeyMonitor` / `AIChatView`）：
+  - **分层优先级状态机**：严格确立 P0 输入法组字放行 → P1 图片放大覆盖层关闭 → P2 消息就地编辑退出 → P3 侧栏标题重命名退出 → P4 交互抽屉在场取消 → P5 纯流式双击急停守卫 → P6 空闲关窗还焦点的确定性链路；
+  - **抽屉协同急停（方案 B）**：在交互抽屉（`ask_user` / 权限确认）在场时按 ESC，立即安全拒绝/取消抽屉并连带彻底中止大模型本次流式生成，回填待注入队列，消息落定为 `.aborted`，窗口稳稳保持打开；
+  - **抑制期防穿透断路器**：抽屉取消后原子开启 0.5 秒抑制保护期（`suppressAbortConfirmationUntil`），流式生成退出期或抑制期内任何按键事件由系统静默消费吸收，彻底消除了由于异步取消间隙导致的「误弹二次确认 Toast」或「意外关闭隐藏窗口」两大严重体验问题；
+  - **GCD 代次令牌调度与全生命周期保洁**：废除依赖 RunLoop 模式易假死的 `Timer`，改用全生命周期安全的 `DispatchQueue.main.asyncAfter` + 自增代次令牌（`abortConfirmationGeneration`），保证 1.5 秒必定准时自动淡出；在窗口隐藏（`performHide`）、重新展示（`show`）、视图卸载（`onDisappear`）、流式收尾（`finishStream`）、切换/清空会话中全方位清除残留状态，开窗绝无幽灵悬挂。
+- 消息就地编辑态全局状态提升（`AIChatState.editingMessageId` / `ChatMessageRow` / `ChatMessageList`）：将原消息行内私有 `@State` 编辑态提升至全局，使窗口层与本地按键监听能够在编辑气泡在场时准确捕获 ESC 并优先退出编辑态，避免按键穿透误触关窗。
 - 完整国际化（简体中文源语言 + English，界面语言跟随系统自动切换）：新建 String Catalog（`Localizable.xcstrings`，582 条 key，zh-Hans 源 / en 翻译，经 project.yml `developmentLanguage: zh-Hans` 声明，构建产物生成 `zh-Hans.lproj` / `en.lproj`）——SwiftUI 字面量（`Text`/`Label` 等 ~271 处）经 `LocalizedStringKey` 零代码改动自动查找 catalog；dynamic 类（三元表达式、枚举 `displayName`、自定义视图 String 参数）与 AppKit 类（`NSMenuItem`/`NSMenu`/toast/`panel.title` 等共 ~360 处、约 50 个文件，4 条并行 lane 改造）显式包裹 `String(localized:)`，插值文案经编译器格式串机制（`%lld`/`%@`）与 catalog 逐条对账；`Text(verbatim:)` 2 处改 `String(localized:)` 恢复本地化。范围决策（用户确认）：AI 工具 displayName / 类别 / 地图卡文案（UI 可见）翻译；发给 LLM 的工具 description / JSON schema / 系统提示词 / 工具执行错误（~180 处）与农历 / 天干地支 / 节气数据表保持中文；语言策略为跟随系统（无应用内切换）
 - 输入框撤销 / 重做支持（AI 窗主输入框与就地编辑框，快捷键 `⌘Z` / `⇧⌘Z`）：主菜单 Edit 菜单补入「撤销 / 重做」菜单项——`allowsUndo` 虽一直开启，但 AppKit 文本系统的 ⌘Z 键等效派发依赖主菜单存在对应 keyEquivalent 的菜单项，缺失即死键（与早年 ⌘V 粘贴失效同因）；`ChatInputNSTextView.performKeyEquivalent` 与 ⌘V/⌘C 同模式显式接住 ⌘Z/⇧⌘Z 双保险（`canUndo` / `canRedo` 为 false 时不消费、放行给系统）；就地编辑框（`ChatInlineEditTextView`）补上遗漏的 `allowsUndo = true`，与主输入框共享同一 NSTextView 子类的快捷键处理
 
@@ -19,6 +24,7 @@
 
 ### Changed
 
+- 阅读列边距收敛（`DesignTokens.swift` / `AIChatLayoutSupport.swift`）：退役 `chatTickRailLane` 额外内缩（归零），刻度轨（10~19pt）完全容纳于标准 18pt 边距内，消除双侧额外 28pt 对称留白，使对话流内容列与输入坞自然舒展。
 - 构建产物目录收敛为统一单根 `./build`（`scripts/restart.sh` / `AGENTS.md`）：废弃并移除历史冗余的 `./build_release` 根目录，构建中间数据与 Release 最终产物统一收敛至 `./build`（Release 产物位于 `./build/Build/Products/Release/QuickShow.app`），彻底消除多根目录导致的磁盘缓存冗余以及 macOS LaunchServices 扫描多路径注册冲突。
 
 ### Fixed

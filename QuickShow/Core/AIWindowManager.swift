@@ -14,12 +14,16 @@ final class AIPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    /// ESC 阶段 ⓪：输入坞抽屉在场时优先取消抽屉（权限 = 拒绝 / 提问 = 取消；
+    /// ESC 阶段 ①：就地编辑消息优先取消编辑（返回 true = 已消费）
+    var onCancelMessageEdit: (() -> Bool)?
+    /// ESC 阶段 ②：会话重命名优先取消重命名（返回 true = 已消费）
+    var onCancelRename: (() -> Bool)?
+    /// ESC 阶段 ③：输入坞抽屉在场时取消抽屉（方案 B: 拒绝/取消并连带彻底中止大模型流式生成；
     /// 返回 true = 已消费本次 ESC，保持窗口打开）
     var onCancelDrawer: (() -> Bool)?
-    /// ESC 第一阶段：流式生成中中止（返回 true = 已消费本次 ESC，保持窗口打开）
+    /// ESC 阶段 ④：流式生成中双击确认急停（返回 true = 已消费本次 ESC，保持窗口打开）
     var onAbortStreaming: (() -> Bool)?
-    /// ESC 第二阶段：非流式时关窗还焦点
+    /// ESC 阶段 ⑤：非流式空闲态时关窗还焦点
     var onEscapeClose: (() -> Void)?
     /// ⌘K 清空会话
     var onClearSession: (() -> Void)?
@@ -58,8 +62,12 @@ final class AIPanel: NSPanel {
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown {
-            // ESC 优先：输入框聚焦时仍走 AI 窗两阶段语义，不落入 field editor 的 cancelOperation
+            // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音（不落入窗口拦截）
             if event.keyCode == 53 {
+                if let textView = firstResponder as? NSTextView, textView.hasMarkedText() {
+                    super.sendEvent(event)
+                    return
+                }
                 handleEscape()
                 return
             }
@@ -85,6 +93,10 @@ final class AIPanel: NSPanel {
     override func keyDown(with event: NSEvent) {
         // 兜住 keyDown 直投路径（与 sendEvent 分支同理）
         if event.keyCode == 53 {
+            if let textView = firstResponder as? NSTextView, textView.hasMarkedText() {
+                super.keyDown(with: event)
+                return
+            }
             handleEscape()
             return
         }
@@ -102,9 +114,17 @@ final class AIPanel: NSPanel {
         super.keyDown(with: event)
     }
 
-    /// ESC 三阶段：⓪ 抽屉在场先取消抽屉（权限 = 拒绝 / 提问 = 取消）；
-    /// ① 流式生成中先中止（消费 ESC）；② 否则关窗还焦点
+    /// ESC 分层处理：
+    /// ① 历史消息就地编辑先退出编辑；② 会话重命名先取消重命名；
+    /// ③ 抽屉在场先取消抽屉（方案 B：连带急停大模型当前生成）；
+    /// ④ 纯流式中双击确认急停；⑤ 否则关窗还焦点。
     private func handleEscape() {
+        if let cancelEdit = onCancelMessageEdit, cancelEdit() {
+            return
+        }
+        if let cancelRename = onCancelRename, cancelRename() {
+            return
+        }
         if let cancelDrawer = onCancelDrawer, cancelDrawer() {
             return
         }
@@ -173,6 +193,10 @@ final class AIWindowManager {
     }
 
     func show() {
+        // 开窗时确保清理任何残留的二次确认提醒
+        MainActor.assumeIsolated {
+            AIChatState.shared.cancelAbortConfirmation()
+        }
         // 主面板可见则先淡出（两者互斥可见性，焦点最终交给 AI 窗，不自动回主面板）。
         // 先读取主面板记录的「原应用」，切窗后 AI 窗继承同一焦点归还目标。
         let handoffApp = PanelManager.shared.focusReturnApp
@@ -254,6 +278,10 @@ final class AIWindowManager {
         // 危险工具确认 sheet 抢占 key 状态时父窗会 resignKey，属本窗内交互，
         // 不视为被动切走（sheet 关闭后焦点自然回归父窗）
         if panel.attachedSheet != nil { return }
+        // 关窗隐藏时清理二次确认提醒，绝不将悬挂状态带入下次开窗
+        MainActor.assumeIsolated {
+            AIChatState.shared.cancelAbortConfirmation()
+        }
         // 隐藏前落盘当前位置/大小，确保本次移动被记住。
         saveFrame()
         isDismissing = true
@@ -533,10 +561,28 @@ final class AIWindowManager {
             self?.scheduleFrameSave()
         })
 
-        // 接线：ESC 三阶段（⓪ 抽屉 → ① 中止流式 → ② 关窗，直连交互中心与 AIChatState）
+        // 接线：ESC 分层（① 编辑 → ② 重命名 → ③ 抽屉连带急停 → ④ 双击流式急停 → ⑤ 关窗）
         // / ⌘K 清空 / 被动失焦隐藏。
         // ChatInteractionCenter/AIChatState 为 @MainActor，闭包恒在主线程按键路径触发，
         // assumeIsolated 同步桥接（编译期隔离检查合规，运行期零开销）
+        panel.onCancelMessageEdit = {
+            MainActor.assumeIsolated {
+                let state = AIChatState.shared
+                guard state.editingMessageId != nil else { return false }
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    state.editingMessageId = nil
+                }
+                return true
+            }
+        }
+        panel.onCancelRename = {
+            MainActor.assumeIsolated {
+                let state = AIChatState.shared
+                guard state.renamingSessionId != nil else { return false }
+                state.renamingSessionId = nil
+                return true
+            }
+        }
         panel.onCancelDrawer = {
             MainActor.assumeIsolated {
                 let center = ChatInteractionCenter.shared
@@ -548,6 +594,14 @@ final class AIWindowManager {
                 case .userQuestions:
                     // 提问抽屉 ESC = 取消
                     center.cancelQuestions()
+                }
+                // 方案 B：抽屉在场按 ESC 连带彻底中止大模型当前生成，避免模型继续啰嗦回应；
+                // 同步设置 0.5s 抑制期并清除二次确认状态，防止连击 ESC 穿透误弹 Toast
+                let state = AIChatState.shared
+                state.suppressAbortConfirmationUntil = Date().addingTimeInterval(0.5)
+                state.cancelAbortConfirmation()
+                if state.isStreaming {
+                    state.abortAndRecallQueue()
                 }
                 return true
             }

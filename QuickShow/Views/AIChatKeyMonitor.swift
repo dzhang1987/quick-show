@@ -16,8 +16,10 @@ final class AIChatKeyMonitor {
 
     /// 抽屉（权限确认 / AI 提问）是否在场
     var isDrawerOpen: () -> Bool = { false }
-    /// 抽屉取消动作（权限 = 拒绝 / 提问 = 取消）
+    /// 抽屉取消动作（权限 = 拒绝 / 提问 = 取消，方案 B 连带急停）
     var onCancelDrawer: () -> Void = {}
+    var isEditingMessage: () -> Bool = { false }
+    var onCancelMessageEdit: () -> Void = {}
     var isRenaming: () -> Bool = { false }
     var onCancelRename: () -> Void = {}
     var isZooming: () -> Bool = { false }
@@ -42,14 +44,24 @@ final class AIChatKeyMonitor {
 
     private func handle(_ event: NSEvent) -> NSEvent? {
         // 只接管 AI 对话窗的按键（设置窗等其他窗口不受影响）
-        guard event.window is AIPanel else { return event }
+        guard event.window is AIPanel || (event.window == nil && NSApp.keyWindow is AIPanel) else { return event }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let cleanFlags = flags.subtracting([.capsLock, .numericPad, .function])
 
-        // ESC：抽屉/重命名/放大态下先行消费；其余放行给窗口层阶段语义
-        if event.keyCode == 53, flags.isEmpty {
-            if isDrawerOpen() { onCancelDrawer(); return nil }
-            if isRenaming() { onCancelRename(); return nil }
+        // ESC：逐层先行消费；其余放行给窗口层阶段语义
+        if event.keyCode == 53, cleanFlags.isEmpty {
+            // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音
+            if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
+                return event
+            }
+            // P1: 图片放大覆盖层
             if isZooming() { onDismissZoom(); return nil }
+            // P2: 消息就地编辑气泡
+            if isEditingMessage() { onCancelMessageEdit(); return nil }
+            // P3: 侧栏会话标题重命名
+            if isRenaming() { onCancelRename(); return nil }
+            // P4: 抽屉在场（方案 B: 拒绝/取消抽屉并连带急停）
+            if isDrawerOpen() { onCancelDrawer(); return nil }
             return event
         }
 

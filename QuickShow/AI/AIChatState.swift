@@ -72,6 +72,8 @@ final class AIChatState: ObservableObject {
     /// 置于 state 层：AIChatState.shared 单例引用恒稳定，keyMonitor 闭包不再捕获 View struct 的
     /// @State 链（结构重构后该捕获链失效导致 ESC 无法消费重命名态）。
     @Published var renamingSessionId: UUID? = nil
+    /// 就地编辑进行中的消息 id（nil = 未在就地编辑；ESC 优先消费退出编辑态）。
+    @Published var editingMessageId: UUID? = nil
     /// 待发送图片附件（Wave 2 附件 UI 消费；发送后清空）。
     @Published var imageAttachments: [ChatImageAttachment] = []
     /// 当前会话是否生成中（视图层旧调用点语义不变；由 syncStreamingState 维护）。
@@ -96,7 +98,10 @@ final class AIChatState: ObservableObject {
     @Published var lastCompactionOutcome: CompactionOutcome?
     /// 是否处于「等待第二次 ESC 确认终止大模型响应」状态（1.5s 有效窗口）。
     @Published var isAwaitingAbortConfirmation: Bool = false
-    var abortConfirmationTimer: Timer?
+    /// ESC 二次确认窗口代次令牌（GCD 防抖，防旧调度跨世代闭包乱序清除）。
+    var abortConfirmationGeneration: Int = 0
+    /// 抑制二次确认提醒截止时间（抽屉按 ESC 连带急停后设置短时抑制期，防连击/重复键误弹）。
+    var suppressAbortConfirmationUntil: Date = .distantPast
 
     /// 当前会话的最近一次压缩结果；非当前会话的结果不回传——自动压缩在流结束后
     /// 异步触发，用户可能已切换会话，跨会话的 toast/详情行会错位（防串会话反馈）。
@@ -243,6 +248,8 @@ final class AIChatState: ObservableObject {
                 self.syncStreamingState()
                 // 会话切换/新对话：危险工具「总是允许」记忆随会话失效（幂等，仅真实切换时清）。
                 if sessionChanged {
+                    self.editingMessageId = nil
+                    self.cancelAbortConfirmation()
                     ChatInteractionCenter.shared.resetSessionMemory()
                 }
             }
@@ -368,6 +375,8 @@ final class AIChatState: ObservableObject {
 
     /// ⌘K 清空当前会话消息（保留会话本身，重置标题待重新摘要）。
     func clearSession() {
+        editingMessageId = nil
+        cancelAbortConfirmation()
         if isStreaming {
             abortStreaming()
         }
