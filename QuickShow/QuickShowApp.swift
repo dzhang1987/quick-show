@@ -10,10 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     
     static func main() {
         let app = NSApplication.shared
-        let delegate = AppDelegate()
-        shared = delegate
-        app.delegate = delegate
-        app.run()
+        if SingleInstanceGuard.shared.tryAcquirePrimaryLock() {
+            let delegate = AppDelegate()
+            shared = delegate
+            app.delegate = delegate
+            app.run()
+        } else {
+            SingleInstanceGuard.shared.runSecondaryRelay(app: app)
+        }
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -28,6 +32,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let state = AppState()
         self.appState = state
+        
+        // 监听跨进程中继：次级实例转交的外部唤醒或通知点击
+        SingleInstanceGuard.shared.startListeningForRelay { [weak self, weak state] action, sessionId in
+            guard let self = self, let state = state else { return }
+            NSRunningApplication.current.activate(options: [.activateIgnoringOtherApps])
+            if action == "showAIChat" {
+                PanelManager.shared.hidePanel(restoreFocus: false)
+                if let sessionId {
+                    AIChatState.shared.selectSession(id: sessionId)
+                }
+                AIWindowManager.shared.show()
+            } else {
+                state.show(mode: .glance)
+            }
+        }
         
         // 启动时应用持久化的明暗模式（须在面板/设置窗口创建前，确保首帧外观正确）
         state.appearanceMode.apply()

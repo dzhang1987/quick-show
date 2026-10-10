@@ -21,7 +21,7 @@
 
 ## 3. 技术栈规范
 - 纯原生 Swift/AppKit 项目，保持零额外生态污染（绝不引入 npm/pnpm/node 等多余生态）。
-- 编译与运行使用原生 `xcodebuild`，构建产物目录为 `./build`（Debug）与 `./build_release`（Release）。
+- 编译与运行使用原生 `xcodebuild`，构建产物统一收敛至 `./build` 目录（Release 产物位于 `./build/Build/Products/Release/QuickShow.app`）。
 
 ## 4. Git 提交与推送规范
 - **严禁擅自提交与推送（必须等待用户明确指示）**：

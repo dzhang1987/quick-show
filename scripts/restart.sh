@@ -24,7 +24,7 @@ BUILD_LOG="$(mktemp -t quickshow_build)"
 # CODE_SIGN_STYLE=Manual：SPM 包产物（如 SwiftMath）默认 Automatic 风格会强制要求
 # 开发团队（Team），自签证书没有 Team 会编译失败；全局覆盖为 Manual 后包产物跳过
 # Team 校验，随主 target 一并用 SIGN_IDENTITY 签名，身份稳定，TCC 权限跨编译持续有效
-if ! xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build_release CODE_SIGN_IDENTITY="$SIGN_IDENTITY" CODE_SIGN_STYLE=Manual build > "$BUILD_LOG" 2>&1; then
+if ! xcodebuild -project QuickShow.xcodeproj -scheme QuickShow -configuration Release -destination 'platform=macOS' -derivedDataPath ./build CODE_SIGN_IDENTITY="$SIGN_IDENTITY" CODE_SIGN_STYLE=Manual build > "$BUILD_LOG" 2>&1; then
     echo "❌ 编译失败，错误摘要："
     grep -E "error: " "$BUILD_LOG" | head -20 || echo "（日志中无 error: 行，请查看完整日志）"
     echo "💡 完整日志：$BUILD_LOG"
@@ -39,7 +39,7 @@ killall QuickShow 2>/dev/null || true
 sleep 0.2
 
 echo "🚀 启动最新 QuickShow..."
-open ./build_release/Build/Products/Release/QuickShow.app 2>/dev/null || {
+open ./build/Build/Products/Release/QuickShow.app 2>/dev/null || {
     echo "💡 启动失败，请在主机终端直接执行：./scripts/restart.sh"
 }
 

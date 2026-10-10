@@ -1,6 +1,7 @@
 // AIChatState+Streaming.swift
 // 职责：会话流式发送 / 中止 / 工具调用回路 / token 合帧与消息落定（自 AIChatState.swift 拆出）。
 import Foundation
+import SwiftUI
 
 extension AIChatState {
 
@@ -374,12 +375,62 @@ extension AIChatState {
     /// 默认中止「当前会话」；指定 sessionId 时中止目标会话（侧栏中止按钮调用），
     /// 不影响其他会话的进行中生成。
     func abortStreaming(sessionId target: UUID? = nil) {
+        cancelAbortConfirmation()
         let sessionId = target ?? currentSessionId
         guard let sessionId, let ctx = streamContexts[sessionId] else { return }
         ctx.abortRequested = true
         // 取消回路任务触发消费侧 CancellationError，进入 .aborted 分支；
         // 网络层取消经流的 onTermination 链路自动传导（AIChatService 无全局 abort）。
         ctx.task?.cancel()
+    }
+
+    // MARK: - ESC 二次确认终止守卫
+
+    /// ESC 键触发大模型响应终止逻辑（双击确认守卫）：
+    /// - 若非生成中：返回 false（不消费，交给下一级关窗等逻辑）。
+    /// - 若生成中且当前处于 1.5s 确认窗口：返回 true（消费并立即执行终止与回填）。
+    /// - 若生成中但未在确认窗口：返回 true（消费本次 ESC，进入 1.5s 确认窗口，弹窗提示，不关窗）。
+    @discardableResult
+    func handleEscapeAbort() -> Bool {
+        guard isStreaming else {
+            cancelAbortConfirmation()
+            return false
+        }
+        if isAwaitingAbortConfirmation {
+            // 第二次按 ESC：在有效窗口期内，正式执行终止
+            cancelAbortConfirmation()
+            abortAndRecallQueue()
+            return true
+        } else {
+            // 第一次按 ESC：进入 1.5 秒确认等待期，消费本次 ESC
+            requestAbortConfirmation()
+            return true
+        }
+    }
+
+    /// 开启 1.5 秒二次 ESC 确认窗口
+    func requestAbortConfirmation() {
+        guard isStreaming else { return }
+        abortConfirmationTimer?.invalidate()
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+            isAwaitingAbortConfirmation = true
+        }
+        abortConfirmationTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.cancelAbortConfirmation()
+            }
+        }
+    }
+
+    /// 取消/复位二次确认状态
+    func cancelAbortConfirmation() {
+        abortConfirmationTimer?.invalidate()
+        abortConfirmationTimer = nil
+        if isAwaitingAbortConfirmation {
+            withAnimation(.easeInOut(duration: Theme.Motion.toastOut)) {
+                isAwaitingAbortConfirmation = false
+            }
+        }
     }
 
     /// 指定会话是否生成中（侧栏状态可视化查询）。

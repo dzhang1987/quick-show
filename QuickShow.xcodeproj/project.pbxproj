@@ -47,6 +47,7 @@
 		321E4DFC3AA99F3C8829C9D5 /* AIChatService+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7695F4FF6C1E0DD5672E388 /* AIChatService+Streaming.swift */; };
 		396D8C5B98B04772B5CF3FD5 /* HotKeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = A717A5076D26657EA117861F /* HotKeyManager.swift */; };
 		39760048DBDB878931394AC3 /* AIModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4270992A33D3DD27F0515539 /* AIModelAdapter.swift */; };
+		3B12C41823DE91014225C158 /* SingleInstanceGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012BB8E364D322E4DFD64D9A /* SingleInstanceGuard.swift */; };
 		3F030C8F6AC7AAC865530EFF /* FocusWorkCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2167D019993E6060D6D375A /* FocusWorkCard.swift */; };
 		3FC1DB5D580A579E2803DF5A /* MTMathAtomFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B220E8199511E133A53FEA /* MTMathAtomFactory.swift */; };
 		429644B19C6C9476A5A1FF53 /* AIChatKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0661EBAA94210CA4383157 /* AIChatKeyMonitor.swift */; };
@@ -187,6 +188,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		012BB8E364D322E4DFD64D9A /* SingleInstanceGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SingleInstanceGuard.swift; sourceTree = "<group>"; };
 		02C56336313E564A9C58442B /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		02EDB0F7F9308986A84F3401 /* AIServiceSettingsForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServiceSettingsForm.swift; sourceTree = "<group>"; };
 		03458E0DB4A3F5DA4B1ABA3F /* MTFontMathTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontMathTable.swift; sourceTree = "<group>"; };
@@ -410,6 +412,7 @@
 				4CB3F9819E7541B279D9C3FB /* PanelManager.swift */,
 				7E308FBA4E88417CC9AEF471 /* PomodoroStore.swift */,
 				B9D368641E2232C1D0E9B426 /* SettingsStore.swift */,
+				012BB8E364D322E4DFD64D9A /* SingleInstanceGuard.swift */,
 				DDF5F18006899874846806D1 /* SystemStatusStore.swift */,
 				03CA1A414D9CFB03EA210EA2 /* TickEngine.swift */,
 			);
@@ -640,7 +643,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_4E56B7A2-8A50-4BDD-A231-4373CABCE53A" /* Resources */ = {
+		"TEMP_3EF1D8D2-9A1F-4034-B54B-7F21E2822CAF" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -922,6 +925,7 @@
 				063D8C81B464D96670DF3D12 /* SettingsShortcutsForm.swift in Sources */,
 				B90F4DF6126D82E466037781 /* SettingsStore.swift in Sources */,
 				1232F626BAE9114CD9B5CB60 /* SettingsView.swift in Sources */,
+				3B12C41823DE91014225C158 /* SingleInstanceGuard.swift in Sources */,
 				9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */,
 				DB289B1C35342CF3AC4D608A /* SystemActions.swift in Sources */,
 				825D8E0668CA724C6E71CC37 /* SystemMetricsProvider.swift in Sources */,

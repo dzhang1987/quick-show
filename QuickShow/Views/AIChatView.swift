@@ -384,6 +384,26 @@ struct AIChatView: View {
                 .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
             }
         }
+        // ESC 终止大模型响应二次确认轻反馈：1.5s 确认窗口，与导出/压缩 toast 同位同语言
+        .overlay(alignment: .bottom) {
+            if state.isAwaitingAbortConfirmation {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "stop.fill")
+                        .font(Theme.Typography.text(10, .bold))
+                        .foregroundColor(Theme.Colors.statusWarning)
+                    Text("再次按 ESC 终止生成")
+                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                }
+                .padding(.horizontal, Theme.Spacing.card)
+                .padding(.vertical, Theme.Spacing.md)
+                .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
+                .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
+                .padding(.bottom, dockTotalHeight + Theme.Spacing.lg)
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+            }
+        }
         // 全窗材质两级收敛：根部 ultraThinMaterial 是唯一内容基面（铺满主列与阅读区），
         // 输入坞 glass 是唯一浮层语言；此处不再叠第二层材质，全窗亮度关系唯一且自洽。
     }
@@ -640,18 +660,17 @@ struct AIChatView: View {
     /// ESC 阶段语义（输入框聚焦时的兜底路径）：
     /// ⓪ 抽屉在场 → 先取消抽屉（权限 = 拒绝 / 提问 = 取消）；
     /// ① 行内重命名进行中 → 先取消重命名（不关窗、不中止流）；
-    /// ② 流式中 → 中止生成；③ 否则关窗还焦点。
+    /// ② 流式中 → 二次确认中止生成（消费 ESC 并弹提示/回填队列）；③ 否则关窗还焦点。
     private func handleEscape() {
         if cancelActiveDrawerIfNeeded() { return }
         if state.renamingSessionId != nil {
             state.renamingSessionId = nil
             return
         }
-        if state.isStreaming {
-            state.abortStreaming()
-        } else {
-            onClose?()
+        if state.handleEscapeAbort() {
+            return
         }
+        onClose?()
     }
 
     /// ESC 阶段 0（与窗口层 AIPanel / 按键监听 AIChatKeyMonitor 三条链路同一语义）：

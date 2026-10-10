@@ -6,6 +6,7 @@
 
 ### Added
 
+- AI 对话 ESC 终止大模型响应二次确认守卫（Double-ESC Guard，`AIChatState` / `AIWindowManager` / `AIChatView`）：为解决长文本与复杂工具调用生成期间，单次误碰 ESC 导致宝贵生成结果被误掐断的高代价非对称痛点，构建 1.5 秒双击确认保护机制——第 1 次按 ESC 时消费按键不关窗，在输入坞上方浮现磨砂玻璃胶囊（「⏹ 再次按 ESC 终止生成」/ 英文「Press ESC again to abort」）并开启 1.5 秒确认倒计时窗口；第 2 次按 ESC 确认急停并自动触发队列回填（`abortAndRecallQueue`）；超过 1.5 秒或模型自然完成回复时提示平滑淡出并自动复位；鼠标/触控板点击界面终止按钮仍保留单击即刻终止的高意图体验
 - 完整国际化（简体中文源语言 + English，界面语言跟随系统自动切换）：新建 String Catalog（`Localizable.xcstrings`，582 条 key，zh-Hans 源 / en 翻译，经 project.yml `developmentLanguage: zh-Hans` 声明，构建产物生成 `zh-Hans.lproj` / `en.lproj`）——SwiftUI 字面量（`Text`/`Label` 等 ~271 处）经 `LocalizedStringKey` 零代码改动自动查找 catalog；dynamic 类（三元表达式、枚举 `displayName`、自定义视图 String 参数）与 AppKit 类（`NSMenuItem`/`NSMenu`/toast/`panel.title` 等共 ~360 处、约 50 个文件，4 条并行 lane 改造）显式包裹 `String(localized:)`，插值文案经编译器格式串机制（`%lld`/`%@`）与 catalog 逐条对账；`Text(verbatim:)` 2 处改 `String(localized:)` 恢复本地化。范围决策（用户确认）：AI 工具 displayName / 类别 / 地图卡文案（UI 可见）翻译；发给 LLM 的工具 description / JSON schema / 系统提示词 / 工具执行错误（~180 处）与农历 / 天干地支 / 节气数据表保持中文；语言策略为跟随系统（无应用内切换）
 - 输入框撤销 / 重做支持（AI 窗主输入框与就地编辑框，快捷键 `⌘Z` / `⇧⌘Z`）：主菜单 Edit 菜单补入「撤销 / 重做」菜单项——`allowsUndo` 虽一直开启，但 AppKit 文本系统的 ⌘Z 键等效派发依赖主菜单存在对应 keyEquivalent 的菜单项，缺失即死键（与早年 ⌘V 粘贴失效同因）；`ChatInputNSTextView.performKeyEquivalent` 与 ⌘V/⌘C 同模式显式接住 ⌘Z/⇧⌘Z 双保险（`canUndo` / `canRedo` 为 false 时不消费、放行给系统）；就地编辑框（`ChatInlineEditTextView`）补上遗漏的 `allowsUndo = true`，与主输入框共享同一 NSTextView 子类的快捷键处理
 
@@ -17,6 +18,16 @@
   - **保留项**（与「作为上下文」无关的剪贴板能力）：⌘V 粘贴图片 / ⊕ 菜单「剪贴板导入」图片附件、`X` 键剪贴板纯文本化、AI 工具 `read_clipboard` / `write_clipboard`（LLM 主动调用语义，非上下文注入）、复制消息 / 导出对话到剪贴板
 
 ### Changed
+
+- 构建产物目录收敛为统一单根 `./build`（`scripts/restart.sh` / `AGENTS.md`）：废弃并移除历史冗余的 `./build_release` 根目录，构建中间数据与 Release 最终产物统一收敛至 `./build`（Release 产物位于 `./build/Build/Products/Release/QuickShow.app`），彻底消除多根目录导致的磁盘缓存冗余以及 macOS LaunchServices 扫描多路径注册冲突。
+
+### Fixed
+
+- 单实例强保障与通知点击唤醒多实例根治（`SingleInstanceGuard` / `QuickShowApp`）：
+  - **根因分析**：应用入口（`AppDelegate.main()`）先前缺失单实例互斥检测；且历史构建在 `./build`（Debug）与 `./build_release`（Release）并存时，同 Bundle ID（`cn.chiproad.QuickShow`）被 LaunchServices 同时登记。当 Release 版发送 AI 生成完成通知后，用户点击横幅，系统 LaunchServices 误激活并拉起另一路径的构建副本；无互斥锁机制使新进程常驻后台，导致双实例运行（双菜单栏图标、双快捷键抢占、双 MediaRemote 进程）；
+  - **双重互斥守卫（SingleInstanceGuard）**：在 `main()` 最早期结合 `NSRunningApplication` 跨路径进程探测与 POSIX 文件排他锁（`flock`），严格保证系统内唯一主实例（Primary Instance）；
+  - **次级实例极简中继（SecondaryRelayDelegate）**：任何后续被系统或用户意外拉起的次级实例，立即阻断全套 UI/状态栏/热键/后台监控初始化；通过极简代理接收通知响应（`UNUserNotificationCenterDelegate`），将 `action` 与 `sessionId` 打包后经 `DistributedNotificationCenter` 跨进程广播给唯一主实例并激活置顶主实例；配以 0.6 秒超时兜底，事件转交完毕后次级实例立即 `exit(0)` 自行终止，绝不逗留；
+  - **主实例响应**：主实例收到中继广播后激活自身，按目标 `sessionId` 切换会话并在鼠标所在物理屏幕直接弹出 AI 对话窗。
 
 - 刻度轨放大模型重构（全刻度统一放大 + 对称推开 + 当前条独立明暗梯度，`ChatTickRail` / `Theme.Layout` / `Theme.Colors`）：
   - **几何尺寸与布局统一**：废除当前条 16×3 与普通刻度 10×2 的尺寸差异，所有刻度几何基底统一为 10×2 圆头胶囊；轨体宽收敛为单一基础宽度的峰值放大宽；

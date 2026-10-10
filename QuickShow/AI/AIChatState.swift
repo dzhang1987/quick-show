@@ -94,6 +94,9 @@ final class AIChatState: ObservableObject {
     /// 最近一次压缩结果（成功/失败）；nil = 本运行周期内从未尝试过。
     /// 仅内存态不落盘——反馈语义是「本次使用期间」，跨重启无意义。
     @Published var lastCompactionOutcome: CompactionOutcome?
+    /// 是否处于「等待第二次 ESC 确认终止大模型响应」状态（1.5s 有效窗口）。
+    @Published var isAwaitingAbortConfirmation: Bool = false
+    var abortConfirmationTimer: Timer?
 
     /// 当前会话的最近一次压缩结果；非当前会话的结果不回传——自动压缩在流结束后
     /// 异步触发，用户可能已切换会话，跨会话的 toast/详情行会错位（防串会话反馈）。
@@ -187,6 +190,9 @@ final class AIChatState: ObservableObject {
         let streaming = currentSessionId.map { streamingSessionIds.contains($0) } ?? false
         if isStreaming != streaming {
             isStreaming = streaming
+            if !streaming {
+                cancelAbortConfirmation()
+            }
         }
     }
 

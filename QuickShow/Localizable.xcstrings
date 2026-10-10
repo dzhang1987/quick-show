@@ -2417,6 +2417,22 @@
         }
       }
     },
+    "再次按 ESC 终止生成": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Press ESC again to abort"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再次按 ESC 终止生成"
+          }
+        }
+      }
+    },
     "发送（⏎）· 追问（⌥⏎）": {
       "localizations": {
         "en": {
