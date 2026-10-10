@@ -34,30 +34,42 @@ struct AIChatQuickSwitcher: View {
     var body: some View {
         VStack(spacing: 0) {
             searchHeader
-            
-            Rectangle()
-                .fill(Theme.Colors.cardStroke)
-                .frame(height: Theme.Layout.dividerHeight)
+
+            subtleDivider
 
             resultsList
-                .frame(maxHeight: 320)
+                .frame(maxHeight: 336)
 
-            Rectangle()
-                .fill(Theme.Colors.cardStroke)
-                .frame(height: Theme.Layout.dividerHeight)
+            subtleDivider
 
             hintFooter
         }
-        .frame(width: 460)
+        .frame(width: 476)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .fill(Theme.Colors.chatNavFloatFill)
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.regularMaterial)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(Theme.Colors.surfaceCard.opacity(0.35))
+            }
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.28),
+                            Theme.Colors.cardStroke,
+                            Color.black.opacity(0.12)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ),
+                    lineWidth: 0.5
+                )
         )
-        .shadow(color: Color.black.opacity(0.35), radius: 24, x: 0, y: 12)
+        .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.28), radius: 32, x: 0, y: 16)
         .onAppear {
             initializeSelection()
             DispatchQueue.main.async {
@@ -91,7 +103,7 @@ struct AIChatQuickSwitcher: View {
     private var searchHeader: some View {
         HStack(spacing: Theme.Spacing.md) {
             Image(systemName: "magnifyingglass")
-                .font(Theme.Typography.text(13, .medium))
+                .font(Theme.Typography.text(14, .medium))
                 .foregroundColor(Theme.Colors.accent)
 
             TextField("快速切换或搜索会话…", text: $searchText)
@@ -112,18 +124,41 @@ struct AIChatQuickSwitcher: View {
                 .help("清空搜索")
             } else {
                 Text("⌘P")
-                    .font(Theme.Typography.mono(9.5))
+                    .font(Theme.Typography.mono(9.5, .medium))
                     .foregroundColor(Theme.Colors.idleText)
-                    .padding(.horizontal, Theme.Spacing.chip)
+                    .padding(.horizontal, 5)
                     .padding(.vertical, 2)
                     .background(
                         RoundedRectangle(cornerRadius: 3.5, style: .continuous)
                             .fill(Theme.Colors.surfaceBadge)
                     )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 3.5, style: .continuous)
+                            .stroke(Theme.Colors.cardStroke.opacity(0.6), lineWidth: 0.5)
+                    )
             }
         }
         .padding(.horizontal, Theme.Spacing.section)
-        .padding(.vertical, Theme.Spacing.lg)
+        .padding(.vertical, 13)
+    }
+
+    // MARK: - 微光羽化分割线
+
+    private var subtleDivider: some View {
+        Rectangle()
+            .fill(
+                LinearGradient(
+                    colors: [
+                        Color.primary.opacity(0.0),
+                        Color.primary.opacity(Theme.Colors.dividerOpacity * 0.6),
+                        Color.primary.opacity(0.0)
+                    ],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .frame(height: 0.5)
+            .padding(.horizontal, Theme.Spacing.md)
     }
 
     // MARK: - 结果列表
@@ -133,18 +168,18 @@ struct AIChatQuickSwitcher: View {
             if matches.isEmpty {
                 VStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: "bubble.left.and.exclamationmark.bubble.right")
-                        .font(Theme.Typography.text(18))
-                        .foregroundColor(Theme.Colors.idleText)
-                        .padding(.top, Theme.Spacing.xl)
+                        .font(Theme.Typography.text(20))
+                        .foregroundColor(Theme.Colors.idleText.opacity(0.7))
+                        .padding(.top, Theme.Spacing.xxl)
                     Text("未找到匹配的会话")
                         .font(Theme.Typography.text(12))
                         .foregroundColor(Theme.Colors.idleText)
-                        .padding(.bottom, Theme.Spacing.xl)
+                        .padding(.bottom, Theme.Spacing.xxl)
                 }
-                .frame(maxWidth: .infinity, minHeight: 100)
+                .frame(maxWidth: .infinity, minHeight: 110)
             } else {
                 ScrollView(.vertical, showsIndicators: false) {
-                    LazyVStack(spacing: Theme.Spacing.xxs) {
+                    LazyVStack(spacing: 3) {
                         ForEach(Array(matches.enumerated()), id: \.element.id) { index, match in
                             let isSelected = index == selectedIndex
                             let isCurrent = match.session.id == store.currentSessionId
@@ -153,6 +188,7 @@ struct AIChatQuickSwitcher: View {
 
                             SwitcherRow(
                                 match: match,
+                                searchKeyword: searchText,
                                 isSelected: isSelected,
                                 isCurrent: isCurrent,
                                 isStreaming: isStreaming,
@@ -165,8 +201,8 @@ struct AIChatQuickSwitcher: View {
                             .id(match.session.id)
                         }
                     }
-                    .padding(.horizontal, Theme.Spacing.sm)
-                    .padding(.vertical, Theme.Spacing.sm)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
                 }
                 .onChange(of: scrollToTargetID) { targetId in
                     guard let targetId else { return }
@@ -178,11 +214,11 @@ struct AIChatQuickSwitcher: View {
         }
     }
 
-    // MARK: - 底部快捷键提示条
+    // MARK: - 底部快捷键提示条（轻盈透明方案 A）
 
     private var hintFooter: some View {
-        HStack(spacing: Theme.Spacing.lg) {
-            HStack(spacing: Theme.Spacing.xs) {
+        HStack(spacing: Theme.Spacing.md) {
+            HStack(spacing: 4) {
                 keyCap("↑")
                 keyCap("↓")
                 Text("选择")
@@ -190,21 +226,21 @@ struct AIChatQuickSwitcher: View {
                     .foregroundColor(Theme.Colors.idleText)
             }
 
-            HStack(spacing: Theme.Spacing.xs) {
+            HStack(spacing: 4) {
                 keyCap("⏎")
                 Text("切换")
                     .font(Theme.Typography.text(10))
                     .foregroundColor(Theme.Colors.idleText)
             }
 
-            HStack(spacing: Theme.Spacing.xs) {
+            HStack(spacing: 4) {
                 keyCap("⌃D")
                 Text("删除")
                     .font(Theme.Typography.text(10))
                     .foregroundColor(Theme.Colors.idleText)
             }
 
-            HStack(spacing: Theme.Spacing.xs) {
+            HStack(spacing: 4) {
                 keyCap("esc")
                 Text("关闭")
                     .font(Theme.Typography.text(10))
@@ -220,23 +256,22 @@ struct AIChatQuickSwitcher: View {
             }
         }
         .padding(.horizontal, Theme.Spacing.card)
-        .padding(.vertical, Theme.Spacing.sm)
-        .background(Theme.Colors.surfaceInset)
+        .padding(.vertical, 8.5)
     }
 
     private func keyCap(_ text: String) -> some View {
         Text(text)
-            .font(Theme.Typography.mono(9.5, .medium))
+            .font(Theme.Typography.mono(9, .medium))
             .foregroundColor(Theme.Colors.contentSecondaryStrong)
             .padding(.horizontal, 4)
             .padding(.vertical, 1.5)
             .background(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Theme.Colors.surfaceBadge)
+                    .fill(Theme.Colors.surfaceBadge.opacity(0.85))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
+                    .stroke(Theme.Colors.cardStroke.opacity(0.55), lineWidth: 0.5)
             )
     }
 
@@ -291,6 +326,7 @@ struct AIChatQuickSwitcher: View {
 
 private struct SwitcherRow: View {
     let match: ChatSessionStore.SearchMatch
+    let searchKeyword: String
     let isSelected: Bool
     let isCurrent: Bool
     let isStreaming: Bool
@@ -306,23 +342,26 @@ private struct SwitcherRow: View {
                 leadingIndicator
 
                 // 中间主信息区（标题与消息摘录）
-                VStack(alignment: .leading, spacing: 2.5) {
+                VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: Theme.Spacing.sm) {
-                        Text(match.session.title)
-                            .font(Theme.Typography.text(12.5, isSelected ? .medium : .regular))
-                            .foregroundColor(isSelected || isHovered ? Theme.Colors.contentPrimary : Theme.Colors.contentSecondaryStrong)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        highlightedText(
+                            match.session.title,
+                            keyword: searchKeyword,
+                            font: Theme.Typography.text(12.5, isSelected ? .medium : .regular),
+                            baseColor: isSelected || isHovered ? Theme.Colors.contentPrimary : Theme.Colors.contentSecondaryStrong,
+                            lineLimit: 1,
+                            truncationMode: .tail
+                        )
 
                         if isCurrent {
                             Text("当前")
-                                .font(Theme.Typography.text(9.5, .medium))
+                                .font(Theme.Typography.text(9, .medium))
                                 .foregroundColor(Theme.Colors.accent)
-                                .padding(.horizontal, 4)
+                                .padding(.horizontal, 4.5)
                                 .padding(.vertical, 1)
                                 .background(
-                                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                        .fill(Theme.Colors.accent.opacity(0.12))
+                                    Capsule()
+                                        .fill(Theme.Colors.accent.opacity(0.14))
                                 )
                         }
                     }
@@ -331,21 +370,22 @@ private struct SwitcherRow: View {
                         HStack(spacing: 3) {
                             Image(systemName: "text.quote")
                                 .font(Theme.Typography.text(9))
-                                .foregroundColor(Theme.Colors.accent.opacity(0.8))
-                            Text(snippet)
-                                .font(Theme.Typography.text(10.5))
-                                .foregroundColor(Theme.Colors.contentTertiary)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                                .foregroundColor(Theme.Colors.accent.opacity(0.85))
+                            highlightedText(
+                                snippet,
+                                keyword: searchKeyword,
+                                font: Theme.Typography.text(10.5),
+                                baseColor: isSelected ? Theme.Colors.contentSecondaryStrong : Theme.Colors.contentTertiary,
+                                lineLimit: 1,
+                                truncationMode: .middle
+                            )
                         }
                     } else if let lastMsg = match.session.messages.last?.content {
-                        let preview = lastMsg
-                            .replacingOccurrences(of: "\n", with: " ")
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !preview.isEmpty {
-                            Text(preview)
+                        let clean = ChatSessionStore.cleanPlainText(from: lastMsg)
+                        if !clean.isEmpty {
+                            Text(clean)
                                 .font(Theme.Typography.text(10.5))
-                                .foregroundColor(Theme.Colors.idleText)
+                                .foregroundColor(isSelected ? Theme.Colors.contentSecondaryStrong : Theme.Colors.idleText)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
@@ -367,15 +407,33 @@ private struct SwitcherRow: View {
                         .foregroundColor(Theme.Colors.idleText)
                 }
             }
-            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.horizontal, 11)
             .padding(.vertical, match.matchedSnippet != nil ? 7.5 : 6)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.previewCapsule, style: .continuous)
-                    .fill(
-                        isSelected
-                            ? Theme.Colors.accent.opacity(0.14)
-                            : (isHovered ? Theme.Colors.surfaceButton : Color.clear)
-                    )
+                Group {
+                    if isSelected {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Theme.Colors.accent.opacity(0.18),
+                                            Theme.Colors.accent.opacity(0.11)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
+                                )
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Theme.Colors.accent.opacity(0.28), lineWidth: 0.5)
+                        }
+                    } else if isHovered {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Theme.Colors.surfaceButton.opacity(0.75))
+                    } else {
+                        Color.clear
+                    }
+                }
             )
             .contentShape(Rectangle())
         }
@@ -390,7 +448,7 @@ private struct SwitcherRow: View {
         if match.session.pinned {
             Image(systemName: "pin.fill")
                 .font(Theme.Typography.text(9.5))
-                .foregroundColor(Theme.Colors.accent.opacity(0.85))
+                .foregroundColor(Theme.Colors.accent.opacity(0.9))
                 .frame(width: 14)
         } else if isStreaming {
             Circle()
@@ -398,9 +456,9 @@ private struct SwitcherRow: View {
                 .frame(width: 6, height: 6)
                 .frame(width: 14)
         } else {
-            Image(systemName: "bubble.left")
+            Image(systemName: isSelected ? "bubble.left.fill" : "bubble.left")
                 .font(Theme.Typography.text(10.5))
-                .foregroundColor(isSelected ? Theme.Colors.contentPrimary : Theme.Colors.idleText)
+                .foregroundColor(isSelected ? Theme.Colors.accent : Theme.Colors.idleText)
                 .frame(width: 14)
         }
     }
@@ -418,5 +476,35 @@ private struct SwitcherRow: View {
             formatter.dateFormat = "M/d"
             return formatter.string(from: date)
         }
+    }
+
+    private func highlightedText(
+        _ text: String,
+        keyword: String,
+        font: Font,
+        baseColor: Color,
+        highlightColor: Color = Theme.Colors.accent,
+        lineLimit: Int? = 1,
+        truncationMode: Text.TruncationMode = .tail
+    ) -> some View {
+        let trimmed = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let range = text.range(of: trimmed, options: .caseInsensitive) else {
+            return Text(text)
+                .font(font)
+                .foregroundColor(baseColor)
+                .lineLimit(lineLimit)
+                .truncationMode(truncationMode)
+        }
+
+        let before = String(text[..<range.lowerBound])
+        let match = String(text[range])
+        let after = String(text[range.upperBound...])
+
+        return (Text(before).foregroundColor(baseColor)
+            + Text(match).foregroundColor(highlightColor).fontWeight(.semibold)
+            + Text(after).foregroundColor(baseColor))
+            .font(font)
+            .lineLimit(lineLimit)
+            .truncationMode(truncationMode)
     }
 }

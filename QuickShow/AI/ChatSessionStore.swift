@@ -284,11 +284,20 @@ final class ChatSessionStore: ObservableObject {
         let session: ChatSession
         /// 匹配的历史消息正文片段（若为标题匹配或空查询则为 nil）
         let matchedSnippet: String?
+        /// 匹配相关性权重（分数越高相关性越强）
+        let matchScore: Int
+
+        init(session: ChatSession, matchedSnippet: String?, matchScore: Int = 0) {
+            self.session = session
+            self.matchedSnippet = matchedSnippet
+            self.matchScore = matchScore
+        }
 
         static func == (lhs: SearchMatch, rhs: SearchMatch) -> Bool {
             lhs.session.id == rhs.session.id &&
             lhs.session.updatedAt == rhs.session.updatedAt &&
-            lhs.matchedSnippet == rhs.matchedSnippet
+            lhs.matchedSnippet == rhs.matchedSnippet &&
+            lhs.matchScore == rhs.matchScore
         }
     }
 
@@ -319,36 +328,107 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
-    /// 快速全局检索：空关键字返回最近会话；非空关键字支持匹配标题与消息内容，并提取命中的上下文摘要。
+    /// 快速全局检索：空关键字返回最近会话；非空关键字支持按相关性权重（标题完全/前缀 > 标题包含 > 历史正文）加权排序。
     func searchWithSnippets(_ query: String) -> [SearchMatch] {
         let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let sorted = sessionsSortedByRecent()
         guard !keyword.isEmpty else {
-            return sorted.map { SearchMatch(session: $0, matchedSnippet: nil) }
+            return sorted.map { SearchMatch(session: $0, matchedSnippet: nil, matchScore: 0) }
         }
 
         var results: [SearchMatch] = []
         for session in sorted {
-            let titleMatched = session.title.lowercased().contains(keyword)
+            let lowerTitle = session.title.lowercased()
+            let score: Int
             var snippet: String? = nil
 
-            if !titleMatched {
-                // 查找最近一条包含关键词的消息
+            if lowerTitle == keyword {
+                // 1. 标题完全一致（权重最高）
+                score = 100
+            } else if lowerTitle.hasPrefix(keyword) {
+                // 2. 标题前缀命中（如搜“冷”命中“冷笑话三连”）
+                score = 80
+            } else if lowerTitle.contains(keyword) {
+                // 3. 标题包含命中（如搜“笑话”命中“冷笑话三连”）
+                score = 60
+            } else {
+                // 4. 标题未中，扫描历史消息正文
                 if let matchedMessage = session.messages.reversed().first(where: { $0.content.lowercased().contains(keyword) }) {
                     snippet = Self.extractSnippet(from: matchedMessage.content, keyword: keyword)
+                    score = snippet != nil ? 30 : 0
+                } else {
+                    score = 0
                 }
             }
 
-            if titleMatched || snippet != nil {
-                results.append(SearchMatch(session: session, matchedSnippet: snippet))
+            if score > 0 {
+                results.append(SearchMatch(session: session, matchedSnippet: snippet, matchScore: score))
             }
         }
+
+        // 第一权重：匹配相关性得分从大到小；第二权重：同分时按最后活跃时间倒序
+        results.sort { (a, b) -> Bool in
+            if a.matchScore != b.matchScore {
+                return a.matchScore > b.matchScore
+            }
+            return a.session.updatedAt > b.session.updatedAt
+        }
+
         return results
     }
 
-    /// 从消息正文中提取围绕关键词的单行上下文片段
+    /// 清洗 Markdown 标记并折叠空白，生成适合单行列表预览的纯文本
+    static func cleanPlainText(from text: String) -> String {
+        guard !text.isEmpty else { return "" }
+        var result = text
+
+        // 1. 去除代码围栏（```lang ... ```）
+        if result.contains("```") {
+            result = result.replacingOccurrences(of: "```[a-zA-Z0-9_-]*\\n?", with: "", options: .regularExpression)
+        }
+
+        // 2. 去除 Markdown 标题符号（行首或空格后的 # 符号）
+        result = result.replacingOccurrences(of: "(?m)^#{1,6}\\s+", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\s+#{1,6}\\s+", with: " ", options: .regularExpression)
+
+        // 3. 去除任务列表复选框
+        result = result.replacingOccurrences(of: "\\[[ xX]\\]\\s*", with: "", options: .regularExpression)
+
+        // 4. 去除列表符号（- / * / + / 1. ）
+        result = result.replacingOccurrences(of: "(?m)^\\s*[-*+]\\s+", with: "", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?m)^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
+
+        // 5. 去除引用标记（> ）
+        result = result.replacingOccurrences(of: "(?m)^\\s*>+\\s*", with: "", options: .regularExpression)
+
+        // 6. 去除粗体、斜体、删除线（**text**, *text*, __text__, _text_, ~~text~~）
+        result = result.replacingOccurrences(of: "\\*\\*([^*]+)\\*\\*", with: "$1", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\*([^*]+)\\*", with: "$1", options: .regularExpression)
+        result = result.replacingOccurrences(of: "__([^_]+)__", with: "$1", options: .regularExpression)
+        result = result.replacingOccurrences(of: "(?<!\\w)_([^_]+)_(?!\\w)", with: "$1", options: .regularExpression)
+        result = result.replacingOccurrences(of: "~~([^~]+)~~", with: "$1", options: .regularExpression)
+
+        // 7. 去除行内代码反引号
+        result = result.replacingOccurrences(of: "`([^`]+)`", with: "$1", options: .regularExpression)
+
+        // 8. 去除链接格式 [text](url) -> text, ![alt](url) -> alt
+        result = result.replacingOccurrences(of: "!\\[([^\\]]*)\\]\\([^)]+\\)", with: "$1", options: .regularExpression)
+        result = result.replacingOccurrences(of: "\\[([^\\]]+)\\]\\([^)]+\\)", with: "$1", options: .regularExpression)
+
+        // 9. 去除表格线中的连续竖线和分隔行
+        result = result.replacingOccurrences(of: "\\|", with: " ")
+        result = result.replacingOccurrences(of: "\\s*[-:]{3,}\\s*", with: " ", options: .regularExpression)
+
+        // 10. 折叠换行与连续空白为单个空格
+        result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 从消息正文中提取围绕关键词的单行上下文片段（自动清洗 Markdown 符号）
     private static func extractSnippet(from text: String, keyword: String, maxSnippetLength: Int = 50) -> String? {
-        let lower = text.lowercased()
+        let clean = cleanPlainText(from: text)
+        let lower = clean.lowercased()
         guard let range = lower.range(of: keyword) else { return nil }
 
         let matchStart = range.lowerBound
@@ -360,9 +440,7 @@ final class ChatSessionStore: ObservableObject {
         let start = lower.index(matchStart, offsetBy: -prefixCount, limitedBy: lower.startIndex) ?? lower.startIndex
         let end = lower.index(matchEnd, offsetBy: suffixCount, limitedBy: lower.endIndex) ?? lower.endIndex
 
-        var rawSnippet = String(text[start..<end])
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
+        var rawSnippet = String(clean[start..<end])
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         if start > lower.startIndex {

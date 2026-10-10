@@ -38,6 +38,12 @@
 
 ### Changed
 
+- 快速会话切换器（Quick Switcher）视觉质感重塑与加权搜索相关性升级（`AIChatQuickSwitcher` / `ChatSessionStore` / `AIChatView`）：
+  - **通透毛玻璃体与顶级光影重构**：废除 95% 不透明度的硬质底板（`chatNavFloatFill`），全面接入原生 `.regularMaterial` 磨砂玻璃体搭配柔光底层（`surfaceCard`），使底层聊天内容自然呈现优雅的景深模糊与高光折射；外框升级为 Directional Rim Light（顶部微白受光边、侧边微弱边、底部阴影重边）与双层立体阴影（贴身接触影 8pt + 纵深漫反射环境影 32pt），彻底消除实色塑料廉价感；
+  - **结构去切片化与轻盈 Footer（方案 A）**：移除粗暴分割线，改用两端对称羽化渐隐的微光光线；剥离底部按键提示条沉重的全幅灰底，将其转为与面板底板浑然一体的轻巧微胶囊提示；调优遮罩层为轻透的 0.12 不透明度；
+  - **消息文本纯净化（Markdown 标记剥离）**：新增 `cleanPlainText` 纯文本清洗管线，在会话列表预览与引文摘要中自动滤除标题井号、粗斜体星号、任务复选框、表格线、代码反引号等原始语法符号，呈现自然流畅的人类自然语言正文；
+  - **相关性梯度加权排序**：重构会话检索算法，建立「标题完全匹配 (100) / 前缀命中 (80) > 标题包含 (60) > 正文命中 (30)」加权评分模型，彻底终结单纯按时间倒序导致正文偶发词压过标题精准命中的反直觉问题；同梯队内部按活跃时间倒序；
+  - **检索关键词视觉高亮**：对标题与正文引文切片中命中的关键词应用 Accent 强调色与 Semibold 加粗渲染，命中点清晰醒目。
 - 阅读列边距收敛（`DesignTokens.swift` / `AIChatLayoutSupport.swift`）：退役 `chatTickRailLane` 额外内缩（归零），刻度轨（10~19pt）完全容纳于标准 18pt 边距内，消除双侧额外 28pt 对称留白，使对话流内容列与输入坞自然舒展。
 - 文档体系净化与持久规则明确（`README.md` / `AGENTS.md`）：系统性净化 README.md，剥离内部架构机制与微观 UI 瞬态描述，修正历史滞后的 API Key 存储与构建路径说明，收敛代码结构树为稳定模块概览；于 AGENTS.md 确立 README 极度克制更新红线与 CHANGELOG 严格分工。
 - 构建产物目录收敛为统一单根 `./build`（`scripts/restart.sh` / `AGENTS.md`）：废弃并移除历史冗余的 `./build_release` 根目录，构建中间数据与 Release 最终产物统一收敛至 `./build`（Release 产物位于 `./build/Build/Products/Release/QuickShow.app`），彻底消除多根目录导致的磁盘缓存冗余以及 macOS LaunchServices 扫描多路径注册冲突。

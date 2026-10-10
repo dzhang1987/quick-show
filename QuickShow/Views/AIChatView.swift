@@ -182,7 +182,7 @@ struct AIChatView: View {
         .overlay {
             if state.isQuickSwitcherPresented {
                 ZStack(alignment: .top) {
-                    Color.black.opacity(0.18)
+                    Color.black.opacity(0.12)
                         .ignoresSafeArea()
                         .contentShape(Rectangle())
                         .onTapGesture {
