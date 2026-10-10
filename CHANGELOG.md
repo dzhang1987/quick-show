@@ -25,6 +25,7 @@
 ### Changed
 
 - 阅读列边距收敛（`DesignTokens.swift` / `AIChatLayoutSupport.swift`）：退役 `chatTickRailLane` 额外内缩（归零），刻度轨（10~19pt）完全容纳于标准 18pt 边距内，消除双侧额外 28pt 对称留白，使对话流内容列与输入坞自然舒展。
+- 文档体系净化与持久规则明确（`README.md` / `AGENTS.md`）：系统性净化 README.md，剥离内部架构机制与微观 UI 瞬态描述，修正历史滞后的 API Key 存储与构建路径说明，收敛代码结构树为稳定模块概览；于 AGENTS.md 确立 README 极度克制更新红线与 CHANGELOG 严格分工。
 - 构建产物目录收敛为统一单根 `./build`（`scripts/restart.sh` / `AGENTS.md`）：废弃并移除历史冗余的 `./build_release` 根目录，构建中间数据与 Release 最终产物统一收敛至 `./build`（Release 产物位于 `./build/Build/Products/Release/QuickShow.app`），彻底消除多根目录导致的磁盘缓存冗余以及 macOS LaunchServices 扫描多路径注册冲突。
 
 ### Fixed
