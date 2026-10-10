@@ -112,12 +112,9 @@ struct ChatReadingColumnWidthKey: PreferenceKey {
 }
 
 /// 阅读列统一约束：限宽 `Theme.Layout.chatContentMaxWidth` 居中 + 水平边距分级
-/// （内容区 <720pt 用 `Spacing.section`=18 即默认窗现状；≥720pt 升为 28，宽窗保留玻璃呼吸边）
-/// + 左右双侧 `chatTickRailLane` 对称内缩：右侧是刻度轨让位通道（与右缘刻度轨之间留足
-/// 呼吸带，覆盖 tick 放大峰值宽度仍有余量），左侧镜像补齐同宽——内容列左右边距恒相等
-/// （窄窗 18+28=46 / 宽窗 28+28=56），整列居中不再左偏。刻度轨本体挂在阅读列之外的
-/// ScrollView overlay 上（贴窗口右缘），不随本修饰器位移。
-/// 各应用点（消息列/输入坞/回底钮/顶栏图钉）共用本修饰器，列左缘/右缘对齐逻辑单一来源、永不漂移。
+/// （内容区 <720pt 用 `Spacing.section`=18 即默认窗现状；≥720pt 升为 28，宽窗保留玻璃呼吸边）。
+/// 刻度轨（宽 10~19pt，贴右缘 4pt）静止时完全容纳于右侧 18pt 边距内，消除双侧额外 28pt 内缩，
+/// 内容与输入坞自然舒展。各应用点（消息列/输入坞/回底钮/顶栏图钉）共用本修饰器，列左缘/右缘对齐逻辑单一来源、永不漂移。
 ///
 /// 宽度读取走 background GeometryReader + preference：部署目标 macOS 13 不可用
 /// onGeometryChange（14+）；GeometryReader 挂 background 内尺寸被前景约束（最外层撑满帧），
@@ -144,8 +141,6 @@ struct ChatReadingColumn: ViewModifier {
         content
             .frame(maxWidth: Theme.Layout.chatContentMaxWidth, alignment: alignment)
             .padding(.horizontal, horizontalPadding)
-            // 双侧对称内缩：右侧为刻度轨让位通道，左侧镜像同宽，内容列左右边距一致
-            .padding(.horizontal, Theme.Layout.chatTickRailLane)
             .frame(maxWidth: .infinity)
             .background(
                 GeometryReader { geo in

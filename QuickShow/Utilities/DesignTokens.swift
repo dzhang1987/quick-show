@@ -384,8 +384,7 @@ enum Theme {
         static let chatContentMaxWidth: CGFloat = 760
         // 阅读列水平边距宽档：内容区 ≥720pt 时由 Spacing.section(18) 升为 28——
         // 宽窗列几近铺满时仍保留玻璃呼吸边（28 = 18×1.56，感知可辨而不突兀）。
-        // 双侧另有 chatTickRailLane(28) 对称内缩：720~872pt 区间列宽 = 内容宽 − 112；
-        // ≥872pt 列锁 760，两侧留白随窗自然生长
+        // 刻度轨静止宽 10pt、距右缘 4pt（占 0~14pt），完全容纳于 18pt 边距内，无需额外通道。
         static let chatReadingWideBreakpoint: CGFloat = 720
         static let chatReadingWidePadding: CGFloat = 28
         // AI 对话浮岛输入坞：坞体真实高度不做静态预算，由 inputArea 整体实测直写
@@ -418,10 +417,9 @@ enum Theme {
         static let chatTickWidth: CGFloat = 10
         static let chatTickHeight: CGFloat = 2
         static let chatTickTrailing: CGFloat = 4       // tick 右端距窗口右内缘
-        // 刻度轨专用让位通道：阅读列（消息/坞/图钉/回底钮/顶栏图钉共用 ChatReadingColumn）
-        // 左右双侧各内缩此值——右侧与刻度轨留足呼吸带（覆盖放大峰值宽度），左侧镜像对称，
-        // 内容列左右边距恒相等（窄窗 18+28=46 / 宽窗 28+28=56）
-        static let chatTickRailLane: CGFloat = 28
+        // 刻度轨专用让位通道已退役：刻度轨（10~19pt）静止时完全容于标准边距 18pt 内，
+        // 消除额外双侧内缩，保留该 token 归零兼容。
+        static let chatTickRailLane: CGFloat = 0
         static let chatTickPitch: CGFloat = 10         // 静止基线间距（紧凑密排）
         static let chatTickPitchMin: CGFloat = 4       // 密度自适应下限（tick 多时再密也不低于此）
         static let chatTickMagnifyMaxScale: CGFloat = 1.9  // 光标正下方峰值放大（Dock ≈1.8~2.2 手感带）
