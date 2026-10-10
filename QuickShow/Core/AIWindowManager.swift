@@ -14,16 +14,7 @@ final class AIPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { true }
 
-    /// ESC 阶段 ①：就地编辑消息优先取消编辑（返回 true = 已消费）
-    var onCancelMessageEdit: (() -> Bool)?
-    /// ESC 阶段 ②：会话重命名优先取消重命名（返回 true = 已消费）
-    var onCancelRename: (() -> Bool)?
-    /// ESC 阶段 ③：输入坞抽屉在场时取消抽屉（方案 B: 拒绝/取消并连带彻底中止大模型流式生成；
-    /// 返回 true = 已消费本次 ESC，保持窗口打开）
-    var onCancelDrawer: (() -> Bool)?
-    /// ESC 阶段 ④：流式生成中双击确认急停（返回 true = 已消费本次 ESC，保持窗口打开）
-    var onAbortStreaming: (() -> Bool)?
-    /// ESC 阶段 ⑤：非流式空闲态时关窗还焦点
+    /// ESC 兜底关窗（当 EscapePolicyCenter 栈为空或未消费时执行）
     var onEscapeClose: (() -> Void)?
     /// ⌘K 清空会话
     var onClearSession: (() -> Void)?
@@ -114,23 +105,13 @@ final class AIPanel: NSPanel {
         super.keyDown(with: event)
     }
 
-    /// ESC 分层处理：
-    /// ① 历史消息就地编辑先退出编辑；② 会话重命名先取消重命名；
-    /// ③ 抽屉在场先取消抽屉（方案 B：连带急停大模型当前生成）；
-    /// ④ 纯流式中双击确认急停；⑤ 否则关窗还焦点。
+    /// ESC 策略化分层处理：
+    /// 由 EscapePolicyCenter 响应者栈统一自顶向下分发；仅当栈未消费时兜底关窗。
     private func handleEscape() {
-        if let cancelEdit = onCancelMessageEdit, cancelEdit() {
-            return
+        let handled = MainActor.assumeIsolated {
+            EscapePolicyCenter.shared.handleEscape()
         }
-        if let cancelRename = onCancelRename, cancelRename() {
-            return
-        }
-        if let cancelDrawer = onCancelDrawer, cancelDrawer() {
-            return
-        }
-        if let abort = onAbortStreaming, abort() {
-            return
-        }
+        if handled { return }
         onEscapeClose?()
     }
 
@@ -561,56 +542,7 @@ final class AIWindowManager {
             self?.scheduleFrameSave()
         })
 
-        // 接线：ESC 分层（① 编辑 → ② 重命名 → ③ 抽屉连带急停 → ④ 双击流式急停 → ⑤ 关窗）
-        // / ⌘K 清空 / 被动失焦隐藏。
-        // ChatInteractionCenter/AIChatState 为 @MainActor，闭包恒在主线程按键路径触发，
-        // assumeIsolated 同步桥接（编译期隔离检查合规，运行期零开销）
-        panel.onCancelMessageEdit = {
-            MainActor.assumeIsolated {
-                let state = AIChatState.shared
-                guard state.editingMessageId != nil else { return false }
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                    state.editingMessageId = nil
-                }
-                return true
-            }
-        }
-        panel.onCancelRename = {
-            MainActor.assumeIsolated {
-                let state = AIChatState.shared
-                guard state.renamingSessionId != nil else { return false }
-                state.renamingSessionId = nil
-                return true
-            }
-        }
-        panel.onCancelDrawer = {
-            MainActor.assumeIsolated {
-                let center = ChatInteractionCenter.shared
-                guard let request = center.request else { return false }
-                switch request {
-                case .toolConfirmation:
-                    // 权限抽屉 ESC = 拒绝（安全默认值）
-                    center.resolveConfirmation(.denied)
-                case .userQuestions:
-                    // 提问抽屉 ESC = 取消
-                    center.cancelQuestions()
-                }
-                // 方案 B：抽屉在场按 ESC 连带彻底中止大模型当前生成，避免模型继续啰嗦回应；
-                // 同步设置 0.5s 抑制期并清除二次确认状态，防止连击 ESC 穿透误弹 Toast
-                let state = AIChatState.shared
-                state.suppressAbortConfirmationUntil = Date().addingTimeInterval(0.5)
-                state.cancelAbortConfirmation()
-                if state.isStreaming {
-                    state.abortAndRecallQueue()
-                }
-                return true
-            }
-        }
-        panel.onAbortStreaming = {
-            MainActor.assumeIsolated {
-                AIChatState.shared.handleEscapeAbort()
-            }
-        }
+        // 接线：ESC 兜底关窗 / ⌘K 清空 / 被动失焦隐藏。
         panel.onEscapeClose = { [weak self] in
             self?.hide()
         }

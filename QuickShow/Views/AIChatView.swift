@@ -90,7 +90,7 @@ struct AIChatView: View {
     @State private var searchFocusRequest = 0
     /// 点击放大预览的图片附件（非 nil 时显示覆盖层，ESC/点击关闭）。
     @State private var zoomedAttachment: ChatImageAttachment?
-    /// AI 窗快捷键监听（⌘N/⌘B/⌘F + 重命名/放大态下的 ESC 先行消费）。
+    /// AI 窗快捷键监听（⌘N/⌘B/⌘F/⌘P/⌘[] + 重命名/放大/快速切换态下的 ESC 先行消费）。
     @State private var keyMonitor = AIChatKeyMonitor()
     /// 钉住常驻态（窗口层真源在 AIWindowManager，视图侧仅镜像渲染）。
     @State private var pinned = AIWindowManager.shared.isPinned
@@ -178,19 +178,95 @@ struct AIChatView: View {
                 }
             }
         }
+        // 快速会话切换 / 全局搜索居中悬浮面板（⌘P 呼出，ESC/点击外部关闭）
+        .overlay {
+            if state.isQuickSwitcherPresented {
+                ZStack(alignment: .top) {
+                    Color.black.opacity(0.18)
+                        .ignoresSafeArea()
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            closeQuickSwitcher()
+                        }
+
+                    AIChatQuickSwitcher(
+                        store: state.store,
+                        streamingSessionIds: state.streamingSessionIds,
+                        unreadSessionIds: state.unreadSessionIds,
+                        onSelectSession: { id in
+                            state.selectSession(id: id)
+                        },
+                        onDismiss: {
+                            closeQuickSwitcher()
+                        }
+                    )
+                    .padding(.top, Theme.Layout.chatTopBarHeight + Theme.Spacing.md)
+                }
+                .transition(.asymmetric(
+                    insertion: .opacity.combined(with: .scale(scale: 0.97)),
+                    removal: .opacity.combined(with: .scale(scale: 0.99))
+                ))
+            }
+        }
+        .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.isQuickSwitcherPresented)
         .modifier(AIChatRoundedClip())
+        // MARK: - ESC 响应者栈管理（浮层动态入栈/出栈，栈底为 Chat 根窗口）
+        .escapeResponder(
+            id: "image_zoom",
+            isActive: zoomedAttachment != nil
+        ) {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                zoomedAttachment = nil
+            }
+            return true
+        }
+        .escapeResponder(
+            id: "quick_switcher",
+            isActive: state.isQuickSwitcherPresented
+        ) {
+            closeQuickSwitcher()
+            return true
+        }
+        .escapeResponder(
+            id: "message_edit",
+            isActive: state.editingMessageId != nil
+        ) {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                state.editingMessageId = nil
+            }
+            return true
+        }
+        .escapeResponder(
+            id: "renaming",
+            isActive: state.renamingSessionId != nil
+        ) {
+            state.renamingSessionId = nil
+            return true
+        }
+        .escapeResponder(
+            id: "drawer",
+            isActive: interaction.request != nil
+        ) {
+            cancelActiveDrawerIfNeeded()
+        }
         .onAppear {
             refreshEnvironment()
             installKeyMonitor()
             pinned = AIWindowManager.shared.isPinned
             // 抽屉 UI 在场登记：逻辑层据此决定发布请求还是安全兜底（拒绝/取消）
             interaction.markUIActive(true)
+            // 注册 ESC 栈底节点：所有上层浮层出栈后，栈底接管流式急停与关窗
+            EscapePolicyCenter.shared.registerRoot(id: "chat_window") {
+                if state.handleEscapeAbort() { return true }
+                onClose?()
+                return true
+            }
         }
         .onDisappear {
             keyMonitor.remove()
             state.cancelAbortConfirmation()
-            // UI 离场：挂起中的抽屉请求被唤醒为兜底结果（确认→拒绝 / 提问→取消），防泄漏
             interaction.markUIActive(false)
+            EscapePolicyCenter.shared.unregisterRoot(id: "chat_window")
         }
         // 回到 AI 窗口时刷新配置/图钉/剪贴板可用态并确保快捷键监听就绪（设置窗口改动后可即时生效）；
         // 只响应 AIPanel——非本窗的 key 变化不触发重渲染（历史根因：Settings/主面板
@@ -637,59 +713,67 @@ struct AIChatView: View {
         AIWindowManager.shared.setSidebarVisible(visible)
     }
 
-    // MARK: - 快捷键监听（⌘N/⌘B/⌘F + 重命名/放大态 ESC 先行消费）
+    // MARK: - 快捷键监听（⌘N/⌘B/⌘F/⌘P/⌘[] + 重命名/放大/快速切换态 ESC 先行消费）
 
     private func installKeyMonitor() {
-        keyMonitor.isDrawerOpen = { ChatInteractionCenter.shared.request != nil }
-        keyMonitor.onCancelDrawer = { _ = self.cancelActiveDrawerIfNeeded() }
-        keyMonitor.isEditingMessage = { AIChatState.shared.editingMessageId != nil }
-        keyMonitor.onCancelMessageEdit = {
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                AIChatState.shared.editingMessageId = nil
-            }
+        keyMonitor.isQuickSwitcherOpen = { AIChatState.shared.isQuickSwitcherPresented }
+        keyMonitor.onQuickSwitcherUp = {
+            NotificationCenter.default.post(name: .aiChatQuickSwitcherUp, object: nil)
         }
-        keyMonitor.isRenaming = { AIChatState.shared.renamingSessionId != nil }
-        keyMonitor.onCancelRename = { AIChatState.shared.renamingSessionId = nil }
-        keyMonitor.isZooming = { zoomedAttachment != nil }
-        keyMonitor.onDismissZoom = {
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                zoomedAttachment = nil
-            }
+        keyMonitor.onQuickSwitcherDown = {
+            NotificationCenter.default.post(name: .aiChatQuickSwitcherDown, object: nil)
         }
+        keyMonitor.onQuickSwitcherSelect = {
+            NotificationCenter.default.post(name: .aiChatQuickSwitcherSelect, object: nil)
+        }
+        keyMonitor.onQuickSwitcherDelete = {
+            NotificationCenter.default.post(name: .aiChatQuickSwitcherDelete, object: nil)
+        }
+        keyMonitor.onToggleQuickSwitcher = { toggleQuickSwitcher() }
+        keyMonitor.onPreviousSession = { state.store.switchToPreviousSession() }
+        keyMonitor.onNextSession = { state.store.switchToNextSession() }
         keyMonitor.onNewSession = { newSession() }
         keyMonitor.onToggleSidebar = { toggleSidebar() }
-        // ⌘F：侧栏收起时先展开，再聚焦搜索框
+        // ⌘F：侧栏收起时唤出居中全局搜索；侧栏展开时聚焦侧栏搜索框
         keyMonitor.onFocusSearch = {
-            if !sidebarVisible { setSidebarVisible(true) }
-            searchFocusRequest += 1
+            if !sidebarVisible {
+                openQuickSwitcher()
+            } else {
+                searchFocusRequest += 1
+            }
         }
         keyMonitor.install()
     }
 
-    /// ESC 阶段语义（输入框聚焦时的兜底路径）：
-    /// ⓪ 就地编辑进行中 → 先取消编辑；
-    /// ① 行内重命名进行中 → 先取消重命名；
-    /// ② 抽屉在场 → 方案 B 取消抽屉并连带急停本次大模型流式；
-    /// ③ 纯流式中 → 二次确认中止生成（消费 ESC 并弹提示/回填队列）；
-    /// ④ 否则关窗还焦点。
+    /// 切换快速会话切换 / 全局搜索面板显隐（⌘P）
+    private func toggleQuickSwitcher() {
+        if state.isQuickSwitcherPresented {
+            closeQuickSwitcher()
+        } else {
+            openQuickSwitcher()
+        }
+    }
+
+    private func openQuickSwitcher() {
+        state.editingMessageId = nil
+        state.renamingSessionId = nil
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+            state.isQuickSwitcherPresented = true
+        }
+    }
+
+    private func closeQuickSwitcher() {
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+            state.isQuickSwitcherPresented = false
+        }
+        NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+    }
+
+    /// ESC 响应处理（统一由栈顶向栈底分发）：
+    /// 栈顶浮层消费退出；全部浮层退栈后，由栈底根窗口执行流式急停或关窗。
     private func handleEscape() {
-        if state.editingMessageId != nil {
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                state.editingMessageId = nil
-            }
-            return
-        }
-        if state.renamingSessionId != nil {
-            state.renamingSessionId = nil
-            return
-        }
-        if cancelActiveDrawerIfNeeded() {
-            return
-        }
-        if state.handleEscapeAbort() {
-            return
-        }
-        onClose?()
+        _ = EscapePolicyCenter.shared.handleEscape()
     }
 
     /// ESC 阶段 0（与窗口层 AIPanel / 按键监听 AIChatKeyMonitor 三条链路同一语义）：

@@ -150,11 +150,13 @@
 		DA4C6170D2969158BA1E3B38 /* MathFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11F7A6D46279250D573223B /* MathFont.swift */; };
 		DAF246032E894DFF886DF0C6 /* MarkdownInlineNS.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8773F47D61D27DA23DC73AB /* MarkdownInlineNS.swift */; };
 		DB289B1C35342CF3AC4D608A /* SystemActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6CE4C4D3B3C24C822C936D /* SystemActions.swift */; };
+		DCDB0D7025AB22155393A0E1 /* EscapePolicyCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B72D1E41F51F05F018ABF /* EscapePolicyCenter.swift */; };
 		E542D68A284B997ED9194C5F /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 209D2082B5AB449D9864B03C /* ChatSessionStore.swift */; };
 		E5E4986AAB0D5EB1606D3B0A /* CalendarEventDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6C9B117A903234A0E71078F /* CalendarEventDetailView.swift */; };
 		E6EB77D3781734A025DDD529 /* libHighlightrKit.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 11C47863F2E3FDEDECD77402 /* libHighlightrKit.a */; };
 		E730A6B03064328D862A238B /* MTFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC0A78A95760C2C20A354FDC /* MTFont.swift */; };
 		E7A3A2A6109B04DDA6F3C1CE /* UserQuestionDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA7B993A50B68FFAF5E4C3FB /* UserQuestionDrawer.swift */; };
+		E8399B71C1F88B7F00C93FB3 /* AIChatQuickSwitcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66C3EBA7C75476E2B3B637D2 /* AIChatQuickSwitcher.swift */; };
 		ED72D26D82D73094EFEC4267 /* MTMathUILabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2BC33923F7BAC20B1968651 /* MTMathUILabel.swift */; };
 		EDA919A13D9DCA4F3394700D /* MarkdownInline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63D9B92957771B78D4759345 /* MarkdownInline.swift */; };
 		EFE080DEA2B34CD39F704145 /* MathImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = C14CCDCBC6C81A448DC4D3B4 /* MathImage.swift */; };
@@ -248,6 +250,7 @@
 		622B97F8A4F6847EC8A4273F /* Shims.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Shims.swift; sourceTree = "<group>"; };
 		63AE6828207BF9FDF55E3684 /* StatusBarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarView.swift; sourceTree = "<group>"; };
 		63D9B92957771B78D4759345 /* MarkdownInline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownInline.swift; sourceTree = "<group>"; };
+		66C3EBA7C75476E2B3B637D2 /* AIChatQuickSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatQuickSwitcher.swift; sourceTree = "<group>"; };
 		6899045187A73D4B76895FE6 /* CalendarEventEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventEditView.swift; sourceTree = "<group>"; };
 		6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontV2.swift; sourceTree = "<group>"; };
 		6C3ED14E818FD6A81E2993F6 /* AIChatLayoutSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatLayoutSupport.swift; sourceTree = "<group>"; };
@@ -276,6 +279,7 @@
 		8F29E4C4AB23A2CD575B4FD2 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatService.swift; sourceTree = "<group>"; };
 		935E9F331F9AE538660984C0 /* ChatTickRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTickRail.swift; sourceTree = "<group>"; };
+		946B72D1E41F51F05F018ABF /* EscapePolicyCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscapePolicyCenter.swift; sourceTree = "<group>"; };
 		94BD4B04C800A479129E797F /* AISettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsSections.swift; sourceTree = "<group>"; };
 		9656C66211292A7426B2795C /* MTMathListBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathListBuilder.swift; sourceTree = "<group>"; };
 		97D5B500F6579D728562FD78 /* SystemStatusModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusModels.swift; sourceTree = "<group>"; };
@@ -406,6 +410,7 @@
 				3BA2EFE2F727CEF5B0BEBC55 /* AppState+Forwarding.swift */,
 				34CBD4C89D5A33D444B5AA62 /* CalendarStore.swift */,
 				D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */,
+				946B72D1E41F51F05F018ABF /* EscapePolicyCenter.swift */,
 				A717A5076D26657EA117861F /* HotKeyManager.swift */,
 				3291950B8938576996251B5D /* MediaStore.swift */,
 				3B9E47FFC6045EDC0E50BE6F /* MonitoringStore.swift */,
@@ -444,6 +449,7 @@
 				9BC88919D5EAE9E17E6C437E /* AIChatMessageList.swift */,
 				DDD353D5D27F078B3E0FBC63 /* AIChatMessageRow.swift */,
 				A6D6B1318545D06F8B940923 /* AIChatPreviewCardView.swift */,
+				66C3EBA7C75476E2B3B637D2 /* AIChatQuickSwitcher.swift */,
 				7DFA821684D05A5547CE67CC /* AIChatSidebarView.swift */,
 				2E580FA27BD85C8347C6C646 /* AIChatStatusViews.swift */,
 				804C2AFE4E28879F9C343208 /* AIChatView.swift */,
@@ -643,7 +649,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_7C99DF0B-3978-487B-A33E-ADC3CA30C96B" /* Resources */ = {
+		"TEMP_BB864147-961C-4525-83E6-1BFDF79A6FAA" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -826,6 +832,7 @@
 				68A4DFC9590BBC63D9C0E292 /* AIChatMessageList.swift in Sources */,
 				098A67D50CB525F84AB8CB17 /* AIChatMessageRow.swift in Sources */,
 				AE1EC6E5B5477D7EE46D569D /* AIChatPreviewCardView.swift in Sources */,
+				E8399B71C1F88B7F00C93FB3 /* AIChatQuickSwitcher.swift in Sources */,
 				A502FE2A9F1F56D2B44AC5AC /* AIChatService+Completion.swift in Sources */,
 				12936723ACBBFE0CBDDB36E8 /* AIChatService+Config.swift in Sources */,
 				536AA6C6BE64E1651D587CEE /* AIChatService+RequestEncoding.swift in Sources */,
@@ -874,6 +881,7 @@
 				6EBCA67406643D8157B55A57 /* DesignTokens.swift in Sources */,
 				A3FB31F1FE5755FC2B12689B /* DeviceProvider.swift in Sources */,
 				0034D112BC5E0A532F010AFD /* DrawerWidgets.swift in Sources */,
+				DCDB0D7025AB22155393A0E1 /* EscapePolicyCenter.swift in Sources */,
 				91069499DDBCC2426DCC41CD /* ExpandedMonitoringView.swift in Sources */,
 				066968D1CC95F6A7FE8D0715 /* FloatingPanel.swift in Sources */,
 				3F030C8F6AC7AAC865530EFF /* FocusWorkCard.swift in Sources */,

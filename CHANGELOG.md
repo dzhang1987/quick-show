@@ -6,6 +6,15 @@
 
 ### Added
 
+- 居中快速会话切换与全局搜索面板（Quick Switcher，`⌘P` / 侧栏收起时 `⌘F`，`AIChatQuickSwitcher` / `ChatSessionStore` / `AIChatKeyMonitor` / `AIChatLayoutSupport`）：
+  - **即搜即切**：无需展开 216pt 侧边栏，按 `⌘P` 随时在对话框正上方唤出居中悬浮切换面板，支持实时全文检索标题与历史消息上下文摘要片段；
+  - **全键盘流畅盲操**：支持 `↑` / `↓` / `Tab` / `Shift+Tab` 列表循环导航，`⏎` 回车切入对应会话；空搜索态默认预选次近会话，连敲即切；
+  - **高亮会话快捷删除**：选中任意会话按 `⌃D` (Ctrl + D) 或 `⌘⌫` 直接删除会话，自动校正选中项并保持平滑滚动。
+- 统一 ESC 响应者栈协调架构（`EscapePolicyCenter` / `EscapeRespondable` / `AIChatView` / `AIChatKeyMonitor`）：
+  - **纯 LIFO 栈模型（栈底为 Chat 窗口）**：彻底拔除各处堆叠的硬编码 if-else 分支，将 Chat 主窗口登记为永久栈底，所有上层组件（快速切换面板、图片放大、就地编辑、行内重命名、交互抽屉）通过声明式修饰符 `.escapeResponder` 动态入栈/出栈；
+  - **彻底消除穿透关窗**：ESC 统一由栈顶优先消费；仅当所有上层组件完全退栈、栈顶回落至根窗口时，才触发关窗或中止生成；
+  - **模态输入阻断**：提供 `isModalActive` 守卫，模态浮层在场时输入坞底层严格阻断按键与制表符派发，根治 `Tab` 切换列表导致输入坞键入制表符的问题。
+
 - AI 交互抽屉（`ask_user` 提问与危险工具授权）后台时效性系统通知与全生命周期自愈（`AICompletionNotifier` / `ChatInteractionCenter` / `AIWindowManager`）：
   - **交互挂起后台提醒**：AI 在执行 `ask_user` 或危险工具授权等交互工具时，若检测到 AI 对话窗处于非前台活跃状态（未钉住隐藏或失焦），立即向系统派发 `.timeSensitive` 时效性系统通知（含问题题干/操作摘要及提示音），解决用户切到其他应用后因不知晓 AI 提问而导致流程死锁卡住的问题；
   - **窗口失焦自动补发**：当交互抽屉弹出时窗口虽在前台、但用户随后切走至其他应用（`onResignKey`）时，自动补发后台待办通知；
@@ -34,6 +43,9 @@
 - 构建产物目录收敛为统一单根 `./build`（`scripts/restart.sh` / `AGENTS.md`）：废弃并移除历史冗余的 `./build_release` 根目录，构建中间数据与 Release 最终产物统一收敛至 `./build`（Release 产物位于 `./build/Build/Products/Release/QuickShow.app`），彻底消除多根目录导致的磁盘缓存冗余以及 macOS LaunchServices 扫描多路径注册冲突。
 
 ### Fixed
+
+- 快速切换器鼠标悬浮滚动与按键冲突修复（`AIChatQuickSwitcher`）：解决鼠标悬停在列表项导致滚轮与上下方向键无法驱动列表滚动的事件争抢问题，确保键鼠平滑过渡。
+- 模态在场输入坞制表符泄漏与穿透修复（`ChatInputNSTextView` / `AIChatInputFields`）：在模态浮层在场期间拒收文本输入与命令派发，彻底消除 `Tab` 键选择会话时向输入坞插入多余制表符的焦点穿透缺陷。
 
 - 单实例强保障与通知点击唤醒多实例根治（`SingleInstanceGuard` / `QuickShowApp`）：
   - **根因分析**：应用入口（`AppDelegate.main()`）先前缺失单实例互斥检测；且历史构建在 `./build`（Debug）与 `./build_release`（Release）并存时，同 Bundle ID（`cn.chiproad.QuickShow`）被 LaunchServices 同时登记。当 Release 版发送 AI 生成完成通知后，用户点击横幅，系统 LaunchServices 误激活并拉起另一路径的构建副本；无互斥锁机制使新进程常驻后台，导致双实例运行（双菜单栏图标、双快捷键抢占、双 MediaRemote 进程）；

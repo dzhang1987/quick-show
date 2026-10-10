@@ -152,6 +152,10 @@ struct ChatInputTextView: NSViewRepresentable {
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // 独占模态在场时（如 Quick Switcher / 覆盖层），主输入框绝对不响应任何文本命令（如 Tab 键 insertTab: / ESC 键 cancelOperation: 等）
+            if EscapePolicyCenter.shared.isModalActive {
+                return true
+            }
             // ⏎：中文 IME 组字期间 markedRange 非空 → 放行给输入法先提交候选字，绝不触发发送
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if textView.hasMarkedText() { return false }
@@ -325,7 +329,18 @@ final class ChatInputNSTextView: NSTextView {
         return super.performDragOperation(sender)
     }
 
+    override func keyDown(with event: NSEvent) {
+        if EscapePolicyCenter.shared.isModalActive {
+            // 独占模态在场时主输入框完全拒收按键，避免误输入 Tab 或字符
+            return
+        }
+        super.keyDown(with: event)
+    }
+
     override func cancelOperation(_ sender: Any?) {
+        if EscapePolicyCenter.shared.handleEscape() {
+            return
+        }
         if let onEscape {
             onEscape()
         } else {

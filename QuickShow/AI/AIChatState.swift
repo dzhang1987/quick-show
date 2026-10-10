@@ -74,6 +74,10 @@ final class AIChatState: ObservableObject {
     @Published var renamingSessionId: UUID? = nil
     /// 就地编辑进行中的消息 id（nil = 未在就地编辑；ESC 优先消费退出编辑态）。
     @Published var editingMessageId: UUID? = nil
+    /// 快速会话切换 / 全局搜索面板在场态（Quick Switcher 稳定真源；ESC 优先退出）。
+    @Published var isQuickSwitcherPresented: Bool = false
+    /// 最近一次关闭 Quick Switcher 的时间戳（防单次 ESC 穿透连击关闭主窗）。
+    var lastQuickSwitcherDismissTime: Date = .distantPast
     /// 待发送图片附件（Wave 2 附件 UI 消费；发送后清空）。
     @Published var imageAttachments: [ChatImageAttachment] = []
     /// 当前会话是否生成中（视图层旧调用点语义不变；由 syncStreamingState 维护）。

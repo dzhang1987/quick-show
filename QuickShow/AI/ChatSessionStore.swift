@@ -276,6 +276,105 @@ final class ChatSessionStore: ObservableObject {
         .sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    // MARK: - 快速切换与匹配摘要
+
+    /// 快速检索结果：包含会话实体与匹配到的消息正文摘要。
+    struct SearchMatch: Identifiable, Equatable {
+        var id: UUID { session.id }
+        let session: ChatSession
+        /// 匹配的历史消息正文片段（若为标题匹配或空查询则为 nil）
+        let matchedSnippet: String?
+
+        static func == (lhs: SearchMatch, rhs: SearchMatch) -> Bool {
+            lhs.session.id == rhs.session.id &&
+            lhs.session.updatedAt == rhs.session.updatedAt &&
+            lhs.matchedSnippet == rhs.matchedSnippet
+        }
+    }
+
+    /// 按最近活跃时间倒序返回会话。
+    func sessionsSortedByRecent() -> [ChatSession] {
+        sessions.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// 切换到上一个（较早活跃或上一顺位）会话
+    func switchToPreviousSession() {
+        let sorted = sessionsSortedByRecent()
+        guard sorted.count > 1 else { return }
+        let currentIndex = sorted.firstIndex(where: { $0.id == currentSessionId }) ?? 0
+        let targetIndex = min(currentIndex + 1, sorted.count - 1)
+        if targetIndex != currentIndex {
+            currentSessionId = sorted[targetIndex].id
+        }
+    }
+
+    /// 切换到下一个（较新活跃或下一顺位）会话
+    func switchToNextSession() {
+        let sorted = sessionsSortedByRecent()
+        guard sorted.count > 1 else { return }
+        let currentIndex = sorted.firstIndex(where: { $0.id == currentSessionId }) ?? 0
+        let targetIndex = max(currentIndex - 1, 0)
+        if targetIndex != currentIndex {
+            currentSessionId = sorted[targetIndex].id
+        }
+    }
+
+    /// 快速全局检索：空关键字返回最近会话；非空关键字支持匹配标题与消息内容，并提取命中的上下文摘要。
+    func searchWithSnippets(_ query: String) -> [SearchMatch] {
+        let keyword = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let sorted = sessionsSortedByRecent()
+        guard !keyword.isEmpty else {
+            return sorted.map { SearchMatch(session: $0, matchedSnippet: nil) }
+        }
+
+        var results: [SearchMatch] = []
+        for session in sorted {
+            let titleMatched = session.title.lowercased().contains(keyword)
+            var snippet: String? = nil
+
+            if !titleMatched {
+                // 查找最近一条包含关键词的消息
+                if let matchedMessage = session.messages.reversed().first(where: { $0.content.lowercased().contains(keyword) }) {
+                    snippet = Self.extractSnippet(from: matchedMessage.content, keyword: keyword)
+                }
+            }
+
+            if titleMatched || snippet != nil {
+                results.append(SearchMatch(session: session, matchedSnippet: snippet))
+            }
+        }
+        return results
+    }
+
+    /// 从消息正文中提取围绕关键词的单行上下文片段
+    private static func extractSnippet(from text: String, keyword: String, maxSnippetLength: Int = 50) -> String? {
+        let lower = text.lowercased()
+        guard let range = lower.range(of: keyword) else { return nil }
+
+        let matchStart = range.lowerBound
+        let matchEnd = range.upperBound
+
+        let prefixCount = 18
+        let suffixCount = max(maxSnippetLength - prefixCount - keyword.count, 15)
+
+        let start = lower.index(matchStart, offsetBy: -prefixCount, limitedBy: lower.startIndex) ?? lower.startIndex
+        let end = lower.index(matchEnd, offsetBy: suffixCount, limitedBy: lower.endIndex) ?? lower.endIndex
+
+        var rawSnippet = String(text[start..<end])
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if start > lower.startIndex {
+            rawSnippet = "…" + rawSnippet
+        }
+        if end < lower.endIndex {
+            rawSnippet = rawSnippet + "…"
+        }
+
+        return rawSnippet
+    }
+
     /// 由首条用户消息截断出的临时标题（~20 字）。
     static func makeTemporaryTitle(from text: String) -> String {
         let cleaned = text

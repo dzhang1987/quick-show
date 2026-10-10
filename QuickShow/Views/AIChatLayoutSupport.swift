@@ -12,6 +12,12 @@ extension Notification.Name {
     /// 持焦后关窗会让复开时的 didBecomeKey 兜底永久让位；「呼出即打字」是硬预期，
     /// 此处无条件聚焦（抽屉展开期间例外，焦点留给抽屉交互）。
     static let aiChatForceFocusInput = Notification.Name("aiChat.forceFocusInput")
+    /// Quick Switcher 键盘导航信号（上下高亮移动与回车选择）
+    static let aiChatQuickSwitcherUp = Notification.Name("aiChat.quickSwitcherUp")
+    static let aiChatQuickSwitcherDown = Notification.Name("aiChat.quickSwitcherDown")
+    static let aiChatQuickSwitcherSelect = Notification.Name("aiChat.quickSwitcherSelect")
+    /// Quick Switcher 快捷删除高亮会话（⌃D / ⌘⌫）
+    static let aiChatQuickSwitcherDelete = Notification.Name("aiChat.quickSwitcherDelete")
 }
 
 // MARK: - 单条消息
