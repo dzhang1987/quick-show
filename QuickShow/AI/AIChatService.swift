@@ -120,10 +120,13 @@ struct AIChatRequestOptions {
     var modelId: String?
     /// 会话思考档位（nil = 不发送思考字段，跟随模型默认）。
     var thinkingLevel: ThinkingLevel?
+    /// 会话绑定智能体 id（nil = 使用全局激活智能体）。
+    var agentId: String?
 
-    init(modelId: String? = nil, thinkingLevel: ThinkingLevel? = nil) {
+    init(modelId: String? = nil, thinkingLevel: ThinkingLevel? = nil, agentId: String? = nil) {
         self.modelId = modelId
         self.thinkingLevel = thinkingLevel
+        self.agentId = agentId
     }
 }
 

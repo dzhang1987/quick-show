@@ -38,25 +38,13 @@ enum AIModelAdapter {
     /// - .off → 可关闭的模型发 `["enable_thinking": false]`；不可关闭则 `[:]`（防御，UI 不展示该档）；
     /// - .low/.medium/.high → 发 `reasoning_effort`：glm-5.3 实测只接受 low/high/max 三个值，
     ///   故中档映射 high、高档映射 max；其他模型实测接受 low/medium/high，直接透传档位名。
+    @MainActor
     static func thinkingFields(for modelId: String, level: ThinkingLevel?) -> [String: Any] {
         guard let level else { return [:] }
-        switch level {
-        case .off:
-            return canDisableThinking(for: modelId) ? ["enable_thinking": false] : [:]
-        case .low, .medium, .high:
-            let effort: String
-            if modelId.hasPrefix("glm-5.3") {
-                switch level {
-                case .low: effort = "low"
-                case .medium: effort = "high"
-                case .high: effort = "max"
-                case .off: effort = "low"
-                }
-            } else {
-                effort = level.rawValue
-            }
-            return ["reasoning_effort": effort]
-        }
+        let provider = AIProviderStore.shared.providers.first { $0.model(for: modelId) != nil } ?? AIProviderStore.shared.selectedProvider
+        let type = provider?.type ?? .openAICompatible
+        let llmProvider = LLMProviderRegistry.shared.provider(for: type)
+        return llmProvider.thinkingFields(for: modelId, level: level)
     }
 
     /// 当前生效模型的上下文窗口（tokens）：从 modelList 中查该模型的 contextWindow 字段，
@@ -64,6 +52,11 @@ enum AIModelAdapter {
     @MainActor
     static func contextWindow(for modelId: String?) -> Int {
         guard let modelId, !modelId.isEmpty else { return defaultContextWindow }
+        for provider in AIProviderStore.shared.providers {
+            if let spec = provider.model(for: modelId), spec.contextWindow > 0 {
+                return spec.contextWindow
+            }
+        }
         if let match = AIChatService.shared.modelList.first(where: { $0.modelId == modelId }),
            let window = match.contextWindow, window > 0 {
             return window

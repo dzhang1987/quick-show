@@ -7,31 +7,12 @@ extension AIChatService {
 
     /// 拉取端点模型列表：GET `{baseURL}/models`，解析 OpenAI 格式 `data[].id`。
     /// 错误统一抛出中文化的 AIChatError，由设置表单行内提示。
-    func fetchModels() async throws -> [String] {
-        guard let url = endpointURL(path: "/models") else { throw AIChatError.invalidBaseURL }
-        guard let key = apiKey, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            throw AIChatError.missingAPIKey
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = 30
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse else { throw AIChatError.invalidResponse }
-        guard (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw AIChatError.http(status: http.statusCode, message: extractErrorMessage(from: body))
-        }
-        guard let decoded = try? JSONDecoder().decode(ModelListResponse.self, from: data) else {
-            throw AIChatError.invalidResponse
-        }
-        let ids = (decoded.data ?? [])
-            .compactMap { $0.id?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !ids.isEmpty else { throw AIChatError.invalidResponse }
-        return ids
+    /// 拉取端点模型列表：支持传入指定 Provider（默认当前选中 Provider 或全局 Base URL）。
+    func fetchModels(for targetProvider: AIProvider? = nil) async throws -> [String] {
+        let provider = targetProvider ?? AIProviderStore.shared.selectedProvider ?? AIProvider.alibabaPreset()
+        let key = AIProviderStore.shared.apiKey(for: provider.id) ?? apiKey ?? ""
+        let llmProvider = LLMProviderRegistry.shared.provider(for: provider.type)
+        return try await llmProvider.fetchModels(provider: provider, apiKey: key)
     }
 
     /// 非流式补全（用于 LLM 标题摘要 / 上下文压缩等后台轻量请求），返回纯文本。
@@ -42,17 +23,37 @@ extension AIChatService {
         options: AIChatRequestOptions = AIChatRequestOptions(),
         maxTokens: Int? = nil
     ) async throws -> String {
-        let proto = apiProtocol
+        let agent = AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
+        let provider = AIProviderStore.shared.provider(for: agent.providerId)
+
+        let proto: APIProtocol
+        let baseURLStr: String
+        let key: String
+
+        if let provider {
+            proto = (provider.apiProtocol == .responses) ? .responses : .chatCompletions
+            baseURLStr = provider.baseURL
+            key = AIProviderStore.shared.apiKey(for: provider.id) ?? ""
+        } else {
+            proto = apiProtocol
+            baseURLStr = baseURL
+            key = apiKey ?? ""
+        }
+
         let path = proto == .responses ? "/responses" : "/chat/completions"
-        guard let url = endpointURL(path: path) else { throw AIChatError.invalidBaseURL }
-        guard let key = apiKey, !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        var base = baseURLStr.trimmingCharacters(in: .whitespacesAndNewlines)
+        while base.hasSuffix("/") { base.removeLast() }
+        guard let url = URL(string: base + path) else { throw AIChatError.invalidBaseURL }
+        guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AIChatError.missingAPIKey
         }
-        // 模型解析优先级与流式一致：会话绑定模型（请求传入且非空）→ 全局 selectedModel。
+
         let requestedModel = options.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedModel: String
         if let requestedModel, !requestedModel.isEmpty {
             resolvedModel = requestedModel
+        } else if let provider {
+            resolvedModel = agent.modelId
         } else {
             resolvedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
         }
