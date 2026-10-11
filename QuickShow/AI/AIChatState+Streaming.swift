@@ -98,6 +98,37 @@ extension AIChatState {
             var toolRounds = 0
             var didComplete = false
 
+            // MARK: - A 模式：多模态视觉先行委派 (Observer Delegation)
+            let session = self.store.session(id: sessionId)
+            let agentId = session?.agentId ?? self.effectiveAgentId
+            let activeAgent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
+            let effectiveModel = session?.modelId ?? activeAgent.modelId
+            let modelSpec = AIProviderStore.shared.modelSpec(providerId: activeAgent.providerId, modelId: effectiveModel)
+            let supportsVision = modelSpec?.supportsVision ?? false
+
+            let lastUserMsg = session?.messages.last(where: { $0.role == .user })
+            let userImages = lastUserMsg?.images ?? []
+
+            if !supportsVision && !userImages.isEmpty {
+                if let observer = AIAgentStore.shared.visualDelegateAgent {
+                    self.observerStatus = String(localized: "👁️ 视觉感知 (\(observer.name)) 正在解析图片…")
+                    do {
+                        let prompt = """
+                        请客观、详细地分析用户提供的图片内容，提取其中的核心要素、布局、图表数据、文字信息（OCR）以及关键视觉细节。以精炼、清晰的 Markdown 格式输出，以便主模型参考并准确解答用户的问题。
+                        """
+                        let visualDesc = try await AIProviderService.shared.performOneOffCompletion(
+                            agent: observer,
+                            prompt: prompt,
+                            images: userImages
+                        )
+                        self.observerStatus = nil
+                        wireMessages = self.buildRequestMessages(for: sessionId, visualContext: visualDesc)
+                    } catch {
+                        self.observerStatus = nil
+                    }
+                }
+            }
+
             do {
                 roundLoop: while true {
                     // 进入新一轮前若已中止则不再发起请求（避免工具轮后继续续请求）。

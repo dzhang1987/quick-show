@@ -17,20 +17,49 @@ extension AIChatState {
 
     /// 构造发往服务端的消息数组：system prompt 在最前，其次为早期对话的压缩摘要，
     /// 最后是未压缩上下文（按 token 水位截断兜底；system 不参与丢弃）。
-    func buildRequestMessages(for sessionId: UUID) -> [ChatCompletionMessage] {
+    func buildRequestMessages(for sessionId: UUID, visualContext: String? = nil) -> [ChatCompletionMessage] {
         var result: [ChatCompletionMessage] = []
 
-        // system 段组装：内置引导（ask_user 启用时）+ 用户自定义，合并为单条 system 消息
-        // （Responses 协议会合并全部 system 为 instructions，此处单条即两协议通吃）。
+        // system 段组装：内置引导（ask_user 启用时）+ 智能体专属设定 / 用户自定义
         var systemParts: [String] = []
         let askUserEnabled = AIToolRegistry.shared.enabledTools()
             .contains { $0.name == "ask_user" }
         if askUserEnabled {
             systemParts.append(Self.builtinSystemGuidance)
         }
-        let customSystem = service.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !customSystem.isEmpty {
-            systemParts.append(customSystem)
+        let session = store.session(id: sessionId)
+        let agentId = session?.agentId ?? effectiveAgentId
+        let agent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
+        let agentPrompt = agent.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !agentPrompt.isEmpty {
+            systemParts.append(agentPrompt)
+        } else {
+            let customSystem = service.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !customSystem.isEmpty {
+                systemParts.append(customSystem)
+            }
+        }
+
+        let delegateEnabled = AIToolRegistry.shared.enabledTools()
+            .contains { $0.name == "delegate_to_agent" }
+        if delegateEnabled {
+            let availableSubagents = AIAgentStore.shared.agents
+                .filter { $0.isEnabled && $0.id != agent.id }
+            if !availableSubagents.isEmpty {
+                let subagentDescriptions = availableSubagents.map {
+                    let visionTag = $0.isVisualDelegate ? " [👁️ 视觉专长]" : ""
+                    return "- `\($0.id)` (\($0.name))\(visionTag)：\($0.description)"
+                }.joined(separator: "\n")
+                let delegationGuidance = """
+                团队协作与子智能体委派指引：
+                你作为当前对话的主持者，拥有 `delegate_to_agent` 工具，可以将具体子任务委派给以下专业子智能体独立执行：
+                \(subagentDescriptions)
+                - 当用户要求识别图片、分析截图、或者任务需要视觉多模态能力时，优先调用 `delegate_to_agent` 委派视觉专家（如 observer）；
+                - 当需要架构权衡、专业编码或定向检索时，可将独立子任务委派给对应专家；
+                - 获得子智能体返回的专业成果后，汇总提炼并清晰回答用户。
+                """
+                systemParts.append(delegationGuidance)
+            }
         }
         if !systemParts.isEmpty {
             result.append(ChatCompletionMessage(
@@ -46,8 +75,21 @@ extension AIChatState {
                 content: "以下是本会话早期对话的压缩摘要：\n\(summary)"
             ))
         }
-        for message in trimmedContextMessages(in: sessionId) {
-            result.append(contentsOf: makeRequestMessages(from: message))
+        let contextMessages = trimmedContextMessages(in: sessionId)
+        for (idx, message) in contextMessages.enumerated() {
+            // 末条用户消息若带有 Observer 视觉解析上下文，替换为图文综合描述，避免纯文本模型收到 imagePart 报错
+            if idx == contextMessages.count - 1, message.role == .user, let visualContext, !visualContext.isEmpty {
+                let enriched = """
+                [👁️ 视觉感知 (Observer) 分析结果]：
+                \(visualContext)
+
+                [用户提问]：
+                \(message.content)
+                """
+                result.append(ChatCompletionMessage(role: message.role.rawValue, content: enriched))
+            } else {
+                result.append(contentsOf: makeRequestMessages(from: message))
+            }
         }
         return result
     }

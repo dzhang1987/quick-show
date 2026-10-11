@@ -150,7 +150,8 @@ final class AIToolRegistry {
             PlanRouteTool(),
             ShowMapTool(),
             MyLocationTool(),
-            AskUserTool()
+            AskUserTool(),
+            DelegateToAgentTool()
         ]
     }
 

@@ -6,6 +6,18 @@
 
 ### Added
 
+- 大模型多供应商原生驱动与统一 Provider 架构（`LLMProvider` / `LLMProviderRegistry` / `OpenAIProvider` / `QoderProvider` / `GeminiProvider`）：
+  - **统一行业标准协议分层**：基于行业通用 Provider + Model 第一性原理，抽象 `protocol LLMProvider` 通用能力接口与 `LLMProviderRegistry` 动态分发总线，业务调用层彻底消除巨型分支；
+  - **Qoder 国际版原生网关纯原生接入**：纯原生 Swift 完整实现 PAT 换取短效 JobToken、动态 UserInfo 查询与 COSY 签名请求头（RSA PKCS1 报文加密 + MD5 校验 + AES-128-CBC 对称加密 + 自定义 Base64 字典重排与块置换），预设官方 14 款模型，彻底摆脱外部桥接依赖；
+  - **Google Gemini / Antigravity 原生协议适配**：原生支持 Gemini 图文 payload 组装与 SSE 流式事件解析；
+  - **OpenAI 兼容端点双协议支持**：支持 OpenAI 官方、阿里云百炼、DeepSeek、Ollama 等端点的 Chat Completions 与 Responses 双协议。
+- 多智能体团队协作与中枢编排体系（`AIAgentStore` / `DelegateToAgentTool` / `oh-my-opencode-slim` 模式）：
+  - **预设多智能体团队**：内置通用助手（Generalist，编排中枢）、系统架构师（Architect）、全能工程师（Engineer）、感知观察者（Observer，视觉担当）、快速探索者（Explorer）等专业角色，每个智能体具备独立专属 Provider、模型绑定、提示词人设与思考档位；
+  - **子智能体中枢委派工具（`delegate_to_agent`）**：为编排中枢注册原生委派工具，中枢可根据用户意图在对话中自主调度视觉专家识别图片、或委派架构师/工程师完成专项深度任务，并将成果汇总回传；
+  - **多模态视觉感知自动接力**：当用户向不支持视觉的纯文本/代码模型发送图片时，视觉担当（Observer）自动先行提取图片结构化要素（OCR、布局、报错信息）并接力注入上下文，纯文本模型无需改动即可精准回答图片内容；
+  - **输入坞智能体与模型矩阵切换**（`AIChatInputDock`）：输入坞常驻 Chip 升级为「智能体团队」➔「所属模型池」➔「思考强度」三级上下文菜单，并直观标注视觉专长（👁️）；
+  - **偏好设置智能体管理面板**（`AIServiceSettingsForm`）：提供可视化智能体团队增删改查、跨 Provider/模型自由指派与视觉担当开关。
+
 - 居中快速会话切换与全局搜索面板（Quick Switcher，`⌘P` / 侧栏收起时 `⌘F`，`AIChatQuickSwitcher` / `ChatSessionStore` / `AIChatKeyMonitor` / `AIChatLayoutSupport`）：
   - **即搜即切**：无需展开 216pt 侧边栏，按 `⌘P` 随时在对话框正上方唤出居中悬浮切换面板，支持实时全文检索标题与历史消息上下文摘要片段；
   - **全键盘流畅盲操**：支持 `↑` / `↓` / `Tab` / `Shift+Tab` 列表循环导航，`⏎` 回车切入对应会话；空搜索态默认预选次近会话，连敲即切；

@@ -299,6 +299,20 @@ struct AIChatInputDock: View {
             HStack(spacing: Theme.Spacing.lg) {
                 attachMenuButton
                 generationChip
+
+                // A 模式：视觉感知 Observer 先行解析弱状态指示
+                if let observerText = state.observerStatus {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text(observerText)
+                            .font(Theme.Typography.text(9, .medium))
+                            .foregroundColor(Theme.Colors.accent)
+                    }
+                    .padding(.horizontal, Theme.Spacing.xs)
+                    .transition(.opacity)
+                }
+
                 // 低频工具组（水位圆环：水位/详情/压缩三合一，AIChatContextRingView）：
                 // 安静态整体隐去——保留占位、纯透明度渐变、布局零跳动；
                 // 悬停/输入/附件/生成中淡入；两类破格常显：水位 >0.8（警戒亮弧语义在
@@ -385,17 +399,28 @@ struct AIChatInputDock: View {
     /// 常驻弱化小字语言：brain 图标 + 多模型露模型名 / 单模型露「思考」（退化为思考入口）。
     /// 思考档位被手动覆盖时整 chip 默认色轻提亮到 contentTertiary（「已覆盖」信号），
     /// 并在文字后挂 ThinkingLevelBars 信号条直观读出档位；默认态（跟随模型）不显示信号条。
+    private var currentAgent: AIAgent {
+        state.currentAgent
+    }
+
     private var generationChip: some View {
         Button {
             showGenerationMenu()
         } label: {
             HStack(spacing: Theme.Spacing.xs) {
-                // 统一 brain 图标：模型与思考强度同属「生成参数」，一个心智入口一个符号
-                Image(systemName: "brain")
-                    .font(Theme.Typography.text(8, .medium))
-                Text(modelList.count > 1 ? currentModelName : String(localized: "思考"))
-                    .font(Theme.Typography.text(10, .regular))
+                // 智能体专属图标
+                Image(systemName: currentAgent.iconName)
+                    .font(Theme.Typography.text(9, .medium))
+                Text(currentAgent.name)
+                    .font(Theme.Typography.text(10, .medium))
                     .lineLimit(1)
+
+                // 辅助弱化小字：模型名
+                Text(currentModelName)
+                    .font(Theme.Typography.text(9, .regular))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+                    .lineLimit(1)
+
                 // 思考覆盖信号条：仅手动覆盖档位时挂载，随 hover 动画同步淡变；
                 // 前导再加一档间距——与模型名拉开，读作独立后缀信号而非文字的一部分
                 if let level = state.currentThinkingLevel {
@@ -417,11 +442,11 @@ struct AIChatInputDock: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .help("切换本会话模型与思考强度")
+        .help("切换智能体团队、模型与思考强度")
     }
 
-    /// 点击 chip 弹出生成菜单：每次点击构建（模型列表/选中态天然最新），
-    /// 结构 = 「模型」分组（仅多模型）+「思考强度」分组；选中项用 NSMenuItem.state 系统原生勾选。
+    /// 点击 chip 弹出生成菜单：每次点击构建（智能体/模型列表/选中态天然最新），
+    /// 结构 = 「智能体团队」分组 +「当前模型」分组 +「思考强度」分组；选中项用 NSMenuItem.state 系统原生勾选。
     private func showGenerationMenu() {
         let menu = NSMenu()
         menu.autoenablesItems = false // 否则 isEnabled=false 的分组标题会被自动启用机制干扰
@@ -445,8 +470,32 @@ struct AIChatInputDock: View {
             menu.addItem(header)
         }
 
-        // 「模型」分组：仅多模型可选时出现；选中写入会话级绑定（setSessionModel），不写全局
-        if modelList.count > 1 {
+        // 1. 「智能体团队 (Agents)」分组：切换对话角色与专长
+        addHeader(String(localized: "智能体团队 (Agents)"))
+        let agents = AIAgentStore.shared.agents.filter { $0.isEnabled }
+        for agent in agents {
+            let isCurrent = (agent.id == state.effectiveAgentId)
+            let tag = agent.isVisualDelegate ? " (👁️ 视觉担当)" : ""
+            addItem("\(agent.name)\(tag)", isOn: isCurrent) { [state] in
+                state.setSessionAgent(agent.id)
+                state.setSessionModel(agent.modelId)
+            }
+        }
+        menu.addItem(.separator())
+
+        // 2. 「当前模型」分组：显示该智能体所属 Provider 的模型池
+        let provider = AIProviderStore.shared.provider(for: currentAgent.providerId)
+        let providerModels = provider?.models ?? []
+        if !providerModels.isEmpty {
+            addHeader(String(localized: "当前模型 (\(provider?.name ?? currentAgent.name))"))
+            for model in providerModels {
+                let visionTag = model.supportsVision ? " 👁️" : ""
+                addItem("\(model.name)\(visionTag)", isOn: model.id == effectiveModelId) { [state] in
+                    state.setSessionModel(model.id)
+                }
+            }
+            menu.addItem(.separator())
+        } else if modelList.count > 1 {
             addHeader(String(localized: "模型"))
             for model in modelList {
                 addItem(model.name, isOn: model.modelId == effectiveModelId) { [state] in
@@ -456,7 +505,7 @@ struct AIChatInputDock: View {
             menu.addItem(.separator())
         }
 
-        // 「思考强度」分组：nil = 默认（跟随当前模型自身默认）；
+        // 3. 「思考强度」分组：nil = 默认（跟随当前模型自身默认）；
         // 「关闭」档仅当当前生效模型允许关闭思考时出现（如不可关则不显示该档）
         addHeader(String(localized: "思考强度"))
         addItem(String(localized: "默认"), isOn: state.currentThinkingLevel == nil) { [state] in
@@ -480,10 +529,15 @@ struct AIChatInputDock: View {
 
     /// 当前生效模型 id：会话级绑定优先，未绑定（nil）回落全局默认模型。
     private var effectiveModelId: String {
-        state.currentSessionModelId ?? AIChatService.shared.selectedModel
+        state.currentSessionModelId ?? currentAgent.modelId
     }
 
     private var currentModelName: String {
+        let agent = currentAgent
+        let provider = AIProviderStore.shared.provider(for: agent.providerId)
+        if let match = provider?.model(for: effectiveModelId) {
+            return match.name
+        }
         if let matched = modelList.first(where: { $0.modelId == effectiveModelId }) {
             return matched.name
         }
