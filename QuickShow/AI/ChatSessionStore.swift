@@ -146,6 +146,11 @@ final class ChatSessionStore: ObservableObject {
         mutate(id, touch: false) { $0.pinned.toggle() }
     }
 
+    /// 绑定会话智能体（nil = 跟随全局默认）。不 touch updatedAt，只影响后续请求。
+    func setSessionAgent(id: UUID, agentId: String?) {
+        mutate(id, touch: false) { $0.agentId = agentId }
+    }
+
     /// 绑定会话模型（nil = 跟随全局默认）。不 touch updatedAt，只影响后续请求。
     func setSessionModel(id: UUID, modelId: String?) {
         mutate(id, touch: false) { $0.modelId = modelId }

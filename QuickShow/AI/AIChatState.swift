@@ -107,6 +107,9 @@ final class AIChatState: ObservableObject {
     /// 抑制二次确认提醒截止时间（抽屉按 ESC 连带急停后设置短时抑制期，防连击/重复键误弹）。
     var suppressAbortConfirmationUntil: Date = .distantPast
 
+    /// 视觉感知 Observer 先行解析状态提示（供 UI 弱化胶囊展示，nil = 无解析进行中）。
+    @Published var observerStatus: String? = nil
+
     /// 当前会话的最近一次压缩结果；非当前会话的结果不回传——自动压缩在流结束后
     /// 异步触发，用户可能已切换会话，跨会话的 toast/详情行会错位（防串会话反馈）。
     var currentSessionOutcome: CompactionOutcome? {
@@ -120,8 +123,33 @@ final class AIChatState: ObservableObject {
     /// 多会话数据层（Wave 2 侧边栏消费其分组 / 搜索 / 增删改 API）。
     let store = ChatSessionStore.shared
 
+    /// 当前生效智能体 id（优先会话绑定，否则全局默认激活智能体）。
+    var effectiveAgentId: String {
+        store.currentSession?.agentId ?? AIAgentStore.shared.activeAgentId
+    }
+
+    /// 当前生效智能体
+    var currentAgent: AIAgent {
+        AIAgentStore.shared.agent(for: effectiveAgentId) ?? AIAgentStore.shared.activeAgent
+    }
+
+    /// 绑定当前会话智能体
+    func setSessionAgent(_ agentId: String?) {
+        guard let sessionId = currentSessionId else { return }
+        let trimmed = agentId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolved = (trimmed?.isEmpty == false) ? trimmed : nil
+        store.setSessionAgent(id: sessionId, agentId: resolved)
+    }
+
     /// Base URL 与 API Key 均已配置。
     var hasConfiguredEndpoint: Bool {
+        let agent = currentAgent
+        if let provider = AIProviderStore.shared.provider(for: agent.providerId) {
+            let key = AIProviderStore.shared.apiKey(for: provider.id) ?? ""
+            if !provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !key.isEmpty {
+                return true
+            }
+        }
         let base = AIChatService.shared.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = AIChatService.shared.apiKey ?? ""
         return !base.isEmpty && !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -365,10 +393,14 @@ final class AIChatState: ObservableObject {
         messages.reduce(0) { $0 + $1.content.count } / charsPerToken
     }
 
-    /// 服务层请求选项：会话绑定模型与思考档位（nil 交给服务层回落全局默认）。
+    /// 服务层请求选项：会话绑定智能体、模型与思考档位（nil 交给服务层回落全局默认）。
     func requestOptions(for sessionId: UUID) -> AIChatRequestOptions {
         let session = store.session(id: sessionId)
-        return AIChatRequestOptions(modelId: session?.modelId, thinkingLevel: session?.thinkingLevel)
+        let agentId = session?.agentId ?? effectiveAgentId
+        let agent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
+        let effectiveModel = session?.modelId ?? agent.modelId
+        let effectiveThinking = session?.thinkingLevel ?? agent.thinkingLevel
+        return AIChatRequestOptions(modelId: effectiveModel, thinkingLevel: effectiveThinking, agentId: agentId)
     }
 
     /// 压缩执行计划：待纳入摘要的消息 id（前缀语义）与消息本体。

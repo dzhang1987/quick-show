@@ -1,17 +1,14 @@
-// 本文件由 SettingsView.swift 拆分而来：AI 服务设置表单与接口协议选项。
+// AIServiceSettingsForm: AI 服务设置中心，支持多服务商管理、多智能体团队编排与工具扩展配置。
 
 import SwiftUI
 
 // MARK: - AI 接口协议选项
-/// AI 接口协议选项（rawValue 与 AIChatService.APIProtocol 保持一致："chat" / "responses"）。
-/// 说明：并行实现的 AIChatService.APIProtocol 公开接口暂不可见时，本表单按同键
-/// `@AppStorage("ai.apiProtocol")` 私有绑定，读写同一份 UserDefaults 原始值，后续可无痛切换到服务接口。
-enum AIProtocolOption: String, CaseIterable, Identifiable {
+enum AIProtocolOption: String, Codable, CaseIterable, Identifiable {
     case chat = "chat"
     case responses = "responses"
-    
+
     var id: String { rawValue }
-    
+
     var displayName: String {
         switch self {
         case .chat: return String(localized: "Chat Completions（通用兼容）")
@@ -20,479 +17,855 @@ enum AIProtocolOption: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - 6. AI 服务设置表单
-struct AIServiceSettingsForm: View {
-    // appState 作为设置中心的统一状态入口保留（本表单配置项均为独立键，暂不依赖其成员）
-    @ObservedObject var appState: AppState
-    
-    // Base URL / Model / System Prompt 均存 UserDefaults，键名与 AIChatService.ConfigKey 完全一致；
-    // 直接以 @AppStorage 绑定同键，既能获得 SwiftUI 响应式刷新，又与 AIChatService 读写共享同一份数据。
-    @AppStorage("ai.baseURL") private var baseURL: String = ""
-    @AppStorage("ai.systemPrompt") private var systemPrompt: String = ""
-    // API 协议：原始值 "chat" / "responses"，键名与 AIChatService 保持一致
-    @AppStorage("ai.apiProtocol") private var apiProtocolRaw: String = AIProtocolOption.chat.rawValue
+// MARK: - 设置子页面枚举
+enum AIServiceSubTab: String, CaseIterable, Identifiable {
+    case providers = "服务商"
+    case agents = "智能体团队"
+    case tools = "工具与扩展"
 
-    /// 模型列表（显示名 + modelId，首项为默认）。由 AIChatService 读写，本表单仅做编辑态。
-    @State private var modelList: [AIModel] = []
-    /// 当前选中模型的 modelId。
-    @State private var selectedModelId: String = ""
-    /// 候选池：端点返回的全部可用 model id（只读，供搜索挑选）。
-    @State private var availableModels: [String] = []
-    /// 候选池搜索关键词（本地过滤，不动持久层）。
-    @State private var modelFilter: String = ""
-    /// 正在从 API 拉取模型列表。
-    @State private var isFetchingModels = false
-    /// 拉取失败的行内中文提示。
-    @State private var fetchError: String?
-    
-    /// 已存 API Key（仅用于掩码展示，绝不持久化到 UserDefaults）
-    @State private var storedKey: String = ""
-    /// 新输入的 API Key（仅内存态，保存成功后清空）
+    var id: String { rawValue }
+}
+
+// MARK: - AI 服务设置主表单
+struct AIServiceSettingsForm: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject private var providerStore = AIProviderStore.shared
+    @ObservedObject private var agentStore = AIAgentStore.shared
+
+    @State private var selectedSubTab: AIServiceSubTab = .providers
+
+    // 当前选中的服务商 API Key 编辑态缓存
     @State private var apiKeyInput: String = ""
-    
+    @State private var isFetchingModels: Bool = false
+    @State private var fetchError: String?
+
+    // 候选模型池搜索过滤
+    @State private var availableModels: [String] = []
+    @State private var modelFilter: String = ""
+
     var body: some View {
-        Form {
-            Section {
-                Picker("API 协议", selection: apiProtocolBinding) {
-                    ForEach(AIProtocolOption.allCases) { option in
-                        Text(option.displayName).tag(option)
+        VStack(spacing: 0) {
+            // 顶部子页面导航
+            Picker("配置分类", selection: $selectedSubTab) {
+                ForEach(AIServiceSubTab.allCases) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            Form {
+                switch selectedSubTab {
+                case .providers:
+                    providersFormSection
+                case .agents:
+                    agentsFormSection
+                case .tools:
+                    toolsFormSection
+                }
+            }
+        }
+    }
+
+    // MARK: ================== 1. 服务商管理 ==================
+
+    @ViewBuilder
+    private var providersFormSection: some View {
+        // 服务商选择与预设添加
+        Section {
+            HStack(spacing: 12) {
+                Picker("选择服务商", selection: $providerStore.selectedProviderId) {
+                    ForEach(providerStore.providers) { p in
+                        HStack {
+                            Text(p.name)
+                            if !p.isEnabled {
+                                Text("(已停用)").foregroundColor(.secondary)
+                            }
+                        }
+                        .tag(p.id)
                     }
                 }
-            } header: {
-                Text("API 协议")
-            } footer: {
-                Text("Chat Completions 兼容大多数 OpenAI 兼容端点（中转 / Ollama / vLLM 等）；Responses 为 OpenAI 官方新协议，仅官方端点支持。选择 Responses 时 Base URL 填官方地址。")
+
+                Menu {
+                    Button("添加 阿里云百炼 (DashScope)") {
+                        addPresetProvider(AIProvider.alibabaPreset())
+                    }
+                    Button("添加 OpenAI 官方") {
+                        addPresetProvider(AIProvider.openAIPreset())
+                    }
+                    Button("添加 Qoder 国际版") {
+                        addPresetProvider(AIProvider.qoderPreset())
+                    }
+                    Button("添加 Antigravity (Gemini)") {
+                        addPresetProvider(AIProvider.antigravityPreset())
+                    }
+                    Divider()
+                    Button("添加 自定义端点") {
+                        addCustomProvider()
+                    }
+                } label: {
+                    Label("添加服务商", systemImage: "plus")
+                        .font(.system(size: Theme.Typography.body))
+                }
             }
-            
+        } header: {
+            Text("服务商列表")
+        } footer: {
+            Text("支持配置主流服务商（阿里云百炼、OpenAI、Qoder、Antigravity），密钥独立安全隔离存储。")
+        }
+
+        if let provider = currentProvider {
+            let providerIndex = providerStore.providers.firstIndex(where: { $0.id == provider.id }) ?? 0
+
             Section {
-                // 占位文案用中性描述且以纯文本传入（String(localized:) 走 String 重载），避免 URL 被 Markdown 自动识别成蓝色链接；
-                // prompt 压成 contentTertiary 灰，与其他字段（如「输入 API Key」）的占位观感一致。
-                TextField("Base URL", text: $baseURL, prompt: Text(String(localized: "例如 api.openai.com/v1")).foregroundColor(Theme.Colors.contentTertiary))
+                TextField("显示名称", text: providerNameBinding(at: providerIndex))
+                    .textFieldStyle(.roundedBorder)
+
+                Picker("通信协议类型", selection: providerTypeBinding(at: providerIndex)) {
+                    ForEach(AIProviderType.allCases) { type in
+                        Text(type.displayName).tag(type)
+                    }
+                }
+
+                if provider.type == .openAICompatible {
+                    Picker("API 子协议", selection: providerProtocolBinding(at: providerIndex)) {
+                        ForEach(AIProtocolOption.allCases) { opt in
+                            Text(opt.displayName).tag(opt)
+                        }
+                    }
+                }
+
+                Toggle("启用此服务商", isOn: providerEnabledBinding(at: providerIndex))
+            } header: {
+                Text("基本配置")
+            }
+
+            Section {
+                TextField("Base URL", text: providerBaseURLBinding(at: providerIndex), prompt: Text(providerURLPlaceholder(for: provider.type)))
                     .textFieldStyle(.roundedBorder)
             } header: {
-                Text("Base URL")
+                Text("端点地址 (Base URL)")
             } footer: {
-                // 纯文本：footer 中的示例地址不做 Markdown 链接着色，保持普通灰白说明文字。
-                Text(String(localized: "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方端点填 https://api.openai.com/v1；本地 Ollama / vLLM 填 http://localhost:端口/v1。"))
+                Text(providerURLFooter(for: provider.type))
             }
-            
+
             Section {
+                let storedKey = providerStore.apiKey(for: provider.id) ?? ""
                 if storedKey.isEmpty {
-                    SecureField("输入 API Key", text: $apiKeyInput)
+                    SecureField(apiKeyPlaceholder(for: provider.type), text: $apiKeyInput)
                         .textFieldStyle(.roundedBorder)
                 } else {
                     HStack {
-                        Text("已存储 ····\(maskedKeySuffix)")
+                        Text("已安全存储 ····\(String(storedKey.suffix(4)))")
                             .font(.system(size: Theme.Typography.body))
                             .foregroundColor(.secondary)
                         Spacer()
-                        Button("清除") { clearAPIKey() }
-                            .font(.system(size: Theme.Typography.body))
+                        Button("清除") {
+                            providerStore.clearAPIKey(for: provider.id)
+                            apiKeyInput = ""
+                        }
+                        .font(.system(size: Theme.Typography.body))
                     }
-                    SecureField("输入新的 API Key 以替换", text: $apiKeyInput)
+                    SecureField("输入新的密钥以替换", text: $apiKeyInput)
                         .textFieldStyle(.roundedBorder)
                 }
-                
-                if !trimmedAPIKeyInput.isEmpty {
+
+                let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmedKey.isEmpty {
                     HStack {
                         Spacer()
-                        Button("保存 API Key") { saveAPIKey() }
-                            .font(.system(size: Theme.Typography.body, weight: .medium))
+                        Button("保存密钥") {
+                            providerStore.setAPIKey(trimmedKey, for: provider.id)
+                            apiKeyInput = ""
+                        }
+                        .font(.system(size: Theme.Typography.body, weight: .medium))
                     }
                 }
             } header: {
-                Text("API Key")
+                Text("认证密钥 (API Key / Token)")
             } footer: {
-                Text("API Key 以仅当前用户可读的文件权限存储在本机应用支持目录，不写入 UserDefaults，不随 iCloud 同步。")
+                Text(apiKeyFooter(for: provider.type))
             }
-            
+
+            // 模型池管理
             Section {
-                if modelList.isEmpty {
-                    Text("尚未配置模型，请添加一项，或从下方「可用模型」中添加。")
+                if provider.models.isEmpty {
+                    Text("尚未配置模型，请点击下方「添加模型」或「从 API 拉取」。")
                         .font(.system(size: Theme.Typography.body))
                         .foregroundColor(.secondary)
                 } else {
-                    // 默认模型（新会话）：仅作为未绑定会话模型的默认值；已绑定模型的会话不受影响
-                    Picker("默认模型（新会话）", selection: selectedModelBinding) {
-                        ForEach(modelList) { item in
-                            Text(item.name.isEmpty ? item.modelId : item.name).tag(item.modelId)
-                        }
-                    }
-
-                    ForEach(Array(modelList.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(provider.models.enumerated()), id: \.element.id) { mIndex, model in
                         VStack(alignment: .leading, spacing: 6) {
                             HStack(spacing: 8) {
-                                TextField("显示名", text: nameBinding(at: index))
+                                TextField("显示名", text: modelNameBinding(pIndex: providerIndex, mIndex: mIndex))
                                     .textFieldStyle(.roundedBorder)
-                                TextField("模型 ID", text: modelIdBinding(at: index))
+                                TextField("模型 ID", text: modelIdBinding(pIndex: providerIndex, mIndex: mIndex))
                                     .textFieldStyle(.roundedBorder)
-                                if index == 0 {
-                                    Text("默认")
-                                        .font(.system(size: Theme.Typography.mini, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                }
                             }
-                            // 上下文窗口（tokens）：留空 = 使用默认 512k；仅接受正整数。
-                            TextField("上下文窗口（tokens，留空=512k）", text: contextWindowBinding(at: index))
-                                .textFieldStyle(.roundedBorder)
+                            HStack(spacing: 12) {
+                                TextField("上下文 (tokens)", text: modelContextBinding(pIndex: providerIndex, mIndex: mIndex))
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(maxWidth: 160)
+
+                                Toggle(isOn: modelVisionBinding(pIndex: providerIndex, mIndex: mIndex)) {
+                                    Label("支持视觉", systemImage: "eye.fill")
+                                        .font(.system(size: Theme.Typography.footnote))
+                                }
+                                .toggleStyle(.checkbox)
+                                .help("开启后，该模型可直接接收并解析图片。若关闭，用户发送图片时系统将自动委派视觉担当 (Observer) 先行分析")
+
+                                Toggle(isOn: modelThinkingBinding(pIndex: providerIndex, mIndex: mIndex)) {
+                                    Label("支持思考", systemImage: "brain.head.profile")
+                                        .font(.system(size: Theme.Typography.footnote))
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+
                             HStack(spacing: 10) {
-                                Button("上移") { moveModel(from: index, to: index - 1) }
-                                    .disabled(index == 0)
-                                Button("下移") { moveModel(from: index, to: index + 1) }
-                                    .disabled(index == modelList.count - 1)
-                                Button("设为默认") { setDefaultModel(at: index) }
-                                    .disabled(index == 0)
-                                Button("删除", role: .destructive) { removeModel(at: index) }
-                                Spacer(minLength: 0)
-                                if selectedModelId == item.modelId {
-                                    Text("当前使用")
-                                        .font(.system(size: Theme.Typography.mini))
-                                        .foregroundColor(.secondary)
-                                }
+                                Button("上移") { moveModel(pIndex: providerIndex, from: mIndex, to: mIndex - 1) }
+                                    .disabled(mIndex == 0)
+                                Button("下移") { moveModel(pIndex: providerIndex, from: mIndex, to: mIndex + 1) }
+                                    .disabled(mIndex == provider.models.count - 1)
+                                Button("删除", role: .destructive) { removeModel(pIndex: providerIndex, at: mIndex) }
+                                Spacer()
                             }
-                            .font(.system(size: Theme.Typography.body))
+                            .font(.system(size: Theme.Typography.footnote))
                             .buttonStyle(.borderless)
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 4)
+                        Divider()
                     }
-
-                    Button("添加模型") { addModel() }
-                        .font(.system(size: Theme.Typography.body))
                 }
-            } header: {
-                Text("我的模型")
-            } footer: {
-                Text("列表首项为默认模型；AI 窗的模型切换菜单只显示这里（我的模型）的条目。图片输入需端点与模型支持 vision。")
-            }
 
-            Section {
-                // 候选池：只读、可搜索、可挑选加入「我的模型」；几百条也保持流畅。
-                TextField("搜索模型 ID", text: $modelFilter)
-                    .textFieldStyle(.roundedBorder)
-
-                HStack(spacing: 10) {
-                    Text(modelFilter.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                         ? "共 \(availableModels.count) 个"
-                         : "匹配 \(filteredAvailableModels.count) / \(availableModels.count)")
-                        .font(.system(size: Theme.Typography.footnote))
-                        .foregroundColor(.secondary)
-                    Spacer(minLength: 0)
-                    Button("从 API 拉取") { fetchModelsFromAPI() }
-                        .font(.system(size: Theme.Typography.body, weight: .medium))
+                HStack {
+                    Button("添加模型") {
+                        addNewModel(pIndex: providerIndex)
+                    }
+                    Spacer()
+                    if provider.type == .openAICompatible {
+                        Button("从 API 拉取模型") {
+                            fetchModelsForProvider(provider)
+                        }
                         .disabled(isFetchingModels)
-                    if isFetchingModels {
-                        ProgressView()
-                            .controlSize(.small)
+                        if isFetchingModels {
+                            ProgressView().controlSize(.small)
+                        }
                     }
                 }
 
                 if let fetchError {
                     Text(fetchError)
-                        .font(.system(size: Theme.Typography.body))
+                        .font(.system(size: Theme.Typography.footnote))
                         .foregroundColor(Theme.Colors.statusWarning)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
 
-                if availableModels.isEmpty {
-                    Text("候选池为空，点击「从 API 拉取」获取端点可用模型。")
-                        .font(.system(size: Theme.Typography.body))
-                        .foregroundColor(.secondary)
-                } else {
-                    // 固定高度 + LazyVStack：只渲染可视行，几百条滚动不卡；行内严禁 TextField。
-                    // 滚动条隐藏：默认叠加式滚动条会压住行尾的「+」按钮，内容已有搜索过滤，无需滚动条存在感。
-                    ScrollView(.vertical) {
-                        LazyVStack(alignment: .leading, spacing: 2) {
-                            ForEach(filteredAvailableModels, id: \.self) { modelId in
-                                HStack(spacing: 8) {
-                                    Text(modelId)
-                                        .font(.system(size: Theme.Typography.body))
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .foregroundColor(isModelAdded(modelId) ? .secondary : .primary)
-                                    Spacer(minLength: 0)
-                                    if isModelAdded(modelId) {
-                                        Text("已添加")
-                                            .font(.system(size: Theme.Typography.mini))
-                                            .foregroundColor(.secondary)
-                                    } else {
-                                        Button {
-                                            addModelFromPool(modelId)
-                                        } label: {
-                                            Image(systemName: "plus.circle")
-                                                .font(.system(size: Theme.Typography.body))
+                if !availableModels.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        TextField("在拉取的候选中搜索...", text: $modelFilter)
+                            .textFieldStyle(.roundedBorder)
+
+                        ScrollView(.vertical) {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(filteredAvailableModels, id: \.self) { mid in
+                                    HStack {
+                                        Text(mid)
+                                            .font(.system(size: Theme.Typography.footnote, design: .monospaced))
+                                        Spacer()
+                                        if provider.models.contains(where: { $0.id == mid }) {
+                                            Text("已添加").font(.system(size: Theme.Typography.micro)).foregroundColor(.secondary)
+                                        } else {
+                                            Button {
+                                                addModelFromAvailable(pIndex: providerIndex, modelId: mid)
+                                            } label: {
+                                                Image(systemName: "plus.circle")
+                                            }
+                                            .buttonStyle(.borderless)
                                         }
-                                        .buttonStyle(.borderless)
-                                        .help("加入我的模型")
                                     }
+                                    .padding(.vertical, 2)
                                 }
-                                .padding(.vertical, 1)
-                                // 行尾让出安全边距：确保「+」按钮不被列表右缘裁切
-                                .padding(.trailing, 6)
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        // 末行完整可见：底部留出滚动余量
-                        .padding(.bottom, 4)
-                    }
-                    .scrollIndicators(.never, axes: .vertical)
-                    .frame(height: 220)
+                        .frame(height: 120)
 
-                    if !filteredAvailableModels.isEmpty || !modelFilter.isEmpty {
-                        Button("清空候选池", role: .destructive) { clearAvailableModels() }
-                            .font(.system(size: Theme.Typography.footnote))
+                        Button("清空拉取的候选列表") {
+                            availableModels = []
+                        }
+                        .font(.system(size: Theme.Typography.micro))
                     }
+                    .padding(.top, 4)
                 }
             } header: {
-                Text("可用模型")
+                Text("模型能力池")
             } footer: {
-                Text("端点返回的全部模型候选，仅供挑选；点击 + 加入「我的模型」。候选池清空不影响我的模型。")
+                Text("「支持视觉」是 A+B 多模态调度的核心开关：若当前模型未勾选支持视觉，带有图片的消息将自动交由视觉感知 (Observer) Agent 代理看图，提取 OCR 与结构化信息后再注入主对话。")
             }
-            
+
+            if providerStore.providers.count > 1 {
+                Section {
+                    Button("删除此服务商", role: .destructive) {
+                        providerStore.deleteProvider(id: provider.id)
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: ================== 2. 智能体管理 ==================
+
+    @ViewBuilder
+    private var agentsFormSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                Picker("选择智能体", selection: $agentStore.activeAgentId) {
+                    ForEach(agentStore.agents) { a in
+                        HStack {
+                            Image(systemName: a.iconName)
+                            Text(a.name)
+                            if a.isVisualDelegate {
+                                Text("[视觉担当]").foregroundColor(.secondary)
+                            }
+                        }
+                        .tag(a.id)
+                    }
+                }
+
+                Menu {
+                    Button("添加新智能体") {
+                        addNewAgent()
+                    }
+                    Divider()
+                    Button("重置为官方默认团队 (Orchestrator, Observer, Coder, Oracle, Librarian)") {
+                        agentStore.resetToDefaults()
+                    }
+                } label: {
+                    Label("智能体操作", systemImage: "ellipsis.circle")
+                        .font(.system(size: Theme.Typography.body))
+                }
+            }
+        } header: {
+            Text("当前激活智能体")
+        } footer: {
+            Text("智能体可在输入底栏点击胶囊随时切换，支持为不同任务配置专属人设、服务商、模型与思考强度。")
+        }
+
+        if let agent = currentAgent {
+            let agentIndex = agentStore.agents.firstIndex(where: { $0.id == agent.id }) ?? 0
+
             Section {
-                TextField("留空则不发送 system 消息", text: $systemPrompt, axis: .vertical)
+                TextField("智能体名称", text: agentNameBinding(at: agentIndex))
                     .textFieldStyle(.roundedBorder)
-                    .lineLimit(3...6)
-            } header: {
-                Text("System Prompt（可选）")
-            } footer: {
-                Text("可选的角色设定 / 前置指令，留空则不发送 system 消息。")
-            }
 
-            // AI 工具配置：开关 / 联网搜索 Key / 文件访问白名单 / 自定义环境变量
-            //（开关与白名单、环境变量即改即生效，后端每次请求直读 UserDefaults；Key 仅存 Keychain）
-            AIToolsSettingsSection()
-            AIWebSearchSettingsSection()
-            AIFileWhitelistSettingsSection()
-            AIEnvVarsSettingsSection()
+                HStack(spacing: 8) {
+                    Text("图标:")
+                        .font(.system(size: Theme.Typography.body))
+                    Image(systemName: agent.iconName)
+                        .font(.system(size: 16, weight: .bold))
+                        .frame(width: 28, height: 28)
+                        .background(Color.secondary.opacity(0.15))
+                        .cornerRadius(6)
+
+                    // 预置常用图标按钮组
+                    ForEach(["sparkles", "eye.fill", "curlybraces", "brain.head.profile", "books.vertical.fill", "bolt.fill"], id: \.self) { sym in
+                        Button {
+                            var copy = agentStore.agents[agentIndex]
+                            copy.iconName = sym
+                            agentStore.saveAgent(copy)
+                        } label: {
+                            Image(systemName: sym)
+                                .font(.system(size: 12))
+                                .padding(4)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    TextField("SF Symbol 名", text: agentIconBinding(at: agentIndex))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 140)
+                }
+
+                TextField("职责描述", text: agentDescBinding(at: agentIndex))
+                    .textFieldStyle(.roundedBorder)
+
+                Toggle("启用此智能体", isOn: agentEnabledBinding(at: agentIndex))
+            } header: {
+                Text("角色档案")
+            }
 
             Section {
-                HStack {
-                    Text("打开 AI 对话窗")
-                    Spacer()
-                    KeyBadge(key: String(localized: "双击 ⌥ / I"))
+                Picker("绑定服务商", selection: agentProviderBinding(at: agentIndex)) {
+                    ForEach(providerStore.providers.filter { $0.isEnabled }) { p in
+                        Text(p.name).tag(p.id)
+                    }
+                }
+
+                let boundProvider = providerStore.provider(for: agent.providerId)
+                let models = boundProvider?.models ?? []
+
+                Picker("绑定模型", selection: agentModelBinding(at: agentIndex)) {
+                    if models.isEmpty {
+                        Text("无可用模型（请先在服务商中配置）").tag("")
+                    } else {
+                        ForEach(models) { m in
+                            HStack {
+                                Text(m.name)
+                                if m.supportsVision {
+                                    Text("[视觉]").foregroundColor(.cyan)
+                                }
+                                if m.supportsThinking {
+                                    Text("[思考]").foregroundColor(.indigo)
+                                }
+                            }
+                            .tag(m.id)
+                        }
+                    }
+                }
+
+                Picker("默认思考强度", selection: agentThinkingBinding(at: agentIndex)) {
+                    Text("无 (None)").tag(ThinkingLevel?.none)
+                    Text("低 (Low)").tag(ThinkingLevel?.some(.low))
+                    Text("中 (Medium)").tag(ThinkingLevel?.some(.medium))
+                    Text("高 (High)").tag(ThinkingLevel?.some(.high))
                 }
             } header: {
-                Text("使用")
+                Text("模型路由绑定")
             } footer: {
-                Text("全局双击 ⌥⌥ 随时唤出 / 关闭 AI 对话窗（热键可在「快捷键设置」中更改）；主面板激活时按 I 键亦可进入。")
+                Text("为该智能体指定后端算力提供商与模型规格。")
             }
-        }
-        .onAppear {
-            loadStoredKey()
-            loadModelList()
-        }
-    }
-    
-    /// API 协议绑定：原始值字符串与枚举互转，默认 Chat Completions
-    private var apiProtocolBinding: Binding<AIProtocolOption> {
-        Binding(
-            get: { AIProtocolOption(rawValue: apiProtocolRaw) ?? .chat },
-            set: { apiProtocolRaw = $0.rawValue }
-        )
-    }
-    
-    /// 已存 key 的末 4 位掩码文本
-    private var maskedKeySuffix: String {
-        String(storedKey.suffix(4))
-    }
-    
-    private var trimmedAPIKeyInput: String {
-        apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    
-    /// API Key 读取走 AIChatService 公开接口（@MainActor），用 MainActor Task 包裹，
-    /// 避免在非隔离的 View 上下文中直接调用产生隔离告警。
-    private func loadStoredKey() {
-        Task { @MainActor in
-            storedKey = AIChatService.shared.apiKey ?? ""
-        }
-    }
-    
-    private func saveAPIKey() {
-        let key = trimmedAPIKeyInput
-        guard !key.isEmpty else { return }
-        Task { @MainActor in
-            AIChatService.shared.saveAPIKey(key)
-            storedKey = key
-            apiKeyInput = ""
-        }
-    }
-    
-    private func clearAPIKey() {
-        Task { @MainActor in
-            AIChatService.shared.clearAPIKey()
-            storedKey = ""
-            apiKeyInput = ""
-        }
-    }
 
-    // MARK: - 模型列表编辑
+            Section {
+                Toggle("设为全局视觉感知担当 (Visual Observer)", isOn: agentVisualDelegateBinding(at: agentIndex))
 
-    /// 当前模型绑定：写回服务层，对下一轮请求生效。
-    private var selectedModelBinding: Binding<String> {
-        Binding(
-            get: { selectedModelId },
-            set: { newValue in
-                selectedModelId = newValue
-                persistModelList()
-            }
-        )
-    }
-
-    private func nameBinding(at index: Int) -> Binding<String> {
-        Binding(
-            get: { index < modelList.count ? modelList[index].name : "" },
-            set: { newValue in
-                guard index < modelList.count else { return }
-                modelList[index].name = newValue
-                persistModelList()
-            }
-        )
-    }
-
-    private func modelIdBinding(at index: Int) -> Binding<String> {
-        Binding(
-            get: { index < modelList.count ? modelList[index].modelId : "" },
-            set: { newValue in
-                guard index < modelList.count else { return }
-                let oldValue = modelList[index].modelId
-                modelList[index].modelId = newValue
-                if selectedModelId == oldValue {
-                    selectedModelId = newValue
+                let boundModel = providerStore.modelSpec(providerId: agent.providerId, modelId: agent.modelId)
+                if boundModel?.supportsVision == false {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(Theme.Colors.statusWarning)
+                        Text("提示：当前绑定的模型未标记「支持视觉」，请确保绑定的模型具备多模态能力以承担视觉解析职责。")
+                            .font(.system(size: Theme.Typography.footnote))
+                            .foregroundColor(Theme.Colors.statusWarning)
+                    }
                 }
-                persistModelList()
+            } header: {
+                Text("多模态协作机制")
+            } footer: {
+                Text("🌟 混合双模设计：当你在与不支持看图的模型对话时，若附带了图片，系统将自动无感调度本视觉担当 Agent 提取图像结构、OCR 文字与视觉关键要素，再将多模态语义注入主对话，解决纯文本模型无法理解图像的痛点！")
             }
-        )
-    }
 
-    /// 上下文窗口（tokens）绑定：空串写回 nil（= 默认 512k）；仅接受正整数，非法输入忽略。
-    private func contextWindowBinding(at index: Int) -> Binding<String> {
-        Binding(
-            get: {
-                guard index < modelList.count, let value = modelList[index].contextWindow else { return "" }
-                return String(value)
-            },
-            set: { newValue in
-                guard index < modelList.count else { return }
-                let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.isEmpty {
-                    modelList[index].contextWindow = nil
-                } else if let value = Int(trimmed), value > 0 {
-                    modelList[index].contextWindow = value
-                } else {
-                    return // 非法输入不写回
+            Section {
+                TextField("特化角色提示词，留空继承全局", text: agentSystemPromptBinding(at: agentIndex), axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(4...8)
+            } header: {
+                Text("特化 System Prompt")
+            } footer: {
+                Text("为该智能体定制的系统设定、思维规范与工程职责。")
+            }
+
+            if agentStore.agents.count > 1 {
+                Section {
+                    Button("删除此智能体", role: .destructive) {
+                        agentStore.deleteAgent(id: agent.id)
+                    }
                 }
-                persistModelList()
-            }
-        )
-    }
-
-    private func loadModelList() {
-        Task { @MainActor in
-            modelList = AIChatService.shared.modelList
-            selectedModelId = AIChatService.shared.selectedModel
-            availableModels = AIChatService.shared.availableModels
-        }
-    }
-
-    private func persistModelList() {
-        let snapshot = modelList
-        let selected = selectedModelId
-        Task { @MainActor in
-            var list = snapshot
-            // 清理空 modelId 项，避免写入无效条目
-            list.removeAll { $0.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            AIChatService.shared.modelList = list
-            // 仅当选中项仍在列表中才写回，否则交由 setter 的校正逻辑兜底。
-            if list.contains(where: { $0.modelId == selected }) {
-                AIChatService.shared.selectedModel = selected
             }
         }
     }
 
-    private func persistAvailableModels() {
-        let snapshot = availableModels
-        Task { @MainActor in
-            AIChatService.shared.availableModels = snapshot
+    // MARK: ================== 3. 工具与扩展 ==================
+
+    @ViewBuilder
+    private var toolsFormSection: some View {
+        AIToolsSettingsSection()
+        AIWebSearchSettingsSection()
+        AIFileWhitelistSettingsSection()
+        AIEnvVarsSettingsSection()
+
+        Section {
+            HStack {
+                Text("打开 AI 对话窗")
+                Spacer()
+                KeyBadge(key: String(localized: "双击 ⌥ / I"))
+            }
+        } header: {
+            Text("使用说明")
+        } footer: {
+            Text("全局双击 ⌥⌥ 随时唤出 / 关闭 AI 对话窗；在输入底栏点击智能体胶囊可一键切换当前角色。")
         }
     }
 
-    private func addModel() {
-        modelList.append(AIModel(name: "", modelId: ""))
-        persistModelList()
+    // MARK: - 辅助计算属性与方法
+
+    private var currentProvider: AIProvider? {
+        providerStore.provider(for: providerStore.selectedProviderId) ?? providerStore.providers.first
     }
 
-    private func removeModel(at index: Int) {
-        guard index < modelList.count else { return }
-        let removed = modelList.remove(at: index)
-        if selectedModelId == removed.modelId, let first = modelList.first {
-            selectedModelId = first.modelId
-        }
-        persistModelList()
+    private var currentAgent: AIAgent? {
+        agentStore.agent(for: agentStore.activeAgentId) ?? agentStore.agents.first
     }
 
-    private func moveModel(from index: Int, to target: Int) {
-        guard modelList.indices.contains(index), modelList.indices.contains(target) else { return }
-        modelList.swapAt(index, target)
-        persistModelList()
-    }
-
-    /// 设为默认：移到首项并切换为当前模型。
-    private func setDefaultModel(at index: Int) {
-        guard modelList.indices.contains(index) else { return }
-        let item = modelList.remove(at: index)
-        modelList.insert(item, at: 0)
-        selectedModelId = item.modelId
-        persistModelList()
-    }
-
-    // MARK: - 候选池
-
-    /// 本地过滤（忽略大小写，匹配 modelId），不动持久层。
     private var filteredAvailableModels: [String] {
-        let keyword = modelFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !keyword.isEmpty else { return availableModels }
-        return availableModels.filter { $0.lowercased().contains(keyword) }
+        let kw = modelFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !kw.isEmpty else { return availableModels }
+        return availableModels.filter { $0.lowercased().contains(kw) }
     }
 
-    private func isModelAdded(_ modelId: String) -> Bool {
-        modelList.contains { $0.modelId == modelId }
+    private func addPresetProvider(_ preset: AIProvider) {
+        var newP = preset
+        newP.id = "\(preset.id)-\(UUID().uuidString.prefix(4).lowercased())"
+        newP.name = "\(preset.name) (副本)"
+        providerStore.saveProvider(newP)
+        providerStore.selectedProviderId = newP.id
     }
 
-    /// 从候选池加入「我的模型」（显示名默认 = modelId）。
-    private func addModelFromPool(_ modelId: String) {
-        guard !isModelAdded(modelId) else { return }
-        modelList.append(AIModel(name: modelId, modelId: modelId))
-        persistModelList()
+    private func addCustomProvider() {
+        let newP = AIProvider(
+            id: "custom-\(UUID().uuidString.prefix(4).lowercased())",
+            name: "自定义端点",
+            type: .openAICompatible,
+            baseURL: "https://api.openai.com/v1",
+            apiProtocol: .chat,
+            isEnabled: true,
+            models: [
+                AIModelSpec(id: "default-model", name: "默认模型", contextWindow: 524288, supportsVision: true, supportsThinking: false)
+            ]
+        )
+        providerStore.saveProvider(newP)
+        providerStore.selectedProviderId = newP.id
     }
 
-    /// 清空候选池（条目都是拉来的，无需确认；不影响我的模型）。
-    private func clearAvailableModels() {
-        availableModels = []
-        modelFilter = ""
-        persistAvailableModels()
+    private func addNewAgent() {
+        let newA = AIAgent(
+            id: "agent-\(UUID().uuidString.prefix(4).lowercased())",
+            name: "新智能体",
+            iconName: "sparkles",
+            description: "自定义职责描述",
+            systemPrompt: "你是一个专业的 AI 助手。",
+            providerId: providerStore.selectedProviderId,
+            modelId: currentProvider?.models.first?.id ?? "glm-5.3",
+            thinkingLevel: nil,
+            isEnabled: true,
+            isVisualDelegate: false
+        )
+        agentStore.saveAgent(newA)
+        agentStore.activeAgentId = newA.id
     }
 
-    /// 从 API 拉取模型：结果只合并进候选池（去重），绝不直接进「我的模型」。
-    private func fetchModelsFromAPI() {
+    private func fetchModelsForProvider(_ provider: AIProvider) {
         isFetchingModels = true
         fetchError = nil
         Task { @MainActor in
             do {
-                let ids = try await AIChatService.shared.fetchModels()
-                var existing = Set(availableModels)
-                for id in ids where !existing.contains(id) {
+                let ids = try await AIChatService.shared.fetchModels(for: provider)
+                var set = Set(availableModels)
+                for id in ids where !set.contains(id) {
                     availableModels.append(id)
-                    existing.insert(id)
+                    set.insert(id)
                 }
                 if availableModels.isEmpty {
-                    fetchError = String(localized: "接口未返回任何模型。")
+                    fetchError = "接口未返回任何模型。"
                 }
-                persistAvailableModels()
             } catch {
                 fetchError = error.localizedDescription
             }
             isFetchingModels = false
         }
+    }
+
+    private func providerURLPlaceholder(for type: AIProviderType) -> String {
+        switch type {
+        case .openAICompatible: return "https://api.openai.com/v1"
+        case .qoderNative: return "https://api3.qoder.sh"
+        case .antigravityNative: return "https://generativelanguage.googleapis.com/v1beta"
+        case .nativeBridge: return "http://127.0.0.1:8080/v1"
+        }
+    }
+
+    private func providerURLFooter(for type: AIProviderType) -> String {
+        switch type {
+        case .openAICompatible:
+            return "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方填 https://api.openai.com/v1；本地 Ollama/vLLM 填 http://localhost:端口/v1。"
+        case .qoderNative:
+            return "Qoder 官方地址为 https://api3.qoder.sh；若使用本地桥接代理，请填入本地 http://127.0.0.1:端口/v1。"
+        case .antigravityNative:
+            return "Gemini 官方地址为 https://generativelanguage.googleapis.com/v1beta；直连 Google AI 端点。"
+        case .nativeBridge:
+            return "本地独立代理端点根地址，程序将直连该地址并不做二次加解密。"
+        }
+    }
+
+    private func apiKeyPlaceholder(for type: AIProviderType) -> String {
+        switch type {
+        case .openAICompatible: return "输入 Bearer API Key"
+        case .qoderNative: return "输入 Qoder PAT 访问令牌 (pt-...)"
+        case .antigravityNative: return "输入 Google AI Studio API Key 或 OAuth Token"
+        case .nativeBridge: return "输入本地代理鉴权密钥 (如有)"
+        }
+    }
+
+    private func apiKeyFooter(for type: AIProviderType) -> String {
+        switch type {
+        case .qoderNative:
+            return "支持直接输入 PAT 令牌 (以 pt- 开头)，应用将在本地自动完成 JobToken 兑换与 COSY 签名，密钥仅保存在本机。"
+        case .antigravityNative:
+            return "支持 Google AI Studio 获取的 API Key，或以 ya29. 开头的 Google Cloud OAuth 临时访问令牌。"
+        default:
+            return "API Key 以仅当前用户可读的文件权限 (0600) 存储在本机应用支持目录，绝不随云端同步。"
+        }
+    }
+
+    // MARK: - Provider Bindings
+
+    private func providerNameBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { providerStore.providers[index].name },
+            set: {
+                var p = providerStore.providers[index]
+                p.name = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func providerTypeBinding(at index: Int) -> Binding<AIProviderType> {
+        Binding(
+            get: { providerStore.providers[index].type },
+            set: {
+                var p = providerStore.providers[index]
+                p.type = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func providerProtocolBinding(at index: Int) -> Binding<AIProtocolOption> {
+        Binding(
+            get: { providerStore.providers[index].apiProtocol },
+            set: {
+                var p = providerStore.providers[index]
+                p.apiProtocol = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func providerEnabledBinding(at index: Int) -> Binding<Bool> {
+        Binding(
+            get: { providerStore.providers[index].isEnabled },
+            set: {
+                var p = providerStore.providers[index]
+                p.isEnabled = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func providerBaseURLBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { providerStore.providers[index].baseURL },
+            set: {
+                var p = providerStore.providers[index]
+                p.baseURL = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    // MARK: - Model Bindings
+
+    private func modelNameBinding(pIndex: Int, mIndex: Int) -> Binding<String> {
+        Binding(
+            get: { providerStore.providers[pIndex].models[mIndex].name },
+            set: {
+                var p = providerStore.providers[pIndex]
+                p.models[mIndex].name = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func modelIdBinding(pIndex: Int, mIndex: Int) -> Binding<String> {
+        Binding(
+            get: { providerStore.providers[pIndex].models[mIndex].id },
+            set: {
+                var p = providerStore.providers[pIndex]
+                p.models[mIndex].id = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func modelContextBinding(pIndex: Int, mIndex: Int) -> Binding<String> {
+        Binding(
+            get: { String(providerStore.providers[pIndex].models[mIndex].contextWindow) },
+            set: {
+                if let val = Int($0.trimmingCharacters(in: .whitespacesAndNewlines)), val > 0 {
+                    var p = providerStore.providers[pIndex]
+                    p.models[mIndex].contextWindow = val
+                    providerStore.saveProvider(p)
+                }
+            }
+        )
+    }
+
+    private func modelVisionBinding(pIndex: Int, mIndex: Int) -> Binding<Bool> {
+        Binding(
+            get: { providerStore.providers[pIndex].models[mIndex].supportsVision },
+            set: {
+                var p = providerStore.providers[pIndex]
+                p.models[mIndex].supportsVision = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func modelThinkingBinding(pIndex: Int, mIndex: Int) -> Binding<Bool> {
+        Binding(
+            get: { providerStore.providers[pIndex].models[mIndex].supportsThinking },
+            set: {
+                var p = providerStore.providers[pIndex]
+                p.models[mIndex].supportsThinking = $0
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func addNewModel(pIndex: Int) {
+        var p = providerStore.providers[pIndex]
+        p.models.append(AIModelSpec(id: "new-model", name: "新模型", contextWindow: 524288, supportsVision: false, supportsThinking: false))
+        providerStore.saveProvider(p)
+    }
+
+    private func addModelFromAvailable(pIndex: Int, modelId: String) {
+        var p = providerStore.providers[pIndex]
+        guard !p.models.contains(where: { $0.id == modelId }) else { return }
+        let isVision = modelId.contains("vl") || modelId.contains("flash") || modelId.contains("4o")
+        let isThinking = modelId.contains("glm") || modelId.contains("k3") || modelId.contains("r1") || modelId.contains("o1") || modelId.contains("o3")
+        p.models.append(AIModelSpec(id: modelId, name: modelId, contextWindow: 524288, supportsVision: isVision, supportsThinking: isThinking))
+        providerStore.saveProvider(p)
+    }
+
+    private func removeModel(pIndex: Int, at mIndex: Int) {
+        var p = providerStore.providers[pIndex]
+        guard mIndex < p.models.count else { return }
+        p.models.remove(at: mIndex)
+        providerStore.saveProvider(p)
+    }
+
+    private func moveModel(pIndex: Int, from: Int, to: Int) {
+        var p = providerStore.providers[pIndex]
+        guard p.models.indices.contains(from), p.models.indices.contains(to) else { return }
+        p.models.swapAt(from, to)
+        providerStore.saveProvider(p)
+    }
+
+    // MARK: - Agent Bindings
+
+    private func agentNameBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { agentStore.agents[index].name },
+            set: {
+                var a = agentStore.agents[index]
+                a.name = $0
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentIconBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { agentStore.agents[index].iconName },
+            set: {
+                var a = agentStore.agents[index]
+                a.iconName = $0
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentDescBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { agentStore.agents[index].description },
+            set: {
+                var a = agentStore.agents[index]
+                a.description = $0
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentEnabledBinding(at index: Int) -> Binding<Bool> {
+        Binding(
+            get: { agentStore.agents[index].isEnabled },
+            set: {
+                var a = agentStore.agents[index]
+                a.isEnabled = $0
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentProviderBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { agentStore.agents[index].providerId },
+            set: { newProviderId in
+                var a = agentStore.agents[index]
+                a.providerId = newProviderId
+                if let p = providerStore.provider(for: newProviderId), let firstModel = p.models.first {
+                    a.modelId = firstModel.id
+                }
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentModelBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { agentStore.agents[index].modelId },
+            set: {
+                var a = agentStore.agents[index]
+                a.modelId = $0
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentThinkingBinding(at index: Int) -> Binding<ThinkingLevel?> {
+        Binding(
+            get: { agentStore.agents[index].thinkingLevel },
+            set: {
+                var a = agentStore.agents[index]
+                a.thinkingLevel = $0
+                agentStore.saveAgent(a)
+            }
+        )
+    }
+
+    private func agentVisualDelegateBinding(at index: Int) -> Binding<Bool> {
+        Binding(
+            get: { agentStore.agents[index].isVisualDelegate },
+            set: { isDelegate in
+                if isDelegate {
+                    agentStore.setVisualDelegate(agentId: agentStore.agents[index].id)
+                } else {
+                    var a = agentStore.agents[index]
+                    a.isVisualDelegate = false
+                    agentStore.saveAgent(a)
+                }
+            }
+        )
+    }
+
+    private func agentSystemPromptBinding(at index: Int) -> Binding<String> {
+        Binding(
+            get: { agentStore.agents[index].systemPrompt },
+            set: {
+                var a = agentStore.agents[index]
+                a.systemPrompt = $0
+                agentStore.saveAgent(a)
+            }
+        )
     }
 }

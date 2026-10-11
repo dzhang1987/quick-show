@@ -147,6 +147,8 @@ struct ChatSession: Identifiable, Equatable, Codable {
     /// 标题是否仍待 LLM 摘要：新会话为 true；用户重命名或摘要完成后置 false。
     var titleNeedsSummary: Bool
     var messages: [ChatMessage]
+    /// 会话绑定的智能体 id（nil = 跟随全局默认激活智能体）。
+    var agentId: String?
     /// 会话绑定的模型 id（nil = 跟随全局默认模型）。
     var modelId: String?
     /// 会话思考档位（nil = 跟随模型默认）。
@@ -166,6 +168,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         pinned: Bool = false,
         titleNeedsSummary: Bool = true,
         messages: [ChatMessage] = [],
+        agentId: String? = nil,
         modelId: String? = nil,
         thinkingLevel: ThinkingLevel? = nil,
         contextTokens: Int? = nil,
@@ -179,6 +182,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.pinned = pinned
         self.titleNeedsSummary = titleNeedsSummary
         self.messages = messages
+        self.agentId = agentId
         self.modelId = modelId
         self.thinkingLevel = thinkingLevel
         self.contextTokens = contextTokens
@@ -188,10 +192,10 @@ struct ChatSession: Identifiable, Equatable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, pinned, titleNeedsSummary, messages
-        case modelId, thinkingLevel, contextTokens, contextSummary, summarizedMessageIDs
+        case agentId, modelId, thinkingLevel, contextTokens, contextSummary, summarizedMessageIDs
     }
 
-    /// 自定义解码：兼容缺省字段（pinned / titleNeedsSummary / messages / 会话级模型、水位与压缩字段）。
+    /// 自定义解码：兼容缺省字段（pinned / titleNeedsSummary / messages / 会话级智能体、模型、水位与压缩字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -202,6 +206,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         titleNeedsSummary = try container.decodeIfPresent(Bool.self, forKey: .titleNeedsSummary) ?? true
         messages = try container.decodeIfPresent([ChatMessage].self, forKey: .messages) ?? []
         // 旧 JSON 无这些字段：decodeIfPresent 保证解码不失败。
+        agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
         modelId = try container.decodeIfPresent(String.self, forKey: .modelId)
         thinkingLevel = try container.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
         contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens)
