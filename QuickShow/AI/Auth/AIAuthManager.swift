@@ -202,7 +202,33 @@ final class AIAuthManager: ObservableObject {
     private nonisolated func detectAntigravityAccount() async -> LocalDetectedAccount? {
         let home = NSHomeDirectory()
 
-        // 1. 优先读取 Antigravity 原生已登录 OAuth 凭据 (~/.gemini/jetski-standalone-oauth-token)
+        // 1. 优先读取系统钥匙串中的 Antigravity 活跃 OAuth 凭据 (保持最新续期状态)
+        if let keychainData = readGenericPassword(service: "gemini", account: "antigravity"),
+           let rawStr = String(data: keychainData, encoding: .utf8) {
+            let b64 = rawStr.replacingOccurrences(of: "go-keyring-base64:", with: "")
+            if let jsonData = Data(base64Encoded: b64),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+               let tokenObj = json["token"] as? [String: Any],
+               let accessToken = tokenObj["access_token"] as? String, !accessToken.isEmpty {
+                var email = ""
+                if let idToken = json["id_token"] as? String,
+                   let parsed = Self.parseEmailFromJWT(idToken), !parsed.isEmpty {
+                    email = parsed
+                }
+                let display = email.isEmpty ? "Antigravity 已登录账号" : "Antigravity (\(email))"
+                return LocalDetectedAccount(
+                    providerId: "antigravity",
+                    displayName: display,
+                    email: email.isEmpty ? "Google 账号" : email,
+                    detail: "已登录 Antigravity 客户端",
+                    token: accessToken,
+                    userId: nil,
+                    avatarURL: nil
+                )
+            }
+        }
+
+        // 2. 兜底读取本地凭据文件 (~/.gemini/jetski-standalone-oauth-token)
         let jetskiTokenPath = "\(home)/.gemini/jetski-standalone-oauth-token"
         if FileManager.default.fileExists(atPath: jetskiTokenPath),
            let data = try? Data(contentsOf: URL(fileURLWithPath: jetskiTokenPath)),
@@ -406,6 +432,26 @@ final class AIAuthManager: ObservableObject {
 
     private nonisolated func extractAntigravityCredentialsSilently() async -> (token: String, email: String, refreshToken: String?)? {
         let home = NSHomeDirectory()
+
+        // 1. 优先尝试从系统钥匙串读取最新的活跃 token (保持最新续期状态)
+        if let keychainData = readGenericPassword(service: "gemini", account: "antigravity"),
+           let rawStr = String(data: keychainData, encoding: .utf8) {
+            let b64 = rawStr.replacingOccurrences(of: "go-keyring-base64:", with: "")
+            if let jsonData = Data(base64Encoded: b64),
+               let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+               let tokenObj = json["token"] as? [String: Any],
+               let accessToken = tokenObj["access_token"] as? String, !accessToken.isEmpty {
+                let refreshToken = tokenObj["refresh_token"] as? String
+                var email = ""
+                if let idToken = json["id_token"] as? String,
+                   let parsed = Self.parseEmailFromJWT(idToken), !parsed.isEmpty {
+                    email = parsed
+                }
+                return (accessToken, email, refreshToken)
+            }
+        }
+
+        // 2. 兜底读取本地凭据文件 (~/.gemini/jetski-standalone-oauth-token)
         let tokenPath = "\(home)/.gemini/jetski-standalone-oauth-token"
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: tokenPath)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
