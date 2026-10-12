@@ -49,7 +49,7 @@ enum MarkdownInlineNS {
     }
 
     /// accent 的 NSColor 近似：优先取当前主题 accent 解析值，失败退回系统 linkColor。
-    private static var accentColor: NSColor {
+    static var accentColor: NSColor {
         MathRasterizer.resolvedColor(Theme.Colors.accent, appearance: NSApp.effectiveAppearance)
     }
 

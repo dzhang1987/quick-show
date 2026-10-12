@@ -131,9 +131,7 @@ struct AssistantMarkdownView: View, Equatable {
             ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
                 switch segment {
                 case let .textFlow(_, content, topSpacing):
-                    Text(content)
-                        .lineSpacing(6)
-                        .fixedSize(horizontal: false, vertical: true)
+                    NativeTextFlowView(attributedString: content)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, index == 0 ? 0 : topSpacing)
                 case let .widget(_, block, topSpacing):

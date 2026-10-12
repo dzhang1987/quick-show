@@ -20,12 +20,12 @@
 
 ### Changed
 
-- **单文本流排版细节深度精修（殿堂级呼吸感与间距对齐）**：
-  - **智能块间留白（`separatorBetween`）**：彻底解决纯文本拼接容易挤成“文字墙”的缺陷，针对标题成组锚点、段落间距、列表项结束后入新章节自动派发精确的双换行 `\n\n` 空行留白，章节层次分明；
-  - **1.7 倍通透行高（`lineSpacing(6)`）**：为文本流挂载原版相同的 6pt 行间距，正文与列表文字通透不贴脸；
-  - **列表制表位两列精密对齐（`NSTextTab` + 悬挂缩进）**：精细区分有序列表（24pt）、任务列表（20pt）与无序列表（18pt），折行文字垂直像素级对齐，保留 8pt 呼吸留白；
-  - **无序圆点光学几何居中（Optical Alignment）**：注入 `baselineOffset = 0.5` 消除中文混排下的圆点下沉感，与汉字保持几何垂直中心对齐；
-  - **行内代码 Chip 质感提升**：字重提升至 `Theme.Typography.mono(12.5, .medium)`，路径与技术词汇在半透明背景上更加清晰扎实。
+- **单文本流升级为 AppKit 原生 TextKit 宿主架构（`NativeTextFlowView` / `NonScrollingTextView`）**：
+  - **TextKit 底层系统级排版穿透**：彻底攻克 SwiftUI `Text(AttributedString)` 静默丢弃 `NSParagraphStyle` 的系统级缺陷，重构为基于原生 `NSTextView` 的 `NativeTextFlowView`；
+  - **真·悬挂缩进与两列精密对齐**：完整支持 `headIndent` 悬挂缩进（折行文字垂直对齐至汉字首字）与 `NSTextTab` 制表对齐，彻底消除列表多行折行顶格在标号圆点下方的缺陷；
+  - **点级精确间距（消除硬拼空行）**：彻底剔除双换行 `\n\n` 物理空行拼接，段间距统一由 TextKit `paragraphSpacing` 驱动——列表项间距精准 10pt 呼吸留白、正文段落间距 14pt、步出列表 16pt、标题后收紧 8pt；
+  - **无感滚动穿透与原生选区链**：重写 `scrollWheel(with:)` 将垂直滚轮自然透传给外层会话 `NSScrollView`，保留 macOS 原生连续多选（跨小标题、段落、多层列表一拖到底）、双击选词、三击整段及原生上下文菜单能力；
+  - **`sizeThatFits` 动态测量撑开**：实现 `sizeThatFits` 依提案宽度自适应重排计算真实像素高度，杜绝窗口缩放与流式生成时的布局抖动。
 
 - **Markdown 引用块（Blockquote）竖线与卡片垂直无限拉伸 Bug 根治（`MarkdownBlocks.swift`）**：
   - 针对原实现中左侧竖条使用无高度约束的 `RoundedRectangle` Shape 导致在 SwiftUI 容器中贪婪占用垂直空间、致使文字悬空且卡片底部产生大片虚白的问题，重构为基于文本内容尺寸驱动的 `.overlay(alignment: .leading)`，引述线高度与内容精确 1:1 贴合；
@@ -52,6 +52,10 @@
   - **双轨无缝平滑容错兜底**：直连通道若遇到严重断网等不可抗力，自动无感 fallback 唤起本地 `agy` CLI 进程兜底执行，保证用户体验稳健无故障。
 
 ### Fixed
+
+- **Mermaid 矢量图表渲染尺寸畸变与时序图泳道穿刺根治（`MermaidWebView.swift`）**：
+  - **消除小图暴力放大畸变**：彻底移除 Web 模板中 `svg { max-width: 100% !important; }` 的破坏性样式覆盖，恢复 Mermaid 原生内联 `style="max-width: 自然宽"` 保护，彻底解决流程图（`flowchart TB`）、方块图（`block-beta`）、实体关系图（`erDiagram`）等窄图被强行拉扯放大 2~4 倍且高度暴增至数千像素的严重缺陷；
+  - **根治时序图（`sequenceDiagram`）泳道竖线穿刺顶部参与者方框**：排查定位 Mermaid 底层生命线起笔于顶部方框内 `y=5` 处、依赖不透明实色背景遮盖的历史实现缺陷；在 SVG 渲染流水线中新增几何规范化裁剪（`normalizeDiagram`），自动将垂直生命线起点截断在顶部参与者底边（$bottomY = y + height$），即使在 macOS 深度毛玻璃半透明体系下亦能呈现规整干净的专业时序图。
 
 - **多轮历史上下文角色严格归一化合并（根治 MALFORMED_FUNCTION_CALL 断流）**：
   - 排查定位多轮对话中若存在截断产生的空回复，会导致 `contents` 中产生连续的 `user` 角色，触发 Google Gemini 服务端上下文状态机崩溃并报 `MALFORMED_FUNCTION_CALL`，导致正文输出为空并被提前掐断；

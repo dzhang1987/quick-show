@@ -3,11 +3,13 @@ import AppKit
 
 // MARK: - 混合排版渲染段（Display Segment）
 
-/// 混合排版片段：将 Markdown AST 切分为连续排版文本流与独立交互岛屿。
-/// - textFlow: 连续的标题、段落、列表项合并为一个 AttributedString，交由单个 Text 渲染，支持全篇自由连续划选与复制。
+/// 混合排版片段：将 Markdown AST 切分为连续原生排版文本流与独立交互岛屿。
+/// - textFlow: 连续的标题、段落、列表项合并为统一 NSAttributedString，由 AppKit 原生 TextKit 渲染，
+///   完美支持 NSTextTab 两列对齐、悬挂缩进（headIndent）、精确段落与列表间距（paragraphSpacing），
+///   并支持全篇真正一拖到底的系统级连续划选与复制。
 /// - widget: 代码块（带复制按钮与横滚）、表格、公式、图片段落等保留为独立 SwiftUI 组件。
 enum MarkdownDisplaySegment: Identifiable, Equatable {
-    case textFlow(id: String, content: AttributedString, topSpacing: CGFloat)
+    case textFlow(id: String, content: NSAttributedString, topSpacing: CGFloat)
     case widget(id: String, block: MarkdownBlock, topSpacing: CGFloat)
 
     var id: String {
@@ -21,6 +23,17 @@ enum MarkdownDisplaySegment: Identifiable, Equatable {
         switch self {
         case let .textFlow(_, _, spacing): return spacing
         case let .widget(_, _, spacing): return spacing
+        }
+    }
+
+    static func == (lhs: MarkdownDisplaySegment, rhs: MarkdownDisplaySegment) -> Bool {
+        switch (lhs, rhs) {
+        case let (.textFlow(id1, content1, s1), .textFlow(id2, content2, s2)):
+            return id1 == id2 && s1 == s2 && content1.isEqual(to: content2)
+        case let (.widget(id1, b1, s1), .widget(id2, b2, s2)):
+            return id1 == id2 && s1 == s2 && b1 == b2
+        default:
+            return false
         }
     }
 }
@@ -91,54 +104,33 @@ enum MarkdownBlockSegmenter {
     }
 }
 
-// MARK: - 文本流 AttributedString 生成器（精密对齐版）
+// MARK: - 文本流 NSAttributedString 生成器（TextKit 殿堂级精密排版版）
 
 enum MarkdownTextFlowBuilder {
-    /// 将连续的普通文本块拼装为单个具备层次样式的 AttributedString
-    static func build(from blocks: [MarkdownBlock]) -> AttributedString {
-        var result = AttributedString()
+    /// 将连续的普通文本块拼装为单个具备层次样式的 NSAttributedString
+    static func build(from blocks: [MarkdownBlock]) -> NSAttributedString {
+        let result = NSMutableAttributedString()
         for (index, block) in blocks.enumerated() {
-            let previous = index > 0 ? blocks[index - 1] : nil
-            if let previous {
-                let sep = separatorBetween(previous: previous, current: block)
-                result.append(AttributedString(sep))
-            }
-            append(block: block, after: previous, into: &result)
+            let next = index < blocks.count - 1 ? blocks[index + 1] : nil
+            append(block: block, nextBlock: next, into: result)
         }
         return result
     }
 
-    /// 根据前后块的语义类型决定块间换行留白：
-    /// - 标题前拉开大间距（\n\n 空行成组锚点）
-    /// - 标题后紧随正文收紧（单个 \n 紧凑成组）
-    /// - 段落与段落、段落与列表、列表与段落之间保持独立段落空行（\n\n）
-    private static func separatorBetween(previous: MarkdownBlock, current: MarkdownBlock) -> String {
-        // 当前是标题：前置拉开成组大留白
-        if case .heading = current {
-            return "\n\n"
-        }
-        // 前一个是标题：后随内容自然收紧
-        if case .heading = previous {
-            return "\n"
-        }
-        // 普通块之间（段落与段落、段落与列表、列表与段落等）：必须保持清晰的双换行空行
-        return "\n\n"
-    }
-
     private static func append(
         block: MarkdownBlock,
-        after previous: MarkdownBlock?,
-        into result: inout AttributedString
+        nextBlock: MarkdownBlock?,
+        into result: NSMutableAttributedString
     ) {
         switch block {
         case let .heading(level, inlines):
-            appendHeading(level: level, inlines: inlines, after: previous, into: &result)
+            appendHeading(level: level, inlines: inlines, nextBlock: nextBlock, into: result)
         case let .paragraph(inlines):
-            appendParagraph(inlines: inlines, after: previous, into: &result)
+            appendParagraph(inlines: inlines, nextBlock: nextBlock, into: result)
         case let .orderedList(items):
-            appendList(items: items, ordered: true, depth: 0, after: previous, into: &result)
+            appendList(items: items, ordered: true, depth: 0, nextBlock: nextBlock, into: result)
         case let .unorderedList(items):
-            appendList(items: items, ordered: false, depth: 0, after: previous, into: &result)
+            appendList(items: items, ordered: false, depth: 0, nextBlock: nextBlock, into: result)
         default:
             break
         }
@@ -148,10 +140,10 @@ enum MarkdownTextFlowBuilder {
     private static func appendHeading(
         level: Int,
         inlines: [InlineToken],
-        after previous: MarkdownBlock?,
-        into result: inout AttributedString
+        nextBlock: MarkdownBlock?,
+        into result: NSMutableAttributedString
     ) {
-        let (size, weight): (CGFloat, Font.Weight) = {
+        let (size, weight): (CGFloat, NSFont.Weight) = {
             switch level {
             case 2: return (16, .semibold)
             case 3: return (14, .semibold)
@@ -161,43 +153,64 @@ enum MarkdownTextFlowBuilder {
             }
         }()
 
-        var headingAttr = MarkdownInline.render(
+        let font = MarkdownInlineNS.font(size: size, weight: weight)
+        let render = MarkdownInlineNS.renderNS(
             inlines,
-            bodyColor: Theme.Colors.contentPrimary,
-            size: size
+            baseFont: font,
+            baseColor: .labelColor,
+            baseSize: size
         )
-        headingAttr.font = Theme.Typography.text(size, weight)
+        let headingPiece = NSMutableAttributedString(attributedString: render.attributed)
+
+        let hasNext = nextBlock != nil
+        if hasNext {
+            headingPiece.append(NSAttributedString(string: "\n", attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
+        }
 
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 2
-        style.paragraphSpacing = Theme.Spacing.lg // 8: 标题后收紧成组
-        if let previous {
-            style.paragraphSpacingBefore = MarkdownBlock.heading(level: level, inlines: inlines).topSpacing(after: previous)
-        }
-        headingAttr.appKit.paragraphStyle = style
-        result.append(headingAttr)
+        style.paragraphSpacing = hasNext ? 8 : 0 // 标题紧随内容收紧成组
+        headingPiece.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: headingPiece.length))
+
+        result.append(headingPiece)
     }
 
     // MARK: - 段落排版
     private static func appendParagraph(
         inlines: [InlineToken],
-        after previous: MarkdownBlock?,
-        into result: inout AttributedString
+        nextBlock: MarkdownBlock?,
+        into result: NSMutableAttributedString
     ) {
-        var paraAttr = MarkdownInline.render(
+        let baseFont = MarkdownInlineNS.font(size: 13, weight: .regular)
+        let baseColor = NSColor.labelColor.withAlphaComponent(0.80)
+        let render = MarkdownInlineNS.renderNS(
             inlines,
-            bodyColor: Color.primary.opacity(0.80),
-            size: 13
+            baseFont: baseFont,
+            baseColor: baseColor,
+            baseSize: 13
         )
+        let paraPiece = NSMutableAttributedString(attributedString: render.attributed)
+
+        let hasNext = nextBlock != nil
+        if hasNext {
+            paraPiece.append(NSAttributedString(string: "\n", attributes: [.font: baseFont, .foregroundColor: baseColor]))
+        }
 
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 6
-        style.paragraphSpacing = Theme.Spacing.card // 16: 段落间距
-        if let previous {
-            style.paragraphSpacingBefore = MarkdownBlock.paragraph(inlines).topSpacing(after: previous)
+        // 间距节奏：紧随标题前拉开大锚点（20pt）；紧随段落/列表舒适 14pt；末段为 0
+        if let next = nextBlock {
+            if case .heading = next {
+                style.paragraphSpacing = 20
+            } else {
+                style.paragraphSpacing = 14
+            }
+        } else {
+            style.paragraphSpacing = 0
         }
-        paraAttr.appKit.paragraphStyle = style
-        result.append(paraAttr)
+        paraPiece.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: paraPiece.length))
+
+        result.append(paraPiece)
     }
 
     // MARK: - 列表排版（NSTextTab 两列精密对齐）
@@ -205,14 +218,20 @@ enum MarkdownTextFlowBuilder {
         items: [MarkdownListItem],
         ordered: Bool,
         depth: Int,
-        after previous: MarkdownBlock?,
-        into result: inout AttributedString
+        nextBlock: MarkdownBlock?,
+        into result: NSMutableAttributedString
     ) {
         for (idx, item) in items.enumerated() {
-            if idx > 0 {
-                result.append(AttributedString("\n"))
-            }
-            appendListItem(item: item, ordered: ordered, depth: depth, isFirstInList: idx == 0, previousBlock: previous, into: &result)
+            let isLastInCurrentList = (idx == items.count - 1)
+            let nextBlockForLastItem = isLastInCurrentList ? nextBlock : nil
+            appendListItem(
+                item: item,
+                ordered: ordered,
+                depth: depth,
+                isLastItem: isLastInCurrentList,
+                nextBlock: nextBlockForLastItem,
+                into: result
+            )
         }
     }
 
@@ -220,47 +239,61 @@ enum MarkdownTextFlowBuilder {
         item: MarkdownListItem,
         ordered: Bool,
         depth: Int,
-        isFirstInList: Bool,
-        previousBlock: MarkdownBlock?,
-        into result: inout AttributedString
+        isLastItem: Bool,
+        nextBlock: MarkdownBlock?,
+        into result: NSMutableAttributedString
     ) {
-        var itemPiece = AttributedString()
+        let itemPiece = NSMutableAttributedString()
 
         // 1. 前导标号与制表符（\t 实现精准两列对齐，彻底告别单空格贴脸）
         let prefixText: String
-        let prefixFont: Font
+        let prefixFont: NSFont
+        let prefixColor: NSColor
+        var baselineOffset: CGFloat = 0
+
         if let state = item.taskState {
             prefixText = (state ? "✓" : "○") + "\t"
-            prefixFont = Theme.Typography.text(12.5, .medium)
+            prefixFont = MarkdownInlineNS.font(size: 12.5, weight: .medium)
+            prefixColor = state ? MarkdownInlineNS.accentColor : NSColor.tertiaryLabelColor
         } else if ordered {
             prefixText = "\(item.number ?? 1).\t"
-            prefixFont = Theme.Typography.mono(12)
+            prefixFont = MarkdownInlineNS.monoFont(size: 12)
+            prefixColor = NSColor.secondaryLabelColor
         } else {
             prefixText = (depth == 0 ? "•" : "◦") + "\t"
-            prefixFont = Theme.Typography.text(12, .medium)
+            prefixFont = MarkdownInlineNS.font(size: 12, weight: .medium)
+            prefixColor = NSColor.secondaryLabelColor
+            if depth == 0 && item.taskState == nil {
+                baselineOffset = 0.5 // 中文混排下圆点几何居中光学微调
+            }
         }
 
-        var prefixAttr = AttributedString(prefixText)
-        prefixAttr.font = prefixFont
-        if depth == 0 && !ordered && item.taskState == nil {
-            prefixAttr.baselineOffset = 0.5 // 中文混排下圆点几何居中光学微调
+        var prefixAttrs: [NSAttributedString.Key: Any] = [
+            .font: prefixFont,
+            .foregroundColor: prefixColor,
+        ]
+        if baselineOffset != 0 {
+            prefixAttrs[.baselineOffset] = baselineOffset
         }
-        prefixAttr.foregroundColor = Theme.Colors.contentTertiary
-        itemPiece.append(prefixAttr)
+        itemPiece.append(NSAttributedString(string: prefixText, attributes: prefixAttrs))
 
         // 2. 正文内容
-        let bodyOpacity: Double = item.taskState == true ? 0.55 : 0.80
+        let bodyOpacity: CGFloat = item.taskState == true ? 0.55 : 0.80
         var subLists: [(items: [MarkdownListItem], ordered: Bool)] = []
+
+        let bodyFont = MarkdownInlineNS.font(size: 13, weight: .regular)
+        let bodyColor = NSColor.labelColor.withAlphaComponent(bodyOpacity)
 
         for block in item.blocks {
             switch block {
             case let .paragraph(inlines):
-                let inlinesAttr = MarkdownInline.render(
+                let bodyRender = MarkdownInlineNS.renderNS(
                     inlines,
-                    bodyColor: Color.primary.opacity(bodyOpacity),
-                    size: 13
+                    baseFont: bodyFont,
+                    baseColor: bodyColor,
+                    baseSize: 13
                 )
-                itemPiece.append(inlinesAttr)
+                itemPiece.append(bodyRender.attributed)
             case let .orderedList(subItems):
                 subLists.append((subItems, true))
             case let .unorderedList(subItems):
@@ -270,28 +303,145 @@ enum MarkdownTextFlowBuilder {
             }
         }
 
+        // 是否需要追加末尾换行
+        let needsTrailingNewline = !isLastItem || nextBlock != nil || !subLists.isEmpty
+        if needsTrailingNewline {
+            itemPiece.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont, .foregroundColor: bodyColor]))
+        }
+
         // 3. 悬挂缩进 + NSTextTab 精准两列对齐
-        // 有序列表 14pt 标号 + 8pt 呼吸留白 = 24pt；任务列表 = 20pt；无序列表圆点 + 8pt 留白 = 18pt
+        // 有序列表 14pt 标号 + 10pt 呼吸留白 = 24pt；任务列表 = 20pt；无序列表圆点 + 10pt 留白 = 18pt
         let baseIndent: CGFloat = CGFloat(depth) * 22
         let hangingOffset: CGFloat = item.taskState != nil ? 20 : (ordered ? 24 : 18)
         let hangingIndent: CGFloat = baseIndent + hangingOffset
 
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 6
-        style.paragraphSpacing = Theme.Spacing.lg // 8: 列表项垂直间距
         style.firstLineHeadIndent = baseIndent
         style.headIndent = hangingIndent
         style.tabStops = [NSTextTab(textAlignment: .left, location: hangingIndent)]
-        if isFirstInList, let previousBlock {
-            style.paragraphSpacingBefore = MarkdownBlock.orderedList([]).topSpacing(after: previousBlock)
+
+        // 项间与退出留白节奏：
+        // 子列表存在时：父项正文到子列表紧随 6pt
+        // 当前项不是最后一项：项间 10pt 呼吸留白（对齐第一张图的通透感，彻底告别文字墙）
+        // 当前项是列表最后一项：
+        //   - 若后随标题：22pt（大组锚点）
+        //   - 若后随段落：16pt（清晰步出列表）
+        //   - 若为整段末尾：0pt
+        if !subLists.isEmpty {
+            style.paragraphSpacing = 6
+        } else if !isLastItem {
+            style.paragraphSpacing = 10
+        } else if let next = nextBlock {
+            if case .heading = next {
+                style.paragraphSpacing = 22
+            } else {
+                style.paragraphSpacing = 16
+            }
+        } else {
+            style.paragraphSpacing = 0
         }
-        itemPiece.appKit.paragraphStyle = style
+
+        itemPiece.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: itemPiece.length))
         result.append(itemPiece)
 
         // 4. 递归追加子列表
-        for sub in subLists {
-            result.append(AttributedString("\n"))
-            appendList(items: sub.items, ordered: sub.ordered, depth: depth + 1, after: nil, into: &result)
+        for (sIdx, sub) in subLists.enumerated() {
+            let isLastSub = sIdx == subLists.count - 1
+            let nextForSub = isLastSub ? nextBlock : nil
+            appendList(items: sub.items, ordered: sub.ordered, depth: depth + 1, nextBlock: nextForSub, into: result)
         }
+    }
+}
+
+// MARK: - AppKit 原生无拦截轻量文本视图（TextKit 宿主）
+
+final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
+    convenience init() {
+        let textContainer = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        textContainer.widthTracksTextView = true
+        textContainer.lineFragmentPadding = 0
+        let layoutManager = NSLayoutManager()
+        layoutManager.addTextContainer(textContainer)
+        let textStorage = NSTextStorage()
+        textStorage.addLayoutManager(layoutManager)
+        self.init(frame: .zero, textContainer: textContainer)
+    }
+
+    override init(frame: NSRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        setupDefaults()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupDefaults()
+    }
+
+    private func setupDefaults() {
+        isEditable = false
+        isSelectable = true
+        drawsBackground = false
+        backgroundColor = .clear
+        isHorizontallyResizable = false
+        isVerticallyResizable = true
+        textContainerInset = .zero
+        textContainer?.lineFragmentPadding = 0
+        focusRingType = .none
+        delegate = self
+    }
+
+    // 垂直滚轮手势平滑穿透：让外层聊天窗口的 NSScrollView 自然滚动
+    override func scrollWheel(with event: NSEvent) {
+        nextResponder?.scrollWheel(with: event)
+    }
+
+    // 点击链接直接在默认浏览器打开
+    func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
+        if let url = link as? URL {
+            NSWorkspace.shared.open(url)
+            return true
+        } else if let string = link as? String, let url = URL(string: string) {
+            NSWorkspace.shared.open(url)
+            return true
+        }
+        return false
+    }
+
+    func setAttributedStringIfNeeded(_ newAttr: NSAttributedString) {
+        guard let ts = textStorage else { return }
+        if !ts.isEqual(to: newAttr) {
+            ts.setAttributedString(newAttr)
+            needsDisplay = true
+        }
+    }
+}
+
+// MARK: - SwiftUI 包装视图（精确自适应高度）
+
+struct NativeTextFlowView: NSViewRepresentable {
+    let attributedString: NSAttributedString
+
+    func makeNSView(context: Context) -> NonScrollingTextView {
+        let textView = NonScrollingTextView()
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        textView.setContentHuggingPriority(.required, for: .vertical)
+        textView.setContentCompressionResistancePriority(.required, for: .vertical)
+        textView.setAttributedStringIfNeeded(attributedString)
+        return textView
+    }
+
+    func updateNSView(_ nsView: NonScrollingTextView, context: Context) {
+        nsView.setAttributedStringIfNeeded(attributedString)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NonScrollingTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        guard let lm = nsView.layoutManager, let tc = nsView.textContainer else { return nil }
+        tc.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        lm.ensureLayout(for: tc)
+        let used = lm.usedRect(for: tc)
+        return CGSize(width: width, height: ceil(used.height))
     }
 }

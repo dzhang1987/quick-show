@@ -194,8 +194,6 @@ struct MermaidWebView: NSViewRepresentable {
                 padding: 6px 0;
               }
               svg {
-                max-width: 100% !important;
-                height: auto !important;
                 display: block;
               }
               #dmermaid-render-error, .error-icon, .error-text {
@@ -249,6 +247,48 @@ struct MermaidWebView: NSViewRepresentable {
                 }, 40);
               };
 
+              function normalizeDiagram(container) {
+                const svgEl = container.querySelector('svg');
+                if (!svgEl) return;
+
+                // 根治时序图泳道生命线穿刺顶部参与者方框：
+                // Mermaid 原生绘制生命线从顶部方框内的 y=5 起笔，依赖不透明背景遮挡；
+                // 在 macOS 毛玻璃半透明体系下，生命线会透过半透明方框暴露。
+                // 此处从几何底层将生命线起点截断在方框底边（bottomY），彻底根治穿刺。
+                const topActors = svgEl.querySelectorAll('rect.actor-top, g.actor-top');
+                if (topActors.length > 0) {
+                  const lines = svgEl.querySelectorAll('line');
+                  topActors.forEach(actor => {
+                    let rx, rw, ry, rh;
+                    if (actor.tagName.toLowerCase() === 'rect') {
+                      rx = parseFloat(actor.getAttribute('x'));
+                      rw = parseFloat(actor.getAttribute('width'));
+                      ry = parseFloat(actor.getAttribute('y'));
+                      rh = parseFloat(actor.getAttribute('height'));
+                    } else if (typeof actor.getBBox === 'function') {
+                      try {
+                        const bbox = actor.getBBox();
+                        rx = bbox.x; rw = bbox.width; ry = bbox.y; rh = bbox.height;
+                      } catch (_) { return; }
+                    }
+                    if (isNaN(rx) || isNaN(rw) || isNaN(ry) || isNaN(rh)) return;
+                    const centerX = rx + rw / 2;
+                    const bottomY = ry + rh;
+
+                    lines.forEach(line => {
+                      const lx1 = parseFloat(line.getAttribute('x1'));
+                      const lx2 = parseFloat(line.getAttribute('x2'));
+                      const ly1 = parseFloat(line.getAttribute('y1'));
+                      if (isNaN(lx1) || isNaN(lx2) || isNaN(ly1)) return;
+                      // 垂直生命线：x 坐标在中轴线附近 (±2px 容差)，且起点深入方框内部 (ly1 < bottomY)
+                      if (Math.abs(lx1 - lx2) < 0.5 && Math.abs(lx1 - centerX) < 2 && ly1 < bottomY) {
+                        line.setAttribute('y1', bottomY);
+                      }
+                    });
+                  });
+                }
+              }
+
               async function doRenderDiagram(code, isDark) {
                 const container = document.getElementById('container');
                 const renderId = 'mermaid-render-' + (++renderCounter);
@@ -275,6 +315,7 @@ struct MermaidWebView: NSViewRepresentable {
 
                   const { svg } = await mermaid.render(renderId, code);
                   container.innerHTML = svg;
+                  normalizeDiagram(container);
 
                   requestAnimationFrame(() => {
                     const svgEl = container.querySelector('svg');
