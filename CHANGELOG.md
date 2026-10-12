@@ -6,6 +6,13 @@
 
 ### Added
 
+- **离线 Mermaid 矢量图表原生渲染支持（`MermaidBlockView` / `MermaidWebView`）**：
+  - **离线单文件运行环境与 WKUserScript 预注入（`MermaidScriptLoader`）**：将精简稳定版 `mermaid.min.js` 打包进 App Bundle 资源，通过 `WKUserScript` 在 Document 启动时单例全局注入，彻底规避 WebKit 本地文件跨域沙箱与 `Script error.` 拦截，零外网依赖，毫秒级快速冷启，保持 QuickShow 纯净隐私安全；
+  - **无感滚动穿透与事件链（`NonScrollingWKWebView`）**：重写 AppKit 滚轮响应逻辑，将垂直滚轮手势自然透传给外层聊天会话 `NSScrollView`，滚轮划过图表卡片极致顺滑无卡顿，水平滑动手势保留用于超宽图表横向平移；
+  - **图表 / 源码 双模切换与复制**：卡片 Header 右上角集成「图表 / 代码」一键切换，默认展示自适应矢量图表，可随时无缝切回等宽高亮源码，并提供一键复制源码及轻反馈；
+  - **自适应高度与深浅色无缝融合**：基于双向 JS Bridge 实时测量 SVG 渲染真实高度动态撑开视图，支持 QuickShow 明暗主题联动与透明磨砂卡片质感，消除白屏与底色突兀；
+  - **ZStack 双层常驻监听架构与流式容错**：底层 `MermaidWebView` 始终在线监听代码变动，AI 流式输出语法未闭合时平滑呈现上层等宽高亮代码，闭合瞬间无缝切换为矢量图表并动态撑开真实高度；内置 60ms 渲染防抖降低高频打字 CPU 开销。
+
 - **AI 会话混合排版架构与跨文本块连续拖选（`MarkdownTextFlow` / `AssistantMarkdownView`）**：
   - **分段单文本流（Segmented Text Flow）**：将常规连续内容（标题、段落、有序/无序列表）在数据层合并为统一 `AttributedString` 由单个文本组件排版，彻底突破 SwiftUI 原生多 View 嵌套下选区被截断的限制，支持鼠标从正文一路跨越多个列表项及小标题自由连续划选与复制；
   - **富交互岛屿（Widget Islands）100% 完整保留**：代码块（独立语言标签、右上角悬浮复制代码按钮、横向独立滚动、语法高亮）、Markdown 表格、KaTeX 数学公式等富组件保持为独立 SwiftUI 容器，交互与排版不受任何破坏；

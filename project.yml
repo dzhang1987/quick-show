@@ -55,6 +55,9 @@ targets:
         buildPhase: resources
       - path: Vendor/Highlightr/Resources/styles
         buildPhase: resources
+      # Mermaid 资源：mermaid.min.js 压入 bundle 根供 WKWebView 离线渲染图表
+      - path: Vendor/Mermaid/mermaid.min.js
+        buildPhase: resources
     info:
       path: QuickShow/Info.plist
       properties:
@@ -102,6 +105,8 @@ targets:
         - "MapKit"
         - "-framework"
         - "Network"
+        - "-framework"
+        - "WebKit"
 
   # SwiftMath 1.7.3 vendored 静态库（本地 CJK 补丁说明见 Vendor/SwiftMath/Package.swift 头注释）
   SwiftMath:

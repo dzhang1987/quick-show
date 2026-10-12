@@ -89,7 +89,7 @@ struct CodeBlockView: View {
 /// 短路父重算——本视图 body 不重跑，`Text(highlighted)`（大段 AttributedString，
 /// 构造需解析 runs，成本高一个数量级）永不重建。滚动中 hover 进出风暴的重算成本
 /// 由此被压缩到 header 一行（语言标签 + 小按钮）。
-private struct CodeBlockText: View {
+struct CodeBlockText: View {
     let code: String
     let language: String?
 

@@ -67,7 +67,11 @@ struct MarkdownBlockView: View {
             MarkdownTableView(table: table)
 
         case let .codeBlock(language, code):
-            CodeBlockView(language: language, code: code)
+            if isMermaid(language) {
+                MermaidBlockView(code: code)
+            } else {
+                CodeBlockView(language: language, code: code)
+            }
 
         case let .footnoteDefinition(_, _):
             // 顶层脚注定义已由 AssistantMarkdownView 抽出到文档末尾统一渲染；
@@ -119,6 +123,14 @@ struct MarkdownBlockView: View {
     /// 块级公式：异步视图（首帧占位 + 后台光栅化淡入），居中展示（display 模式 14pt）。
     private func mathBlockView(_ latex: String) -> some View {
         AsyncMathBlockView(latex: latex, fontSize: 14, color: Theme.Colors.contentPrimary)
+    }
+
+    /// 判定是否为 Mermaid 图表块（忽略大小写与首尾空白）。
+    private func isMermaid(_ language: String?) -> Bool {
+        guard let lang = language?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else {
+            return false
+        }
+        return lang == "mermaid"
     }
 }
 
