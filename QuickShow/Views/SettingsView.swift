@@ -78,10 +78,6 @@ struct SettingsView: View {
             }
             .listStyle(.sidebar)
             .navigationSplitViewColumnWidth(min: 200, ideal: 215, max: 240)
-            .safeAreaInset(edge: .top) {
-                // 留出左上角沉浸式红绿灯避让间距
-                Spacer().frame(height: 32)
-            }
         } detail: {
             // 右侧详情：纯正的 macOS 原生 .formStyle(.grouped)。
             // 显式 ScrollView 接管滚动：此前内容（~822pt）溢出 hosting 视口（506pt）时

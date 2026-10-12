@@ -187,7 +187,7 @@ struct AIServiceSettingsForm: View {
                                             .foregroundColor(.secondary)
                                     }
                                     Spacer()
-                                    Text(acc.authMethod == "browser" ? "浏览器授权" : (acc.authMethod == "auto_detect" ? "本机导入" : "手动凭据"))
+                                    Text(acc.authMethod == "browser" ? "浏览器授权" : ((acc.authMethod == "biometric_import" || acc.authMethod == "auto_detect") ? "触控 ID 导入" : "手动凭据"))
                                         .font(.system(size: Theme.Typography.micro))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -228,7 +228,7 @@ struct AIServiceSettingsForm: View {
                                         Button {
                                             authManager.importDetectedAccount(for: provider.id)
                                         } label: {
-                                            Label("⚡️ 导入本机账号 (\(local.displayName))", systemImage: "bolt.fill")
+                                            Label("触控 ID 导入 (\(local.displayName))", systemImage: "touchid")
                                                 .font(.system(size: Theme.Typography.body))
                                         }
                                         .buttonStyle(.bordered)

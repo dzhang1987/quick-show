@@ -8,6 +8,7 @@ import Network
 import AppKit
 import CommonCrypto
 import Security
+import LocalAuthentication
 import os
 
 @MainActor
@@ -159,12 +160,23 @@ final class AIAuthManager: ObservableObject {
                     if !uid.isEmpty { parsedUid = uid }
                 }
             }
+
+            // 检查本地是否已有或环境变量中有可用 Token
+            var detectedToken: String? = nil
+            if let envPat = ProcessInfo.processInfo.environment["QODER_PERSONAL_ACCESS_TOKEN"],
+               !envPat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                detectedToken = envPat.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else if let savedKey = await MainActor.run(body: { AIProviderStore.shared.apiKey(for: "qoder") }),
+                      !savedKey.isEmpty {
+                detectedToken = savedKey
+            }
+
             return LocalDetectedAccount(
                 providerId: "qoder",
                 displayName: name,
                 email: email,
                 detail: "Qoder 客户端环境",
-                token: nil,
+                token: detectedToken,
                 userId: parsedUid,
                 avatarURL: avatar.isEmpty ? nil : avatar
             )
@@ -188,7 +200,47 @@ final class AIAuthManager: ObservableObject {
     }
 
     private nonisolated func detectAntigravityAccount() async -> LocalDetectedAccount? {
-        // 1. 检查环境变量中的 Gemini / Google API Key
+        let home = NSHomeDirectory()
+
+        // 1. 优先读取 Antigravity 原生已登录 OAuth 凭据 (~/.gemini/jetski-standalone-oauth-token)
+        let jetskiTokenPath = "\(home)/.gemini/jetski-standalone-oauth-token"
+        if FileManager.default.fileExists(atPath: jetskiTokenPath),
+           let data = try? Data(contentsOf: URL(fileURLWithPath: jetskiTokenPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let tokenObj = json["token"] as? [String: Any] ?? [:]
+            let accessToken = tokenObj["access_token"] as? String ?? ""
+            let idToken = json["id_token"] as? String ?? ""
+
+            var email = ""
+            if !idToken.isEmpty, let parsed = Self.parseEmailFromJWT(idToken), !parsed.isEmpty {
+                email = parsed
+            } else {
+                let googleAccountsPath = "\(home)/.gemini/google_accounts.json"
+                if let accData = try? Data(contentsOf: URL(fileURLWithPath: googleAccountsPath)),
+                   let accJson = try? JSONSerialization.jsonObject(with: accData) as? [String: Any] {
+                    if let old = accJson["old"] as? [String], let first = old.first {
+                        email = first
+                    } else if let active = accJson["active"] as? String {
+                        email = active
+                    }
+                }
+            }
+
+            if !accessToken.isEmpty || !email.isEmpty {
+                let display = email.isEmpty ? "Antigravity 已登录账号" : "Antigravity (\(email))"
+                return LocalDetectedAccount(
+                    providerId: "antigravity",
+                    displayName: display,
+                    email: email.isEmpty ? "Google 账号" : email,
+                    detail: "已登录 Antigravity 客户端",
+                    token: accessToken.isEmpty ? nil : accessToken,
+                    userId: nil,
+                    avatarURL: nil
+                )
+            }
+        }
+
+        // 2. 检查环境变量中的 Gemini / Google API Key
         let env = ProcessInfo.processInfo.environment
         if let key = env["GEMINI_API_KEY"] ?? env["GOOGLE_API_KEY"],
            !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -202,8 +254,7 @@ final class AIAuthManager: ObservableObject {
             )
         }
 
-        // 2. 检查 gcloud 已登录账号
-        let home = NSHomeDirectory()
+        // 3. 检查 gcloud 已登录账号
         let gcloudCandidates = ["/usr/local/bin/gcloud", "\(home)/google-cloud-sdk/bin/gcloud", "/opt/homebrew/bin/gcloud"]
         for gpath in gcloudCandidates {
             if FileManager.default.isExecutableFile(atPath: gpath) {
@@ -230,7 +281,7 @@ final class AIAuthManager: ObservableObject {
             }
         }
 
-        // 3. 检查本机 Antigravity 安装与已登录状态
+        // 4. 检查本机 Antigravity 安装与已登录状态
         let antiAppSupport = "\(home)/Library/Application Support/Antigravity"
         let storagePath = "\(antiAppSupport)/app_storage.json"
         if FileManager.default.fileExists(atPath: storagePath),
@@ -249,37 +300,220 @@ final class AIAuthManager: ObservableObject {
         return nil
     }
 
-    // MARK: - 一键导入本机账号
+    // MARK: - 触控 ID (Touch ID) / 机主身份安全授权
+
+    /// 优先唤起 macOS 触控 ID (Touch ID) 指纹识别，若无指纹则降级系统密码。
+    /// 用户验证通过返回 true；若用户点击取消或验证失败返回 false。
+    private func authenticateWithBiometrics(reason: String) async -> Bool {
+        let context = LAContext()
+        context.localizedCancelTitle = "取消"
+
+        var authError: NSError?
+        // 优先触控 ID 指纹识别 (Touch ID)
+        if context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &authError) {
+            return await withCheckedContinuation { continuation in
+                context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason) { success, _ in
+                    continuation.resume(returning: success)
+                }
+            }
+        } else if context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) {
+            // 无指纹设备降级到系统锁屏密码
+            return await withCheckedContinuation { continuation in
+                context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason) { success, _ in
+                    continuation.resume(returning: success)
+                }
+            }
+        } else {
+            // 系统未开启任何认证机制（无密码无指纹）
+            return true
+        }
+    }
+
+    // MARK: - 一键触控 ID 静默导入本机账号 (绝不唤起浏览器)
 
     func importDetectedAccount(for providerId: String) {
         guard let detected = detectedAccounts[providerId] else { return }
 
-        if let token = detected.token, !token.isEmpty {
-            // 直接保存有效凭据
-            AIProviderStore.shared.setAPIKey(token, for: providerId)
-            let acc = ProviderAccountInfo(
+        let providerName = providerId == "qoder" ? "Qoder" : "Antigravity"
+        authStates[providerId] = .authorizing(message: "请使用触控 ID 授权导入本机账号...")
+
+        Task {
+            // 1. 优先调用 Touch ID (生物识别) 授权机主身份
+            let authorized = await authenticateWithBiometrics(
+                reason: "使用触控 ID 允许 QuickShow 导入本机已登录的 \(providerName) 凭据"
+            )
+
+            guard authorized else {
+                await MainActor.run {
+                    self.authStates[providerId] = .failed(error: "触控 ID 授权已取消")
+                }
+                return
+            }
+
+            // 2. 指纹验证通过后，在后台线程静默提取真实凭据，绝对不打开浏览器！
+            var importedToken: String? = nil
+            var importedAccountInfo = ProviderAccountInfo(
                 userId: detected.userId,
                 displayName: detected.displayName,
                 email: detected.email,
                 avatarURL: detected.avatarURL,
-                authMethod: "auto_detect",
+                authMethod: "biometric_import",
                 authorizedAt: Date(),
                 refreshToken: nil
             )
-            AIProviderStore.shared.saveAccountInfo(acc, for: providerId)
-            AIProviderStore.shared.selectedProviderId = providerId
-            if providerId == "qoder" {
-                let alibabaKey = AIProviderStore.shared.apiKey(for: "alibaba")
-                if alibabaKey == nil || alibabaKey?.isEmpty == true {
-                    AIAgentStore.shared.resetToDefaults()
+
+            if let directToken = detected.token, !directToken.isEmpty {
+                importedToken = directToken
+            } else if providerId == "antigravity" {
+                if let extracted = await self.extractAntigravityCredentialsSilently() {
+                    importedToken = extracted.token
+                    importedAccountInfo.email = extracted.email
+                    if !extracted.email.isEmpty {
+                        importedAccountInfo.displayName = "Antigravity (\(extracted.email))"
+                    }
+                    importedAccountInfo.refreshToken = extracted.refreshToken
+                }
+            } else if providerId == "qoder" {
+                if let extracted = await self.extractQoderCredentialsSilently() {
+                    importedToken = extracted.token
+                    if let uid = extracted.userId {
+                        importedAccountInfo.userId = uid
+                    }
                 }
             }
-            authStates[providerId] = .success(message: "已导入本机凭据：\(detected.displayName)")
-        } else {
-            // 本机环境检测到已登录，提示并唤起官方网页一键确认
-            authStates[providerId] = .authorizing(message: "正在唤起官方授权页确认绑定本机账号 (\(detected.displayName))...")
-            startBrowserAuth(for: providerId)
+
+            await MainActor.run {
+                if let token = importedToken, !token.isEmpty {
+                    AIProviderStore.shared.setAPIKey(token, for: providerId)
+                    AIProviderStore.shared.saveAccountInfo(importedAccountInfo, for: providerId)
+                    AIProviderStore.shared.selectedProviderId = providerId
+                    if providerId == "qoder" {
+                        let alibabaKey = AIProviderStore.shared.apiKey(for: "alibaba")
+                        if alibabaKey == nil || alibabaKey?.isEmpty == true {
+                            AIAgentStore.shared.resetToDefaults()
+                        }
+                    }
+                    self.authStates[providerId] = .success(message: "已通过触控 ID 成功导入：\(importedAccountInfo.displayName)")
+                } else {
+                    // 绝不打开浏览器！友好明确提示用户
+                    self.authStates[providerId] = .failed(error: "未能在本机提取到免密 Token，建议手动填入 API Key 或使用下方「浏览器登录授权」")
+                }
+            }
         }
+    }
+
+    // MARK: - 静默凭据提取辅助方法 (完全无浏览器无钥匙串骚扰)
+
+    private nonisolated func extractAntigravityCredentialsSilently() async -> (token: String, email: String, refreshToken: String?)? {
+        let home = NSHomeDirectory()
+        let tokenPath = "\(home)/.gemini/jetski-standalone-oauth-token"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: tokenPath)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let tokenObj = json["token"] as? [String: Any] ?? [:]
+        guard let accessToken = tokenObj["access_token"] as? String, !accessToken.isEmpty else {
+            return nil
+        }
+
+        let refreshToken = tokenObj["refresh_token"] as? String
+        var email = ""
+
+        if let idToken = json["id_token"] as? String,
+           let parsed = Self.parseEmailFromJWT(idToken), !parsed.isEmpty {
+            email = parsed
+        } else {
+            let googleAccountsPath = "\(home)/.gemini/google_accounts.json"
+            if let accData = try? Data(contentsOf: URL(fileURLWithPath: googleAccountsPath)),
+               let accJson = try? JSONSerialization.jsonObject(with: accData) as? [String: Any] {
+                if let old = accJson["old"] as? [String], let first = old.first {
+                    email = first
+                } else if let active = accJson["active"] as? String {
+                    email = active
+                }
+            }
+        }
+
+        return (accessToken, email, refreshToken)
+    }
+
+    private nonisolated func extractQoderCredentialsSilently() async -> (token: String, userId: String?)? {
+        let home = NSHomeDirectory()
+
+        // 1. 检查当前已有已保存的 API Key (如之前已生成的 dt- 令牌)
+        if let existing = await MainActor.run(body: { AIProviderStore.shared.apiKey(for: "qoder") }),
+           !existing.isEmpty {
+            let savedUid = await MainActor.run(body: { AIProviderStore.shared.accountInfo(for: "qoder")?.userId })
+            return (existing, savedUid)
+        }
+
+        // 2. 检查环境变量
+        if let envPat = ProcessInfo.processInfo.environment["QODER_PERSONAL_ACCESS_TOKEN"],
+           !envPat.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return (envPat.trimmingCharacters(in: .whitespacesAndNewlines), nil)
+        }
+
+        // 3. 检查 ~/.qoder/.qoder-app-status.json 中的 UID
+        var uid: String? = nil
+        let appStatusPath = "\(home)/.qoder/.qoder-app-status.json"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: appStatusPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let avatar = json["avatar_url"] as? String ?? ""
+            if let range = avatar.range(of: "/users/") {
+                let sub = avatar[range.upperBound...]
+                if let endRange = sub.range(of: "/") {
+                    let extracted = String(sub[..<endRange.lowerBound])
+                    if !extracted.isEmpty { uid = extracted }
+                }
+            }
+        }
+
+        // 4. 检查 Keychain 中是否存在通用密码 Session
+        if let sessionData = readGenericPassword(service: "IntelliJ Platform Qoder — Login Session"),
+           let sessionStr = String(data: sessionData, encoding: .utf8), !sessionStr.isEmpty {
+            if sessionStr.hasPrefix("jt-") || sessionStr.hasPrefix("dt-") || sessionStr.hasPrefix("pat-") {
+                return (sessionStr, uid)
+            }
+            if let json = try? JSONSerialization.jsonObject(with: sessionData) as? [String: Any],
+               let token = json["token"] as? String ?? json["accessToken"] as? String ?? json["jobToken"] as? String {
+                return (token, uid)
+            }
+        }
+
+        return nil
+    }
+
+    private nonisolated func readGenericPassword(service: String, account: String? = nil) -> Data? {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        if let account {
+            query[kSecAttrAccount as String] = account
+        }
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess, let data = item as? Data else { return nil }
+        return data
+    }
+
+    private nonisolated static func parseEmailFromJWT(_ jwt: String) -> String? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var base64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while base64.count % 4 != 0 {
+            base64.append("=")
+        }
+        guard let data = Data(base64Encoded: base64),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["email"] as? String
     }
 
     // MARK: - 方式 ③：网页端浏览器登录授权
