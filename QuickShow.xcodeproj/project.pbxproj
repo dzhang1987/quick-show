@@ -186,6 +186,7 @@
 		F4BE6BFAA94DEC22AE533146 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B7BF9C965803CBAE72E3577B /* Assets.xcassets */; };
 		F7A44C62B3BA697C2B3B80CC /* RWLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C7EC4C33CD9AD3C0270AD3 /* RWLock.swift */; };
 		FA8AB9E209F88AE07E9E7664 /* MarkdownHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5570F43DFA4FADCF1C25059 /* MarkdownHighlighter.swift */; };
+		FC280DBDD8546A8A81A559E3 /* MarkdownTextFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1BDD70ED7A39E00C7BFEE3D /* MarkdownTextFlow.swift */; };
 		FF86284F7EB2DF312039B7E2 /* MTFontMathTableV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8306490C02B02B7D9AC1528 /* MTFontMathTableV2.swift */; };
 		FFB923C1D21F1CD1B375660E /* ChatTickRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935E9F331F9AE538660984C0 /* ChatTickRail.swift */; };
 /* End PBXBuildFile section */
@@ -325,6 +326,7 @@
 		A778ED424DC0712032CB7B56 /* AssistantMarkdownView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantMarkdownView.swift; sourceTree = "<group>"; };
 		AAE68F9B169D86DE978CDC45 /* AIChatState+RequestAssembly.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+RequestAssembly.swift"; sourceTree = "<group>"; };
 		ACCD30C80C4D1CF7C8E5341A /* NowPlayingCardRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NowPlayingCardRow.swift; sourceTree = "<group>"; };
+		B1BDD70ED7A39E00C7BFEE3D /* MarkdownTextFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTextFlow.swift; sourceTree = "<group>"; };
 		B1CA12043DFFB7C8ACCC6093 /* MarkdownCodeBlock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownCodeBlock.swift; sourceTree = "<group>"; };
 		B447A4A50153BE5D3817D655 /* mathFonts.bundle */ = {isa = PBXFileReference; lastKnownFileType = folder; name = mathFonts.bundle; path = Vendor/SwiftMath/Sources/SwiftMath/mathFonts.bundle; sourceTree = SOURCE_ROOT; };
 		B4AF676850B86A33336B61A1 /* WebToolsConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebToolsConfig.swift; sourceTree = "<group>"; };
@@ -514,6 +516,7 @@
 				63D9B92957771B78D4759345 /* MarkdownInline.swift */,
 				F8773F47D61D27DA23DC73AB /* MarkdownInlineNS.swift */,
 				70F05DFE164F90170F29E01B /* MarkdownTableView.swift */,
+				B1BDD70ED7A39E00C7BFEE3D /* MarkdownTextFlow.swift */,
 				F4336F7B225DC0F782600285 /* MathLatexCollector.swift */,
 				F125C20A7A18B3250E0DC143 /* MathLatexTranspiler.swift */,
 				28B054C54CC70DDF05EA318A /* MathLayoutCache.swift */,
@@ -727,7 +730,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_EB8D83BA-4CAF-4648-9ABE-9F32C93935E8" /* Resources */ = {
+		"TEMP_28E7803D-65F2-4418-844C-F492C2903EDD" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -1000,6 +1003,7 @@
 				A1FDBE8E1E5ED6AA004D88AB /* MarkdownParser+List.swift in Sources */,
 				06AFDE855BCBA67DE767B4E1 /* MarkdownParser.swift in Sources */,
 				481B4C88A89CE8CA7D9FEBC7 /* MarkdownTableView.swift in Sources */,
+				FC280DBDD8546A8A81A559E3 /* MarkdownTextFlow.swift in Sources */,
 				CB14D7E63498041C3E70F8D4 /* MathLatexCollector.swift in Sources */,
 				739BA7095E61D54EF8BBD81D /* MathLatexTranspiler.swift in Sources */,
 				A2BB37E72F6E14AD44182149 /* MathLayoutCache.swift in Sources */,

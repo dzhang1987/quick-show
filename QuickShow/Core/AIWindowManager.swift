@@ -105,6 +105,37 @@ final class AIPanel: NSPanel {
         super.keyDown(with: event)
     }
 
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        // 1. 优先让输入框等子视图（firstResponder 等）尝试消费
+        if super.performKeyEquivalent(with: event) {
+            return true
+        }
+
+        // 2. 作为 .accessory 轻量应用，macOS 顶层菜单栏不会自动接管按键等效派发。
+        // 若子视图未消费，先尝试交由 NSApp.mainMenu（剪切、拷贝、粘贴、全选等标准编辑动作）
+        if let mainMenu = NSApp.mainMenu, mainMenu.performKeyEquivalent(with: event) {
+            return true
+        }
+
+        // 3. 针对 ⌘C（复制）、⌘A（全选）等通用编辑键做显式响应者链派发兜底，
+        // 确保 SwiftUI 文本选区（.textSelection）在无焦点 NSTextView 时按 ⌘C 也能稳定触发拷贝。
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let cleanFlags = flags.subtracting([.capsLock, .numericPad, .function])
+        if cleanFlags == [.command] {
+            if event.keyCode == 8 { // ANSI 'C'
+                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) {
+                    return true
+                }
+            } else if event.keyCode == 0 { // ANSI 'A'
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) {
+                    return true
+                }
+            }
+        }
+
+        return false
+    }
+
     /// ESC 策略化分层处理：
     /// 由 EscapePolicyCenter 响应者栈统一自顶向下分发；仅当栈未消费时兜底关窗。
     private func handleEscape() {

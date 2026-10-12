@@ -125,10 +125,21 @@ struct AssistantMarkdownView: View, Equatable {
         let footnotes = split.footnotes
         let seededInitial = Self.initialBlockCount(viewportHeight: viewportHeight, total: blocks.count)
         let visibleCount = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
+        let visibleBlocks = Array(blocks.prefix(visibleCount))
+        let segments = MarkdownBlockSegmenter.segment(visibleBlocks)
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(blocks.prefix(visibleCount).enumerated()), id: \.offset) { index, block in
-                MarkdownBlockView(block: block)
-                    .padding(.top, index == 0 ? 0 : block.topSpacing(after: blocks[index - 1]))
+            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+                switch segment {
+                case let .textFlow(_, content, topSpacing):
+                    Text(content)
+                        .lineSpacing(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, index == 0 ? 0 : topSpacing)
+                case let .widget(_, block, topSpacing):
+                    MarkdownBlockView(block: block)
+                        .padding(.top, index == 0 ? 0 : topSpacing)
+                }
             }
             // 分批哨兵：零尺寸、无内容，出现后下一 runloop 再放一批。
             // 未被构建的块（含其内公式 attachment）此帧完全不参与测量/光栅化。

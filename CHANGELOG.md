@@ -6,6 +6,28 @@
 
 ### Added
 
+- **AI 会话混合排版架构与跨文本块连续拖选（`MarkdownTextFlow` / `AssistantMarkdownView`）**：
+  - **分段单文本流（Segmented Text Flow）**：将常规连续内容（标题、段落、有序/无序列表）在数据层合并为统一 `AttributedString` 由单个文本组件排版，彻底突破 SwiftUI 原生多 View 嵌套下选区被截断的限制，支持鼠标从正文一路跨越多个列表项及小标题自由连续划选与复制；
+  - **富交互岛屿（Widget Islands）100% 完整保留**：代码块（独立语言标签、右上角悬浮复制代码按钮、横向独立滚动、语法高亮）、Markdown 表格、KaTeX 数学公式等富组件保持为独立 SwiftUI 容器，交互与排版不受任何破坏；
+  - **视图树性能大幅飞跃**：单条长消息的 SwiftUI View 实例数从 300~800 个锐减 90% 以上，消除长消息首帧挂载布局与快速滚动卡顿。
+
+### Changed
+
+- **单文本流排版细节深度精修（殿堂级呼吸感与间距对齐）**：
+  - **智能块间留白（`separatorBetween`）**：彻底解决纯文本拼接容易挤成“文字墙”的缺陷，针对标题成组锚点、段落间距、列表项结束后入新章节自动派发精确的双换行 `\n\n` 空行留白，章节层次分明；
+  - **1.7 倍通透行高（`lineSpacing(6)`）**：为文本流挂载原版相同的 6pt 行间距，正文与列表文字通透不贴脸；
+  - **列表制表位两列精密对齐（`NSTextTab` + 悬挂缩进）**：列表标号后采用制表符与 `tabStops`（有序列表 24pt、无序列表 18pt），折行文字垂直像素级对齐，保留 8pt 呼吸留白。
+
+### Fixed
+
+- **`⌘ + C` 复制快捷键失效修复（`AIPanel.performKeyEquivalent`）**：
+  - 针对 QuickShow 运行于 `NSApp.setActivationPolicy(.accessory)` 下系统不自动派发主菜单 Key Equivalent 的底层机制，在 `AIPanel` 窗口层补齐 `performKeyEquivalent(with:)`；
+  - 子视图未消费时自动转交 `NSApp.mainMenu`，并针对 `⌘C`（复制）、`⌘A`（全选）直接向当前响应者链派发 `copy:` / `selectAll:` 动作，彻底解决聊天消息划选后只能依赖右键菜单复制的 P0 痛点。
+- **输入坞全区域点击即聚焦光标（Click-to-Focus 兜底）**：
+  - 在 `AIChatInputDock` 输入区域添加全框点击手势与 `aiChatRefocusInput` 聚焦通知，点到输入框上下左右任何空白内边距边缘，100% 瞬间激活光标，根除光标难获取与反复点击问题；
+  - 消除内层重复挂载 `textSelection` 导致的双重选区层冲突，恢复窗口失焦与聚焦的毫秒级轻量响应。
+
+
 - Antigravity 官方云端网关原生 HTTP SSE 直连架构（`AntigravityCloudCodeAdapter` / `GeminiProvider` / `AIAuthManager`）：
   - **彻底剥离本地 CLI 5.5 秒冷启动开销**：从第一性原理直连 Google Cloud Code PA 内部服务端点 (`daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse`)，首字上屏时间 (TTFT) 从原来的 10 秒骤降至 1.2~1.8 秒，提速超 5~7 倍；
   - **官方原生结构化思考流承接**：服务端 SSE 事件流直接下发 `candidate.parts.thought == true` 字段，无需任何客户端打标或模型输出的 `[THINK]` 标签清洗，实现纯净且实时的思考流折叠展开卡片；

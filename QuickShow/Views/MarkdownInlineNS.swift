@@ -383,7 +383,7 @@ private enum InlineDisplaySegment {
 
 // MARK: - 公式 / 图片检测（递归）
 
-private extension Array where Element == InlineToken {
+extension Array where Element == InlineToken {
     /// 是否含公式 token（递归粗体/斜体/链接/删除线/下划线/高亮/上下标内部）。
     var containsMath: Bool { contains { $0.containsMath } }
 
@@ -409,7 +409,7 @@ private extension Array where Element == InlineToken {
 
     /// 仅按顶层 `.image` 拆段（老逻辑），供链接内层拆解复用。
     /// 顺序保持，连续文本归一段，图片各自成项，空文本段丢弃。
-    var topLevelImageSegments: [InlineDisplaySegment] {
+    fileprivate var topLevelImageSegments: [InlineDisplaySegment] {
         var segments: [InlineDisplaySegment] = []
         var buffer: [InlineToken] = []
         func flush() {
@@ -433,7 +433,7 @@ private extension Array where Element == InlineToken {
     /// 图片各自成项，空文本段丢弃。
     /// 升级：顶层 `.link` 的 text 顶层含 `.image` 时，递归拆解其内层——image 提升为图片项并
     /// 携带 linkURL，非图片 token 归并到相邻文本段（不保留链接样式，可接受）。
-    var imageSegments: [InlineDisplaySegment] {
+    fileprivate var imageSegments: [InlineDisplaySegment] {
         var segments: [InlineDisplaySegment] = []
         var buffer: [InlineToken] = []
         func flush() {
@@ -465,7 +465,7 @@ private extension Array where Element == InlineToken {
     }
 }
 
-private extension InlineToken {
+extension InlineToken {
     var containsMath: Bool {
         switch self {
         case .math:

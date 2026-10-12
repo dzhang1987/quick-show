@@ -292,6 +292,10 @@ struct AIChatInputDock: View {
                 }
             }
             .frame(height: Theme.Layout.chatInputHeight)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+            }
 
             // 底部工具行（2026-10 重设计）：左组 = ⊕ 附件 / 生成 chip（模型+思考合并入口）/
             // 水位圆环（低频工具组随 showDockSecondaryTools 显隐）；
