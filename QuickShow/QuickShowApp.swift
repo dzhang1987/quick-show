@@ -189,10 +189,12 @@ private final class SettingsWindow: NSWindow {
         if settingsWindow == nil {
             let window = SettingsWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
-                styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
+            window.minSize = NSSize(width: 700, height: 480)
+            window.setFrameAutosaveName("QuickShowSettingsWindow")
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
             window.toolbar = nil
@@ -213,7 +215,7 @@ private final class SettingsWindow: NSWindow {
             let hostingView = NSHostingView(rootView: SettingsView(appState: appState))
             if #available(macOS 26.0, *) {
                 // 不设 sizingOptions=[]：那是两窗「PreferenceKey 测量链死锁」的规避手段；
-                // 设置窗固定尺寸、无测量链、无动画，不需要禁 hosting 尺寸协商——禁用反而
+                // 设置窗支持缩放响应式布局、无测量链、无动画，不需要禁 hosting 尺寸协商——禁用反而
                 // 引入外层 HostingScrollView 自动滚动包装（溢出 822>506 时包装详情区，
                 // 其滚动指示条退化成常驻宽体）。
                 let glass = NSGlassEffectView()
@@ -226,6 +228,7 @@ private final class SettingsWindow: NSWindow {
                     glass.contentView = hostingView
                 })
                 hostingView.autoresizingMask = [.width, .height]
+                glass.autoresizingMask = [.width, .height]
                 window.contentView = glass
             } else {
                 window.backgroundColor = .windowBackgroundColor
