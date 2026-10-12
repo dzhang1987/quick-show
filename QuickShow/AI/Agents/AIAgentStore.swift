@@ -78,10 +78,10 @@ final class AIAgentStore: ObservableObject {
     func deleteAgent(id: String) {
         // 至少保留一个 agent
         guard agents.count > 1 else { return }
-        agents.removeAll { $0.id == id }
         if activeAgentId == id {
-            activeAgentId = agents.first?.id ?? "orchestrator"
+            activeAgentId = agents.first(where: { $0.id != id })?.id ?? "orchestrator"
         }
+        agents.removeAll { $0.id == id }
     }
 
     func setVisualDelegate(agentId: String) {

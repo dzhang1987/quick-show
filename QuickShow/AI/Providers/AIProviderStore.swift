@@ -45,6 +45,13 @@ final class AIProviderStore: ObservableObject {
         provider(for: providerId)?.model(for: modelId)
     }
 
+    func modelSpec(for modelId: String) -> AIModelSpec? {
+        for p in providers {
+            if let m = p.model(for: modelId) { return m }
+        }
+        return nil
+    }
+
     // MARK: - 增删改
 
     func saveProvider(_ provider: AIProvider) {
@@ -56,11 +63,11 @@ final class AIProviderStore: ObservableObject {
     }
 
     func deleteProvider(id: String) {
+        if selectedProviderId == id {
+            selectedProviderId = providers.first(where: { $0.id != id })?.id ?? ""
+        }
         providers.removeAll { $0.id == id }
         clearAPIKey(for: id)
-        if selectedProviderId == id {
-            selectedProviderId = providers.first?.id ?? ""
-        }
     }
 
     // MARK: - API Key 安全文件存取 (按 Provider 隔离)
@@ -116,6 +123,37 @@ final class AIProviderStore: ObservableObject {
 
     func clearAPIKey(for providerId: String) {
         guard let url = keyFileURL(for: providerId),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        try? FileManager.default.removeItem(at: url)
+        clearAccountInfo(for: providerId)
+    }
+
+    // MARK: - 账号信息存储 (ProviderAccountInfo)
+
+    private func accountFileURL(for providerId: String) -> URL? {
+        keysDirectoryURL?.appendingPathComponent("\(providerId).account.json")
+    }
+
+    func accountInfo(for providerId: String) -> ProviderAccountInfo? {
+        guard let url = accountFileURL(for: providerId),
+              FileManager.default.fileExists(atPath: url.path) else { return nil }
+        guard let data = try? Data(contentsOf: url),
+              let info = try? JSONDecoder().decode(ProviderAccountInfo.self, from: data) else {
+            return nil
+        }
+        return info
+    }
+
+    func saveAccountInfo(_ info: ProviderAccountInfo, for providerId: String) {
+        guard let url = accountFileURL(for: providerId) else { return }
+        if let data = try? JSONEncoder().encode(info) {
+            try? data.write(to: url, options: .atomic)
+            tightenPermissionsIfNeeded(at: url)
+        }
+    }
+
+    func clearAccountInfo(for providerId: String) {
+        guard let url = accountFileURL(for: providerId),
               FileManager.default.fileExists(atPath: url.path) else { return }
         try? FileManager.default.removeItem(at: url)
     }

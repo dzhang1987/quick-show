@@ -21,6 +21,35 @@ enum AIProviderType: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - 服务商账号授权信息
+struct ProviderAccountInfo: Codable, Equatable {
+    var userId: String?
+    var displayName: String
+    var email: String
+    var avatarURL: String?
+    var authMethod: String // "browser", "auto_detect", "manual"
+    var authorizedAt: Date
+    var refreshToken: String?
+
+    init(
+        userId: String? = nil,
+        displayName: String,
+        email: String,
+        avatarURL: String? = nil,
+        authMethod: String,
+        authorizedAt: Date,
+        refreshToken: String? = nil
+    ) {
+        self.userId = userId
+        self.displayName = displayName
+        self.email = email
+        self.avatarURL = avatarURL
+        self.authMethod = authMethod
+        self.authorizedAt = authorizedAt
+        self.refreshToken = refreshToken
+    }
+}
+
 // MARK: - 模型能力规格
 struct AIModelSpec: Identifiable, Codable, Equatable {
     var id: String                    // model identifier, e.g. "glm-5.3", "qwen-vl-max", "gpt-4o"

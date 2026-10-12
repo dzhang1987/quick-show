@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -18,6 +18,7 @@
 		08B6452D8C9B974472C3DD71 /* SystemStatusStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDF5F18006899874846806D1 /* SystemStatusStore.swift */; };
 		098A67D50CB525F84AB8CB17 /* AIChatMessageRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDD353D5D27F078B3E0FBC63 /* AIChatMessageRow.swift */; };
 		0AFE02D45382351E3BE2E871 /* SendMessageTool.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50C23D0E1A7BC0F0F3B38D7D /* SendMessageTool.swift */; };
+		0B231CEA77924E7323248E56 /* AIAuthManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69D3D4B60B8DE26010CF69E1 /* AIAuthManager.swift */; };
 		0B53C4B5540BB1CA1796211A /* AIChatStatusViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E580FA27BD85C8347C6C646 /* AIChatStatusViews.swift */; };
 		0BB0E0FE6EC153DCC4DED9CF /* MTColor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B2211C3F2E376A20DB7FE5A /* MTColor.swift */; };
 		0C5114982045E735EAE25370 /* AIChatWindowControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC4F3CD708D8C2432833E3E3 /* AIChatWindowControls.swift */; };
@@ -277,6 +278,7 @@
 		65026604DA4F2FEF2D827A2E /* GeminiProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeminiProvider.swift; sourceTree = "<group>"; };
 		66C3EBA7C75476E2B3B637D2 /* AIChatQuickSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatQuickSwitcher.swift; sourceTree = "<group>"; };
 		6899045187A73D4B76895FE6 /* CalendarEventEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventEditView.swift; sourceTree = "<group>"; };
+		69D3D4B60B8DE26010CF69E1 /* AIAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAuthManager.swift; sourceTree = "<group>"; };
 		6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontV2.swift; sourceTree = "<group>"; };
 		6C3ED14E818FD6A81E2993F6 /* AIChatLayoutSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatLayoutSupport.swift; sourceTree = "<group>"; };
 		6E1362BEB3DC49FF20A811F5 /* MTUnicode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTUnicode.swift; sourceTree = "<group>"; };
@@ -609,6 +611,7 @@
 				D5DD1A58827FCD3047A809B0 /* MarkdownParser+List.swift */,
 				E97C435AE3528691A109E6D1 /* RichCard.swift */,
 				ECFE7B66FDA7E5B8577F1339 /* Agents */,
+				C0CCB1D35D9251C61C0854E9 /* Auth */,
 				C5CB65447B91D09EC89CC397 /* Providers */,
 				A6396C9BB874D8C3216A5C33 /* Tools */,
 			);
@@ -659,6 +662,14 @@
 				B4AF676850B86A33336B61A1 /* WebToolsConfig.swift */,
 			);
 			path = Tools;
+			sourceTree = "<group>";
+		};
+		C0CCB1D35D9251C61C0854E9 /* Auth */ = {
+			isa = PBXGroup;
+			children = (
+				69D3D4B60B8DE26010CF69E1 /* AIAuthManager.swift */,
+			);
+			path = Auth;
 			sourceTree = "<group>";
 		};
 		C5CB65447B91D09EC89CC397 /* Providers */ = {
@@ -713,7 +724,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_BDDD201E-C1AC-4347-8A46-414A27C2A220" /* Resources */ = {
+		"TEMP_77BD3C5D-A6F5-43A6-A140-225D9C7CB4D6" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -735,8 +746,6 @@
 			dependencies = (
 			);
 			name = SwiftMath;
-			packageProductDependencies = (
-			);
 			productName = SwiftMath;
 			productReference = 0E743B480470624A4287B53E /* libSwiftMath.a */;
 			productType = "com.apple.product-type.library.static";
@@ -753,8 +762,6 @@
 			dependencies = (
 			);
 			name = HighlightrKit;
-			packageProductDependencies = (
-			);
 			productName = HighlightrKit;
 			productReference = 11C47863F2E3FDEDECD77402 /* libHighlightrKit.a */;
 			productType = "com.apple.product-type.library.static";
@@ -774,8 +781,6 @@
 				135C32D5292F69C79A3C1477 /* PBXTargetDependency */,
 			);
 			name = QuickShow;
-			packageProductDependencies = (
-			);
 			productName = QuickShow;
 			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
 			productType = "com.apple.product-type.application";
@@ -802,6 +807,7 @@
 				};
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -810,9 +816,6 @@
 				"zh-Hans",
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = 9B0F05138AE231E7D18DDCA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -895,6 +898,7 @@
 			files = (
 				7092C4EF6F30C3735E6FC725 /* AIAgent.swift in Sources */,
 				1E0AF6BA29234DD649047352 /* AIAgentStore.swift in Sources */,
+				0B231CEA77924E7323248E56 /* AIAuthManager.swift in Sources */,
 				AE7B7FBB6DA67690F1F7F5DC /* AIChatAttachmentViews.swift in Sources */,
 				03F9B8B0283FE7ABB9D12123 /* AIChatContextRingView.swift in Sources */,
 				AB8319ECBF04E457827650EB /* AIChatDrawerPanel.swift in Sources */,
