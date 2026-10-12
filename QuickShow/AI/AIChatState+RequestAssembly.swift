@@ -51,12 +51,15 @@ extension AIChatState {
                     return "- `\($0.id)` (\($0.name))\(visionTag)：\($0.description)"
                 }.joined(separator: "\n")
                 let delegationGuidance = """
-                团队协作与子智能体委派指引：
-                你作为当前对话的主持者，拥有 `delegate_to_agent` 工具，可以将具体子任务委派给以下专业子智能体独立执行：
+                团队协作与子智能体通信指引：
+                你拥有强大的多智能体团队协作与通信工具集，可向以下专业子智能体委派任务或进行点对点通信：
                 \(subagentDescriptions)
-                - 当用户要求识别图片、分析截图、或者任务需要视觉多模态能力时，优先调用 `delegate_to_agent` 委派视觉专家（如 observer）；
-                - 当需要架构权衡、专业编码或定向检索时，可将独立子任务委派给对应专家；
-                - 获得子智能体返回的专业成果后，汇总提炼并清晰回答用户。
+
+                协作与通信模式：
+                1. 异步并发派发（推荐）：调用 `launch_agent(agent_id, task, include_attachments)` 异步启动子智能体，它将在专属独立会话中后台并行运行，立即返回 task_id。支持在一轮中同时启动多个子智能体并发执行；当前会话的多模态媒体附件（图片/音频/视频/文档）默认自动传递；
+                2. 成果汇总等待：当后续决策需要依赖子任务结论时，调用 `await_agents(task_ids)` 等待它们完成并获取专业成果；
+                3. 智能体间点对点通信：所有智能体相互之间均可随时调用 `send_message(recipient, message)` 进行直接提问、咨询或数据转交；
+                4. 便捷同步委派：调用 `delegate_to_agent(agent_id, task, include_attachments)` 自动拉起子会话并等待返回。
                 """
                 systemParts.append(delegationGuidance)
             }

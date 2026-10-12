@@ -151,7 +151,10 @@ final class AIToolRegistry {
             ShowMapTool(),
             MyLocationTool(),
             AskUserTool(),
-            DelegateToAgentTool()
+            DelegateToAgentTool(),
+            LaunchAgentTool(),
+            AwaitAgentsTool(),
+            SendMessageTool()
         ]
     }
 

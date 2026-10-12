@@ -2,10 +2,48 @@
 
 import Foundation
 
-// MARK: - 图片附件模型
+// MARK: - 全模态媒体附件模型 (图片/音频/视频/文档通用抽象)
 
-/// 对话消息中的图片附件：统一转 JPEG 后以 base64 保存。
-/// 缩略图单独存一份，供列表 / 气泡快速渲染，避免大图解码卡顿。
+/// 多模态媒体分类：原生面向未来全模态扩展
+enum AttachmentKind: String, Codable, Equatable {
+    case image    // 截图、图片 (JPEG/PNG/WebP)
+    case audio    // 语音录音、音频片段 (MP3/WAV/M4A)
+    case video    // 录屏切片、视频流 (MP4/WebM)
+    case document // 文本文档、代码文件 (PDF/TXT/JSON)
+}
+
+/// 全模态媒体附件通用容器
+struct ChatAttachment: Identifiable, Equatable, Codable {
+    let id: UUID
+    var kind: AttachmentKind
+    var mimeType: String
+    var base64Data: String
+    var fileName: String?
+    var byteCount: Int
+    var durationSeconds: Double?
+
+    init(
+        id: UUID = UUID(),
+        kind: AttachmentKind = .image,
+        mimeType: String = "image/jpeg",
+        base64Data: String,
+        fileName: String? = nil,
+        byteCount: Int = 0,
+        durationSeconds: Double? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.mimeType = mimeType
+        self.base64Data = base64Data
+        self.fileName = fileName
+        self.byteCount = byteCount
+        self.durationSeconds = durationSeconds
+    }
+
+    var dataURI: String { "data:\(mimeType);base64,\(base64Data)" }
+}
+
+/// 对话消息中的图片附件（对齐既有存储向后兼容）。
 struct ChatImageAttachment: Identifiable, Equatable, Codable {
     let id: UUID
     /// 原图 JPEG base64（不含 `data:image/jpeg;base64,` 前缀）。
@@ -37,8 +75,20 @@ struct ChatImageAttachment: Identifiable, Equatable, Codable {
         self.fileName = fileName
     }
 
-    /// OpenAI 兼容的 data URI（vision 请求体用）。
+    /// OpenAI / Gemini 兼容的 data URI（多模态请求体用）。
     var dataURI: String { "data:image/jpeg;base64,\(base64JPEG)" }
+
+    /// 转换为通用全模态 ChatAttachment
+    var asGenericAttachment: ChatAttachment {
+        ChatAttachment(
+            id: id,
+            kind: .image,
+            mimeType: "image/jpeg",
+            base64Data: base64JPEG,
+            fileName: fileName,
+            byteCount: byteCount
+        )
+    }
 }
 
 // MARK: - 工具调用记录
@@ -137,6 +187,13 @@ struct ChatMessage: Identifiable, Equatable, Codable {
 // MARK: - 会话模型
 
 /// 单个会话：标题 + 时间戳 + 置顶标记 + 消息列表。每会话独立落盘为一个 JSON 文件。
+/// 子智能体任务生命周期状态
+enum SubagentTaskStatus: String, Codable, Equatable {
+    case running
+    case completed
+    case failed
+}
+
 struct ChatSession: Identifiable, Equatable, Codable {
     let id: UUID
     var title: String
@@ -159,6 +216,12 @@ struct ChatSession: Identifiable, Equatable, Codable {
     var contextSummary: String?
     /// 已纳入摘要的消息 id（前缀语义；旧会话缺失即 nil）。
     var summarizedMessageIDs: [String]?
+    /// 所属父会话 id（若为子智能体任务派生会话；nil = 根主会话）。
+    var parentSessionId: UUID?
+    /// 子任务状态（nil = 普通独立会话）。
+    var taskStatus: SubagentTaskStatus?
+    /// 子任务完成后的简短结论或摘要。
+    var taskSummary: String?
 
     init(
         id: UUID = UUID(),
@@ -173,7 +236,10 @@ struct ChatSession: Identifiable, Equatable, Codable {
         thinkingLevel: ThinkingLevel? = nil,
         contextTokens: Int? = nil,
         contextSummary: String? = nil,
-        summarizedMessageIDs: [String]? = nil
+        summarizedMessageIDs: [String]? = nil,
+        parentSessionId: UUID? = nil,
+        taskStatus: SubagentTaskStatus? = nil,
+        taskSummary: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -188,14 +254,18 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.contextTokens = contextTokens
         self.contextSummary = contextSummary
         self.summarizedMessageIDs = summarizedMessageIDs
+        self.parentSessionId = parentSessionId
+        self.taskStatus = taskStatus
+        self.taskSummary = taskSummary
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, pinned, titleNeedsSummary, messages
         case agentId, modelId, thinkingLevel, contextTokens, contextSummary, summarizedMessageIDs
+        case parentSessionId, taskStatus, taskSummary
     }
 
-    /// 自定义解码：兼容缺省字段（pinned / titleNeedsSummary / messages / 会话级智能体、模型、水位与压缩字段）。
+    /// 自定义解码：兼容缺省字段（pinned / titleNeedsSummary / messages / 会话级智能体、模型、水位与压缩字段、父子任务字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -212,6 +282,9 @@ struct ChatSession: Identifiable, Equatable, Codable {
         contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens)
         contextSummary = try container.decodeIfPresent(String.self, forKey: .contextSummary)
         summarizedMessageIDs = try container.decodeIfPresent([String].self, forKey: .summarizedMessageIDs)
+        parentSessionId = try container.decodeIfPresent(UUID.self, forKey: .parentSessionId)
+        taskStatus = try container.decodeIfPresent(SubagentTaskStatus.self, forKey: .taskStatus)
+        taskSummary = try container.decodeIfPresent(String.self, forKey: .taskSummary)
     }
 }
 

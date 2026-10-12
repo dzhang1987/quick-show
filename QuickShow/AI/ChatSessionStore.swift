@@ -112,10 +112,66 @@ final class ChatSessionStore: ObservableObject {
 
     /// 删除会话及其落盘文件；若删的是当前会话，自动切到第一个。
     func deleteSession(id: UUID) {
+        // 若删除父会话，连带删除所有子会话
+        let children = sessions.filter { $0.parentSessionId == id }
+        for child in children {
+            sessions.removeAll { $0.id == child.id }
+            removeFile(child.id)
+        }
+
         sessions.removeAll { $0.id == id }
         removeFile(id)
         if currentSessionId == id {
             currentSessionId = sessions.first?.id
+        }
+    }
+
+    /// 创建子 Agent 会话
+    @discardableResult
+    func createChildSession(
+        parentId: UUID,
+        agentId: String,
+        title: String,
+        switchToChild: Bool = false
+    ) -> ChatSession {
+        let now = Date()
+        let agent = AIAgentStore.shared.agent(for: agentId)
+        let session = ChatSession(
+            title: title,
+            createdAt: now,
+            updatedAt: now,
+            pinned: false,
+            titleNeedsSummary: false,
+            messages: [],
+            agentId: agentId,
+            modelId: agent?.modelId,
+            thinkingLevel: agent?.thinkingLevel,
+            parentSessionId: parentId,
+            taskStatus: .running,
+            taskSummary: nil
+        )
+        sessions.insert(session, at: 0)
+        if switchToChild {
+            currentSessionId = session.id
+        }
+        persist(session)
+        return session
+    }
+
+    /// 查询某主会话派生的全部子 Agent 会话
+    func childSessions(of parentId: UUID) -> [ChatSession] {
+        sessions
+            .filter { $0.parentSessionId == parentId }
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// 更新子任务状态与结论
+    func updateTaskStatus(sessionId: UUID, status: SubagentTaskStatus, summary: String? = nil) {
+        mutate(sessionId) { session in
+            session.taskStatus = status
+            if let summary, !summary.isEmpty {
+                session.taskSummary = summary
+            }
         }
     }
 
@@ -194,6 +250,28 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
+    /// 追加流式增量文本（内存变更，避免每 token 写盘）
+    func appendStreamToken(_ token: String, to messageId: UUID, in sessionId: UUID) {
+        updateMessage(id: messageId, in: sessionId, touch: true, persist: false) { msg in
+            msg.content += token
+            msg.state = .streaming
+        }
+    }
+
+    /// 追加思考增量文本
+    func appendReasoningToken(_ token: String, to messageId: UUID, in sessionId: UUID) {
+        updateMessage(id: messageId, in: sessionId, touch: true, persist: false) { msg in
+            msg.reasoning = (msg.reasoning ?? "") + token
+        }
+    }
+
+    /// 更新消息生命周期状态并写盘
+    func updateMessageState(_ messageId: UUID, state: ChatMessage.MessageState, in sessionId: UUID) {
+        updateMessage(id: messageId, in: sessionId, touch: true, persist: true) { msg in
+            msg.state = state
+        }
+    }
+
     /// 替换最后一条助手消息（重新生成场景）。
     func replaceLastAssistantMessage(with message: ChatMessage, in sessionId: UUID) {
         mutate(sessionId) { session in
@@ -234,7 +312,8 @@ final class ChatSessionStore: ObservableObject {
     /// 分组规则：置顶单独成组（组内按 updatedAt 倒序）；
     /// 其余按更新时间分为「今天 / 昨天 / 过去 7 天 / 更早」，组内同样倒序。
     func groupedSessions() -> [ChatSessionGroup] {
-        let sorted = sessions.sorted { $0.updatedAt > $1.updatedAt }
+        let roots = sessions.filter { $0.parentSessionId == nil }
+        let sorted = roots.sorted { $0.updatedAt > $1.updatedAt }
 
         var groups: [ChatSessionGroup] = []
         let pinned = sorted.filter { $0.pinned }
