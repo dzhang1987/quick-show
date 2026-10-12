@@ -59,6 +59,7 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                 do {
                     let cred = try await resolveCredentials(pat: apiKey)
                     let cleanModelId = model.id.replacingOccurrences(of: "qoder/", with: "")
+                    let isReasoning = (options.thinkingLevel == .off) ? false : model.supportsThinking
 
                     var systemText = ""
                     var userMessages: [[String: Any]] = []
@@ -66,13 +67,16 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
 
                     for msg in messages {
                         if msg.role == "system" {
-                            if let plain = msg.content?.plainText {
-                                systemText += (systemText.isEmpty ? "" : "\n") + plain
+                            let text = msg.content?.extractedText ?? ""
+                            if !text.isEmpty {
+                                systemText += (systemText.isEmpty ? "" : "\n") + text
                             }
                         } else {
-                            let role = msg.role
-                            let content = msg.content?.plainText ?? ""
-                            if role == "user" {
+                            let isTool = (msg.role == "tool")
+                            let role = isTool ? "user" : msg.role
+                            let rawContent = msg.content?.extractedText ?? ""
+                            let content = isTool ? "[工具执行结果]: \(rawContent)" : rawContent
+                            if role == "user" && !isTool {
                                 lastUserText = content
                             }
                             userMessages.append([
@@ -80,6 +84,13 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                                 "content": content
                             ])
                         }
+                    }
+
+                    if userMessages.isEmpty {
+                        userMessages.append([
+                            "role": "user",
+                            "content": systemText.isEmpty ? "你好" : systemText
+                        ])
                     }
 
                     let recordID = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(16))
@@ -116,7 +127,7 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                                 "context": [],
                                 "modelConfig": [
                                     "key": cleanModelId,
-                                    "is_reasoning": model.supportsThinking
+                                    "is_reasoning": isReasoning
                                 ],
                                 "originalContent": lastUserText
                             ],
@@ -125,7 +136,7 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                         ],
                         "model_config": [
                             "key": cleanModelId,
-                            "is_reasoning": model.supportsThinking,
+                            "is_reasoning": isReasoning,
                             "max_output_tokens": 4096,
                             "source": "system"
                         ],
@@ -143,7 +154,13 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                     let rawBodyData = try JSONSerialization.data(withJSONObject: requestBody)
                     let encodedBody = QoderNativeSigner.encodeBody(rawBodyData)
 
-                    let chatURL = URL(string: "https://api3.qoder.sh/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1")!
+                    var base = provider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if base.isEmpty { base = "https://api3.qoder.sh" }
+                    while base.hasSuffix("/") { base.removeLast() }
+                    guard let chatURL = URL(string: "\(base)/algo/api/v2/service/pro/sse/agent_chat_generation?FetchKeys=llm_model_result&AgentId=agent_common&Encode=1") else {
+                        throw AIChatError.invalidBaseURL
+                    }
+
                     let machineID = QoderNativeSigner.getStableMachineID()
 
                     let authHeaders = try QoderNativeSigner.buildAuthHeaders(
@@ -174,7 +191,18 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                     let (bytes, response) = try await URLSession.shared.bytes(for: req)
                     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
-                        throw AIChatError.http(status: status, message: "Qoder 网关响应异常 (HTTP \(status))")
+                        var errorDetail = "Qoder 网关响应异常 (HTTP \(status))"
+                        if let _ = response as? HTTPURLResponse {
+                            var rawErr = ""
+                            for try await line in bytes.lines {
+                                rawErr += line
+                                if rawErr.count > 300 { break }
+                            }
+                            if !rawErr.isEmpty {
+                                errorDetail = "\(errorDetail): \(rawErr)"
+                            }
+                        }
+                        throw AIChatError.http(status: status, message: errorDetail)
                     }
 
                     streaming: for try await line in bytes.lines {
@@ -200,6 +228,11 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                         guard let chunkData = bodyStr.data(using: .utf8),
                               let chunk = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any] else {
                             continue
+                        }
+
+                        if let errObj = chunk["error"] as? [String: Any],
+                           let errMsg = errObj["message"] as? String {
+                            throw AIChatError.streamError(errMsg)
                         }
 
                         if let usage = chunk["usage"] as? [String: Any],
@@ -254,37 +287,148 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
     // MARK: - 凭据换取与解析
 
     private func resolveCredentials(pat: String) async throws -> CredentialCache.Entry {
-        if let cached = credentialCache.get(for: pat) {
+        if let cached = credentialCache.get(for: pat), cached.userId != "qoder-user" && !cached.userId.isEmpty {
             return cached
         }
         let jt = try await QoderNativeSigner.exchangeJobToken(pat: pat)
-        let userInfo = try await fetchUserInfo(jt: jt)
+        let userInfo = await fetchUserInfo(jt: jt)
+
+        let saved = await MainActor.run {
+            AIProviderStore.shared.accountInfo(for: "qoder")
+        }
+
+        let resolvedUserId: String
+        if !userInfo.id.isEmpty {
+            resolvedUserId = userInfo.id
+        } else if let savedUid = saved?.userId, !savedUid.isEmpty {
+            resolvedUserId = savedUid
+        } else {
+            resolvedUserId = ""
+        }
+
+        guard !resolvedUserId.isEmpty && resolvedUserId != "qoder-user" else {
+            throw AIChatError.http(status: 401, message: "未能获取有效的 Qoder 账号绑定 UID，请在设置中重新授权绑定 Qoder")
+        }
+
+        let resolvedName: String
+        if !userInfo.name.isEmpty {
+            resolvedName = userInfo.name
+        } else if let savedName = saved?.displayName, !savedName.isEmpty {
+            resolvedName = savedName
+        } else {
+            resolvedName = "QuickShow User"
+        }
+
+        let resolvedEmail: String
+        if !userInfo.email.isEmpty {
+            resolvedEmail = userInfo.email
+        } else if let savedEmail = saved?.email, !savedEmail.isEmpty {
+            resolvedEmail = savedEmail
+        } else {
+            resolvedEmail = "user@quickshow.app"
+        }
+
         let entry = CredentialCache.Entry(
             jobToken: jt,
-            userId: userInfo.id.isEmpty ? "qoder-user" : userInfo.id,
-            name: userInfo.name,
-            email: userInfo.email,
+            userId: resolvedUserId,
+            name: resolvedName,
+            email: resolvedEmail,
             expiresAt: Date().addingTimeInterval(86400 - 300)
         )
         credentialCache.set(entry, for: pat)
         return entry
     }
 
-    private func fetchUserInfo(jt: String) async throws -> (id: String, name: String, email: String) {
-        let url = URL(string: "https://openapi.qoder.sh/api/v1/userinfo")!
-        var req = URLRequest(url: url)
-        req.httpMethod = "GET"
-        req.setValue("Bearer \(jt)", forHTTPHeaderField: "Authorization")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("opencode-qoder", forHTTPHeaderField: "User-Agent")
-        req.setValue("1.0.1", forHTTPHeaderField: "Cosy-Version")
-        req.setValue("5", forHTTPHeaderField: "Cosy-ClientType")
+    private func fetchUserInfo(jt: String) async -> (id: String, name: String, email: String, avatar: String) {
+        let endpoints = [
+            "https://openapi.qoder.sh/api/v1/userinfo",
+            "https://openapi.qoder.com.cn/api/v1/userinfo"
+        ]
 
-        let (data, _) = try await URLSession.shared.data(for: req)
-        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        let id = json["id"] as? String ?? ""
-        let name = json["name"] as? String ?? ""
-        let email = json["email"] as? String ?? ""
-        return (id, name, email)
+        for endpoint in endpoints {
+            guard let url = URL(string: endpoint) else { continue }
+            var req = URLRequest(url: url)
+            req.httpMethod = "GET"
+            req.setValue("Bearer \(jt)", forHTTPHeaderField: "Authorization")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.setValue("opencode-qoder", forHTTPHeaderField: "User-Agent")
+            req.setValue(QoderNativeSigner.openAPICosyVersion, forHTTPHeaderField: "Cosy-Version")
+            req.setValue(QoderNativeSigner.clientType, forHTTPHeaderField: "Cosy-ClientType")
+            req.timeoutInterval = 6
+
+            do {
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    continue
+                }
+                guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    continue
+                }
+                let dataObj = json["data"] as? [String: Any]
+                let id = json["id"] as? String ?? json["userId"] as? String ?? dataObj?["id"] as? String ?? ""
+                let name = json["name"] as? String ?? json["username"] as? String ?? dataObj?["name"] as? String ?? ""
+                let email = json["email"] as? String ?? dataObj?["email"] as? String ?? ""
+                let avatar = json["avatar"] as? String ?? json["avatar_url"] as? String ?? dataObj?["avatar"] as? String ?? ""
+
+                if !id.isEmpty {
+                    // 同步持久化有效 UID 到 ProviderAccountInfo，供离线或后续降级使用
+                    await MainActor.run {
+                        var existing = AIProviderStore.shared.accountInfo(for: "qoder") ?? ProviderAccountInfo(
+                            userId: id,
+                            displayName: name.isEmpty ? "Qoder 用户" : name,
+                            email: email,
+                            avatarURL: avatar.isEmpty ? nil : avatar,
+                            authMethod: "browser",
+                            authorizedAt: Date(),
+                            refreshToken: nil
+                        )
+                        existing.userId = id
+                        if !name.isEmpty { existing.displayName = name }
+                        if !email.isEmpty { existing.email = email }
+                        if !avatar.isEmpty { existing.avatarURL = avatar }
+                        AIProviderStore.shared.saveAccountInfo(existing, for: "qoder")
+                    }
+
+                    return (id, name, email, avatar)
+                }
+            } catch {
+                logger.warning("请求 Qoder 用户信息端点 [\(endpoint)] 异常: \(error.localizedDescription)")
+            }
+        }
+
+        // 网络端点均失败时，优先从 AIProviderStore 读取已持久化的真实 UID
+        let saved = await MainActor.run {
+            AIProviderStore.shared.accountInfo(for: "qoder")
+        }
+        if let saved = saved, let uid = saved.userId, !uid.isEmpty {
+            return (
+                id: uid,
+                name: saved.displayName,
+                email: saved.email,
+                avatar: saved.avatarURL ?? ""
+            )
+        }
+
+        // 尝试从本地 Qoder 应用配置读取真实 UID 作为脱机兜底
+        let home = NSHomeDirectory()
+        let appStatusPath = "\(home)/.qoder/.qoder-app-status.json"
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: appStatusPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let name = json["name"] as? String ?? ""
+            let email = json["email"] as? String ?? ""
+            let avatar = json["avatar_url"] as? String ?? ""
+            var uid = ""
+            if let range = avatar.range(of: "/users/") {
+                let sub = avatar[range.upperBound...]
+                if let endRange = sub.range(of: "/") {
+                    uid = String(sub[..<endRange.lowerBound])
+                }
+            }
+            if !uid.isEmpty {
+                return (id: uid, name: name, email: email, avatar: avatar)
+            }
+        }
+
+        return ("", "", "", "")
     }
 }

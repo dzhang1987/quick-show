@@ -69,8 +69,6 @@ extension AIChatService {
         onEvent: (AIStreamEvent) -> Void
     ) async throws {
         let agent = AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
-        let provider = AIProviderStore.shared.provider(for: agent.providerId) ?? AIProviderStore.shared.selectedProvider ?? AIProvider.alibabaPreset()
-        let key = AIProviderStore.shared.apiKey(for: provider.id) ?? apiKey ?? ""
 
         let requestedModel = options.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedModelId: String
@@ -81,9 +79,25 @@ extension AIChatService {
         }
         guard !resolvedModelId.isEmpty else { throw AIChatError.missingModel }
 
-        let modelSpec = provider.model(for: resolvedModelId) ?? AIModelSpec(id: resolvedModelId, name: resolvedModelId)
+        // 优先根据模型归属匹配 Provider（避免在会话中切换 Qoder / Gemini 等模型时误派发给 Alibaba 导致报错）
+        var provider = AIProviderStore.shared.providers.first(where: { p in
+            p.models.contains(where: { $0.id == resolvedModelId })
+        })
+        if provider == nil && resolvedModelId.hasPrefix("qoder/") {
+            provider = AIProviderStore.shared.provider(for: "qoder")
+        } else if provider == nil && (resolvedModelId.hasPrefix("gemini-") || resolvedModelId.hasPrefix("antigravity/")) {
+            provider = AIProviderStore.shared.provider(for: "antigravity")
+        }
+        if provider == nil {
+            provider = AIProviderStore.shared.provider(for: agent.providerId)
+                ?? AIProviderStore.shared.selectedProvider
+                ?? AIProvider.alibabaPreset()
+        }
+        guard let effectiveProvider = provider else { throw AIChatError.missingModel }
 
-        let llmProvider = LLMProviderRegistry.shared.provider(for: provider.type)
+        let key = AIProviderStore.shared.apiKey(for: effectiveProvider.id) ?? apiKey ?? ""
+        let modelSpec = effectiveProvider.model(for: resolvedModelId) ?? AIModelSpec(id: resolvedModelId, name: resolvedModelId)
+        let llmProvider = LLMProviderRegistry.shared.provider(for: effectiveProvider.type)
 
         let firstTokenFlag = FirstTokenFlag()
         let watchdog = Task {
@@ -96,7 +110,7 @@ extension AIChatService {
 
         do {
             let stream = llmProvider.stream(
-                provider: provider,
+                provider: effectiveProvider,
                 model: modelSpec,
                 messages: messages,
                 options: options,

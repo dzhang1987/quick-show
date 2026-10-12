@@ -16,6 +16,17 @@ enum MessageContent: Codable {
         return nil
     }
 
+    /// 提取文本内容：纯文本直接返回，多模态聚合所有文本片段。
+    var extractedText: String {
+        switch self {
+        case let .text(val):
+            return val
+        case let .parts(parts):
+            let joined = parts.compactMap { $0.text }.joined(separator: "\n")
+            return joined
+        }
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
         if let plain = try? container.decode(String.self) {

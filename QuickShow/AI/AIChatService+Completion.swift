@@ -24,7 +24,43 @@ extension AIChatService {
         maxTokens: Int? = nil
     ) async throws -> String {
         let agent = AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
-        let provider = AIProviderStore.shared.provider(for: agent.providerId)
+
+        let requestedModel = options.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModel: String
+        if let requestedModel, !requestedModel.isEmpty {
+            resolvedModel = requestedModel
+        } else {
+            resolvedModel = agent.modelId
+        }
+        guard !resolvedModel.isEmpty else { throw AIChatError.missingModel }
+
+        var provider = AIProviderStore.shared.providers.first(where: { p in
+            p.models.contains(where: { $0.id == resolvedModel })
+        })
+        if provider == nil && resolvedModel.hasPrefix("qoder/") {
+            provider = AIProviderStore.shared.provider(for: "qoder")
+        } else if provider == nil && (resolvedModel.hasPrefix("gemini-") || resolvedModel.hasPrefix("antigravity/")) {
+            provider = AIProviderStore.shared.provider(for: "antigravity")
+        }
+        if provider == nil {
+            provider = AIProviderStore.shared.provider(for: agent.providerId)
+        }
+
+        // 非 OpenAI 兼容服务商（如 Qoder 原生或 Gemini 原生）通过统一流式调度收集纯文本
+        if let p = provider, p.type != .openAICompatible {
+            var streamOptions = options
+            if streamOptions.modelId == nil || streamOptions.modelId?.isEmpty == true {
+                streamOptions.modelId = resolvedModel
+            }
+            let stream = send(messages: messages, options: streamOptions)
+            var fullText = ""
+            for try await event in stream {
+                if case .text(let t) = event {
+                    fullText += t
+                }
+            }
+            return fullText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
 
         let proto: APIProtocol
         let baseURLStr: String
@@ -47,17 +83,6 @@ extension AIChatService {
         guard !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw AIChatError.missingAPIKey
         }
-
-        let requestedModel = options.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedModel: String
-        if let requestedModel, !requestedModel.isEmpty {
-            resolvedModel = requestedModel
-        } else if let provider {
-            resolvedModel = agent.modelId
-        } else {
-            resolvedModel = selectedModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        guard !resolvedModel.isEmpty else { throw AIChatError.missingModel }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"

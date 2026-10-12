@@ -141,8 +141,20 @@ final class AIChatState: ObservableObject {
         store.setSessionAgent(id: sessionId, agentId: resolved)
     }
 
-    /// Base URL 与 API Key 均已配置。
+    /// Base URL 与 API Key 均已配置（综合会话生效模型、当前 Agent、全局选中 Provider 与全局回退）。
     var hasConfiguredEndpoint: Bool {
+        let session = currentSessionId.flatMap { store.session(id: $0) }
+        let effectiveModel = session?.modelId ?? currentAgent.modelId
+
+        // 1. 若当前生效模型明确属于某个已配置 Provider，优先判定
+        if let matchedProvider = AIProviderStore.shared.providers.first(where: { $0.models.contains(where: { $0.id == effectiveModel }) }) {
+            let key = AIProviderStore.shared.apiKey(for: matchedProvider.id) ?? ""
+            if !matchedProvider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !key.isEmpty {
+                return true
+            }
+        }
+
+        // 2. 检查当前 Agent 所属 Provider
         let agent = currentAgent
         if let provider = AIProviderStore.shared.provider(for: agent.providerId) {
             let key = AIProviderStore.shared.apiKey(for: provider.id) ?? ""
@@ -150,6 +162,16 @@ final class AIChatState: ObservableObject {
                 return true
             }
         }
+
+        // 3. 检查全局当前选中的 Provider
+        if let selected = AIProviderStore.shared.selectedProvider {
+            let key = AIProviderStore.shared.apiKey(for: selected.id) ?? ""
+            if !selected.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !key.isEmpty {
+                return true
+            }
+        }
+
+        // 4. 回退检查全局 Base URL 与 Key
         let base = AIChatService.shared.baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let key = AIChatService.shared.apiKey ?? ""
         return !base.isEmpty && !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

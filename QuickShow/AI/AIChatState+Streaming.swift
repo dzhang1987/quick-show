@@ -104,6 +104,7 @@ extension AIChatState {
             let activeAgent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
             let effectiveModel = session?.modelId ?? activeAgent.modelId
             let modelSpec = AIProviderStore.shared.modelSpec(providerId: activeAgent.providerId, modelId: effectiveModel)
+                ?? AIProviderStore.shared.modelSpec(for: effectiveModel)
             let supportsVision = modelSpec?.supportsVision ?? false
 
             let lastUserMsg = session?.messages.last(where: { $0.role == .user })

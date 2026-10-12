@@ -51,40 +51,53 @@ enum QoderNativeSigner {
         }
     }
 
-    /// 使用 PAT 换取短期 Job Token (jt-...)
-    static func exchangeJobToken(pat: String, baseURL: String = "https://openapi.qoder.sh") async throws -> String {
-        let cleanPat = pat.trimmingCharacters(in: .whitespacesAndNewlines)
-        // 如果用户直接填的是已经换出来的 jt- 令牌，直接返回
-        if cleanPat.hasPrefix("jt-") {
+    /// 使用 PAT 换取短期 Job Token (jt-...)，自动尝试国内与国际端点
+    static func exchangeJobToken(pat: String) async throws -> String {
+        var cleanPat = pat.trimmingCharacters(in: .whitespacesAndNewlines)
+        cleanPat = cleanPat.trimmingCharacters(in: CharacterSet(charactersIn: "\"\'"))
+        if cleanPat.lowercased().hasPrefix("bearer ") {
+            cleanPat = String(cleanPat.dropFirst(7)).trimmingCharacters(in: .whitespacesAndNewlines)
+            cleanPat = cleanPat.trimmingCharacters(in: CharacterSet(charactersIn: "\"\'"))
+        }
+        // 如果用户直接填的是已经换出来的 jt- 令牌，或者浏览器授权返回的 dt- (Device Token)，直接返回
+        if cleanPat.hasPrefix("jt-") || cleanPat.hasPrefix("dt-") {
             return cleanPat
         }
 
-        guard let url = URL(string: "\(baseURL)/api/v1/jobToken/exchange") else {
-            throw NSError(domain: "QoderNativeSigner", code: -1, userInfo: [NSLocalizedDescriptionKey: "无效的 Qoder 交换地址"])
+        let endpoints = [
+            "https://openapi.qoder.sh/api/v1/jobToken/exchange",
+            "https://openapi.qoder.com.cn/api/v1/jobToken/exchange"
+        ]
+
+        var lastError: Error?
+        for endpoint in endpoints {
+            guard let url = URL(string: endpoint) else { continue }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            req.setValue("opencode-qoder", forHTTPHeaderField: "User-Agent")
+            req.setValue(openAPICosyVersion, forHTTPHeaderField: "Cosy-Version")
+            req.setValue(clientType, forHTTPHeaderField: "Cosy-ClientType")
+            req.timeoutInterval = 8
+
+            let body: [String: Any] = ["personal_token": cleanPat]
+            do {
+                req.httpBody = try JSONSerialization.data(withJSONObject: body)
+                let (data, response) = try await URLSession.shared.data(for: req)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    continue
+                }
+                let decoded = try JSONDecoder().decode(JobTokenExchangeResponse.self, from: data)
+                if let token = decoded.resolvedToken, !token.isEmpty {
+                    return token
+                }
+            } catch {
+                lastError = error
+            }
         }
 
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue("application/json", forHTTPHeaderField: "Accept")
-        req.setValue("opencode-qoder", forHTTPHeaderField: "User-Agent")
-        req.setValue(openAPICosyVersion, forHTTPHeaderField: "Cosy-Version")
-        req.setValue(clientType, forHTTPHeaderField: "Cosy-ClientType")
-
-        let body: [String: Any] = ["personal_token": cleanPat]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw NSError(domain: "QoderNativeSigner", code: -2, userInfo: [NSLocalizedDescriptionKey: "Qoder Token 交换请求失败"])
-        }
-
-        let decoded = try JSONDecoder().decode(JobTokenExchangeResponse.self, from: data)
-        guard let token = decoded.resolvedToken, !token.isEmpty else {
-            let msg = decoded.msg ?? "未知错误"
-            throw NSError(domain: "QoderNativeSigner", code: -3, userInfo: [NSLocalizedDescriptionKey: "Qoder Token 交换失败: \(msg)"])
-        }
-        return token
+        throw lastError ?? NSError(domain: "QoderNativeSigner", code: -3, userInfo: [NSLocalizedDescriptionKey: "Qoder Token 交换失败，请检查网络或 PAT 是否有效"])
     }
 
     // MARK: - 2. Qoder 自定义 Base64 编码与块重排
