@@ -61,13 +61,14 @@ final class PanelManager {
         // 初始同步面板尺寸到 SwiftUI（首帧布局即有正确数据，避免 0 尺寸起步）
         appState.updateLivePanelSize(initialSize)
         
-        // ESC 快捷退出（若正在展示 CheatSheet 则优先关闭 CheatSheet）
+        // ESC 策略化分层处理：
+        // 由 EscapePolicyCenter 响应者栈按 glance 作用域统一自顶向下分发；未消费时兜底关窗。
         panel.onEscapePressed = { [weak appState] in
-            guard let appState = appState else { return }
-            if appState.showCheatSheet {
-                appState.setCheatSheetVisible(false)
-            } else {
-                appState.dismiss()
+            let handled = MainActor.assumeIsolated {
+                EscapePolicyCenter.shared.handleEscape(scope: .glance)
+            }
+            if !handled {
+                appState?.dismiss()
             }
         }
         
@@ -404,7 +405,7 @@ final class PanelManager {
             guard let self = self, let panel = self.panel, panel.isVisible else { return }
             if event.keyCode == 53 { // ESC 键
                 DispatchQueue.main.async {
-                    self.appState?.dismiss()
+                    _ = EscapePolicyCenter.shared.handleEscape(scope: .glance)
                 }
             }
         }
@@ -413,10 +414,14 @@ final class PanelManager {
         escLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let panel = self.panel, panel.isVisible else { return event }
             if event.keyCode == 53 { // ESC 键
-                // 文本编辑聚焦时放行：ESC 归还 field editor 结束编辑（不退出面板）
-                if panel.firstResponder is NSTextView { return event }
-                self.appState?.dismiss()
-                return nil
+                // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音（不落入窗口拦截）
+                if let textView = panel.firstResponder as? NSTextView, textView.hasMarkedText() {
+                    return event
+                }
+                let handled = MainActor.assumeIsolated {
+                    EscapePolicyCenter.shared.handleEscape(scope: .glance)
+                }
+                if handled { return nil }
             }
             return event
         }

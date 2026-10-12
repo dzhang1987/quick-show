@@ -167,9 +167,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.toggleFromHotKey()
     }
     
+private final class SettingsWindow: NSWindow {
+    override func cancelOperation(_ sender: Any?) {
+        close()
+    }
+    
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 { // ESC 键
+            if let textView = firstResponder as? NSTextView, textView.hasMarkedText() {
+                super.keyDown(with: event)
+                return
+            }
+            close()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
     @objc func openSettings() {
         if settingsWindow == nil {
-            let window = NSWindow(
+            let window = SettingsWindow(
                 contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
                 styleMask: [.titled, .closable, .miniaturizable, .fullSizeContentView],
                 backing: .buffered,

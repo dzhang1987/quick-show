@@ -132,6 +132,61 @@ struct PanelView: View {
                     .transition(.opacity.combined(with: .scale(scale: Theme.Motion.overlayScale)))
             }
         }
+        // MARK: - ESC 响应者栈管理（Glance 窗口各层级动态入栈/出栈，栈底为根窗口）
+        .onAppear {
+            EscapePolicyCenter.shared.registerRoot(scope: .glance, id: "glance_window") {
+                appState.dismiss()
+                return true
+            }
+        }
+        .onDisappear {
+            EscapePolicyCenter.shared.unregisterRoot(scope: .glance, id: "glance_window")
+        }
+        // Top 1: 全键盘盲操速查表（覆盖层，优先级最高）
+        .escapeResponder(
+            scope: .glance,
+            id: "cheat_sheet",
+            isActive: appState.showCheatSheet
+        ) {
+            appState.setCheatSheetVisible(false)
+            return true
+        }
+        // Top 2: 日历日程编辑/新建草稿（表单态）
+        .escapeResponder(
+            scope: .glance,
+            id: "calendar_editing",
+            isActive: appState.calendarEditing != nil
+        ) {
+            appState.calendarEditing = nil
+            return true
+        }
+        // Top 3: 日历日程详情卡片
+        .escapeResponder(
+            scope: .glance,
+            id: "calendar_selected_event",
+            isActive: appState.selectedEvent != nil
+        ) {
+            appState.selectedEvent = nil
+            return true
+        }
+        // Top 4: 日历独立上下文（按 G 进入，退回进入前的来源上下文）
+        .escapeResponder(
+            scope: .glance,
+            id: "calendar_context",
+            isActive: appState.showCalendarView
+        ) {
+            appState.exitContext()
+            return true
+        }
+        // Top 5（方案 A）: 监控看板展开态（Tab 展开，ESC 收起回紧凑时钟）
+        .escapeResponder(
+            scope: .glance,
+            id: "dashboard_expanded",
+            isActive: appState.isExpanded && !appState.showCalendarView
+        ) {
+            appState.toggleExpanded()
+            return true
+        }
     }
 }
 

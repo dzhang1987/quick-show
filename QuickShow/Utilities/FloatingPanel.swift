@@ -67,9 +67,18 @@ final class FloatingPanel: NSPanel {
             cmdLongPressTimer?.invalidate()
             cmdLongPressTimer = nil
             
-            // 文本编辑聚焦时全部按键放行给第一响应者（编辑表单 TextField/DatePicker 的 field editor
-            // 即 NSTextView）——窗口级拦截先于第一响应者，会吞掉 G/Tab/⏎/←→ 导致无法输入并误触
-            // 全局动作；ESC 此时走标准 AppKit cancelOperation 结束编辑（不退出面板）
+            // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音（不落入窗口拦截）
+            if event.keyCode == 53 {
+                if let textView = firstResponder as? NSTextView, textView.hasMarkedText() {
+                    super.sendEvent(event)
+                    return
+                }
+                onEscapePressed?()
+                return
+            }
+            
+            // 文本编辑聚焦时其余按键放行给第一响应者（编辑表单 TextField/DatePicker 的 field editor
+            // 即 NSTextView）——窗口级拦截先于第一响应者，会吞掉 G/Tab/⏎/←→ 导致无法输入并误触全局动作
             if firstResponder is NSTextView {
                 super.sendEvent(event)
                 return
@@ -90,10 +99,7 @@ final class FloatingPanel: NSPanel {
                 return
             }
             
-            if event.keyCode == 53 { // ESC 键
-                onEscapePressed?()
-                return
-            } else if event.keyCode == 49 { // Space 空格键
+            if event.keyCode == 49 { // Space 空格键
                 onSpacePressed?()
                 return
             } else if event.keyCode == 48 { // Tab 键
@@ -117,7 +123,18 @@ final class FloatingPanel: NSPanel {
     }
     
     override func keyDown(with event: NSEvent) {
-        // 文本编辑聚焦时放行给第一响应者（与 sendEvent 分支同理，兜住 keyDown 直投路径）
+        // 兜住 keyDown 直投路径（与 sendEvent 分支同理）
+        // P0: 优先放行系统输入法 marked text 组字
+        if event.keyCode == 53 {
+            if let textView = firstResponder as? NSTextView, textView.hasMarkedText() {
+                super.keyDown(with: event)
+                return
+            }
+            onEscapePressed?()
+            return
+        }
+        
+        // 文本编辑聚焦时其余按键放行给第一响应者
         if firstResponder is NSTextView {
             super.keyDown(with: event)
             return
@@ -132,10 +149,7 @@ final class FloatingPanel: NSPanel {
             return
         }
         
-        if event.keyCode == 53 { // ESC 键
-            onEscapePressed?()
-            return
-        } else if event.keyCode == 49 { // Space 空格键
+        if event.keyCode == 49 { // Space 空格键
             onSpacePressed?()
             return
         } else if event.keyCode == 48 { // Tab 键
