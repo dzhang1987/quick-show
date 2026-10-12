@@ -206,7 +206,27 @@ final class AIProviderStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: Keys.providersData),
            let loaded = try? JSONDecoder().decode([AIProvider].self, from: data),
            !loaded.isEmpty {
-            self.providers = loaded
+            var updated = loaded
+            // 确保 antigravity 原生预设模型收敛为纯净正交模型
+            if let idx = updated.firstIndex(where: { $0.id == "antigravity" }) {
+                let preset = AIProvider.antigravityPreset()
+                let hasLegacyEffortSuffixes = updated[idx].models.contains {
+                    $0.id.hasSuffix("-high") || $0.id.hasSuffix("-medium") || $0.id.hasSuffix("-low") || $0.id.hasSuffix("-thinking")
+                }
+                if hasLegacyEffortSuffixes || updated[idx].models.isEmpty {
+                    updated[idx].models = preset.models
+                } else {
+                    var existingIds = Set(updated[idx].models.map { $0.id })
+                    for m in preset.models {
+                        if !existingIds.contains(m.id) {
+                            updated[idx].models.append(m)
+                            existingIds.insert(m.id)
+                        }
+                    }
+                }
+            }
+            self.providers = updated
+            saveProviders()
             self.selectedProviderId = UserDefaults.standard.string(forKey: Keys.selectedProviderId) ?? loaded.first?.id ?? "alibaba"
             return
         }

@@ -6,6 +6,18 @@
 
 ### Added
 
+- 触控 ID (Touch ID) 优先的生物识别本机静默导入体系（`AIAuthManager` / `AIServiceSettingsForm`）：
+  - **原生 Touch ID 授权闭环**：接入 Apple 原生 `LocalAuthentication` 框架，点击「触控 ID 导入」优先唤起系统生物识别面板（呼吸灯与指纹提示），轻触指纹秒级通过验证，无 Touch ID 设备自动优雅降级为系统解锁密码，彻底消除每次输入钥匙串密码的繁琐体验；
+  - **真正的零浏览器静默导入**：彻底切断导入流程中回退唤起网页浏览器的逻辑，全程在 macOS 系统安全与原生 UI 闭环完成，不再产生“导入账号却弹浏览器”的体验割裂；
+  - **Antigravity 原生 CLI 流式驱动引擎（`GeminiProvider` / `AIProvider` / `AIProviderStore`）**：
+    - 针对 Antigravity 本机凭据与 Google OAuth 架构，引入基于原生 Antigravity CLI (`agy`) 的子进程流式交互引擎，直接利用本地已登录凭据与官方网关通道，彻底解决传统 Google AI Studio 端点 (`generativelanguage.googleapis.com`) 报 `HTTP 401 / Scope 不足` 的致命缺陷；
+    - 基于异步 NDJSON 流解析器提取 `step_update.text_delta` 与 `usage.input_tokens`，实现毫秒级流式打字机吐字与上下文感知；
+    - **启动与工作空间轻量化**：自动指派临时专用独立沙箱工作空间，配合 `--disable-slash-commands` 与 `PYTHONUNBUFFERED`，彻底杜绝 CLI 扫描用户主目录大量文件和 git 历史的开销；
+    - **Pro 会员全套官方旗舰模型矩阵升级**：全面接入官方支持的 Pro 会员核心模型（`gemini-3.1-pro-high`、`claude-sonnet-4-6`、`claude-opus-4-6-thinking`、`gemini-3.8-flash-high`、`gemini-3.8-flash-medium`、`gpt-oss-120b-medium` 等），并在 `loadProviders` 时自动补齐同步；
+    - 双轨平滑兼容：若用户手动输入传统 Google AI Studio API Key (`AIzaSy...`) 则无缝 fallback 到云端 HTTP 直连。
+  - **Antigravity 本机凭据深度感知**：直接探测并读取 `~/.gemini/jetski-standalone-oauth-token`，解析 OAuth Access Token (`ya29...`)、Refresh Token 与从 JWT/本地账号配置解析的真实邮箱，指纹确认后无感注入与持久化；
+  - **Qoder 本机凭据与 UID 联动**：自动感知 Qoder CLI / 客户端全局状态与本地已有 Device Token，指纹确认后一键完成真实 UID 绑定与就绪激活；
+  - **UI 职责与操作边界清晰化**：设置面板按钮直观区分「🌐 浏览器登录授权」与「触控 ID 导入」，状态卡片标明「触控 ID 导入」身份来源，取消或失败即地清晰提示，操作边界彻底清晰。
 - Qoder 与 Antigravity 三模认证与无感授权体系（`AIAuthManager` / `OAuthLoopbackServer` / `AIProviderStore` / `AIServiceSettingsForm`）：
   - **三位一体认证架构**：同时支持「① 直接填入 API Key / PAT 凭据」、「② 自动探测并导入本机已登录账号」、「③ 网页端浏览器登录授权」，彻底消除手动复制长串密钥的心智负担；
   - **Qoder 官方 Device Flow 浏览器授权**：纯原生 Swift 实现基于官方 Device Flow（S256 PKCE + Nonce + Machine ID）的浏览器授权通道，打开 `qoder.com/device/selectAccounts` 并在后台异步轮询 `deviceToken/poll`，用户在网页端点击确认后自动回传 Token 并换取用户信息完成绑定，无本地端口依赖，零代理/TUN模式冲突；
@@ -65,6 +77,10 @@
 
 ### Changed
 
+- Antigravity 模型列表纯净化与思考强度正交收敛（`AIProvider` / `AIProviderStore` / `GeminiProvider`）：
+  - **模型列表纯净化**：彻底移除模型选择下拉菜单中冗余的思考强度后缀项（`-high`、`-medium`、`-low`、`-thinking`），模型列表仅展示标准清晰的模型本体（Gemini 3.1 Pro、Gemini 3.8 Flash、Gemini 3.7 Flash、Claude Opus 4.6、Claude Sonnet 4.6、GPT-OSS 120B）；
+  - **思考强度正交映射**：思考档位由输入坞生成 chip 统一调度，底层根据用户选取的档位（Low / Medium / High / Off）动态映射至官方合规的后缀模型（如 Gemini 3.8 Flash + Low 映射至 `gemini-3.8-flash-low`，High 映射至 `gemini-3.8-flash-high`），并彻底移除命令行 `--effort` 参数，彻底根除 `conflicts with --effort=low` 等参数冲突崩溃；
+  - **旧数据自动去重迁移**：`AIProviderStore.loadProviders` 启动时自动探测并清洗旧配置中带旧后缀的冗余模型，保持列表纯净。
 - 快速会话切换器（Quick Switcher）视觉质感重塑与加权搜索相关性升级（`AIChatQuickSwitcher` / `ChatSessionStore` / `AIChatView`）：
   - **通透毛玻璃体与顶级光影重构**：废除 95% 不透明度的硬质底板（`chatNavFloatFill`），全面接入原生 `.regularMaterial` 磨砂玻璃体搭配柔光底层（`surfaceCard`），使底层聊天内容自然呈现优雅的景深模糊与高光折射；外框升级为 Directional Rim Light（顶部微白受光边、侧边微弱边、底部阴影重边）与双层立体阴影（贴身接触影 8pt + 纵深漫反射环境影 32pt），彻底消除实色塑料廉价感；
   - **结构去切片化与轻盈 Footer（方案 A）**：移除粗暴分割线，改用两端对称羽化渐隐的微光光线；剥离底部按键提示条沉重的全幅灰底，将其转为与面板底板浑然一体的轻巧微胶囊提示；调优遮罩层为轻透的 0.12 不透明度；
@@ -78,6 +94,9 @@
 
 ### Fixed
 
+- Antigravity 思考流正文 `[/THINK]` 标签残留泄露与流式状态机容错（`GeminiProvider` / `AIChatState+Streaming`）：
+  - **正文流式标签自洁**：流式状态机 `ThinkingStreamParser` 新增孤立闭合标签吞噬机制与正文流 `cleanTextDelta` 净化层，针对大模型在思考内部复述提示词标签引发的提早闭合边界场景，自动吸收孤立的 `[/THINK]` 或 `<think>` 标签，彻底根除正文开头泄露技术标签的问题；
+  - **思考流式活性即时激活**：`AIChatState+Streaming` 在收到思考增量（`reasoningChunk`）时立即将消息状态翻转为 `.streaming`，激活呼吸灯与流式更新节拍。
 - Qoder 模型切换全线报错与浏览器凭据网关鉴权根治（`AIChatService+Streaming` / `AIChatService+Completion` / `AIChatState` / `AIProviderStore` / `QoderNativeSigner` / `QoderProvider` / `AIAuthManager`）：
   - **跨服务商模型路由纠偏**：修复 `performStream` 与 `complete` 仅依赖当前 Agent 绑定的默认服务商（Alibaba），导致在会话中切换 Qoder 模型时误将请求发往 DashScope 触发 404/400 报错的缺陷；重构为优先按目标模型 ID 动态路由真实归属的 Provider 及独立 Key；
   - **Qoder Device Token (`dt-`) 放行与端点优先**：浏览器设备流签发的 `dt-` 令牌本身即为长期 Access Token，在 `exchangeJobToken` 中直接识别并放行 `dt-` 与 `jt-` 前缀，清洗包裹引号，杜绝误作为 PAT 提交给兑换接口遭到 400 拒绝；调整端点顺序优先请求国际版 `openapi.qoder.sh`，避开国内端点对国际凭据的 401 拦截；

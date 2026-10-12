@@ -182,15 +182,18 @@ extension AIProvider {
     static func antigravityPreset() -> AIProvider {
         AIProvider(
             id: "antigravity",
-            name: "Antigravity (Gemini 原生)",
+            name: "Antigravity (Google 原生)",
             type: .antigravityNative,
             baseURL: "https://generativelanguage.googleapis.com/v1beta",
             apiProtocol: .chat,
             isEnabled: true,
             models: [
-                AIModelSpec(id: "gemini-2.5-flash", name: "Gemini 2.5 Flash (多模态极速)", contextWindow: 1048576, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "gemini-2.5-pro", name: "Gemini 2.5 Pro (多模态旗舰)", contextWindow: 2097152, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "gemini-3.8-flash", name: "Gemini 3.8 Flash (高智能)", contextWindow: 1048576, supportsVision: true, supportsThinking: true)
+                AIModelSpec(id: "gemini-3.1-pro", name: "Gemini 3.1 Pro (旗舰推理)", contextWindow: 2097152, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "gemini-3.8-flash", name: "Gemini 3.8 Flash (极速全能)", contextWindow: 1048576, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "gemini-3.7-flash", name: "Gemini 3.7 Flash (极速思考)", contextWindow: 1048576, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "claude-opus-4-6", name: "Claude Opus 4.6 (深度思考)", contextWindow: 200000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (旗舰主力)", contextWindow: 200000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "gpt-oss-120b", name: "GPT-OSS 120B (开源大模型)", contextWindow: 131072, supportsVision: false, supportsThinking: true)
             ]
         )
     }

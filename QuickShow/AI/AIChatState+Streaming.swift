@@ -543,6 +543,9 @@ extension AIChatState {
             // UI 侧 .equatable() 仍可对其余未变行跳过重建。
             if !reasoningChunk.isEmpty {
                 message.reasoning = (message.reasoning ?? "") + reasoningChunk
+                if message.state == .sending {
+                    message.state = .streaming
+                }
             }
             if !contentChunk.isEmpty {
                 message.content += contentChunk
