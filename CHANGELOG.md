@@ -53,6 +53,11 @@
 
 ### Fixed
 
+- **亮色模式下正文文本颜色异常变白根治（`MarkdownInlineNS.swift` / `MarkdownTextFlow.swift`）**：
+  - **排查与根因**：排查定位 AppKit 动态语义色（Catalog Color，如 `NSColor.labelColor`）在调用 `.withAlphaComponent(...)` 时会丢失外观动态响应能力并在调用瞬间的暗色上下文下被静态光栅化为固化 sRGB 白色（`RGBA(1, 1, 1, 0.8)`）的底层机制，导致普通正文与列表在亮色模式毛玻璃卡片上呈现为近乎不可见的隐形白字；
+  - **动态外观自适应提供器（`adaptiveLabel`）**：封装基于 `NSColor(name: nil, dynamicProvider:)` 的动态颜色构造器，依据当前宿主视图的 `effectiveAppearance` 正确分流深色（白字透明度）与浅色（黑字透明度），使正文与列表项在亮色模式下自然呈现高对比度深色文本；
+  - **全链路外观联动与即时重绘**：将行内代码背景色、高亮底色与链接强调色同步升级为动态闭包提供，并在 `NonScrollingTextView` 中重写 `viewDidChangeEffectiveAppearance()`，确保系统或设置切换深浅模式时文字样式毫秒级无缝联动刷新。
+
 - **Mermaid 矢量图表渲染尺寸畸变与时序图泳道穿刺根治（`MermaidWebView.swift`）**：
   - **消除小图暴力放大畸变**：彻底移除 Web 模板中 `svg { max-width: 100% !important; }` 的破坏性样式覆盖，恢复 Mermaid 原生内联 `style="max-width: 自然宽"` 保护，彻底解决流程图（`flowchart TB`）、方块图（`block-beta`）、实体关系图（`erDiagram`）等窄图被强行拉扯放大 2~4 倍且高度暴增至数千像素的严重缺陷；
   - **根治时序图（`sequenceDiagram`）泳道竖线穿刺顶部参与者方框**：排查定位 Mermaid 底层生命线起笔于顶部方框内 `y=5` 处、依赖不透明实色背景遮盖的历史实现缺陷；在 SVG 渲染流水线中新增几何规范化裁剪（`normalizeDiagram`），自动将垂直生命线起点截断在顶部参与者底边（$bottomY = y + height$），即使在 macOS 深度毛玻璃半透明体系下亦能呈现规整干净的专业时序图。

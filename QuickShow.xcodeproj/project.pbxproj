@@ -748,7 +748,7 @@
 			path = Vendor/Mermaid;
 			sourceTree = "<group>";
 		};
-		"TEMP_43BD5686-3A1E-49FD-B63E-8DBE3CD9E33D" /* Resources */ = {
+		"TEMP_3A27D8F9-4F92-4FFF-8E54-42ACA899A1C3" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);

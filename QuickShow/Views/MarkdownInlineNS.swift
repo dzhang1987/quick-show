@@ -38,19 +38,33 @@ enum MarkdownInlineNS {
         NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
+    /// 动态适配外观的文本前景色（带透明度）：解决 NSColor.labelColor.withAlphaComponent 在 AppKit 下固化为固定 sRGB 丢失外观感知的问题
+    static func adaptiveLabel(opacity: CGFloat) -> NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor.white.withAlphaComponent(opacity)
+                : NSColor.black.withAlphaComponent(opacity)
+        }
+    }
+
     /// 行内代码底色：chatInlineCodeFill = Color.primary.opacity(0.10) 的 NSColor 近似。
     private static var codeBackground: NSColor {
-        NSColor.labelColor.withAlphaComponent(0.10)
+        adaptiveLabel(opacity: 0.10)
     }
 
     /// 高亮（`<mark>`）底色：半透明强调色（与 SwiftUI 路径同 accent 色系，0.15 降噪）。
     private static var highlightBackground: NSColor {
-        accentColor.withAlphaComponent(0.15)
+        NSColor(name: nil) { appearance in
+            MathRasterizer.resolvedColor(Theme.Colors.accent, appearance: appearance).withAlphaComponent(0.15)
+        }
     }
 
     /// accent 的 NSColor 近似：优先取当前主题 accent 解析值，失败退回系统 linkColor。
     static var accentColor: NSColor {
-        MathRasterizer.resolvedColor(Theme.Colors.accent, appearance: NSApp.effectiveAppearance)
+        NSColor(name: nil) { appearance in
+            MathRasterizer.resolvedColor(Theme.Colors.accent, appearance: appearance)
+        }
     }
 
     static func renderNS(

@@ -182,7 +182,7 @@ enum MarkdownTextFlowBuilder {
         into result: NSMutableAttributedString
     ) {
         let baseFont = MarkdownInlineNS.font(size: 13, weight: .regular)
-        let baseColor = NSColor.labelColor.withAlphaComponent(0.80)
+        let baseColor = MarkdownInlineNS.adaptiveLabel(opacity: 0.80)
         let render = MarkdownInlineNS.renderNS(
             inlines,
             baseFont: baseFont,
@@ -282,7 +282,7 @@ enum MarkdownTextFlowBuilder {
         var subLists: [(items: [MarkdownListItem], ordered: Bool)] = []
 
         let bodyFont = MarkdownInlineNS.font(size: 13, weight: .regular)
-        let bodyColor = NSColor.labelColor.withAlphaComponent(bodyOpacity)
+        let bodyColor = MarkdownInlineNS.adaptiveLabel(opacity: bodyOpacity)
 
         for block in item.blocks {
             switch block {
@@ -383,12 +383,18 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
         isSelectable = true
         drawsBackground = false
         backgroundColor = .clear
+        textColor = .labelColor
         isHorizontallyResizable = false
         isVerticallyResizable = true
         textContainerInset = .zero
         textContainer?.lineFragmentPadding = 0
         focusRingType = .none
         delegate = self
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        needsDisplay = true
     }
 
     // 垂直滚轮手势平滑穿透：让外层聊天窗口的 NSScrollView 自然滚动
