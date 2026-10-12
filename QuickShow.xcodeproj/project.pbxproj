@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		0034D112BC5E0A532F010AFD /* DrawerWidgets.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF89D31F162076BCB41E882E /* DrawerWidgets.swift */; };
 		00B5149450CDBE5397A80E8D /* MTMathListIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = C132F36FD7F7D2FD7DD1FFF8 /* MTMathListIndex.swift */; };
+		014193ACDD080820A1EA300C /* AntigravityCloudCodeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED16FD8DF40DEA1024430822 /* AntigravityCloudCodeAdapter.swift */; };
 		03CB1BD151911C430AA9CDE9 /* AIProviderStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3D64C798A068B23C7FF94E3 /* AIProviderStore.swift */; };
 		03F9B8B0283FE7ABB9D12123 /* AIChatContextRingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */; };
 		063D8C81B464D96670DF3D12 /* SettingsShortcutsForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EBB220C3DE2C9A87217EC24 /* SettingsShortcutsForm.swift */; };
@@ -372,6 +373,7 @@
 		EB8F7C9405E7B908FF1A9A77 /* MapTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTools.swift; sourceTree = "<group>"; };
 		EC0A78A95760C2C20A354FDC /* MTFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFont.swift; sourceTree = "<group>"; };
 		EC406C9BEF26120A9D234C3D /* LaunchAgentTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAgentTool.swift; sourceTree = "<group>"; };
+		ED16FD8DF40DEA1024430822 /* AntigravityCloudCodeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityCloudCodeAdapter.swift; sourceTree = "<group>"; };
 		EF5BE1591E097DFDF1C55A4C /* CalendarProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarProvider.swift; sourceTree = "<group>"; };
 		F125C20A7A18B3250E0DC143 /* MathLatexTranspiler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathLatexTranspiler.swift; sourceTree = "<group>"; };
 		F20AF867571D5BCBBE336B6E /* QoderProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderProvider.swift; sourceTree = "<group>"; };
@@ -678,6 +680,7 @@
 				2684F414D200DE0822A89A46 /* AIProvider.swift */,
 				4E15717BBFCB8B1FE8ED7396 /* AIProviderService.swift */,
 				C3D64C798A068B23C7FF94E3 /* AIProviderStore.swift */,
+				ED16FD8DF40DEA1024430822 /* AntigravityCloudCodeAdapter.swift */,
 				54454D7151672BFEB009A4EA /* AntigravityNativeAdapter.swift */,
 				65026604DA4F2FEF2D827A2E /* GeminiProvider.swift */,
 				635CA881705D782F4C882329 /* LLMProvider.swift */,
@@ -724,7 +727,7 @@
 			path = Vendor/Highlightr/Resources/styles;
 			sourceTree = "<group>";
 		};
-		"TEMP_360C6CFA-76C5-46C7-B0D5-10EF95332A27" /* Resources */ = {
+		"TEMP_EB8D83BA-4CAF-4648-9ABE-9F32C93935E8" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -940,6 +943,7 @@
 				C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */,
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
 				9EC1ACFED3A4A9661527135F /* AgentCoordinator.swift in Sources */,
+				014193ACDD080820A1EA300C /* AntigravityCloudCodeAdapter.swift in Sources */,
 				1FCB6755CE9734879FC56056 /* AntigravityNativeAdapter.swift in Sources */,
 				54F3DBE5FAF2AC2BAC8FDB20 /* AppState+Actions.swift in Sources */,
 				5CCB1AA7FCD1E076C224113C /* AppState+Forwarding.swift in Sources */,

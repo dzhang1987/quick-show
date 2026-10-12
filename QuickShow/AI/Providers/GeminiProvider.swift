@@ -2,9 +2,11 @@
 // 支持 Gemini 官方直连 API，提供多模态图文 payload 组装与 SSE 响应解析。
 
 import Foundation
+import os
 
 final class GeminiProvider: LLMProvider, @unchecked Sendable {
     let providerType: AIProviderType = .antigravityNative
+    private static let logger = Logger(subsystem: "cn.chiproad.QuickShow", category: "GeminiProvider")
 
     init() {}
 
@@ -20,14 +22,78 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
             return OpenAIProvider().stream(provider: provider, model: model, messages: messages, options: options, apiKey: apiKey)
         }
 
-        // 优先检查本机是否已安装 Antigravity CLI (agy)，并且凭据为 OAuth / 本机导入或未指定 AIza 格式密钥
         let cleanKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let isClassicStudioKey = cleanKey.hasPrefix("AIzaSy")
-        if let agyPath = Self.findAgyExecutable(), !isClassicStudioKey {
+
+        // 1. 如果指定了经典的 AI Studio API Key (AIzaSy 开头)，走 Google AI Studio 端点
+        if isClassicStudioKey {
+            return streamViaAIStudio(provider: provider, model: model, messages: messages, options: options, apiKey: cleanKey)
+        }
+
+        // 2. 优先尝试 Antigravity 官方云端网关原生 HTTP SSE 直连 (TTFT ~ 1.5s，剥离 agy 5.5s 本地冷启动)
+        if let accessToken = AntigravityCloudCodeAdapter.resolveAccessToken(explicitKey: cleanKey) {
+            return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
+                let task = Task {
+                    do {
+                        let directStream = AntigravityCloudCodeAdapter.stream(
+                            model: model,
+                            messages: messages,
+                            options: options,
+                            initialToken: accessToken
+                        )
+                        for try await event in directStream {
+                            try Task.checkCancellation()
+                            continuation.yield(event)
+                        }
+                        continuation.finish()
+                    } catch {
+                        Self.logger.warning("[GeminiProvider] 原生直连异常: \(error.localizedDescription)，尝试检查 agy CLI 兜底...")
+                        // 直连遇到异常时，若本机已安装 agy，无缝平滑 fallback 至 CLI 兜底
+                        if let agyPath = Self.findAgyExecutable() {
+                            Self.logger.info("[GeminiProvider] 本地找到 agy 可执行文件: \(agyPath)，执行平滑 fallback")
+                            do {
+                                let fallbackStream = self.streamViaAntigravityCLI(
+                                    agyPath: agyPath,
+                                    model: model,
+                                    messages: messages,
+                                    options: options
+                                )
+                                for try await event in fallbackStream {
+                                    try Task.checkCancellation()
+                                    continuation.yield(event)
+                                }
+                                continuation.finish()
+                                return
+                            } catch {
+                                Self.logger.error("[GeminiProvider] agy CLI 兜底失败: \(error.localizedDescription)")
+                                continuation.finish(throwing: error)
+                                return
+                            }
+                        }
+                        continuation.finish(throwing: error)
+                    }
+                }
+                continuation.onTermination = { _ in task.cancel() }
+            }
+        }
+
+        // 3. 兜底检查本机是否已安装 Antigravity CLI (agy)
+        if let agyPath = Self.findAgyExecutable() {
             return streamViaAntigravityCLI(agyPath: agyPath, model: model, messages: messages, options: options)
         }
 
-        return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
+        // 4. 其它情况走标准 Google AI Studio 端点
+        return streamViaAIStudio(provider: provider, model: model, messages: messages, options: options, apiKey: cleanKey)
+    }
+
+    private func streamViaAIStudio(
+        provider: AIProvider,
+        model: AIModelSpec,
+        messages: [ChatCompletionMessage],
+        options: AIChatRequestOptions,
+        apiKey: String
+    ) -> AsyncThrowingStream<AIStreamEvent, Error> {
+        AsyncThrowingStream<AIStreamEvent, Error> { continuation in
             let task = Task {
                 do {
                     let req = try AntigravityNativeAdapter.buildRequest(
