@@ -66,9 +66,9 @@ enum MarkdownInline {
 
             case let .code(value):
                 // 2026-10 重设计：底色 0.06→0.10（比面板亮一档，旧值在玻璃上近乎隐形），
-                // 字色 0.80→主文字色——行内代码 chip 对比度提升，一眼可辨
+                // 字色 0.80→主文字色，字重 medium——行内代码 chip 对比度与可读性提升，一眼可辨
                 var piece = AttributedString(value)
-                piece.font = Theme.Typography.mono(12.5)
+                piece.font = Theme.Typography.mono(12.5, .medium)
                 piece.foregroundColor = Theme.Colors.contentPrimary
                 piece.backgroundColor = Theme.Colors.chatInlineCodeFill
                 result.append(piece)

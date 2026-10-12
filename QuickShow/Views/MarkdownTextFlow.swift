@@ -237,11 +237,14 @@ enum MarkdownTextFlowBuilder {
             prefixFont = Theme.Typography.mono(12)
         } else {
             prefixText = (depth == 0 ? "•" : "◦") + "\t"
-            prefixFont = Theme.Typography.text(13, .medium)
+            prefixFont = Theme.Typography.text(12, .medium)
         }
 
         var prefixAttr = AttributedString(prefixText)
         prefixAttr.font = prefixFont
+        if depth == 0 && !ordered && item.taskState == nil {
+            prefixAttr.baselineOffset = 0.5 // 中文混排下圆点几何居中光学微调
+        }
         prefixAttr.foregroundColor = Theme.Colors.contentTertiary
         itemPiece.append(prefixAttr)
 
@@ -268,9 +271,9 @@ enum MarkdownTextFlowBuilder {
         }
 
         // 3. 悬挂缩进 + NSTextTab 精准两列对齐
-        // 有序列表 14pt 标号 + 8pt 呼吸留白 = 24pt；无序列表圆点 + 8pt 留白 = 18pt
+        // 有序列表 14pt 标号 + 8pt 呼吸留白 = 24pt；任务列表 = 20pt；无序列表圆点 + 8pt 留白 = 18pt
         let baseIndent: CGFloat = CGFloat(depth) * 22
-        let hangingOffset: CGFloat = ordered ? 24 : 18
+        let hangingOffset: CGFloat = item.taskState != nil ? 20 : (ordered ? 24 : 18)
         let hangingIndent: CGFloat = baseIndent + hangingOffset
 
         let style = NSMutableParagraphStyle()
