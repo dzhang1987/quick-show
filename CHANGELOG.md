@@ -6,6 +6,12 @@
 
 ### Added
 
+- Qoder 与 Antigravity 三模认证与无感授权体系（`AIAuthManager` / `OAuthLoopbackServer` / `AIProviderStore` / `AIServiceSettingsForm`）：
+  - **三位一体认证架构**：同时支持「① 直接填入 API Key / PAT 凭据」、「② 自动探测并导入本机已登录账号」、「③ 网页端浏览器登录授权」，彻底消除手动复制长串密钥的心智负担；
+  - **Qoder 官方 Device Flow 浏览器授权**：纯原生 Swift 实现基于官方 Device Flow（S256 PKCE + Nonce + Machine ID）的浏览器授权通道，打开 `qoder.com/device/selectAccounts` 并在后台异步轮询 `deviceToken/poll`，用户在网页端点击确认后自动回传 Token 并换取用户信息完成绑定，无本地端口依赖，零代理/TUN模式冲突；
+  - **Google OAuth 2.0 PKCE 桌面端流（Antigravity）**：使用 Apple 原生 `Network.framework` 的 `NWListener` 监听临时本地回环随机端口，生成高熵 S256 PKCE 凭据，唤起系统默认浏览器完成 Google 账号登录授权，捕获回调后自动换取 Access Token 与 Refresh Token，展示原生美观的授权成功 HTML 反馈页并即时销毁监听器；
+  - **本机凭据智能感知与一键导入**：自动探测 Mac 本机已安装并登录的 `qodercli`（解析 `status -o json` 用户名与邮箱）、本机环境变量 `GEMINI_API_KEY` / `GOOGLE_API_KEY` 及 `gcloud` 账号，检测到即在界面高亮提供一键导入；
+  - **偏好设置授权卡片与生命周期管理**：提供已授权账号卡片（展示用户名、邮箱、授权来源标签与退出登录操作），未授权态支持进度加载提示与随时取消，保留折叠/就地手动输入框作为高级自定义中转兜底。
 - 大模型多供应商原生驱动与统一 Provider 架构（`LLMProvider` / `LLMProviderRegistry` / `OpenAIProvider` / `QoderProvider` / `GeminiProvider`）：
   - **统一行业标准协议分层**：基于行业通用 Provider + Model 第一性原理，抽象 `protocol LLMProvider` 通用能力接口与 `LLMProviderRegistry` 动态分发总线，业务调用层彻底消除巨型分支；
   - **Qoder 国际版原生网关纯原生接入**：纯原生 Swift 完整实现 PAT 换取短效 JobToken、动态 UserInfo 查询与 COSY 签名请求头（RSA PKCS1 报文加密 + MD5 校验 + AES-128-CBC 对称加密 + 自定义 Base64 字典重排与块置换），预设官方 14 款模型，彻底摆脱外部桥接依赖；
@@ -72,6 +78,22 @@
 
 ### Fixed
 
+- Qoder 模型切换全线报错与浏览器凭据网关鉴权根治（`AIChatService+Streaming` / `AIChatService+Completion` / `AIChatState` / `AIProviderStore` / `QoderNativeSigner` / `QoderProvider` / `AIAuthManager`）：
+  - **跨服务商模型路由纠偏**：修复 `performStream` 与 `complete` 仅依赖当前 Agent 绑定的默认服务商（Alibaba），导致在会话中切换 Qoder 模型时误将请求发往 DashScope 触发 404/400 报错的缺陷；重构为优先按目标模型 ID 动态路由真实归属的 Provider 及独立 Key；
+  - **Qoder Device Token (`dt-`) 放行与端点优先**：浏览器设备流签发的 `dt-` 令牌本身即为长期 Access Token，在 `exchangeJobToken` 中直接识别并放行 `dt-` 与 `jt-` 前缀，清洗包裹引号，杜绝误作为 PAT 提交给兑换接口遭到 400 拒绝；调整端点顺序优先请求国际版 `openapi.qoder.sh`，避开国内端点对国际凭据的 401 拦截；
+  - **真实 UID 可靠解析与防 403 鉴权失效**：Qoder 推理网关严格校验 Token 与真实 UID 绑定关系；`fetchUserInfo` 与 `finishQoderAuth` 兼容提取多层结构及从 `avatar_url` 提取 UID，并持久化到本地账号存储；彻底消除因回滚至占位符 `qoder-user` 触发内层 SSE 403 `Login expired`，凭据缓存主动拦截失效 UID 条目；
+  - **端点就绪与模型能力跨服务商探测**：`hasConfiguredEndpoint` 升级为依次综合会话生效模型、当前 Agent、全局选中 Provider 与全局回退判定，彻底解决用户仅授权 Qoder、但 Agent 仍指向未配 Key 的默认服务商时输入坞错误报「尚未配置 AI 服务」的阻断问题；`modelSpec(for:)` 支持跨 Provider 查询模型的视觉与思考能力；
+  - **非流式补全与角色映射兼容**：对非 OpenAI 兼容服务商（Qoder / Gemini）的轻量补全（标题摘要/上下文压缩）统一重定向至流式收集逻辑并严格透传目标模型，根治请求不存在的 `chat/completions` 端点导致的 404；Qoder 请求构建将 `role: tool` 安全映射为上下文观测文本，并在授权成功时自动为新用户切入官方预设团队。
+
+- Qoder 浏览器登录授权与本机账号一键确认链路根治（`AIAuthManager` / `QoderNativeSigner` / `AIServiceSettingsForm`）：
+  - **根因分析**：原实现将 Qoder Web 授权地址硬编码为不存在的 `qoder.sh` 根域名，导致唤起 Safari 时报「无法找到服务器 qoder.sh」；且当点击「导入本机账号」时，因本机 CLI 凭据由系统加密保存而回退调用该错误链接，导致两个按钮均打开失效网页；
+  - **官方生产 Web 域名校正**：将授权页地址修正为官方可用的 `https://qoder.com/device/selectAccounts`，Safari 唤起后即可正常渲染官方账号授权与允许页面；
+  - **双端点并发轮询容灾**：轮询 Device Token 与兑换 Job Token 时并发试探国内端点（`openapi.qoder.com.cn`）与国际端点（`openapi.qoder.sh`），只要任意一侧响应 200 即可秒级完成无感绑定，解决跨区域网络 DNS 偶发延迟；
+  - **已登录账号探测直读与清晰引导**：Antigravity 探测直接解析本机 `app_storage.json` 获取真实登录账号（如 `netpicasa@gmail.com`）；Qoder 导入本机账号文案明确指引「正在唤起官方授权页确认绑定本机账号 (用户名)...」，用户点击后网页一键确认即完成全流程。
+- 设置面板删除服务商崩溃根治（`AIServiceSettingsForm` / `AIProviderStore` / `AIAgentStore`）：
+  - **根因分析**：设置面板原模型列表与智能体表单的 SwiftUI `Binding` 使用硬编码数组整数下标（`pIndex`、`mIndex`、`agentIndex`）；当用户点击「删除此服务商」导致数组缩短时，SwiftUI 在当前布局刷新帧内对旧 Binding 闭包求值，直接触发 `Swift runtime failure: Index out of range` 致命崩溃；
+  - **按实体 ID 安全路由重构**：将所有 Provider、Model、Agent 的 Binding 生成器及辅助操作方法全面重构为基于唯一 ID（`providerId` / `modelId` / `agentId`）动态检索；若目标实体已从 Store 中移除，getter 安全返回默认值（空串/默认开关），setter 安全守卫返回，彻底消除下标越界隐患；
+  - **删除动作选中迁移守卫**：`AIProviderStore.deleteProvider(id:)` 与 `AIAgentStore.deleteAgent(id:)` 在移除目标对象时，原子检查并平滑将 `selectedProviderId` 与 `activeAgentId` 迁移至第一个可用项，确保界面平滑切换不闪退。
 - 快速切换器鼠标悬浮滚动与按键冲突修复（`AIChatQuickSwitcher`）：解决鼠标悬停在列表项导致滚轮与上下方向键无法驱动列表滚动的事件争抢问题，确保键鼠平滑过渡。
 - 模态在场输入坞制表符泄漏与穿透修复（`ChatInputNSTextView` / `AIChatInputFields`）：在模态浮层在场期间拒收文本输入与命令派发，彻底消除 `Tab` 键选择会话时向输入坞插入多余制表符的焦点穿透缺陷。
 
