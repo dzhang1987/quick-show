@@ -135,6 +135,25 @@ private struct ToolCallRow: View {
                         .foregroundColor(Theme.Colors.contentTertiary)
                         .lineLimit(1)
                 }
+                if let taskId = extractTaskId(from: record), let uuid = UUID(uuidString: taskId) {
+                    Button {
+                        ChatSessionStore.shared.currentSessionId = uuid
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text("查看子会话")
+                                .font(Theme.Typography.text(10, .medium))
+                            Image(systemName: "arrow.up.right.square")
+                                .font(Theme.Typography.text(9))
+                        }
+                        .foregroundColor(Theme.Colors.accent)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Theme.Colors.accent.opacity(0.12))
+                        .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("切换到该子智能体的独立会话")
+                }
                 ToolStatusBadge(status: record.status)
                 Image(systemName: "chevron.right")
                     .font(Theme.Typography.text(9, .semibold))
@@ -145,6 +164,14 @@ private struct ToolCallRow: View {
         }
         .buttonStyle(.plain)
         .help(expanded ? String(localized: "收起详情") : String(localized: "展开参数与结果"))
+    }
+
+    private func extractTaskId(from record: ToolCallRecord) -> String? {
+        guard let result = record.result, let data = result.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["task_id"] as? String
     }
 
     // MARK: 展开区（参数 + 结果）

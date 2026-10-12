@@ -181,7 +181,7 @@ struct AIChatSidebarView: View {
                             .padding(.top, Theme.Spacing.lg)
                             .padding(.bottom, Theme.Spacing.xs)
                         ForEach(group.sessions) { session in
-                            sessionRow(session)
+                            sessionTreeNode(session)
                         }
                     }
                 }
@@ -205,9 +205,51 @@ struct AIChatSidebarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - 单个会话行
+    // MARK: - 树状会话节点
 
-    private func sessionRow(_ session: ChatSession) -> some View {
+    @State private var collapsedSessionIds: Set<UUID> = []
+
+    @ViewBuilder
+    private func sessionTreeNode(_ session: ChatSession) -> some View {
+        let children = store.childSessions(of: session.id)
+        let hasChildren = !children.isEmpty
+        let isCollapsed = collapsedSessionIds.contains(session.id)
+
+        VStack(alignment: .leading, spacing: 2) {
+            sessionRow(
+                session,
+                hasChildren: hasChildren,
+                isCollapsed: isCollapsed,
+                onToggleCollapse: {
+                    if isCollapsed {
+                        collapsedSessionIds.remove(session.id)
+                    } else {
+                        collapsedSessionIds.insert(session.id)
+                    }
+                }
+            )
+
+            // 树状缩进子 Agent 会话列表
+            if hasChildren && !isCollapsed {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(children) { child in
+                        childSessionRow(child, parent: session)
+                    }
+                }
+                .padding(.leading, 18)
+                .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: - 单个主会话行
+
+    private func sessionRow(
+        _ session: ChatSession,
+        hasChildren: Bool = false,
+        isCollapsed: Bool = false,
+        onToggleCollapse: (() -> Void)? = nil
+    ) -> some View {
         SessionRowView(
             session: session,
             isSelected: store.currentSessionId == session.id,
@@ -215,6 +257,9 @@ struct AIChatSidebarView: View {
             isStreaming: streamingSessionIds.contains(session.id),
             isUnread: unreadSessionIds.contains(session.id),
             isHovered: hoveredSessionId == session.id,
+            hasChildren: hasChildren,
+            isCollapsed: isCollapsed,
+            onToggleCollapse: onToggleCollapse,
             renamingText: $renamingText,
             renameFocused: $renameFocused,
             onSelect: { onSelect(session.id) },
@@ -222,7 +267,6 @@ struct AIChatSidebarView: View {
             onBeginRename: {
                 renamingText = session.title
                 renamingSessionId = session.id
-                // 延迟一帧聚焦：等行内 TextField 随重命名态挂载后再下发放大镜焦点
                 DispatchQueue.main.async { renameFocused = true }
             },
             onCommitRename: { commit in
@@ -236,10 +280,28 @@ struct AIChatSidebarView: View {
             },
             onDelete: { store.deleteSession(id: session.id) },
             onAbort: { onAbortStreaming(session.id) },
-            // 单悬停：enter 覆盖式置位（新 enter 自动顶掉旧行残留）；exit 仅匹配自身才清除
             onHoverStart: {
                 hoveredSessionId = session.id
             },
+            onHoverEnd: { id in
+                guard hoveredSessionId == id else { return }
+                hoveredSessionId = nil
+            }
+        )
+    }
+
+    // MARK: - 树状缩进子 Agent 会话行
+
+    private func childSessionRow(_ child: ChatSession, parent: ChatSession) -> some View {
+        ChildSessionRowView(
+            child: child,
+            isSelected: store.currentSessionId == child.id,
+            isStreaming: streamingSessionIds.contains(child.id),
+            isHovered: hoveredSessionId == child.id,
+            onSelect: { onSelect(child.id) },
+            onDelete: { store.deleteSession(id: child.id) },
+            onAbort: { onAbortStreaming(child.id) },
+            onHoverStart: { hoveredSessionId = child.id },
             onHoverEnd: { id in
                 guard hoveredSessionId == id else { return }
                 hoveredSessionId = nil
@@ -260,6 +322,9 @@ private struct SessionRowView: View {
     let isUnread: Bool
     /// 全局单悬停下发的 hover 态（父级保证至多一行为 true）。
     let isHovered: Bool
+    var hasChildren: Bool = false
+    var isCollapsed: Bool = false
+    var onToggleCollapse: (() -> Void)? = nil
     @Binding var renamingText: String
     var renameFocused: FocusState<Bool>.Binding
     let onSelect: () -> Void
@@ -277,6 +342,19 @@ private struct SessionRowView: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.md) {
+            if hasChildren {
+                Button {
+                    onToggleCollapse?()
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .font(Theme.Typography.text(8, .semibold))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                        .frame(width: 12, height: 12)
+                }
+                .buttonStyle(.plain)
+            }
+
             if session.pinned {
                 Image(systemName: "pin.fill")
                     .font(Theme.Typography.text(8.5))
@@ -400,5 +478,93 @@ private struct BreathingDot: View {
             if hovered { NSCursor.pop() }
         }
         .help("点击中止生成")
+    }
+}
+
+// MARK: - 树状缩进子 Agent 会话行
+
+private struct ChildSessionRowView: View {
+    let child: ChatSession
+    let isSelected: Bool
+    let isStreaming: Bool
+    let isHovered: Bool
+    let onSelect: () -> Void
+    let onDelete: () -> Void
+    let onAbort: () -> Void
+    let onHoverStart: () -> Void
+    let onHoverEnd: (UUID) -> Void
+
+    private var agent: AIAgent? {
+        AIAgentStore.shared.agent(for: child.agentId ?? "")
+    }
+
+    var body: some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            // 树形拐角分支符号
+            Image(systemName: "arrow.turn.down.right")
+                .font(Theme.Typography.text(8.5, .medium))
+                .foregroundColor(Theme.Colors.contentTertiary.opacity(0.6))
+
+            // 智能体小图标
+            Image(systemName: agent?.iconName ?? "brain")
+                .font(Theme.Typography.text(8.5, .medium))
+                .foregroundColor(Theme.Colors.accent)
+
+            // 智能体小标签
+            Text(agent?.name ?? "子智能体")
+                .font(Theme.Typography.text(9.5, .medium))
+                .foregroundColor(Theme.Colors.contentSecondary)
+                .lineLimit(1)
+
+            // 标题
+            Text(child.title.replacingOccurrences(of: "[\(agent?.name ?? "")] ", with: ""))
+                .font(Theme.Typography.text(11, isSelected ? .medium : .regular))
+                .foregroundColor(isSelected || isHovered ? Theme.Colors.contentPrimary : Theme.Colors.contentSecondaryStrong)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Spacer(minLength: 0)
+
+            // 状态指示
+            if isStreaming {
+                BreathingDot(onAbort: onAbort)
+            } else if child.taskStatus == .completed {
+                Image(systemName: "checkmark")
+                    .font(Theme.Typography.text(8, .bold))
+                    .foregroundColor(.green.opacity(0.8))
+            } else if child.taskStatus == .failed {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(Theme.Typography.text(8, .bold))
+                    .foregroundColor(.orange.opacity(0.8))
+            }
+
+            // ⋯ 菜单
+            if isHovered || isSelected {
+                Menu {
+                    Button("删除任务", role: .destructive, action: onDelete)
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(Theme.Typography.text(9, .semibold))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .frame(width: 16, height: 16)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, Theme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                .fill(isSelected ? Theme.Colors.accent.opacity(0.12) : Color.clear)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onSelect)
+        .onHover { hovering in
+            if hovering { onHoverStart() }
+            else { onHoverEnd(child.id) }
+        }
+        .onDisappear { onHoverEnd(child.id) }
     }
 }

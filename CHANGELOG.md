@@ -13,7 +13,16 @@
   - **OpenAI 兼容端点双协议支持**：支持 OpenAI 官方、阿里云百炼、DeepSeek、Ollama 等端点的 Chat Completions 与 Responses 双协议。
 - 多智能体团队协作与中枢编排体系（`AIAgentStore` / `DelegateToAgentTool` / `oh-my-opencode-slim` 模式）：
   - **预设多智能体团队**：内置通用助手（Generalist，编排中枢）、系统架构师（Architect）、全能工程师（Engineer）、感知观察者（Observer，视觉担当）、快速探索者（Explorer）等专业角色，每个智能体具备独立专属 Provider、模型绑定、提示词人设与思考档位；
-  - **子智能体中枢委派工具（`delegate_to_agent`）**：为编排中枢注册原生委派工具，中枢可根据用户意图在对话中自主调度视觉专家识别图片、或委派架构师/工程师完成专项深度任务，并将成果汇总回传；
+  - **多智能体异步并发调度与任务总线（`AgentCoordinator` / `LaunchAgentTool` / `AwaitAgentsTool`）**：
+    - 引入基于 Swift Concurrency 的后台调度中枢 `AgentCoordinator`，支持中枢通过 `launch_agent` 默认异步并发启动多个子智能体，立即返回 `task_id` 并在后台独立流式会话中并行执行，彻底消除串行阻塞；
+    - 引入 `await_agents(task_ids)` 工具，支持在后续规划依赖子任务产出时原子挂起并同步聚合等待多个子智能体成果；
+  - **全连接智能体间点对点通信（`SendMessageTool`）**：所有智能体相互之间均可调用 `send_message` 进行点对点直接通信、跨领域咨询或中间数据移交，无需中枢二次传话；
+  - **独立子会话与侧边栏树状缩进切换（`ChatSessionStore` / `AIChatSidebarView` / `AIToolCardView`）**：
+    - 每次委派均自动创建具有 `parentSessionId` 关联的独立持久化会话，主会话保持聚焦不跳转；
+    - 侧边栏主会话支持折叠/展开，展开后以树状层级缩进展示所有子会话（呈现拐角连接线、智能体专属图标、呼吸中/完成/失败状态指示）；
+    - 工具调用卡片提供 `[查看子会话 ↗]` 快捷按钮，支持一键切换至对应子会话查看完整流式生成；
+  - **全模态媒体协议扩展（`ChatAttachment` / `AttachmentKind`）**：淘汰单一特化的 `include_images` 参数，全面升级为通用的 `include_attachments`（双向兼容），媒体容器抽象为通用的 `ChatAttachment`（涵盖图片、音频、视频、文档），为未来全模态扩展奠定统一底座；
+  - **子智能体中枢委派工具（`delegate_to_agent`）**：保留一键复合委派工具，自动创建子会话并同步等待结果回传；
   - **多模态视觉感知自动接力**：当用户向不支持视觉的纯文本/代码模型发送图片时，视觉担当（Observer）自动先行提取图片结构化要素（OCR、布局、报错信息）并接力注入上下文，纯文本模型无需改动即可精准回答图片内容；
   - **输入坞智能体与模型矩阵切换**（`AIChatInputDock`）：输入坞常驻 Chip 升级为「智能体团队」➔「所属模型池」➔「思考强度」三级上下文菜单，并直观标注视觉专长（👁️）；
   - **偏好设置智能体管理面板**（`AIServiceSettingsForm`）：提供可视化智能体团队增删改查、跨 Provider/模型自由指派与视觉担当开关。
