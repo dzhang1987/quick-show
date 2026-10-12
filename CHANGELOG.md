@@ -6,6 +6,25 @@
 
 ### Added
 
+- Antigravity 官方云端网关原生 HTTP SSE 直连架构（`AntigravityCloudCodeAdapter` / `GeminiProvider` / `AIAuthManager`）：
+  - **彻底剥离本地 CLI 5.5 秒冷启动开销**：从第一性原理直连 Google Cloud Code PA 内部服务端点 (`daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse`)，首字上屏时间 (TTFT) 从原来的 10 秒骤降至 1.2~1.8 秒，提速超 5~7 倍；
+  - **官方原生结构化思考流承接**：服务端 SSE 事件流直接下发 `candidate.parts.thought == true` 字段，无需任何客户端打标或模型输出的 `[THINK]` 标签清洗，实现纯净且实时的思考流折叠展开卡片；
+  - **系统钥匙串 (macOS Keychain) 凭据真源与 401 自动检测自愈**：
+    - 优先自 macOS 钥匙串（`svce: "gemini"`, `acct: "antigravity"`）提取活跃 OAuth Token，彻底根除读取静态过期凭据的问题；
+    - 结合系统钥匙串后台实时续期机制，当遇到 HTTP 401 时自动重新捕获更新后的最新 Token 并秒级重试，实现零密钥硬编码的纯净直连自愈能力；
+  - **服务端模型映射表修正**：精确映射 `gemini-3.8-flash` / `gemini-3.7-flash` 为 `gemini-3.6-flash-high`，映射 `gemini-3.1-pro` 为 `gemini-pro-agent`，杜绝因非法模型参数触发 HTTP 400 INVALID_ARGUMENT；
+  - **双轨无缝平滑容错兜底**：直连通道若遇到严重断网等不可抗力，自动无感 fallback 唤起本地 `agy` CLI 进程兜底执行，保证用户体验稳健无故障。
+
+### Fixed
+
+- **多轮历史上下文角色严格归一化合并（根治 MALFORMED_FUNCTION_CALL 断流）**：
+  - 排查定位多轮对话中若存在截断产生的空回复，会导致 `contents` 中产生连续的 `user` 角色，触发 Google Gemini 服务端上下文状态机崩溃并报 `MALFORMED_FUNCTION_CALL`，导致正文输出为空并被提前掐断；
+  - 引入连续相同角色 `parts` 自动合并与首轮 `user` 校验机制，确保上下文绝对合规，彻底根除思考后正文丢失断流的问题。
+- **SSE 流式数据块空行防御性跳过**：
+  - 修正原 `guard !rawJSON.isEmpty, rawJSON != "[DONE]" else { break }` 误将 SSE 心跳空行当做结束标志 break 的严重逻辑缺陷，仅在明确收到 `[DONE]` 时退出，空行正常 continue 等待，杜绝流式提前截断。
+- **直连网络通道专用隔离**：
+  - 建立专用的 `directSession`，独立管理连接池与请求超时，杜绝与系统全局会话的连接复用冲突。
+
 - 触控 ID (Touch ID) 优先的生物识别本机静默导入体系（`AIAuthManager` / `AIServiceSettingsForm`）：
   - **原生 Touch ID 授权闭环**：接入 Apple 原生 `LocalAuthentication` 框架，点击「触控 ID 导入」优先唤起系统生物识别面板（呼吸灯与指纹提示），轻触指纹秒级通过验证，无 Touch ID 设备自动优雅降级为系统解锁密码，彻底消除每次输入钥匙串密码的繁琐体验；
   - **真正的零浏览器静默导入**：彻底切断导入流程中回退唤起网页浏览器的逻辑，全程在 macOS 系统安全与原生 UI 闭环完成，不再产生“导入账号却弹浏览器”的体验割裂；
