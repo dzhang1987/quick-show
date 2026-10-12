@@ -207,18 +207,20 @@ private struct MarkdownBlockquoteView: View {
     let blocks: [MarkdownBlock]
 
     var body: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.xl) {
-            // 左竖线：弱化强调色，克制不抢戏
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, child in
+                MarkdownBlockView(block: child)
+            }
+        }
+        // 引用内容整体弱化一档，与竖线共同传达「引述」语义
+        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+        // 竖线与文字间距 + 竖线宽（3）
+        .padding(.leading, Theme.Spacing.xl + 3)
+        // 左竖线：高度严格贴合引用内容实际高度，绝不向外自由拉伸
+        .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
                 .fill(Theme.Colors.accent.opacity(0.55))
                 .frame(width: 3)
-            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                ForEach(Array(blocks.enumerated()), id: \.offset) { _, child in
-                    MarkdownBlockView(block: child)
-                }
-            }
-            // 引用内容整体弱化一档，与竖线共同传达「引述」语义
-            .foregroundColor(Theme.Colors.contentSecondaryStrong)
         }
         .padding(.horizontal, Theme.Spacing.xl)
         .padding(.vertical, Theme.Spacing.lg)

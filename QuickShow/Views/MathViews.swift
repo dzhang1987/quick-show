@@ -23,31 +23,27 @@ enum InlineMathAttachment {
 
 // MARK: - 块级公式视图
 
-/// 块级公式：包 NSImageView，display 模式光栅化，等比缩放不下溢。
-/// 失败降级由调用方处理（本视图 image 为 nil 时不显示内容）。
-struct MathBlockView: NSViewRepresentable {
+/// 块级公式：display 模式光栅化位图，等比自适应尺寸，高度严格受真实位图高度约束。
+/// 失败降级由调用方（AsyncMathBlockView）处理。
+struct MathBlockView: View {
     let latex: String
     var fontSize: CGFloat = 14
     var color: Color = Color.primary
 
-    /// 明暗翻转追踪：SwiftUI 环境变化才触发 updateNSView 重调（读 NSApp.effectiveAppearance
-    /// 不被追踪，外观切换后旧位图会钉死），翻转后经缓存 key（含颜色分量）自动换新位图。
+    /// 明暗翻转追踪：SwiftUI 环境变化触发视图重绘，经缓存 key（含颜色分量）自动换新位图。
     @Environment(\.colorScheme) private var colorScheme
 
-    func makeNSView(context: Context) -> NSImageView {
-        let view = NSImageView()
-        view.imageScaling = .scaleProportionallyDown
-        view.imageAlignment = .alignCenter
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        return view
-    }
-
-    func updateNSView(_ view: NSImageView, context: Context) {
+    var body: some View {
         let nsColor = MathRasterizer.resolvedColor(color, appearance: MathRasterizer.appearance(for: colorScheme))
-        let raster = MathRasterizer.rasterize(
+        if let raster = MathRasterizer.rasterize(
             latex: latex, pointSize: fontSize, color: nsColor, isDisplay: true
-        )
-        view.image = raster?.image
+        ) {
+            Image(nsImage: raster.image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: raster.size.width)
+                .frame(height: raster.size.height)
+        }
     }
 }
 

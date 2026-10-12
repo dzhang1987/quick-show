@@ -20,8 +20,13 @@
   - **无序圆点光学几何居中（Optical Alignment）**：注入 `baselineOffset = 0.5` 消除中文混排下的圆点下沉感，与汉字保持几何垂直中心对齐；
   - **行内代码 Chip 质感提升**：字重提升至 `Theme.Typography.mono(12.5, .medium)`，路径与技术词汇在半透明背景上更加清晰扎实。
 
-### Fixed
-
+- **Markdown 引用块（Blockquote）竖线与卡片垂直无限拉伸 Bug 根治（`MarkdownBlocks.swift`）**：
+  - 针对原实现中左侧竖条使用无高度约束的 `RoundedRectangle` Shape 导致在 SwiftUI 容器中贪婪占用垂直空间、致使文字悬空且卡片底部产生大片虚白的问题，重构为基于文本内容尺寸驱动的 `.overlay(alignment: .leading)`，引述线高度与内容精确 1:1 贴合；
+- **Markdown 块级数学公式（Math Block）夸张留白修复（`MathViews.swift`）**：
+  - 针对 `MathBlockView` 封装的 `NSImageView` 因缺少 `sizeThatFits` 在垂直方向被分配过多 Proposed Height、导致公式上下各留出数百像素空白的缺陷，重构为纯 SwiftUI `Image(nsImage: raster.image)` 并显式锚定为光栅化实际逻辑点高度，公式恢复紧凑优雅的居中展现；
+- **Markdown 图片加载失败卡片排版轻量化与请求头增强（`MarkdownImageView.swift`）**：
+  - 移除 `failureView` 强加的通栏 `maxWidth: .infinity`，改为自适应紧凑卡片并补充 `photo` 状态图标，避免在列表项缩进中形成臃肿 Banner；
+  - `loadRemote` 补齐现代浏览器标准 `User-Agent` 与 `Accept` 请求头，降低图床防盗链被误拒概率。
 - **`⌘ + C` 复制快捷键失效修复（`AIPanel.performKeyEquivalent`）**：
   - 针对 QuickShow 运行于 `NSApp.setActivationPolicy(.accessory)` 下系统不自动派发主菜单 Key Equivalent 的底层机制，在 `AIPanel` 窗口层补齐 `performKeyEquivalent(with:)`；
   - 子视图未消费时自动转交 `NSApp.mainMenu`，并针对 `⌘C`（复制）、`⌘A`（全选）直接向当前响应者链派发 `copy:` / `selectAll:` 动作，彻底解决聊天消息划选后只能依赖右键菜单复制的 P0 痛点。

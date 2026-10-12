@@ -174,32 +174,41 @@ struct MarkdownImageView: View {
         }
     }
 
-    /// 失败：弱化色圆角块内显示 alt 文本 + url 小字链接。
+    /// 失败：弱化色圆角块内显示破损图示 + alt 文本 + url 小字链接，自适应尺寸克制排版。
     private var failureView: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-            Text(alt.isEmpty ? String(localized: "图片无法加载") : alt)
-                .font(Theme.Typography.text(12))
-                .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                .fixedSize(horizontal: false, vertical: true)
-            if let linkURL = URL(string: url),
-               let scheme = linkURL.scheme?.lowercased(),
-               scheme == "http" || scheme == "https" {
-                Link(destination: linkURL) {
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            Image(systemName: "photo")
+                .font(Theme.Typography.text(13))
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(alt.isEmpty ? String(localized: "图片无法加载") : alt)
+                    .font(Theme.Typography.text(12, .medium))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let linkURL = URL(string: url),
+                   let scheme = linkURL.scheme?.lowercased(),
+                   scheme == "http" || scheme == "https" {
+                    Link(destination: linkURL) {
+                        Text(url)
+                            .font(Theme.Typography.mono(10))
+                            .foregroundColor(Theme.Colors.accent)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                } else {
                     Text(url)
-                        .font(Theme.Typography.text(10))
-                        .foregroundColor(Theme.Colors.accent)
+                        .font(Theme.Typography.mono(10))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-            } else {
-                Text(url)
-                    .font(Theme.Typography.text(10))
-                    .foregroundColor(Theme.Colors.contentTertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
             }
         }
         .padding(.horizontal, Theme.Spacing.xl)
-        .padding(.vertical, Theme.Spacing.lg)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, Theme.Spacing.md)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                 .fill(Theme.Colors.surfaceTrack)
@@ -208,6 +217,7 @@ struct MarkdownImageView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                 .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: 加载
@@ -248,10 +258,13 @@ struct MarkdownImageView: View {
         }
     }
 
-    /// 远程图片：URLSession 异步取数据，解码放到后台线程。
+    /// 远程图片：URLSession 异步取数据（携带标准 User-Agent / Accept 头防防盗链拦截），解码放到后台线程。
     private static func loadRemote(_ url: URL) async -> NSImage? {
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            var request = URLRequest(url: url)
+            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            request.setValue("image/*,*/*;q=0.8", forHTTPHeaderField: "Accept")
+            let (data, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse,
                !(200..<300).contains(http.statusCode) {
                 return nil
