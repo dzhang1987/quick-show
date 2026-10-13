@@ -18,9 +18,20 @@ struct MermaidBlockView: View {
     @State private var renderedHeight: CGFloat = 80
     @Environment(\.colorScheme) private var colorScheme
 
+    @AppStorage(MermaidLook.storageKey) private var lookRaw: String = MermaidLook.classic.rawValue
+    @AppStorage(MermaidTheme.storageKey) private var themeRaw: String = MermaidTheme.auto.rawValue
+
+    private var currentLook: MermaidLook {
+        MermaidLook(rawValue: lookRaw) ?? .classic
+    }
+
+    private var currentTheme: MermaidTheme {
+        MermaidTheme(rawValue: themeRaw) ?? .auto
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
-            // Header: 语言标签 + 状态提示 + (切换按钮 + 复制按钮)
+            // Header: 语言标签 + 状态提示 + (风格切换 + 主题菜单 + 图表/代码切换 + 复制按钮)
             HStack(spacing: Theme.Spacing.md) {
                 Text("mermaid")
                     .font(Theme.Typography.mono(10, .semibold))
@@ -33,6 +44,55 @@ struct MermaidBlockView: View {
                 }
 
                 Spacer(minLength: 0)
+
+                // 风格与主题快捷控件：仅在图表模式且渲染成功时显示，视觉与右侧「代码 / 复制」胶囊按钮完全统一
+                if !renderFailed && !isShowingCode {
+                    // 1. 外观风格选择按钮 (classic / neo / handDrawn)
+                    Button(action: showLookMenu) {
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Image(systemName: currentLook.iconName)
+                                .font(Theme.Typography.text(9.5, .medium))
+                            Text(currentLook.shortName)
+                                .font(Theme.Typography.text(9.5, .medium))
+                        }
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xxs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                                .fill(Theme.Colors.surfaceButton)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .help(String(localized: "选择 Mermaid 外观风格 (look)"))
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+                    .accessibilityHidden(!hovered)
+
+                    // 2. 内置主题选择按钮
+                    Button(action: showThemeMenu) {
+                        HStack(spacing: Theme.Spacing.xs) {
+                            Image(systemName: "paintpalette")
+                                .font(Theme.Typography.text(9.5, .medium))
+                            Text(currentTheme.shortName)
+                                .font(Theme.Typography.text(9.5, .medium))
+                        }
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xxs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                                .fill(Theme.Colors.surfaceButton)
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize()
+                    .help(String(localized: "选择 Mermaid 内置主题"))
+                    .opacity(hovered ? 1 : 0)
+                    .allowsHitTesting(hovered)
+                    .accessibilityHidden(!hovered)
+                }
 
                 // 模式切换按钮：仅在渲染成功后显示（失败时自动降级展示代码）
                 if !renderFailed {
@@ -88,6 +148,8 @@ struct MermaidBlockView: View {
                 MermaidWebView(
                     code: code,
                     isDark: colorScheme == .dark,
+                    look: currentLook,
+                    theme: currentTheme,
                     renderedHeight: $renderedHeight,
                     renderFailed: $renderFailed
                 )
@@ -123,6 +185,44 @@ struct MermaidBlockView: View {
         }
     }
 
+    private func showLookMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        var actions: [MermaidMenuAction] = []
+
+        for item in MermaidLook.allCases {
+            let action = MermaidMenuAction {
+                lookRaw = item.rawValue
+            }
+            actions.append(action)
+            let menuItem = NSMenuItem(title: item.displayName, action: #selector(MermaidMenuAction.invoke), keyEquivalent: "")
+            menuItem.target = action
+            menuItem.state = (item == currentLook) ? .on : .off
+            menu.addItem(menuItem)
+        }
+
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
+    private func showThemeMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        var actions: [MermaidMenuAction] = []
+
+        for item in MermaidTheme.allCases {
+            let action = MermaidMenuAction {
+                themeRaw = item.rawValue
+            }
+            actions.append(action)
+            let menuItem = NSMenuItem(title: item.displayName, action: #selector(MermaidMenuAction.invoke), keyEquivalent: "")
+            menuItem.target = action
+            menuItem.state = (item == currentTheme) ? .on : .off
+            menu.addItem(menuItem)
+        }
+
+        menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
+    }
+
     private func copyCode() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -130,4 +230,10 @@ struct MermaidBlockView: View {
         copied = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
     }
+}
+
+private final class MermaidMenuAction: NSObject {
+    let handler: () -> Void
+    init(handler: @escaping () -> Void) { self.handler = handler }
+    @objc func invoke() { handler() }
 }

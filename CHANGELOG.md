@@ -6,8 +6,9 @@
 
 ### Added
 
-- **离线 Mermaid 矢量图表原生渲染支持（`MermaidBlockView` / `MermaidWebView`）**：
-  - **离线单文件运行环境与 WKUserScript 预注入（`MermaidScriptLoader`）**：将精简稳定版 `mermaid.min.js` 打包进 App Bundle 资源，通过 `WKUserScript` 在 Document 启动时单例全局注入，彻底规避 WebKit 本地文件跨域沙箱与 `Script error.` 拦截，零外网依赖，毫秒级快速冷启，保持 QuickShow 纯净隐私安全；
+- **离线 Mermaid 矢量图表原生渲染支持（`MermaidBlockView` / `MermaidWebView` / `AIMermaidSettingsSection`）**：
+  - **离线单文件运行环境与 WKUserScript 预注入（`MermaidScriptLoader`）**：将精简稳定版 `mermaid.min.js`（升级至 v11.12.0）打包进 App Bundle 资源，通过 `WKUserScript` 在 Document 启动时单例全局注入，彻底规避 WebKit 本地文件跨域沙箱与 `Script error.` 拦截，零外网依赖，毫秒级快速冷启，保持 QuickShow 纯净隐私安全；
+  - **内置外观风格（`look`）与主题（`theme`）双入口配置**：支持全局偏好设置面板（`AIMermaidSettingsSection`）与图表卡片 Header 右上角悬停胶囊按钮（与「代码 / 复制」视觉统一，采用原生 `NSMenu.popUp`）随时切换 3 种官方外观（规整 `classic` / 新锐 `neo` / 手绘 `handDrawn`）与 12 套主题（自动毛玻璃、官方经典五色及 Neo / Redux 新生代六色），切换后所有图表卡片实时联动重绘；
   - **无感滚动穿透与事件链（`NonScrollingWKWebView`）**：重写 AppKit 滚轮响应逻辑，将垂直滚轮手势自然透传给外层聊天会话 `NSScrollView`，滚轮划过图表卡片极致顺滑无卡顿，水平滑动手势保留用于超宽图表横向平移；
   - **图表 / 源码 双模切换与复制**：卡片 Header 右上角集成「图表 / 代码」一键切换，默认展示自适应矢量图表，可随时无缝切回等宽高亮源码，并提供一键复制源码及轻反馈；
   - **自适应高度与深浅色无缝融合**：基于双向 JS Bridge 实时测量 SVG 渲染真实高度动态撑开视图，支持 QuickShow 明暗主题联动与透明磨砂卡片质感，消除白屏与底色突兀；
@@ -58,10 +59,16 @@
   - **动态外观自适应提供器（`adaptiveLabel`）**：封装基于 `NSColor(name: nil, dynamicProvider:)` 的动态颜色构造器，依据当前宿主视图的 `effectiveAppearance` 正确分流深色（白字透明度）与浅色（黑字透明度），使正文与列表项在亮色模式下自然呈现高对比度深色文本；
   - **全链路外观联动与即时重绘**：将行内代码背景色、高亮底色与链接强调色同步升级为动态闭包提供，并在 `NonScrollingTextView` 中重写 `viewDidChangeEffectiveAppearance()`，确保系统或设置切换深浅模式时文字样式毫秒级无缝联动刷新。
 
-- **Mermaid 矢量图表渲染尺寸畸变、底部截断/留白与中文词法支持根治（`MermaidWebView.swift` / `mermaid.min.js`）**：
-  - **全量图表中文与 Unicode 词法打通**：排查定位 Mermaid 官方 Jison 词法分析器在 `quadrantChart`（象限图）、`xychart-beta`（XY 图）中将未加引号的 `ALPHA` Token 硬编码为 `/^(?:[A-Za-z]+)/i`（仅匹配纯英文 ASCII），在 `sankey-beta`（桑基图）中将 CSV 文本上限锁死在 `\u007E`，以及在 `erDiagram`、`gitGraph`、`requirementDiagram` 中将标识符限制在 ASCII `\w`，导致中文坐标轴、象限名、数据点名或实体名不加引号即抛出 `Lexical error` 降级回退；从词法器底层统一扩充 `\u0080-\uFFFF` Unicode 字符范围与半角括号标点支持；
+- **Mermaid 全量 25+ 种图表语法预归一化、跨主题对比度与渲染尺寸根治（`MermaidWebView.swift` / `mermaid.min.js`）**：
+  - **全量图表中文、特殊字符与无引号语法预归一化（`normalizeMermaidSource` + 词法器补齐）**：
+    - 排查定位 Mermaid 18 个 Jison 词法器与 7 个 Langium 语法对未加引号文本的严苛限制（如 `requirementDiagram` 的 `unqString` 规则显式禁止连字符 `-`，导致 `id: REQ-101` 直接词法报错；`xychart-beta` 未加引号标题含 `%`/`/` 报错且吞空格；`packet-beta` 位段描述、`pie` 切片名、`treemap-beta` 节点名、`erDiagram` 第 4 列注释强制要求双引号；`radar-beta` 强制要求纯 ASCII 标识符）；
+    - 从 `mermaid.min.js` 词法器底层扩充 `\u0080-\uFFFF` Unicode 范围，并在 `MermaidWebView` 渲染前引入无损语法预归一化层 `normalizeMermaidSource`，自动为 `requirementDiagram`、`xychart-beta`、`packet-beta`、`radar-beta`、`erDiagram`、`pie`、`gitGraph`、`treemap-beta` 中未加引号的属性值、标题、注释及中文维度补齐双引号或合法 ID 映射；
+  - **全量 25+ 种图表暗黑/亮色 × 3 种外观 × 12 套主题对比度统一治理（`initMermaid` / `updateCanvasContrastCSS`）**：
+    - 排查定位当传入 `background: 'transparent'` 时，Mermaid 内部 `invert('transparent')` 会计算出 `rgba(255, 255, 255, 0)` 全透明色并赋给 `lineColor` / `relationColor` / `transitionColor`，导致所有连线隐形；彻底移除 `background: 'transparent'` 并显式接管跨主题画布连线与文字色值；
+    - 建立双层 CSS 与 `themeVariables` 对比度保护体系：针对 `mindmap`（脑图暗色节点与分支连线）、`c4`（硬编码 `#444444` 关系线与浅灰外部系统块）、`gitGraph`（翻转标签底色与 `cScaleLabel`）、`sankey-beta`（`mix-blend-mode: multiply` 连线消失与 SVG `<text>` 缺少 `fill`）、`architecture-beta`、`kanban`、`block-beta`、`packet-beta`、`treeView-beta`、`radar-beta`、`xychart-beta`、`quadrantChart`、`timeline`、`gantt`、`journey`、`pie` 等全部图表消除暗色画布黑字/黑线与亮色节点白字问题；
+    - 针对 `handDrawn`（Rough.js 手绘斜线填充 `fill="none"`）在暗色毛玻璃画布搭配浅色主题时透出暗底导致深色字模糊的问题，在 `normalizeDiagram` 中为手绘闭合边框路径注入 `0.82` 同色系半透明实心衬底，兼顾手绘质感与文字锐利度；
   - **`ResizeObserver` 实时高度同步（根治 `erDiagram` 等图表底部截断）**：解决原实现仅在 `mermaid.render` 完成单帧测量一次 `svgEl.getBoundingClientRect().height` 且漏算 `#container` 上下 12px 内边距的缺陷——当容器首帧处于较窄宽度完成测量后展开至完整宽度时，内部 `<svg width="100%">` 等比放大而外层 SwiftUI `renderedHeight` 锁死在旧高度导致底部节点被裁切；引入 `ResizeObserver` 监听 `document.body`、`#container` 与 `<svg>` 实时上报精确容器高度，并在 `clientWidth < 10` 时延后至布局就绪再渲染；
-  - **根治用户旅程图（`journey`）底部巨幅空白**：排查定位 `journey` 渲染器在设置响应式 `width="100%"` 后强行写入硬编码 `height="565"` 且将顶部标题高度 `70px` 误加至底部 `viewBox` 的问题；在 `normalizeDiagram` 中针对 `journey` 依据 `getBBox()` 实际几何边界收紧 `viewBox`，并移除带 `viewBox` 图表的硬编码 `height` 属性，使其严格按宽高比自适应高度；
+  - **根治用户旅程图（`journey`）与 C4 架构图（`c4`）巨幅留白与标题偏置**：在 `normalizeDiagram` 中将 C4 顶层标题相对图形实际几何中心居中归位，并依据 `getBBox()` 实际几何边界收紧 `journey` 与 `c4` 的 `viewBox`、移除硬编码 `height` 属性，使其严格按真实宽高比紧凑展示；
   - **消除小图暴力放大畸变**：彻底移除 Web 模板中 `svg { max-width: 100% !important; }` 的破坏性样式覆盖，恢复 Mermaid 原生内联 `style="max-width: 自然宽"` 保护，彻底解决流程图（`flowchart TB`）、方块图（`block-beta`）、实体关系图（`erDiagram`）等窄图被强行拉扯放大 2~4 倍且高度暴增至数千像素的严重缺陷；
   - **根治时序图（`sequenceDiagram`）泳道竖线穿刺顶部参与者方框**：排查定位 Mermaid 底层生命线起笔于顶部方框内 `y=5` 处、依赖不透明实色背景遮盖的历史实现缺陷；在 SVG 渲染流水线中新增几何规范化裁剪（`normalizeDiagram`），自动将垂直生命线起点截断在顶部参与者底边（$bottomY = y + height$），即使在 macOS 深度毛玻璃半透明体系下亦能呈现规整干净的专业时序图；
   - **根治实体关系图（`erDiagram`）鱼尾终端点闭合树叶畸变与穿透遮挡表头**：排查定位 Mermaid 原生将 `ONE_OR_MORE`（`|{`）与 `ZERO_OR_MORE`（`o{`）四个 `<marker>` 绘制为闭合树叶曲线并将 `refX` 设在中心点、导致后半截 18px 曲线深入实体框内部且依赖不透明背景遮挡的缺陷；将 `mermaid.min.js` 中的鱼尾 `<marker>` 路径重构为标准开放式三叉曲线，并在 `normalizeDiagram` 中通过 `userSpaceOnUse` 坐标系 `<mask>` 将所有 `rect.er.entityBox` 实体矩形内部从 `path.er.relationshipLine` 图层中精准镂空，确保任意角度入射的鱼尾三叉严丝合缝止步于实体框外边缘。

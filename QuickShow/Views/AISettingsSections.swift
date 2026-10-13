@@ -349,3 +349,44 @@ struct AIWebSearchSettingsSection: View {
         keyInput = ""
     }
 }
+
+/// 「Mermaid 图表渲染」小节：外露 Mermaid v11 官方内置的 `look`（规整 / 手绘）与 `theme`（内置主题）参数。
+/// 与 MermaidBlockView 右上角快捷菜单共享同一份 @AppStorage 键，任意一处切换全局即时同步生效。
+struct AIMermaidSettingsSection: View {
+    @AppStorage(MermaidLook.storageKey) private var lookRaw: String = MermaidLook.classic.rawValue
+    @AppStorage(MermaidTheme.storageKey) private var themeRaw: String = MermaidTheme.auto.rawValue
+
+    private var lookBinding: Binding<MermaidLook> {
+        Binding(
+            get: { MermaidLook(rawValue: lookRaw) ?? .classic },
+            set: { lookRaw = $0.rawValue }
+        )
+    }
+
+    private var themeBinding: Binding<MermaidTheme> {
+        Binding(
+            get: { MermaidTheme(rawValue: themeRaw) ?? .auto },
+            set: { themeRaw = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        Section {
+            Picker("外观风格 (look)", selection: lookBinding) {
+                ForEach(MermaidLook.allCases) { item in
+                    Text(item.displayName).tag(item)
+                }
+            }
+
+            Picker("内置主题 (theme)", selection: themeBinding) {
+                ForEach(MermaidTheme.allCases) { item in
+                    Text(item.displayName).tag(item)
+                }
+            }
+        } header: {
+            Text("Mermaid 图表渲染")
+        } footer: {
+            Text("直接映射 Mermaid 官方内置的 look 与 theme 参数，全局实时生效；也可在对话窗的 Mermaid 图表卡片右上角悬停快捷切换。")
+        }
+    }
+}
