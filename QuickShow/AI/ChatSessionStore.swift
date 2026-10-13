@@ -537,13 +537,21 @@ final class ChatSessionStore: ObservableObject {
         return rawSnippet
     }
 
-    /// 由首条用户消息截断出的临时标题（~20 字）。
+    /// 由首条用户消息提取临时标题。优先取完整第一句（换行或标点前），保持语义完整。
     static func makeTemporaryTitle(from text: String) -> String {
-        let cleaned = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !cleaned.isEmpty else { return String(localized: "新会话") }
-        return String(cleaned.prefix(20))
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return String(localized: "新会话") }
+
+        let firstLine = trimmed.components(separatedBy: .newlines).first ?? trimmed
+        let sentenceDelimiters = CharacterSet(charactersIn: "。！？!?；;\n")
+        let parts = firstLine.components(separatedBy: sentenceDelimiters)
+        let firstSentence = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        let candidate = firstSentence.isEmpty ? firstLine : firstSentence
+        if candidate.count <= 18 {
+            return candidate
+        }
+        return String(candidate.prefix(16)) + "…"
     }
 
     // MARK: - 内部：分组辅助
@@ -598,6 +606,24 @@ final class ChatSessionStore: ObservableObject {
     }
 
     // MARK: - 会话草稿落盘
+
+    /// 新会话独立草稿在 UserDefaults 中的存储键。
+    private static let newSessionDraftKey = "QuickShow_NewSessionDraft"
+
+    /// 读取新会话独立未发送草稿。
+    func loadNewSessionDraft() -> String {
+        UserDefaults.standard.string(forKey: Self.newSessionDraftKey) ?? ""
+    }
+
+    /// 持久化新会话独立未发送草稿（空白文本自动清理）。
+    func persistNewSessionDraft(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: Self.newSessionDraftKey)
+        } else {
+            UserDefaults.standard.set(text, forKey: Self.newSessionDraftKey)
+        }
+    }
 
     /// 读取全部会话草稿。key 非法或 value 为空的条目直接丢弃；文件不存在 / 解码失败返回空。
     func loadSessionDrafts() -> [UUID: String] {
@@ -685,6 +711,15 @@ final class ChatSessionStore: ObservableObject {
         // 仅加载时收敛——已按 updatedAt 降序排序，取首次出现即保留最新那条；运行时 mutate 路径不变。
         var seenIds = Set<UUID>()
         loaded = loaded.filter { seenIds.insert($0.id).inserted }
+        // 过滤并自动清理历史遗留的完全空白无消息的主会话（parentSessionId == nil 且 messages.isEmpty），
+        // 杜绝垃圾空会话文件堆积污染侧栏。
+        loaded = loaded.filter { session in
+            if session.parentSessionId == nil && session.messages.isEmpty {
+                removeFile(session.id)
+                return false
+            }
+            return true
+        }
         sessions = loaded
 
         let stored = UserDefaults.standard.string(forKey: currentIdKey).flatMap(UUID.init(uuidString:))

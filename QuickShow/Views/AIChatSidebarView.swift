@@ -66,20 +66,22 @@ struct AIChatSidebarView: View {
             Rectangle()
                 .fill(Theme.Colors.cardStroke)
                 .frame(height: Theme.Layout.dividerHeight)
+            let isDraftActive = store.currentSessionId == nil
             Button(action: onNewSession) {
                 HStack(spacing: Theme.Spacing.md) {
                     Image(systemName: "plus")
                         .font(Theme.Typography.text(11, .semibold))
                     Text("新对话")
-                        .font(Theme.Typography.text(12, .medium))
+                        .font(Theme.Typography.text(12, isDraftActive ? .semibold : .medium))
                     Spacer(minLength: 0)
                     Text("⌘N")
                         .font(Theme.Typography.mono(9.5))
-                        .foregroundColor(Theme.Colors.idleText)
+                        .foregroundColor(isDraftActive ? Theme.Colors.accent.opacity(0.8) : Theme.Colors.idleText)
                 }
-                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                .foregroundColor(isDraftActive ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
                 .padding(.horizontal, Theme.Spacing.xxl)
                 .padding(.vertical, Theme.Spacing.xl)
+                .background(isDraftActive ? Theme.Colors.accent.opacity(0.12) : Color.clear)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

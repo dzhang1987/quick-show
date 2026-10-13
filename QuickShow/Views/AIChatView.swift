@@ -694,7 +694,7 @@ struct AIChatView: View {
     private func newSession() {
         state.renamingSessionId = nil
         state.cancelAbortConfirmation()
-        _ = state.newSession()
+        state.newSession()
     }
 
     /// 侧栏显隐切换（⌘B）：视图状态 + 窗口宽度联动（AIWindowManager 内写偏好并动画调宽）。

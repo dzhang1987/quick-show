@@ -31,6 +31,16 @@
 
 ### Changed
 
+- **AI 对话新建会话交互与草稿生命周期重构（`ChatSessionStore.swift` / `AIChatState.swift` / `AIChatSidebarView.swift` / `AIChatView.swift`）**：
+  - **惰性会话与防重复新建（`newSession`）**：按下 `⌘N` 或点击「新对话」时进入「新会话草稿待命态」，不向会话列表插入条目，不写磁盘文件；若当前已处于草稿态，重复按 `⌘N` 直接保持并重新聚焦输入框，杜绝反复生成无内容空会话；
+  - **独立新会话草稿记忆与消费转正**：在草稿态输入内容未发送时切换至其他会话，草稿独立持久化至后台（`newSessionDraft`），再次进入新对话自动恢复；当且仅当发送首条消息时，正式实例化会话并持久化，同时原子清空新会话草稿，彻底杜绝首条消息回写泄露到下一次新会话；
+  - **历史遗留空会话自动清理**：启动加载时自动扫描并移除历史残留的无消息主会话，彻底清爽侧栏历史。
+
+- **AI 对话语义标题提炼与截断机制重构（`AIChatState+Notifications.swift` / `AIChatState+Streaming.swift` / `ChatSessionStore.swift`）**：
+  - **首条用户输入直击意图**：废除过去必须等待助手回复且拼接大段助修正文的迟钝机制，发送首条消息后立即以用户的提问内容为唯一输入源启动后台轻量摘要请求，单次闭环提炼核心主题；
+  - **消除暴力字符截断**：彻底废除写死的 `prefix(12)` 机械字符截断，完整保留模型生成的精炼短句，仅在异常超长时平滑追加省略号；
+  - **临时标题语义优化**：临时标题由机械截断前 20 字符优化为优先截取完整第一句，避免词句被拦腰截断。
+
 - **Markdown Mermaid 渲染器前端资源（HTML/CSS/JS）全面独立化与模块化解耦（`QuickShow/Resources/Mermaid/` 与 `MermaidTemplateProvider.swift`）**：
   - **前端资产独立与多语言原生支持**：将原先在 Swift 源码中硬编码定义的近 1300 行前端代码彻底抽离为 4 个独立资源文件，获得完整的 HTML/CSS/JavaScript 语法高亮、Prettier 格式化与独立调试能力：
     - `mermaid_template.html`：HTML 容器骨架与插槽占位；

@@ -6,17 +6,14 @@ extension AIChatState {
 
     // MARK: - 内部：LLM 标题摘要
 
-    /// 首轮回复完成后，后台非流式请求生成 ≤12 字中文标题；失败静默保留临时标题。
-    func scheduleTitleSummary(sessionId: UUID) {
+    /// 以用户首条提问为输入，后台非流式请求大模型提炼主题标题；单次闭环，失败静默保留临时标题。
+    func scheduleTitleSummary(sessionId: UUID, userInput: String? = nil) {
         guard let session = store.session(id: sessionId), session.titleNeedsSummary else { return }
-        guard let firstUser = session.messages.first(where: { $0.role == .user }),
-              // 取首条有正文的落定助手消息作为种子（跳过仅含工具调用的助手消息）。
-              let firstAssistant = session.messages.first(where: { $0.role == .assistant && $0.state == .done && !$0.content.isEmpty }) else {
-            return
-        }
+        guard titleTasks[sessionId] == nil else { return }
 
-        let seedUser = String(firstUser.content.prefix(500))
-        let seedAssistant = String(firstAssistant.content.prefix(500))
+        let rawUser = userInput ?? session.messages.first(where: { $0.role == .user })?.content ?? ""
+        let seedUser = String(rawUser.prefix(400)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !seedUser.isEmpty else { return }
 
         titleTasks[sessionId] = Task { [weak self] in
             defer { self?.titleTasks[sessionId] = nil }
@@ -24,29 +21,33 @@ extension AIChatState {
             let messages = [
                 ChatCompletionMessage(
                     role: "system",
-                    content: "你是对话标题生成器。请用不超过 12 个汉字概括对话主题，只输出标题本身，不要标点、引号、编号或任何解释。"
+                    content: "你是对话标题生成器。请根据用户的输入，提炼出简明扼要的对话主题。要求：不超过 10 个汉字（英文 2~4 个单词），语义完整，直接输出标题本身，严禁任何标点符号、引号、序号或解释说明。"
                 ),
                 ChatCompletionMessage(
                     role: "user",
-                    content: "用户：\(seedUser)\n助手：\(seedAssistant)\n\n标题："
+                    content: "用户输入：\(seedUser)\n\n标题："
                 )
             ]
             guard let raw = try? await self.service.complete(messages: messages) else { return }
             let title = Self.sanitizeTitle(raw)
             guard !title.isEmpty else { return }
-            // 生成期间用户可能已重命名，二次确认后再写入。
+            // 生成期间用户可能已手动重命名，二次确认后再写入。
             guard let latest = self.store.session(id: sessionId), latest.titleNeedsSummary else { return }
             self.store.setTitle(id: sessionId, title: title, markSummarized: true)
         }
     }
 
-    /// 清洗标题：去换行、引号与 Markdown 标记，截断 12 字。
+    /// 清洗标题：去换行、引号与标点符号，保留完整语义；仅在异常超长时平滑截断。
     private static func sanitizeTitle(_ raw: String) -> String {
         let cleaned = raw
             .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "「」\"'“”《》#*·-"))
-        return String(cleaned.prefix(12))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "「」\"'“”《》#*·-：:。，,!！?？"))
+        guard !cleaned.isEmpty else { return "" }
+        if cleaned.count <= 16 {
+            return cleaned
+        }
+        return String(cleaned.prefix(15)) + "…"
     }
 
     // MARK: - 流式完成通知

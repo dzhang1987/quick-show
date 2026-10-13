@@ -28,7 +28,19 @@ extension AIChatState {
             return
         }
 
-        let session = store.ensureCurrentSession()
+        let isCreatingNewSession = (store.currentSession == nil)
+        if isCreatingNewSession {
+            isPromotingDraft = true
+            newSessionDraft = ""
+            store.persistNewSessionDraft("")
+        }
+        defer {
+            if isCreatingNewSession {
+                isPromotingDraft = false
+            }
+        }
+
+        let session = store.currentSession ?? store.createSession()
         let sessionId = session.id
 
         // 新建该会话的流式上下文；旧上下文若残留（异常路径兜底）先强制冲刷半截内容再重建。
@@ -46,10 +58,11 @@ extension AIChatState {
         let isFirstUserMessage = session.messages.allSatisfy { $0.role != .user }
         store.appendMessage(userMessage, to: sessionId, persist: false)
 
-        // 首条用户消息：用截断文本做临时标题（待首轮回复后 LLM 摘要）。
+        // 首条用户消息：用首句生成临时标题，并立即启动 LLM 语义标题摘要（仅用用户输入提炼，单次闭环）。
         if session.titleNeedsSummary, isFirstUserMessage {
             let temporary = ChatSessionStore.makeTemporaryTitle(from: userInput)
             store.setTitle(id: sessionId, title: temporary, markSummarized: false, persist: false)
+            scheduleTitleSummary(sessionId: sessionId, userInput: userInput)
         }
 
         inputText = ""
