@@ -210,11 +210,10 @@ public final class MarkdownBlockRegistry {
 - **核心痛点**：`MathLatexTranspiler` 单函数包含 40 余类命令的替换，逻辑混杂且无法独立单测。
 - **解耦结构**：
   1. `MathBalancedParser.swift` (~90 行)：独立通用的平衡括号（`{...}`、`[...]`）提取纯函数；
-  2. `MathSyntaxSanitizer.swift` (~160 行)：负责分数族（`\dfrac`, `\cfrac`）、多重积分、间距符、逻辑关系符的基础映射；
+  2. `MathSyntaxSanitizer.swift` (~200 行)：负责分数族（`\dfrac`, `\cfrac`）、多重积分、间距符、逻辑关系符、装饰去壳（`\boxed`, `\cancel`）与纯命令基础映射；
   3. `MathEnvironmentMapper.swift` (~180 行)：负责 `matrix`、`aligned`、`cases` 等环境映射，以及 2 列收敛处理；
-  4. `MathArgumentRewriter.swift` (~200 行)：负责带参命令（`\overset`, `\xrightarrow`, `\textcolor`, `\color`）的参数重写；
-  5. `MathCommandPatcher.swift` (~120 行)：负责装饰去壳（`\boxed`, `\cancel`）与字体命令补丁；
-  6. `MathLatexPipeline.swift` (~80 行)：主入口，以流水线方式串联上述阶段，对外保持原 `MathLatexTranspiler.transpile` 契约不变。
+  4. `MathArgumentRewriter.swift` (~200 行)：负责带参命令（`\overset`, `\xrightarrow`, `\textcolor`, `\color`）与希腊粗体符号的参数重写；
+  5. `MathLatexPipeline.swift` (~110 行)：主入口，以流水线方式串联上述阶段，对外保持原 `MathLatexTranspiler.transpile` 契约不变。
 
 ### 3.3 TextKit 连续文本流排版引擎（504 行 → 职责单一化）
 - **解耦结构**：
@@ -274,6 +273,7 @@ QuickShow/Views/Markdown/
 │   └── MarkdownRubyView.swift             # 东亚注音组件
 │
 ├── Blocks/                                # [独立块级渲染器与视图组件]
+│   ├── MarkdownBlockView.swift            # 协议驱动块级统一分发视图与间距扩展
 │   ├── MarkdownHeadingRenderer.swift
 │   ├── MarkdownParagraphRenderer.swift
 │   ├── MarkdownListRenderer.swift
@@ -282,6 +282,7 @@ QuickShow/Views/Markdown/
 │   ├── MarkdownDetailsRenderer.swift
 │   ├── MarkdownDefinitionListRenderer.swift
 │   ├── MarkdownTableRenderer.swift
+│   ├── MarkdownTableView.swift
 │   ├── MarkdownCodeBlockRenderer.swift
 │   ├── MarkdownMathRenderer.swift
 │   ├── MarkdownHorizontalRuleRenderer.swift
@@ -298,10 +299,9 @@ QuickShow/Views/Markdown/
 └── Math/                                  # [LaTeX 数学公式独立引擎]
     ├── Pipeline/                          # 转译流水线
     │   ├── MathBalancedParser.swift       # 括号平衡提取纯算法
-    │   ├── MathSyntaxSanitizer.swift      # 符号与命令基础清洗
+    │   ├── MathSyntaxSanitizer.swift      # 符号与命令基础清洗、装饰去壳
     │   ├── MathEnvironmentMapper.swift    # 环境转换与两列收敛
-    │   ├── MathArgumentRewriter.swift     # 复杂命令带参重写
-    │   ├── MathCommandPatcher.swift       # 装饰去壳与字体补丁
+    │   ├── MathArgumentRewriter.swift     # 复杂命令带参重写与希腊粗体
     │   └── MathLatexPipeline.swift        # 流水线执行宿主 (原 MathLatexTranspiler)
     └── Views/                             # 公式光栅化与视图
         ├── MathRasterizer.swift           # SwiftMath 位图渲染引擎

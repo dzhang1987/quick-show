@@ -42,7 +42,8 @@
     - `MarkdownTextFlow.swift`（原 504 行）拆解为 `MarkdownDisplaySegment`、`MarkdownBlockSegmenter`、`MarkdownTextFlowBuilder` 与 `NativeTextFlowView`，排版流切分完全由渲染器 `capabilities` 契约驱动；
     - 行内渲染拆解为纯 TextKit 路径 `MarkdownInlineNS`、纯 SwiftUI 路径 `MarkdownInline`、统一门面 `MarkdownInlineText` 与 AST 属性检测 `InlineToken+Inspection`。
   - **代码与资产零污染规范落地**：
-    - 渲染子系统源码统一收敛至 `QuickShow/Views/Markdown/` 子目录，单文件平均体量控制在 25 ~ 200 行，首帧自适应分批、落定态防抖全量渲染与 TextKit 精密排版 100% 保持零退化；架构设计文档归档至 `docs/MARKDOWN_REFACTOR_DESIGN.md`。
+    - 渲染子系统源码统一收敛至 `QuickShow/Views/Markdown/` 子目录，单文件平均体量控制在 25 ~ 200 行，首帧自适应分批、落定态防抖全量渲染与 TextKit 精密排版 100% 保持零退化；架构设计文档归档至 `docs/MARKDOWN_REFACTOR_DESIGN.md`；
+    - 将行内注音与图片组件（`MarkdownRubyView`、`MarkdownImageView`）、表格组件（`MarkdownTableView`）以及数学公式光栅化/缓存体系（`MathRasterizer`、`MathViews`、`AsyncMathBlockView`、`MathLayoutCache`、`MathLatexCollector`）全量物理归位至 `Markdown/` 对应子目录，`QuickShow/Views/` 顶层目录彻底纯净化。
 
 - **单文本流升级为 AppKit 原生 TextKit 宿主架构（`NativeTextFlowView` / `NonScrollingTextView`）**：
   - **TextKit 底层系统级排版穿透**：彻底攻克 SwiftUI `Text(AttributedString)` 静默丢弃 `NSParagraphStyle` 的系统级缺陷，重构为基于原生 `NSTextView` 的 `NativeTextFlowView`；
