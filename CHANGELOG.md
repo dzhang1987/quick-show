@@ -6,6 +6,11 @@
 
 ### Added
 
+- **Markdown 扩展语法支持：GitHub 风格提示卡片（Alerts）、`<details>/<summary>` 交互折叠块与 `<kbd>` 键盘按键（`MarkdownAST.swift` / `MarkdownParser.swift` / `MarkdownParser+HTML.swift` / `MarkdownBlocks.swift`）**：
+  - **GitHub 风格提示卡片（GFM Alerts）**：在 `MarkdownParser` 引用块解析中新增 `parseAlertHeader` 识别首行 `> [!NOTE]` / `> [!TIP]` / `> [!IMPORTANT]` / `> [!WARNING]` / `> [!CAUTION]`（大小写不敏感），剥离标记行后递归解析块级正文；新增 `MarkdownAlertView` 组件，配备五种语义专属配色（蓝 / 绿 / 紫 / 橙 / 红）、SF Symbol 图标、语义标题栏与左侧 3pt 语义色竖条及半透明衬底卡片；
+  - **`<details>` / `<summary>` 原生可折叠卡片**：在 `MarkdownParser+HTML` 中新增 `parseDetailsInner` 与 `isDetailsOpen`，自动提取 `<summary>` 行内标题（并剥离冗余手写 `▶`/`▼` 前缀）与内部块级正文，支持 `open` 默认展开属性；新增 `MarkdownDetailsView` 交互卡片，支持点击标题栏平滑旋转 chevron 展开/收起详细内容；
+  - **`<kbd>` 键盘按键标签**：将行内 `<kbd>` 从普通 `<code>` 中解耦为独立 `.kbd(String)` token，在 SwiftUI（`MarkdownInline`）与 AppKit（`MarkdownInlineNS`）双路径中统一渲染为加粗等宽键帽样式。
+
 - **离线 Mermaid 矢量图表原生渲染支持（`MermaidBlockView` / `MermaidWebView` / `AIMermaidSettingsSection`）**：
   - **离线单文件运行环境与 WKUserScript 预注入（`MermaidScriptLoader`）**：将精简稳定版 `mermaid.min.js`（升级至 v11.12.0）打包进 App Bundle 资源，通过 `WKUserScript` 在 Document 启动时单例全局注入，彻底规避 WebKit 本地文件跨域沙箱与 `Script error.` 拦截，零外网依赖，毫秒级快速冷启，保持 QuickShow 纯净隐私安全；
   - **内置外观风格（`look`）与主题（`theme`）双入口配置**：支持全局偏好设置面板（`AIMermaidSettingsSection`）与图表卡片 Header 右上角悬停胶囊按钮（与「代码 / 复制」视觉统一，采用原生 `NSMenu.popUp`）随时切换 3 种官方外观（规整 `classic` / 新锐 `neo` / 手绘 `handDrawn`）与 12 套主题（自动毛玻璃、官方经典五色及 Neo / Redux 新生代六色），切换后所有图表卡片实时联动重绘；
@@ -53,6 +58,10 @@
   - **双轨无缝平滑容错兜底**：直连通道若遇到严重断网等不可抗力，自动无感 fallback 唤起本地 `agy` CLI 进程兜底执行，保证用户体验稳健无故障。
 
 ### Fixed
+
+- **修复 SwiftUI 行内渲染字体覆盖导致加粗/斜体/行内代码失效及 `***粗斜体***` 解析错位（`MarkdownInline.swift` / `MarkdownInlineNS.swift` / `MarkdownParser+Inline.swift`）**：
+  - **消除整段 `result.font` 事后覆盖**：重构 `MarkdownInline.render`，改为按叶子 token 上下文（`size` / `baseWeight` / `isBold` / `isItalic`）直接计算并赋予精确字体，解决此前 `result.font = Theme.Typography.text(size)` 抹平 `.code` 等宽字体以及 `.bold`/`.italic` 缺失字重与斜体样式导致引用块、Alert、表格内行内格式失效的问题；
+  - **支持三符号 `***text***` / `___text___` 粗斜体语法与 trait 叠加**：在 `MarkdownParser.parseInlines` 中增加 `findClosingTriple` 三符号优先匹配（解析为 `.bold([.italic(...)])`），避免被双符号 `**` 抢先截断留置孤立星号；并在 `MarkdownInlineNS` 的 `.bold` 分支中保留外层已有的 `.italic` 字体特征。
 
 - **Markdown 混合排版与行内公式引发的 AppKit 300 次布局死循环与主线程死机根治（`MarkdownTextFlow.swift` / `MathViews.swift` / `AIChatMessageList.swift` / `MermaidWebView.swift`）**：
   - **排查与根因**：采样与系统日志定证，当会话同时包含单文本流（`NativeTextFlowView`）、行内数学公式（`MathParagraphView`）与多张 Mermaid 图表时，主线程陷入 `-layoutSubtreeIfNeeded has continued for 300 iterations because -updateConstraints and/or -layout has kept the layout or constraints dirty` 死循环，导致 CPU 100% 满载与内存暴涨无响应；

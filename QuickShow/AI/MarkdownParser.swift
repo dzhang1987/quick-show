@@ -93,7 +93,7 @@ enum MarkdownParser {
                 continue
             }
 
-            // 引用块：连续以 > 开头的行。
+            // 引用块 / GitHub 风格提示块（> [!NOTE|TIP|IMPORTANT|WARNING|CAUTION]）：连续以 > 开头的行。
             if trimmed.hasPrefix(">") {
                 flushParagraph()
                 var quoted: [String] = []
@@ -105,7 +105,16 @@ enum MarkdownParser {
                     quoted.append(content)
                     index += 1
                 }
-                blocks.append(.blockquote(parse(quoted.joined(separator: "\n"), references: referenceMap)))
+                if let first = quoted.first, let header = parseAlertHeader(first) {
+                    var bodyLines = Array(quoted.dropFirst())
+                    if !header.trailingText.isEmpty {
+                        bodyLines.insert(header.trailingText, at: 0)
+                    }
+                    let innerBlocks = parse(bodyLines.joined(separator: "\n"), references: referenceMap)
+                    blocks.append(.alert(kind: header.kind, blocks: innerBlocks))
+                } else {
+                    blocks.append(.blockquote(parse(quoted.joined(separator: "\n"), references: referenceMap)))
+                }
                 continue
             }
 
@@ -312,6 +321,20 @@ enum MarkdownParser {
         if text.hasPrefix("|") { text.removeFirst() }
         if text.hasSuffix("|") { text.removeLast() }
         return text.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    // MARK: - 内部：GitHub Alert
+
+    /// 识别引用块首行的 `[!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]`（大小写不敏感）。
+    /// 返回提示块类型与首行标记后可能紧跟的同行文本。
+    private static func parseAlertHeader(_ firstLine: String) -> (kind: MarkdownAlertKind, trailingText: String)? {
+        let trimmed = firstLine.trimmingCharacters(in: .whitespaces)
+        guard trimmed.hasPrefix("[!"), let closeIndex = trimmed.firstIndex(of: "]") else { return nil }
+        let startIndex = trimmed.index(trimmed.startIndex, offsetBy: 2)
+        let rawKind = String(trimmed[startIndex..<closeIndex]).trimmingCharacters(in: .whitespaces).lowercased()
+        guard let kind = MarkdownAlertKind(rawValue: rawKind) else { return nil }
+        let trailing = String(trimmed[trimmed.index(after: closeIndex)...]).trimmingCharacters(in: .whitespaces)
+        return (kind, trailing)
     }
 
 }

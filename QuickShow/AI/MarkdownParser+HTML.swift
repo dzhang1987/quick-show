@@ -66,7 +66,60 @@ extension MarkdownParser {
         }
 
         let inner = innerLines.joined(separator: "\n")
+        if tag == "details" {
+            let isOpen = isDetailsOpen(in: trimmed, tagLength: tag.count)
+            let parsed = parseDetailsInner(inner, references: references)
+            return ([.details(summary: parsed.summary, blocks: parsed.blocks, isOpen: isOpen)], closeLine + 1)
+        }
         return (parse(inner, references: references), closeLine + 1)
+    }
+
+    /// 检查 `<details ...>` 开标签是否携带 `open` 属性。
+    private static func isDetailsOpen(in openLine: String, tagLength: Int) -> Bool {
+        let chars = Array(openLine)
+        let attrStart = 1 + tagLength
+        guard attrStart < chars.count, let gt = findCharacter(">", in: chars, from: attrStart) else {
+            return false
+        }
+        let attrs = parseAttributes(String(chars[attrStart..<gt]))
+        return attrs["open"] != nil
+    }
+
+    /// 从 `<details>` 内部文本中提取 `<summary>…</summary>` 标题与剩余正文块。
+    private static func parseDetailsInner(
+        _ inner: String,
+        references: [String: LinkReference]
+    ) -> (summary: [InlineToken], blocks: [MarkdownBlock]) {
+        if let openRange = inner.range(of: "<summary", options: .caseInsensitive),
+           let openGt = inner[openRange.upperBound...].firstIndex(of: ">"),
+           let closeRange = inner.range(
+               of: "</summary>",
+               options: .caseInsensitive,
+               range: inner.index(after: openGt)..<inner.endIndex
+           ) {
+            let summaryContentStart = inner.index(after: openGt)
+            var rawSummary = String(inner[summaryContentStart..<closeRange.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // 剥离常见手写折叠箭头前缀（▶ / ▸ / ► / ▼ / ▾），由组件统一绘制原生旋转 chevron
+            let leadingArrows: Set<Character> = ["▶", "▸", "►", "▼", "▾"]
+            if let first = rawSummary.first, leadingArrows.contains(first) {
+                rawSummary.removeFirst()
+                rawSummary = rawSummary.trimmingCharacters(in: .whitespaces)
+            }
+            let summaryInlines = rawSummary.isEmpty
+                ? [InlineToken.text(String(localized: "详情"))]
+                : parseInlines(rawSummary, references: references)
+
+            let beforeSummary = String(inner[inner.startIndex..<openRange.lowerBound])
+            let afterSummary = String(inner[closeRange.upperBound...])
+            let bodyMarkdown = (beforeSummary + "\n" + afterSummary)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let bodyBlocks = parse(bodyMarkdown, references: references)
+            return (summaryInlines, bodyBlocks)
+        }
+
+        let defaultSummary = [InlineToken.text(String(localized: "详情"))]
+        return (defaultSummary, parse(inner, references: references))
     }
 
     /// 从 start 行起按同名标签深度计数，返回匹配闭合标签所在行；未闭合返回 nil。
@@ -174,8 +227,10 @@ extension MarkdownParser {
             return ([.underline(parseInlines(content, references: references))], next)
         case "s", "del", "strike":
             return ([.strikethrough(parseInlines(content, references: references))], next)
-        case "code", "kbd", "samp":
+        case "code", "samp":
             return ([.code(content)], next)
+        case "kbd":
+            return ([.kbd(decodeHTMLEntities(content))], next)
         case "mark":
             return ([.highlight(parseInlines(content, references: references))], next)
         case "sub":

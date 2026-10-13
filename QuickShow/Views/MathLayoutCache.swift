@@ -101,6 +101,7 @@ enum MathLayoutCache {
             switch token {
             case let .text(value): hasher.combine(1); hasher.combine(value)
             case let .code(value): hasher.combine(2); hasher.combine(value)
+            case let .kbd(value): hasher.combine(15); hasher.combine(value)
             case let .bold(inner): hasher.combine(3); hashTokens(inner, into: &hasher)
             case let .italic(inner): hasher.combine(4); hashTokens(inner, into: &hasher)
             case let .link(text, url, title):

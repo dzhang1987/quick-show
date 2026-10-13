@@ -53,6 +53,11 @@ enum MarkdownInlineNS {
         adaptiveLabel(opacity: 0.10)
     }
 
+    /// 键盘按键（`<kbd>`）底色：比行内代码深半档以突显键帽感。
+    private static var kbdBackground: NSColor {
+        adaptiveLabel(opacity: 0.14)
+    }
+
     /// 高亮（`<mark>`）底色：半透明强调色（与 SwiftUI 路径同 accent 色系，0.15 降噪）。
     private static var highlightBackground: NSColor {
         NSColor(name: nil) { appearance in
@@ -107,19 +112,34 @@ enum MarkdownInlineNS {
                 let piece = NSAttributedString(
                     string: value,
                     attributes: [
-                        .font: monoFont(size: 12.5),
-                        .foregroundColor: baseColor,
+                        .font: monoFont(size: 12.5, weight: .medium),
+                        .foregroundColor: NSColor.labelColor,
                         .backgroundColor: codeBackground,
                     ]
                 )
                 result.append(piece)
 
+            case let .kbd(value):
+                let piece = NSAttributedString(
+                    string: "\u{2009}\(value)\u{2009}",
+                    attributes: [
+                        .font: monoFont(size: max(baseSize - 1, 9), weight: .semibold),
+                        .foregroundColor: NSColor.labelColor,
+                        .backgroundColor: kbdBackground,
+                    ]
+                )
+                result.append(piece)
+
             case let .bold(inner):
-                // 加粗档提为 labelColor（contentPrimary），与 SwiftUI 版一致
+                // 加粗档提为 labelColor（contentPrimary），并保留可能存在的外层斜体 trait
+                var boldFont = font(size: baseSize, weight: .semibold)
+                if baseFont.fontDescriptor.symbolicTraits.contains(.italic) {
+                    boldFont = NSFontManager.shared.convert(boldFont, toHaveTrait: .italicFontMask)
+                }
                 render(
                     into: result,
                     tokens: inner,
-                    baseFont: font(size: baseSize, weight: .semibold),
+                    baseFont: boldFont,
                     baseColor: .labelColor,
                     baseSize: baseSize,
                     pending: &pending
@@ -376,8 +396,7 @@ struct MarkdownInlineText: View {
     /// 非公式路径：严格复刻各调用点原有的 Text + font(+foregroundColor) modifier 组合。
     @ViewBuilder
     private var plainText: some View {
-        let base = Text(MarkdownInline.render(inlines, bodyColor: bodyColor))
-            .font(Theme.Typography.text(baseSize, weight))
+        let base = Text(MarkdownInline.render(inlines, bodyColor: bodyColor, size: baseSize, baseWeight: weight))
         if let explicitColor {
             base.foregroundColor(explicitColor)
         } else {
@@ -492,7 +511,7 @@ extension InlineToken {
             return inner.containsMath
         case let .link(text, _, _):
             return text.containsMath
-        case .text, .code, .image, .lineBreak, .footnoteRef:
+        case .text, .code, .kbd, .image, .lineBreak, .footnoteRef:
             return false
         }
     }

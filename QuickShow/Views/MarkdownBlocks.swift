@@ -63,6 +63,12 @@ struct MarkdownBlockView: View {
         case let .blockquote(inner):
             MarkdownBlockquoteView(blocks: inner)
 
+        case let .alert(kind, inner):
+            MarkdownAlertView(kind: kind, blocks: inner)
+
+        case let .details(summary, inner, isOpen):
+            MarkdownDetailsView(summary: summary, blocks: inner, defaultOpen: isOpen)
+
         case let .table(table):
             MarkdownTableView(table: table)
 
@@ -240,6 +246,152 @@ private struct MarkdownBlockquoteView: View {
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                 .fill(Theme.Colors.surfaceBadge)
+        )
+    }
+}
+
+// MARK: - GitHub 风格提示卡片（Alerts）
+
+private struct MarkdownAlertView: View {
+    let kind: MarkdownAlertKind
+    let blocks: [MarkdownBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            HStack(spacing: Theme.Spacing.md) {
+                Image(systemName: iconName)
+                    .font(Theme.Typography.text(12.5, .semibold))
+                Text(title)
+                    .font(Theme.Typography.text(12.5, .semibold))
+            }
+            .foregroundColor(tintColor)
+
+            if !blocks.isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, child in
+                        MarkdownBlockView(block: child)
+                    }
+                }
+            }
+        }
+        .padding(.leading, Theme.Spacing.xl + 3)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1.5, style: .continuous)
+                .fill(tintColor.opacity(0.85))
+                .frame(width: 3)
+        }
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                .fill(tintColor.opacity(0.06))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                .stroke(tintColor.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+
+    private var title: String {
+        switch kind {
+        case .note: return "Note"
+        case .tip: return "Tip"
+        case .important: return "Important"
+        case .warning: return "Warning"
+        case .caution: return "Caution"
+        }
+    }
+
+    private var iconName: String {
+        switch kind {
+        case .note: return "info.circle.fill"
+        case .tip: return "lightbulb.fill"
+        case .important: return "exclamationmark.bubble.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .caution: return "exclamationmark.octagon.fill"
+        }
+    }
+
+    private var tintColor: Color {
+        switch kind {
+        case .note: return Color(nsColor: .systemBlue)
+        case .tip: return Color(nsColor: .systemGreen)
+        case .important: return Color(nsColor: .systemPurple)
+        case .warning: return Color(nsColor: .systemOrange)
+        case .caution: return Color(nsColor: .systemRed)
+        }
+    }
+}
+
+// MARK: - 交互式折叠组件（<details> / <summary>）
+
+private struct MarkdownDetailsView: View {
+    let summary: [InlineToken]
+    let blocks: [MarkdownBlock]
+    let defaultOpen: Bool
+
+    @State private var isExpanded: Bool
+
+    init(summary: [InlineToken], blocks: [MarkdownBlock], defaultOpen: Bool) {
+        self.summary = summary
+        self.blocks = blocks
+        self.defaultOpen = defaultOpen
+        self._isExpanded = State(initialValue: defaultOpen)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(spacing: Theme.Spacing.lg) {
+                    Image(systemName: "chevron.right")
+                        .font(Theme.Typography.text(11, .semibold))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .frame(width: 12, alignment: .center)
+                    MarkdownInlineText(
+                        inlines: summary,
+                        bodyColor: Theme.Colors.contentPrimary,
+                        baseSize: 13,
+                        weight: .semibold,
+                        explicitColor: Theme.Colors.contentPrimary
+                    )
+                    .lineSpacing(4)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.lg)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded, !blocks.isEmpty {
+                Rectangle()
+                    .fill(Theme.Colors.cardStroke)
+                    .frame(height: Theme.Layout.dividerHeight)
+                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    ForEach(Array(blocks.enumerated()), id: \.offset) { _, child in
+                        MarkdownBlockView(block: child)
+                    }
+                }
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.lg)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .fill(Theme.Colors.surfaceBadge)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
     }
 }

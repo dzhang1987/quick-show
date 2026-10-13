@@ -10,6 +10,8 @@ indirect enum InlineToken: Equatable {
     case bold([InlineToken])
     case italic([InlineToken])
     case code(String)
+    /// 键盘按键（`<kbd>…</kbd>`）。
+    case kbd(String)
     /// 链接：`text` 为可继续解析的行内内容，`url` 为原始地址，`title` 为可选的引号标题。
     case link(text: [InlineToken], url: String, title: String?)
     /// 行内数学公式：已剥离定界符（$…$ / \(…\)）的纯 LaTeX 源串。
@@ -30,6 +32,17 @@ indirect enum InlineToken: Equatable {
     case lineBreak
     /// 脚注引用（`[^id]`）。
     case footnoteRef(String)
+}
+
+// MARK: - GitHub 风格提示块类型
+
+/// GFM Alert 五种语义类型（`> [!NOTE]` 等）。
+enum MarkdownAlertKind: String, Equatable {
+    case note
+    case tip
+    case important
+    case warning
+    case caution
 }
 
 // MARK: - 引用式链接定义
@@ -75,13 +88,17 @@ struct MarkdownTable: Equatable {
 
 // MARK: - 块级 AST
 
-/// 块级 Markdown AST。blockquote / list item 递归包含块级节点，故为 indirect enum。
+/// 块级 Markdown AST。blockquote / alert / details / list item 递归包含块级节点，故为 indirect enum。
 indirect enum MarkdownBlock: Equatable {
     case heading(level: Int, inlines: [InlineToken])
     case paragraph([InlineToken])
     case orderedList([MarkdownListItem])
     case unorderedList([MarkdownListItem])
     case blockquote([MarkdownBlock])
+    /// GitHub 风格提示卡片（`> [!NOTE|TIP|IMPORTANT|WARNING|CAUTION]`）。
+    case alert(kind: MarkdownAlertKind, blocks: [MarkdownBlock])
+    /// HTML `<details>` 折叠块（含 `<summary>` 行内标题与展开后的块级内容）。
+    case details(summary: [InlineToken], blocks: [MarkdownBlock], isOpen: Bool)
     case table(MarkdownTable)
     case codeBlock(language: String?, code: String)
     /// 块级数学公式：已剥离定界符（$$…$$ / \[…\]）的纯 LaTeX 源串。

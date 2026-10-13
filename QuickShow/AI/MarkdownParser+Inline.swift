@@ -187,8 +187,20 @@ extension MarkdownParser {
                 }
             }
 
-            // 粗体 / 斜体（*/_ 双符号优先）。
+            // 粗斜体 / 粗体 / 斜体（*/_ 三符号 → 双符号 → 单符号 依次优先）。
             if current == "*" || current == "_" {
+                let isTriple = index + 2 < chars.count
+                    && chars[index + 1] == current
+                    && chars[index + 2] == current
+                if isTriple, let close = findClosingTriple(chars, from: index + 3, marker: current) {
+                    let inner = String(chars[(index + 3)..<close])
+                    if !inner.isEmpty {
+                        flush()
+                        tokens.append(.bold([.italic(parseInlines(inner, references: references))]))
+                        index = close + 3
+                        continue
+                    }
+                }
                 let isDouble = index + 1 < chars.count && chars[index + 1] == current
                 if isDouble, let close = findClosingDouble(chars, from: index + 2, marker: current) {
                     let inner = String(chars[(index + 2)..<close])
@@ -301,6 +313,17 @@ extension MarkdownParser {
                 }
             }
             close += 1
+        }
+        return nil
+    }
+
+    private static func findClosingTriple(_ chars: [Character], from: Int, marker: Character) -> Int? {
+        var index = from
+        while index + 2 < chars.count {
+            if chars[index] == marker && chars[index + 1] == marker && chars[index + 2] == marker {
+                return index
+            }
+            index += 1
         }
         return nil
     }
