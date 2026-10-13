@@ -63,7 +63,8 @@
   - **`ResizeObserver` 实时高度同步（根治 `erDiagram` 等图表底部截断）**：解决原实现仅在 `mermaid.render` 完成单帧测量一次 `svgEl.getBoundingClientRect().height` 且漏算 `#container` 上下 12px 内边距的缺陷——当容器首帧处于较窄宽度完成测量后展开至完整宽度时，内部 `<svg width="100%">` 等比放大而外层 SwiftUI `renderedHeight` 锁死在旧高度导致底部节点被裁切；引入 `ResizeObserver` 监听 `document.body`、`#container` 与 `<svg>` 实时上报精确容器高度，并在 `clientWidth < 10` 时延后至布局就绪再渲染；
   - **根治用户旅程图（`journey`）底部巨幅空白**：排查定位 `journey` 渲染器在设置响应式 `width="100%"` 后强行写入硬编码 `height="565"` 且将顶部标题高度 `70px` 误加至底部 `viewBox` 的问题；在 `normalizeDiagram` 中针对 `journey` 依据 `getBBox()` 实际几何边界收紧 `viewBox`，并移除带 `viewBox` 图表的硬编码 `height` 属性，使其严格按宽高比自适应高度；
   - **消除小图暴力放大畸变**：彻底移除 Web 模板中 `svg { max-width: 100% !important; }` 的破坏性样式覆盖，恢复 Mermaid 原生内联 `style="max-width: 自然宽"` 保护，彻底解决流程图（`flowchart TB`）、方块图（`block-beta`）、实体关系图（`erDiagram`）等窄图被强行拉扯放大 2~4 倍且高度暴增至数千像素的严重缺陷；
-  - **根治时序图（`sequenceDiagram`）泳道竖线穿刺顶部参与者方框**：排查定位 Mermaid 底层生命线起笔于顶部方框内 `y=5` 处、依赖不透明实色背景遮盖的历史实现缺陷；在 SVG 渲染流水线中新增几何规范化裁剪（`normalizeDiagram`），自动将垂直生命线起点截断在顶部参与者底边（$bottomY = y + height$），即使在 macOS 深度毛玻璃半透明体系下亦能呈现规整干净的专业时序图。
+  - **根治时序图（`sequenceDiagram`）泳道竖线穿刺顶部参与者方框**：排查定位 Mermaid 底层生命线起笔于顶部方框内 `y=5` 处、依赖不透明实色背景遮盖的历史实现缺陷；在 SVG 渲染流水线中新增几何规范化裁剪（`normalizeDiagram`），自动将垂直生命线起点截断在顶部参与者底边（$bottomY = y + height$），即使在 macOS 深度毛玻璃半透明体系下亦能呈现规整干净的专业时序图；
+  - **根治实体关系图（`erDiagram`）鱼尾终端点闭合树叶畸变与穿透遮挡表头**：排查定位 Mermaid 原生将 `ONE_OR_MORE`（`|{`）与 `ZERO_OR_MORE`（`o{`）四个 `<marker>` 绘制为闭合树叶曲线并将 `refX` 设在中心点、导致后半截 18px 曲线深入实体框内部且依赖不透明背景遮挡的缺陷；将 `mermaid.min.js` 中的鱼尾 `<marker>` 路径重构为标准开放式三叉曲线，并在 `normalizeDiagram` 中通过 `userSpaceOnUse` 坐标系 `<mask>` 将所有 `rect.er.entityBox` 实体矩形内部从 `path.er.relationshipLine` 图层中精准镂空，确保任意角度入射的鱼尾三叉严丝合缝止步于实体框外边缘。
 
 - **多轮历史上下文角色严格归一化合并（根治 MALFORMED_FUNCTION_CALL 断流）**：
   - 排查定位多轮对话中若存在截断产生的空回复，会导致 `contents` 中产生连续的 `user` 角色，触发 Google Gemini 服务端上下文状态机崩溃并报 `MALFORMED_FUNCTION_CALL`，导致正文输出为空并被提前掐断；

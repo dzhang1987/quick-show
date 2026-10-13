@@ -348,6 +348,76 @@ struct MermaidWebView: NSViewRepresentable {
                     });
                   });
                 }
+
+                // 3. 根治 ER 图（erDiagram）关系连接线终端符号穿刺半透明实体框：
+                //    Mermaid 原生将 ER 关系线绘制在实体框图层下方，且将鱼尾分叉（ONE_OR_MORE / ZERO_OR_MORE）的 refX 设在
+                //    中心点并向实体框内部延伸 18px，依赖不透明实体框背景遮挡。在毛玻璃半透明主题下会穿透实体框遮挡表名。
+                //    此处配合开放式鱼尾分叉路径，通过 SVG userSpaceOnUse 遮罩将所有实体框内部区域从关系线图层中精准镂空，
+                //    确保任意角度入射的鱼尾三叉均严丝合缝止步于实体框外边缘。
+                const relLines = svgEl.querySelectorAll('path.er.relationshipLine');
+                const entityBoxes = svgEl.querySelectorAll('g[id^="entity-"] > rect.er.entityBox');
+                if (relLines.length > 0 && entityBoxes.length > 0) {
+                  const ns = 'http://www.w3.org/2000/svg';
+                  let defs = svgEl.querySelector('defs');
+                  if (!defs) {
+                    defs = document.createElementNS(ns, 'defs');
+                    svgEl.insertBefore(defs, svgEl.firstChild);
+                  }
+                  const maskId = (svgEl.id || 'mermaid-er') + '-entity-mask';
+                  const mask = document.createElementNS(ns, 'mask');
+                  mask.setAttribute('id', maskId);
+                  mask.setAttribute('maskUnits', 'userSpaceOnUse');
+                  mask.setAttribute('maskContentUnits', 'userSpaceOnUse');
+                  mask.setAttribute('x', '-10000');
+                  mask.setAttribute('y', '-10000');
+                  mask.setAttribute('width', '20000');
+                  mask.setAttribute('height', '20000');
+
+                  const bg = document.createElementNS(ns, 'rect');
+                  bg.setAttribute('x', '-10000');
+                  bg.setAttribute('y', '-10000');
+                  bg.setAttribute('width', '20000');
+                  bg.setAttribute('height', '20000');
+                  bg.setAttribute('fill', 'white');
+                  mask.appendChild(bg);
+
+                  entityBoxes.forEach(box => {
+                    const g = box.parentElement;
+                    const transform = (g && g.getAttribute('transform')) || '';
+                    let tx = 0, ty = 0;
+                    const tStart = transform.indexOf('translate(');
+                    if (tStart !== -1) {
+                      const tEnd = transform.indexOf(')', tStart);
+                      if (tEnd !== -1) {
+                        const parts = transform.slice(tStart + 10, tEnd).trim().split(/[ ,]+/);
+                        tx = parseFloat(parts[0]) || 0;
+                        ty = parseFloat(parts[1]) || 0;
+                      }
+                    }
+                    const bx = parseFloat(box.getAttribute('x')) || 0;
+                    const by = parseFloat(box.getAttribute('y')) || 0;
+                    const bw = parseFloat(box.getAttribute('width')) || 0;
+                    const bh = parseFloat(box.getAttribute('height')) || 0;
+                    if (bw > 0 && bh > 0) {
+                      const cut = document.createElementNS(ns, 'rect');
+                      cut.setAttribute('x', String(tx + bx));
+                      cut.setAttribute('y', String(ty + by));
+                      cut.setAttribute('width', String(bw));
+                      cut.setAttribute('height', String(bh));
+                      cut.setAttribute('fill', 'black');
+                      mask.appendChild(cut);
+                    }
+                  });
+                  defs.appendChild(mask);
+
+                  const relGroup = document.createElementNS(ns, 'g');
+                  relGroup.setAttribute('mask', `url(#${maskId})`);
+                  const firstLine = relLines[0];
+                  if (firstLine.parentNode) {
+                    firstLine.parentNode.insertBefore(relGroup, firstLine);
+                    relLines.forEach(line => relGroup.appendChild(line));
+                  }
+                }
               }
 
               async function doRenderDiagram(code, isDark) {
