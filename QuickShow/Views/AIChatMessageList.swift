@@ -393,10 +393,10 @@ struct SessionMessageList: View {
     ///   frame.height 即缓存值本身，天然无变化。
     private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
         guard viewportHeight > 0, !frames.isEmpty else { return }
-        // 列宽变化即整体失效行高缓存：行 frame 宽度统一 = 内容列宽，任取一行即可代表。
+        // 列宽变化即整体失效行高缓存：使用确定性的最大行宽（避免 Dictionary.values.first 无序随机抽样抖动）。
         // 清空后 virtualWindowIds 内的行（视口 ±2 屏）仍实渲染、按新宽度回写缓存；
         // 窗口外行切换为估算占位（100pt），进入窗口时再实渲染重测。
-        let probeWidth = frames.values.first?.width ?? 0
+        let probeWidth = frames.values.map(\.width).max() ?? 0
         if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 1 {
             rowHeights.removeAll()
             cachedColumnWidth = probeWidth

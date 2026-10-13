@@ -74,6 +74,9 @@ struct MathParagraphView: NSViewRepresentable {
         weak var field: NSTextField?
         /// 本段内容 hash（updateNSView 时算一次）：全局高度缓存的 key 之一。
         var contentHash = 0
+        var lastIsDark: Bool?
+        var lastBaseSize: CGFloat = -1
+        var lastWeightRaw: Int = -1
         /// 本段是否已「测量稳定」（无待回填公式：命中缓存或已知失败）：只有稳定测量才写入全局缓存，
         /// 避免用「占位文本高度」污染持久缓存。
         var measurementStable = true
@@ -100,9 +103,28 @@ struct MathParagraphView: NSViewRepresentable {
     func updateNSView(_ field: NSTextField, context: Context) {
         let coordinator = context.coordinator
         coordinator.field = field
+
+        let newHash = MathLayoutCache.contentHash(inlines)
+        let isDark = colorScheme == .dark
+        let wRaw = Self.weightRaw(weight)
+        // 输入未变且已完成稳定测量（无在途待回填公式）时直接短路：
+        // 避免外层无关重排触发重复 MarkdownInlineNS.renderNS 与测量缓存清空。
+        if coordinator.contentHash == newHash,
+           coordinator.lastIsDark == isDark,
+           coordinator.lastBaseSize == baseSize,
+           coordinator.lastWeightRaw == wRaw,
+           field.attributedStringValue.length > 0,
+           coordinator.measurementStable {
+            return
+        }
+
         // 世代推进：本次更新后，任何在途旧回调作废。
         coordinator.generation += 1
         let generation = coordinator.generation
+        coordinator.contentHash = newHash
+        coordinator.lastIsDark = isDark
+        coordinator.lastBaseSize = baseSize
+        coordinator.lastWeightRaw = wRaw
 
         let nsColor = MathRasterizer.resolvedColor(color, appearance: MathRasterizer.appearance(for: colorScheme))
         let nsFont = MarkdownInlineNS.font(size: baseSize, weight: MarkdownInlineNS.nsWeight(weight))
@@ -112,13 +134,16 @@ struct MathParagraphView: NSViewRepresentable {
             baseColor: nsColor,
             baseSize: baseSize
         )
-        field.attributedStringValue = renderResult.attributed
-        field.invalidateIntrinsicContentSize()
-        // 内容/外观变化使旧测量失效：清缓存，下次 sizeThatFits 重新测量。
-        coordinator.measuredWidth = -1
-        // 全局高度缓存 key 的内容部分（updateNSView 时算一次；sizeThatFits 只补宽度/字号/字重）。
-        coordinator.contentHash = MathLayoutCache.contentHash(inlines)
-        // 诊断埋点（临时）：段落重建时刻 + pending 公式数——定位 doc 大塌缩的子视图来源。
+        // ⚠ 严禁在此调用 field.invalidateIntrinsicContentSize()：
+        // 本视图已实现 sizeThatFits，SwiftUI 布局尺寸完全由 sizeThatFits 驱动；
+        // 在 updateNSView（布局遍历内）调用 invalidateIntrinsicContentSize 会冒泡标记
+        // 父级 NSHostingView 的约束/布局 dirty，导致 AppKit 陷入 300 次布局死循环。
+        if !field.attributedStringValue.isEqual(to: renderResult.attributed) {
+            field.attributedStringValue = renderResult.attributed
+            field.needsDisplay = true
+            // 内容/外观变化使旧测量失效：清缓存，下次 sizeThatFits 重新测量。
+            coordinator.measuredWidth = -1
+        }
         // 稳定性：本帧无待回填公式（全部命中缓存或已知失败）→ 测得的高度才写入全局缓存。
         coordinator.measurementStable = renderResult.pendingMath.isEmpty
 
@@ -138,11 +163,14 @@ struct MathParagraphView: NSViewRepresentable {
                 baseColor: nsColor,
                 baseSize: size
             )
-            // ⚠ 无任何 opacity/动画过渡：直接替换，避免 CA 事务竞态把内容层卡在近零透明度。
-            coordinator.field?.attributedStringValue = rebuilt.attributed
-            coordinator.field?.invalidateIntrinsicContentSize()
-            // 位图回填改变内容尺寸：清测量缓存，驱动 sizeThatFits 重新测量高度。
-            coordinator.measuredWidth = -1
+            // ⚠ 无任何 opacity/动画过渡，且不调用 invalidateIntrinsicContentSize（防约束震荡）。
+            if let currentField = coordinator.field,
+               !currentField.attributedStringValue.isEqual(to: rebuilt.attributed) {
+                currentField.attributedStringValue = rebuilt.attributed
+                currentField.needsDisplay = true
+                // 位图回填改变内容尺寸：清测量缓存，下次 sizeThatFits 重新测量高度。
+                coordinator.measuredWidth = -1
+            }
             // 回填后本段所有公式均已缓存/已知失败 → 后续测量为稳定测量，可写入全局高度缓存。
             coordinator.measurementStable = true
         }

@@ -263,13 +263,17 @@ struct MermaidWebView: NSViewRepresentable {
                 if type == "rendered" {
                     if let rawHeight = body["height"] as? Double {
                         let height = CGFloat(rawHeight)
-                        if height > 0 {
+                        if height > 0, abs(self.parent.renderedHeight - height) >= 1 {
                             self.parent.renderedHeight = height
                         }
                     }
-                    self.parent.renderFailed = false
+                    if self.parent.renderFailed {
+                        self.parent.renderFailed = false
+                    }
                 } else if type == "error" {
-                    self.parent.renderFailed = true
+                    if !self.parent.renderFailed {
+                        self.parent.renderFailed = true
+                    }
                 }
             }
         }

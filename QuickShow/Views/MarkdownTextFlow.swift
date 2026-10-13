@@ -385,7 +385,10 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
         backgroundColor = .clear
         textColor = .labelColor
         isHorizontallyResizable = false
-        isVerticallyResizable = true
+        // 关键防线：禁止 TextKit 在 ensureLayout 时自动调用 setFrameSize 篡改自身 frame——
+        // 视图高度完全由 SwiftUI 的 sizeThatFits 决策，若开启 isVerticallyResizable，
+        // AppKit 布局遍历中途 frame 被改会冒泡标记父级 NSHostingView dirty，引发 300 次布局死循环。
+        isVerticallyResizable = false
         textContainerInset = .zero
         textContainer?.lineFragmentPadding = 0
         focusRingType = .none
@@ -414,40 +417,86 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
         return false
     }
 
-    func setAttributedStringIfNeeded(_ newAttr: NSAttributedString) {
-        guard let ts = textStorage else { return }
+    @discardableResult
+    func setAttributedStringIfNeeded(_ newAttr: NSAttributedString) -> Bool {
+        guard let ts = textStorage else { return false }
         if !ts.isEqual(to: newAttr) {
             ts.setAttributedString(newAttr)
             needsDisplay = true
+            return true
         }
+        return false
     }
 }
 
-// MARK: - SwiftUI 包装视图（精确自适应高度）
+// MARK: - SwiftUI 包装视图（精确自适应高度 + 离屏无副作用测量缓存）
 
 struct NativeTextFlowView: NSViewRepresentable {
     let attributedString: NSAttributedString
+
+    final class Coordinator {
+        var measuredWidth: CGFloat = -1
+        var measuredHeight: CGFloat = 0
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    // 独立于任何 NSView 的纯离屏 TextKit 测量栈（仅主线程使用）：
+    // 与 NonScrollingTextView 共享完全一致的 lineFragmentPadding = 0 与排版算法，
+    // 但不挂载任何视图，确保 sizeThatFits 测量全程零视图树副作用、不触发任何重排冒泡。
+    @MainActor
+    private static let measureStorage = NSTextStorage()
+    @MainActor
+    private static let measureLayoutManager: NSLayoutManager = {
+        let lm = NSLayoutManager()
+        measureStorage.addLayoutManager(lm)
+        return lm
+    }()
+    @MainActor
+    private static let measureContainer: NSTextContainer = {
+        let tc = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        tc.lineFragmentPadding = 0
+        measureLayoutManager.addTextContainer(tc)
+        return tc
+    }()
+
+    @MainActor
+    private static func measureHeight(for attr: NSAttributedString, width: CGFloat) -> CGFloat {
+        guard attr.length > 0 else { return 0 }
+        measureStorage.setAttributedString(attr)
+        measureContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
+        measureLayoutManager.ensureLayout(for: measureContainer)
+        let used = measureLayoutManager.usedRect(for: measureContainer)
+        return ceil(used.height)
+    }
 
     func makeNSView(context: Context) -> NonScrollingTextView {
         let textView = NonScrollingTextView()
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        textView.setContentHuggingPriority(.required, for: .vertical)
-        textView.setContentCompressionResistancePriority(.required, for: .vertical)
+        textView.setContentHuggingPriority(.defaultLow, for: .vertical)
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
         textView.setAttributedStringIfNeeded(attributedString)
         return textView
     }
 
     func updateNSView(_ nsView: NonScrollingTextView, context: Context) {
-        nsView.setAttributedStringIfNeeded(attributedString)
+        if nsView.setAttributedStringIfNeeded(attributedString) {
+            context.coordinator.measuredWidth = -1
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NonScrollingTextView, context: Context) -> CGSize? {
-        guard let width = proposal.width, width > 0 else { return nil }
-        guard let lm = nsView.layoutManager, let tc = nsView.textContainer else { return nil }
-        tc.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
-        lm.ensureLayout(for: tc)
-        let used = lm.usedRect(for: tc)
-        return CGSize(width: width, height: ceil(used.height))
+        guard let width = proposal.width, width > 0, width.isFinite else { return nil }
+        let coordinator = context.coordinator
+        if abs(coordinator.measuredWidth - width) < 0.5, coordinator.measuredHeight > 0 {
+            return CGSize(width: width, height: coordinator.measuredHeight)
+        }
+        let height = Self.measureHeight(for: attributedString, width: width)
+        coordinator.measuredWidth = width
+        coordinator.measuredHeight = height
+        return CGSize(width: width, height: height)
     }
 }

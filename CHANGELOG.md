@@ -54,6 +54,12 @@
 
 ### Fixed
 
+- **Markdown 混合排版与行内公式引发的 AppKit 300 次布局死循环与主线程死机根治（`MarkdownTextFlow.swift` / `MathViews.swift` / `AIChatMessageList.swift` / `MermaidWebView.swift`）**：
+  - **排查与根因**：采样与系统日志定证，当会话同时包含单文本流（`NativeTextFlowView`）、行内数学公式（`MathParagraphView`）与多张 Mermaid 图表时，主线程陷入 `-layoutSubtreeIfNeeded has continued for 300 iterations because -updateConstraints and/or -layout has kept the layout or constraints dirty` 死循环，导致 CPU 100% 满载与内存暴涨无响应；
+  - **`NativeTextFlowView` 离屏测量与禁止视图自改 `frame`**：将 `NonScrollingTextView.isVerticallyResizable` 设为 `false`，禁止 TextKit 在 `ensureLayout` 期间私自调用 `setFrameSize:` 篡改视图树 `frame` 冒泡标记父级 `NSHostingView` dirty；引入不挂载任何 `NSView` 的纯离屏 TextKit 测量栈（`measureStorage` / `measureLayoutManager` / `measureContainer`）与 `Coordinator` 宽高缓存，确保 `sizeThatFits` 测量全程零视图树副作用、同宽度下 $O(1)$ 命中返回；
+  - **`MathParagraphView` 移除布局周期内的约束失效调用**：移除 `updateNSView` 与异步回填 `rebuildFlush` 中触发 AppKit 约束树反复 dirty 的 `field.invalidateIntrinsicContentSize()`（尺寸完全由 `sizeThatFits` 独立负责），并新增输入签名（内容 Hash、深浅色、字号、字重与稳定态）短路守卫与富文本相等性检查；
+  - **消除列宽探测与图表高度回调抖动**：将 `AIChatMessageList.updateRowFrames` 的列宽探测从无序字典随机首项 `frames.values.first?.width` 改为确定性的 `frames.values.map(\.width).max()`；在 `MermaidWebView` 接收高度回调处增加 $\ge 1\text{pt}$ 差值守卫，过滤同值重复状态写回。
+
 - **亮色模式下正文文本颜色异常变白根治（`MarkdownInlineNS.swift` / `MarkdownTextFlow.swift`）**：
   - **排查与根因**：排查定位 AppKit 动态语义色（Catalog Color，如 `NSColor.labelColor`）在调用 `.withAlphaComponent(...)` 时会丢失外观动态响应能力并在调用瞬间的暗色上下文下被静态光栅化为固化 sRGB 白色（`RGBA(1, 1, 1, 0.8)`）的底层机制，导致普通正文与列表在亮色模式毛玻璃卡片上呈现为近乎不可见的隐形白字；
   - **动态外观自适应提供器（`adaptiveLabel`）**：封装基于 `NSColor(name: nil, dynamicProvider:)` 的动态颜色构造器，依据当前宿主视图的 `effectiveAppearance` 正确分流深色（白字透明度）与浅色（黑字透明度），使正文与列表项在亮色模式下自然呈现高对比度深色文本；
