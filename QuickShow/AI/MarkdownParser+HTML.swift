@@ -237,6 +237,9 @@ extension MarkdownParser {
             return ([.subscript(parseInlines(content, references: references))], next)
         case "sup":
             return ([.superscript(parseInlines(content, references: references))], next)
+        case "ruby":
+            let isUnder = attributes["ruby-position"]?.lowercased() == "under"
+            return (parseRubyContent(content, isUnder: isUnder, references: references), next)
         case "a":
             let href = decodeHTMLEntities(attributes["href"] ?? "")
             guard !href.isEmpty else { return ([], next) }
@@ -246,6 +249,75 @@ extension MarkdownParser {
             // 未知标签：剥外壳，内部内容继续行内解析。
             return (parseInlines(content, references: references), next)
         }
+    }
+
+    /// 解析 `<ruby>…</ruby>` 内部结构：提取每组底字与 `<rt>…</rt>` 注音，
+    /// 自动根据东亚各地区标音特征与规范分配位置：
+    /// - 台湾注音符号（ㄅㄆㄇㄈ）：右侧同行（.right）
+    /// - 显式 ruby-position="under"：正下方（.under）
+    /// - 默认（大陆普通话拼音、日文振假名等）：正上方（.over）
+    private static func parseRubyContent(_ raw: String, isUnder: Bool = false, references: [String: LinkReference]) -> [InlineToken] {
+        // 先剔除 <rp>...</rp> 回退括号标签
+        var cleaned = raw
+        while let rpOpen = cleaned.range(of: "<rp", options: .caseInsensitive),
+              let rpGt = cleaned[rpOpen.upperBound...].firstIndex(of: ">"),
+              let rpClose = cleaned.range(
+                  of: "</rp>",
+                  options: .caseInsensitive,
+                  range: cleaned.index(after: rpGt)..<cleaned.endIndex
+              ) {
+            cleaned.removeSubrange(rpOpen.lowerBound..<rpClose.upperBound)
+        }
+
+        var result: [InlineToken] = []
+        var cursor = cleaned.startIndex
+
+        while cursor < cleaned.endIndex,
+              let rtOpen = cleaned.range(of: "<rt", options: .caseInsensitive, range: cursor..<cleaned.endIndex),
+              let rtGt = cleaned[rtOpen.upperBound...].firstIndex(of: ">"),
+              let rtClose = cleaned.range(
+                  of: "</rt>",
+                  options: .caseInsensitive,
+                  range: cleaned.index(after: rtGt)..<cleaned.endIndex
+              ) {
+            let baseRaw = String(cleaned[cursor..<rtOpen.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let rtText = String(cleaned[cleaned.index(after: rtGt)..<rtClose.lowerBound])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let position: RubyPosition
+            if isUnder {
+                position = .under
+            } else if isBopomofo(rtText) {
+                position = .right
+            } else {
+                position = .over
+            }
+
+            let baseTokens = parseInlines(baseRaw, references: references)
+            result.append(.ruby(base: baseTokens, ruby: rtText, position: position))
+            cursor = rtClose.upperBound
+        }
+
+        let trailing = String(cleaned[cursor...])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trailing.isEmpty {
+            result.append(contentsOf: parseInlines(trailing, references: references))
+        }
+        return result
+    }
+
+    /// 判定文本中是否包含台湾注音符号（ㄅㄆㄇㄈ / 声调等）。
+    private static func isBopomofo(_ text: String) -> Bool {
+        for scalar in text.unicodeScalars {
+            // ㄅㄆㄇㄈ (3105..312F), ㄪ..ㄿ (31A0..31BF), 调号 ˊ ˇ ˋ ˙ (02CA..02D9)
+            if (scalar.value >= 0x3105 && scalar.value <= 0x312F) ||
+               (scalar.value >= 0x31A0 && scalar.value <= 0x31BF) ||
+               (scalar.value >= 0x02CA && scalar.value <= 0x02D9) {
+                return true
+            }
+        }
+        return false
     }
 
     /// 查找 `</name>` 的起始位置（大小写不敏感，要求标签名后有边界）。
@@ -320,9 +392,10 @@ extension MarkdownParser {
 
     // MARK: - 内部：HTML 实体
 
-    /// 常用命名实体表（≥40）。
+    /// 常用命名实体表（≥45）。
     private static let htmlEntities: [String: String] = [
         "amp": "&", "lt": "<", "gt": ">", "quot": "\"", "apos": "'", "nbsp": "\u{00A0}",
+        "emsp": "\u{2003}", "ensp": "\u{2002}", "thinsp": "\u{2009}", "zwj": "\u{200D}", "zwnj": "\u{200C}",
         "copy": "©", "reg": "®", "trade": "™", "hellip": "…", "mdash": "—", "ndash": "–",
         "lsquo": "‘", "rsquo": "’", "ldquo": "“", "rdquo": "”", "bull": "•", "prime": "′",
         "times": "×", "plusmn": "±", "darr": "↓", "uarr": "↑", "rarr": "→", "larr": "←",

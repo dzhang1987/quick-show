@@ -134,6 +134,7 @@
 		A3FB31F1FE5755FC2B12689B /* DeviceProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50CF0F2EA78ECAACDCE0E67F /* DeviceProvider.swift */; };
 		A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 04AE831E93734F1F74D7F169 /* AIWindowManager.swift */; };
 		A481C52ADB6F702FF209986E /* TickEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03CA1A414D9CFB03EA210EA2 /* TickEngine.swift */; };
+		A4E9564709EF4BD33FAEE31D /* MarkdownRubyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAFF717DF1115969C3288198 /* MarkdownRubyView.swift */; };
 		A502FE2A9F1F56D2B44AC5AC /* AIChatService+Completion.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3690C0A5C026E98A6BD709AF /* AIChatService+Completion.swift */; };
 		A5F6EC4516F732842271BAB0 /* AISettingsSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BD4B04C800A479129E797F /* AISettingsSections.swift */; };
 		A6F2ACF18E60EAF649B66A77 /* OpenAIProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59BA3FE106439322551FC698 /* OpenAIProvider.swift */; };
@@ -378,6 +379,7 @@
 		E915869A3E5B27AB15C17D8D /* MathRasterizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathRasterizer.swift; sourceTree = "<group>"; };
 		E97C435AE3528691A109E6D1 /* RichCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RichCard.swift; sourceTree = "<group>"; };
 		EAAD65B6EE17A2EF5DAD010C /* MarkdownBlocks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlocks.swift; sourceTree = "<group>"; };
+		EAFF717DF1115969C3288198 /* MarkdownRubyView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownRubyView.swift; sourceTree = "<group>"; };
 		EB8F7C9405E7B908FF1A9A77 /* MapTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapTools.swift; sourceTree = "<group>"; };
 		EC0A78A95760C2C20A354FDC /* MTFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFont.swift; sourceTree = "<group>"; };
 		EC406C9BEF26120A9D234C3D /* LaunchAgentTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAgentTool.swift; sourceTree = "<group>"; };
@@ -521,6 +523,7 @@
 				43A3531AA75BABD5D1FE3080 /* MarkdownImageView.swift */,
 				63D9B92957771B78D4759345 /* MarkdownInline.swift */,
 				F8773F47D61D27DA23DC73AB /* MarkdownInlineNS.swift */,
+				EAFF717DF1115969C3288198 /* MarkdownRubyView.swift */,
 				70F05DFE164F90170F29E01B /* MarkdownTableView.swift */,
 				B1BDD70ED7A39E00C7BFEE3D /* MarkdownTextFlow.swift */,
 				F4336F7B225DC0F782600285 /* MathLatexCollector.swift */,
@@ -748,7 +751,7 @@
 			path = Vendor/Mermaid;
 			sourceTree = "<group>";
 		};
-		"TEMP_24899517-5062-4359-AB1E-8000394F7B71" /* Resources */ = {
+		"TEMP_DEAD5AF0-1B7C-4709-B6C5-29DE272EF451" /* Resources */ = {
 			isa = PBXGroup;
 			children = (
 			);
@@ -1021,6 +1024,7 @@
 				D54069715E1809D6A244C74B /* MarkdownParser+Links.swift in Sources */,
 				A1FDBE8E1E5ED6AA004D88AB /* MarkdownParser+List.swift in Sources */,
 				06AFDE855BCBA67DE767B4E1 /* MarkdownParser.swift in Sources */,
+				A4E9564709EF4BD33FAEE31D /* MarkdownRubyView.swift in Sources */,
 				481B4C88A89CE8CA7D9FEBC7 /* MarkdownTableView.swift in Sources */,
 				FC280DBDD8546A8A81A559E3 /* MarkdownTextFlow.swift in Sources */,
 				CB14D7E63498041C3E70F8D4 /* MathLatexCollector.swift in Sources */,

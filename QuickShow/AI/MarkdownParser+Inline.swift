@@ -187,8 +187,9 @@ extension MarkdownParser {
                 }
             }
 
-            // 粗斜体 / 粗体 / 斜体（*/_ 三符号 → 双符号 → 单符号 依次优先）。
-            if current == "*" || current == "_" {
+            // 粗斜体 / 粗体 / 斜体（*/_ 三符号 → 双符号 → 单符号 依次优先；
+            // 下划线遵循 CommonMark 词内保护规则：开启前不得紧邻字母/数字，闭合后不得紧邻字母/数字）。
+            if (current == "*" || current == "_"), canOpenEmphasis(chars, at: index, marker: current) {
                 let isTriple = index + 2 < chars.count
                     && chars[index + 1] == current
                     && chars[index + 2] == current
@@ -220,6 +221,13 @@ extension MarkdownParser {
                         continue
                     }
                 }
+            }
+
+            // Emoji 短代码（如 `:rocket:` → 🚀）。
+            if current == ":", let emoji = parseEmojiShortcode(chars, from: index) {
+                buffer += emoji.emoji
+                index = emoji.next
+                continue
             }
 
             // HTML 实体解码（纯文本阶段的 &amp; / &#NNN; / &#xHH;）。
@@ -317,10 +325,27 @@ extension MarkdownParser {
         return nil
     }
 
+    /// CommonMark 词内下划线保护：`_` 开启前一个字符不得为字母或数字。
+    private static func canOpenEmphasis(_ chars: [Character], at index: Int, marker: Character) -> Bool {
+        guard marker == "_" else { return true }
+        guard index > 0 else { return true }
+        let prev = chars[index - 1]
+        return !(prev.isLetter || prev.isNumber)
+    }
+
+    /// CommonMark 词内下划线保护：`_` 闭合后一个字符不得为字母或数字。
+    private static func canCloseEmphasis(_ chars: [Character], afterIndex: Int, marker: Character) -> Bool {
+        guard marker == "_" else { return true }
+        guard afterIndex < chars.count else { return true }
+        let after = chars[afterIndex]
+        return !(after.isLetter || after.isNumber)
+    }
+
     private static func findClosingTriple(_ chars: [Character], from: Int, marker: Character) -> Int? {
         var index = from
         while index + 2 < chars.count {
-            if chars[index] == marker && chars[index + 1] == marker && chars[index + 2] == marker {
+            if chars[index] == marker && chars[index + 1] == marker && chars[index + 2] == marker,
+               canCloseEmphasis(chars, afterIndex: index + 3, marker: marker) {
                 return index
             }
             index += 1
@@ -331,7 +356,10 @@ extension MarkdownParser {
     private static func findClosingDouble(_ chars: [Character], from: Int, marker: Character) -> Int? {
         var index = from
         while index + 1 < chars.count {
-            if chars[index] == marker && chars[index + 1] == marker { return index }
+            if chars[index] == marker && chars[index + 1] == marker,
+               canCloseEmphasis(chars, afterIndex: index + 2, marker: marker) {
+                return index
+            }
             index += 1
         }
         return nil
@@ -344,9 +372,59 @@ extension MarkdownParser {
             if chars[index] == marker {
                 let nextIsSame = index + 1 < chars.count && chars[index + 1] == marker
                 let prevIsSame = index - 1 >= 0 && chars[index - 1] == marker
-                if !nextIsSame && !prevIsSame { return index }
+                if !nextIsSame && !prevIsSame,
+                   canCloseEmphasis(chars, afterIndex: index + 1, marker: marker) {
+                    return index
+                }
             }
             index += 1
+        }
+        return nil
+    }
+
+    // MARK: - 内部：Emoji 短代码
+
+    private static let emojiShortcodes: [String: String] = [
+        "rocket": "🚀", "sparkles": "✨", "fire": "🔥", "white_check_mark": "✅",
+        "heavy_check_mark": "✔️", "check": "✓", "x": "❌", "cross_mark": "❌",
+        "warning": "⚠️", "bulb": "💡", "zap": "⚡", "package": "📦", "mag": "🔍",
+        "shield": "🛡️", "hammer_and_wrench": "🛠️", "wrench": "🔧", "hammer": "🔨",
+        "gear": "⚙️", "memo": "📝", "bug": "🐛", "tada": "🎉", "star": "⭐",
+        "star2": "🌟", "heart": "❤️", "thumbsup": "👍", "+1": "👍",
+        "thumbsdown": "👎", "-1": "👎", "clap": "👏", "muscle": "💪",
+        "pray": "🙏", "eyes": "👀", "thinking": "🤔", "100": "💯",
+        "smile": "😄", "joy": "😂", "sob": "😭", "wink": "😉",
+        "lock": "🔒", "unlock": "🔓", "key": "🔑", "link": "🔗",
+        "info": "ℹ️", "information_source": "ℹ️", "question": "❓", "exclamation": "❗",
+        "construction": "🚧", "recycle": "♻️", "art": "🎨", "ambulance": "🚑",
+        "books": "📚", "book": "📖", "bookmark": "🔖", "bell": "🔔",
+        "hourglass": "⏳", "stopwatch": "⏱️", "alarm_clock": "⏰",
+        "chart_with_upwards_trend": "📈", "chart_with_downwards_trend": "📉",
+        "bar_chart": "📊", "clipboard": "📋", "pushpin": "📌", "paperclip": "📎",
+        "file_folder": "📁", "open_file_folder": "📂", "page_facing_up": "📄",
+        "globe_with_meridians": "🌐", "computer": "💻", "iphone": "📱",
+        "battery": "🔋", "electric_plug": "🔌", "loudspeaker": "📢", "mega": "📣",
+        "trophy": "🏆", "medal_sports": "🏅", "crown": "👑", "gem": "💎"
+    ]
+
+    /// 解析 GFM Emoji 短代码 `:name:`。
+    private static func parseEmojiShortcode(_ chars: [Character], from: Int) -> (emoji: String, next: Int)? {
+        guard from + 2 < chars.count else { return nil }
+        var index = from + 1
+        var name = ""
+        while index < chars.count {
+            let ch = chars[index]
+            if ch == ":" {
+                guard !name.isEmpty, let emoji = emojiShortcodes[name.lowercased()] else { return nil }
+                return (emoji, index + 1)
+            }
+            if ch.isLetter || ch.isNumber || ch == "_" || ch == "+" || ch == "-" {
+                name.append(ch)
+                index += 1
+                if name.count > 40 { return nil }
+            } else {
+                return nil
+            }
         }
         return nil
     }

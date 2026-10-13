@@ -26,12 +26,27 @@ indirect enum InlineToken: Equatable {
     case `subscript`([InlineToken])
     /// 上标（`<sup>`）。
     case superscript([InlineToken])
+    /// 东亚文字注音（`<ruby>base<rt>ruby</rt></ruby>`）：
+    /// `base` 为底字 tokens，`ruby` 为注音纯文本，`position` 遵循东亚各地排版惯例。
+    case ruby(base: [InlineToken], ruby: String, position: RubyPosition)
     /// 图片：`alt` 为原始替代文本，`url` 为地址，`title` 为可选标题。
     case image(alt: String, url: String, title: String?)
     /// 硬换行（行尾 ≥2 空格或行尾反斜杠）。
     case lineBreak
     /// 脚注引用（`[^id]`）。
     case footnoteRef(String)
+}
+
+// MARK: - 东亚文字注音排版位置
+
+/// 东亚文字注音（Ruby / Furigana / 拼音）相对底字位置。
+enum RubyPosition: String, Equatable {
+    /// 正上方居中（大陆汉语拼音、日文振假名等）。
+    case over
+    /// 右侧同行（台湾注音符号 ㄅㄆㄇㄈ）。
+    case right
+    /// 正下方居中（古籍训诂反切、部分粤语标音）。
+    case under
 }
 
 // MARK: - GitHub 风格提示块类型
@@ -86,6 +101,14 @@ struct MarkdownTable: Equatable {
     var alignments: [MarkdownTableAlignment?]
 }
 
+// MARK: - 定义列表
+
+/// 定义列表项：一个术语（term）对应一条或多条定义说明（definitions）。
+struct MarkdownDefinitionItem: Equatable {
+    var term: [InlineToken]
+    var definitions: [[InlineToken]]
+}
+
 // MARK: - 块级 AST
 
 /// 块级 Markdown AST。blockquote / alert / details / list item 递归包含块级节点，故为 indirect enum。
@@ -99,6 +122,8 @@ indirect enum MarkdownBlock: Equatable {
     case alert(kind: MarkdownAlertKind, blocks: [MarkdownBlock])
     /// HTML `<details>` 折叠块（含 `<summary>` 行内标题与展开后的块级内容）。
     case details(summary: [InlineToken], blocks: [MarkdownBlock], isOpen: Bool)
+    /// 定义列表（`Term` + `: Definition` 或 `<dl>/<dt>/<dd>`）。
+    case definitionList([MarkdownDefinitionItem])
     case table(MarkdownTable)
     case codeBlock(language: String?, code: String)
     /// 块级数学公式：已剥离定界符（$$…$$ / \[…\]）的纯 LaTeX 源串。

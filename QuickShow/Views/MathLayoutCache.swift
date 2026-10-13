@@ -113,6 +113,8 @@ enum MathLayoutCache {
             case let .highlight(inner): hasher.combine(9); hashTokens(inner, into: &hasher)
             case let .`subscript`(inner): hasher.combine(10); hashTokens(inner, into: &hasher)
             case let .superscript(inner): hasher.combine(11); hashTokens(inner, into: &hasher)
+            case let .ruby(base, ruby, position):
+                hasher.combine(16); hashTokens(base, into: &hasher); hasher.combine(ruby); hasher.combine(position.rawValue)
             case let .image(alt, url, title):
                 hasher.combine(12); hasher.combine(alt); hasher.combine(url); hasher.combine(title)
             case .lineBreak: hasher.combine(13)

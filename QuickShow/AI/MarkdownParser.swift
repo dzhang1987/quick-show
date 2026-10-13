@@ -31,15 +31,14 @@ enum MarkdownParser {
             let raw = lines[index]
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
 
-            // 围栏代码块（``` 开始，``` 结束；未闭合时剩余整体按代码块）。
-            if trimmed.hasPrefix("```") {
+            // 围栏代码块（≥3 个连续 ` 或 ~ 开始，≥开启长度的同字符整行结束；未闭合时剩余整体按代码块）。
+            if let fence = parseFenceOpen(trimmed) {
                 flushParagraph()
-                let tag = String(trimmed.dropFirst(3)).trimmingCharacters(in: .whitespaces)
                 index += 1
                 var codeLines: [String] = []
                 while index < lines.count {
                     let candidate = lines[index]
-                    if candidate.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+                    if isFenceClose(candidate.trimmingCharacters(in: .whitespaces), char: fence.char, minCount: fence.count) {
                         index += 1
                         break
                     }
@@ -47,7 +46,7 @@ enum MarkdownParser {
                     index += 1
                 }
                 blocks.append(.codeBlock(
-                    language: tag.isEmpty ? nil : tag,
+                    language: fence.tag.isEmpty ? nil : fence.tag,
                     code: codeLines.joined(separator: "\n")
                 ))
                 continue
@@ -58,6 +57,15 @@ enum MarkdownParser {
                 flushParagraph()
                 blocks.append(math.block)
                 index = math.next
+                continue
+            }
+
+            // YAML Front Matter（`---` 开启 + 连续 `key: value` 行 + `---`/`...` 闭合）：
+            // 优先于水平分隔线与 Setext H2，避免元数据块被底线 `---` 误判为二级标题。
+            if trimmed == "---", let frontMatter = parseFrontMatter(lines: lines, start: index) {
+                flushParagraph()
+                blocks.append(frontMatter.block)
+                index = frontMatter.next
                 continue
             }
 
@@ -143,6 +151,15 @@ enum MarkdownParser {
                 let result = parseList(lines: lines, start: index, references: referenceMap)
                 blocks.append(result.block)
                 index = result.next
+                continue
+            }
+
+            // 定义列表（`Term` + 下一行 `: Definition`）。
+            if paragraph.isEmpty,
+               let defList = parseDefinitionList(lines: lines, start: index, references: referenceMap) {
+                flushParagraph()
+                blocks.append(defList.block)
+                index = defList.next
                 continue
             }
 
@@ -315,15 +332,166 @@ enum MarkdownParser {
         return (table, index)
     }
 
-    /// 拆分表格行单元格：去掉首尾竖线后按 | 切分并 trim。
+    /// 拆分表格行单元格：去掉首尾竖线后按未转义且不在行内反引号内的 `|` 切分并 trim。
+    /// 同时将表格层面的转义管道符 `\|` 还原为字面 `|`。
     private static func splitTableCells(_ line: String) -> [String] {
         var text = line.trimmingCharacters(in: .whitespaces)
         if text.hasPrefix("|") { text.removeFirst() }
-        if text.hasSuffix("|") { text.removeLast() }
-        return text.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+        if text.hasSuffix("|"), !text.hasSuffix("\\|") { text.removeLast() }
+
+        let chars = Array(text)
+        var cells: [String] = []
+        var current = ""
+        var inBackticks = 0
+        var index = 0
+
+        while index < chars.count {
+            let ch = chars[index]
+
+            // 表格级转义管道符 \|（在 GFM 中即便位于反引号内也优先作为表格管道符转义处理）
+            if ch == "\\", index + 1 < chars.count, chars[index + 1] == "|" {
+                current.append("|")
+                index += 2
+                continue
+            }
+
+            // 其它反斜杠转义（在反引号外跳过下一个字符，保留给 parseInlines）
+            if ch == "\\", inBackticks == 0, index + 1 < chars.count {
+                current.append(ch)
+                current.append(chars[index + 1])
+                index += 2
+                continue
+            }
+
+            // 跟踪反引号开合
+            if ch == "`" {
+                var run = 0
+                while index + run < chars.count, chars[index + run] == "`" { run += 1 }
+                if inBackticks == 0 {
+                    inBackticks = run
+                } else if inBackticks == run {
+                    inBackticks = 0
+                }
+                for _ in 0..<run { current.append("`") }
+                index += run
+                continue
+            }
+
+            // 仅在反引号外部切分单元格
+            if ch == "|", inBackticks == 0 {
+                cells.append(current.trimmingCharacters(in: .whitespaces))
+                current.removeAll(keepingCapacity: true)
+                index += 1
+                continue
+            }
+
+            current.append(ch)
+            index += 1
+        }
+        cells.append(current.trimmingCharacters(in: .whitespaces))
+        return cells
     }
 
-    // MARK: - 内部：GitHub Alert
+    // MARK: - 内部：围栏代码块 / YAML Front Matter / 定义列表 / GitHub Alert
+
+    /// 识别围栏代码块开启行：连续 ≥3 个 `` ` `` 或 `~`（反引号围栏的 info string 中不得再含反引号）。
+    static func parseFenceOpen(_ trimmed: String) -> (char: Character, count: Int, tag: String)? {
+        guard let first = trimmed.first, first == "`" || first == "~" else { return nil }
+        var count = 0
+        for ch in trimmed {
+            if ch == first { count += 1 } else { break }
+        }
+        guard count >= 3 else { return nil }
+        let tag = String(trimmed.dropFirst(count)).trimmingCharacters(in: .whitespaces)
+        if first == "`", tag.contains("`") { return nil }
+        return (first, count, tag)
+    }
+
+    /// 识别围栏代码块闭合行：整行仅由 ≥minCount 个 `char` 组成。
+    static func isFenceClose(_ trimmed: String, char: Character, minCount: Int) -> Bool {
+        guard trimmed.count >= minCount else { return false }
+        return trimmed.allSatisfy { $0 == char }
+    }
+
+    /// 识别 YAML Front Matter（`---` 开启，内部为连续 `key: value` 行，以 `---` 或 `...` 闭合）。
+    private static func parseFrontMatter(lines: [String], start: Int) -> (block: MarkdownBlock, next: Int)? {
+        var cursor = start + 1
+        var body: [String] = []
+        while cursor < lines.count {
+            let trimmed = lines[cursor].trimmingCharacters(in: .whitespaces)
+            if trimmed == "---" || trimmed == "..." {
+                guard !body.isEmpty else { return nil }
+                return (.codeBlock(language: "yaml", code: body.joined(separator: "\n")), cursor + 1)
+            }
+            if trimmed.isEmpty { return nil }
+            // 要求每一行均为 YAML 键值（含 `:`）或注释（`#`）或列表项（`- `）
+            let isYAMLRow = trimmed.contains(":") || trimmed.hasPrefix("#") || trimmed.hasPrefix("- ")
+            guard isYAMLRow else { return nil }
+            body.append(lines[cursor])
+            cursor += 1
+        }
+        return nil
+    }
+
+    /// 识别定义列表行前缀（`: 内容`）。
+    private static func parseDefinitionMarker(_ trimmed: String) -> String? {
+        guard trimmed.hasPrefix(":") else { return nil }
+        let after = trimmed.dropFirst()
+        guard let first = after.first, first == " " || first == "\t" else { return nil }
+        return String(after.dropFirst()).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 解析定义列表：连续的 `Term` + 一至多行 `: Definition`。
+    private static func parseDefinitionList(
+        lines: [String],
+        start: Int,
+        references: [String: LinkReference]
+    ) -> (block: MarkdownBlock, next: Int)? {
+        guard start + 1 < lines.count else { return nil }
+        let firstDefTrimmed = lines[start + 1].trimmingCharacters(in: .whitespaces)
+        guard parseDefinitionMarker(firstDefTrimmed) != nil else { return nil }
+
+        var items: [MarkdownDefinitionItem] = []
+        var cursor = start
+
+        while cursor < lines.count {
+            // 跳过组间空行（仅当空行后紧跟新的 `Term` + `: Definition` 时继续合并）
+            if lines[cursor].trimmingCharacters(in: .whitespaces).isEmpty {
+                var k = cursor
+                while k < lines.count, lines[k].trimmingCharacters(in: .whitespaces).isEmpty { k += 1 }
+                if k + 1 < lines.count,
+                   !lines[k].trimmingCharacters(in: .whitespaces).isEmpty,
+                   parseDefinitionMarker(lines[k + 1].trimmingCharacters(in: .whitespaces)) != nil {
+                    cursor = k
+                } else {
+                    break
+                }
+            }
+
+            guard cursor + 1 < lines.count else { break }
+            let termLine = lines[cursor].trimmingCharacters(in: .whitespaces)
+            let nextLine = lines[cursor + 1].trimmingCharacters(in: .whitespaces)
+            guard !termLine.isEmpty, parseDefinitionMarker(nextLine) != nil else { break }
+
+            let termTokens = parseInlines(termLine, references: references)
+            cursor += 1
+
+            var definitions: [[InlineToken]] = []
+            while cursor < lines.count {
+                let defTrimmed = lines[cursor].trimmingCharacters(in: .whitespaces)
+                guard let defContent = parseDefinitionMarker(defTrimmed) else { break }
+                definitions.append(parseInlines(defContent, references: references))
+                cursor += 1
+            }
+
+            if !definitions.isEmpty {
+                items.append(MarkdownDefinitionItem(term: termTokens, definitions: definitions))
+            }
+        }
+
+        guard !items.isEmpty else { return nil }
+        return (.definitionList(items), cursor)
+    }
 
     /// 识别引用块首行的 `[!NOTE]` / `[!TIP]` / `[!IMPORTANT]` / `[!WARNING]` / `[!CAUTION]`（大小写不敏感）。
     /// 返回提示块类型与首行标记后可能紧跟的同行文本。

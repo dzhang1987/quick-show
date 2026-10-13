@@ -6,6 +6,11 @@
 
 ### Added
 
+- **东亚注音文本（Ruby Annotation `<ruby>/<rt>`）全生命周期解析与诗词/散文双轨原生排版（`MarkdownAST.swift` / `MarkdownParser+HTML.swift` / `MarkdownRubyView.swift` / `MarkdownInlineNS.swift`）**：
+  - **规范级东亚多区域注音解析**：在 `MarkdownParser+HTML` 中完整支持 `<ruby>`、`<rt>`、`<rp>` 标签解析，根据字符集与属性智能识别注音方位（普通话拼音与日文假名置于汉字正上方 `.over`、台湾注音符号 ㄅㄆㄇㄈ 置于字符右侧同行 `.right`、显式 `ruby-position="under"` 置于字符正下方 `.under`）；
+  - **诗词对仗等宽网格排版（`PoetryRubyGridView`）**：针对三言至八言古诗律绝（如《静夜思》），建立 38pt 黄金基准列宽网格，拼音与底字严格纵向居中对齐，标点紧随尾字右侧，跨联跨节严密对齐；严格限定单行 3~8 字、无句内停顿逗号且各行字数规整，防止文赋散文误入网格；
+  - **散文流式 CoreText 原生排版（`RubyProseRepresentable`）**：针对大段文赋长句与散文混排（如《赤壁赋》），接入 Apple 原生 `CTRubyAnnotation` 流式自然折行；配置 `lineSpacing = 11` 与 `minimumLineHeight = 26` 出版级行距，彻底消除上一行汉字底端对下一行拼音顶部的垂直重叠碰撞，并在视口上下保留安全边距防止声调被边缘截断。
+
 - **Markdown 扩展语法支持：GitHub 风格提示卡片（Alerts）、`<details>/<summary>` 交互折叠块与 `<kbd>` 键盘按键（`MarkdownAST.swift` / `MarkdownParser.swift` / `MarkdownParser+HTML.swift` / `MarkdownBlocks.swift`）**：
   - **GitHub 风格提示卡片（GFM Alerts）**：在 `MarkdownParser` 引用块解析中新增 `parseAlertHeader` 识别首行 `> [!NOTE]` / `> [!TIP]` / `> [!IMPORTANT]` / `> [!WARNING]` / `> [!CAUTION]`（大小写不敏感），剥离标记行后递归解析块级正文；新增 `MarkdownAlertView` 组件，配备五种语义专属配色（蓝 / 绿 / 紫 / 橙 / 红）、SF Symbol 图标、语义标题栏与左侧 3pt 语义色竖条及半透明衬底卡片；
   - **`<details>` / `<summary>` 原生可折叠卡片**：在 `MarkdownParser+HTML` 中新增 `parseDetailsInner` 与 `isDetailsOpen`，自动提取 `<summary>` 行内标题（并剥离冗余手写 `▶`/`▼` 前缀）与内部块级正文，支持 `open` 默认展开属性；新增 `MarkdownDetailsView` 交互卡片，支持点击标题栏平滑旋转 chevron 展开/收起详细内容；
@@ -58,6 +63,9 @@
   - **双轨无缝平滑容错兜底**：直连通道若遇到严重断网等不可抗力，自动无感 fallback 唤起本地 `agy` CLI 进程兜底执行，保证用户体验稳健无故障。
 
 ### Fixed
+
+- **大段注音长文排版横向越界爆屏与标点堆叠修复（`MarkdownRubyView.swift`）**：
+  - 收紧诗词网格识别判准，单行超过 8 字或包含句内逗号分割的长文赋/散文 100% 自动分流至 CoreText 原生折行；修复标点遍历累加逻辑，彻底根除行末产生 `，，。` 的缺陷。
 
 - **修复 SwiftUI 行内渲染字体覆盖导致加粗/斜体/行内代码失效及 `***粗斜体***` 解析错位（`MarkdownInline.swift` / `MarkdownInlineNS.swift` / `MarkdownParser+Inline.swift`）**：
   - **消除整段 `result.font` 事后覆盖**：重构 `MarkdownInline.render`，改为按叶子 token 上下文（`size` / `baseWeight` / `isBold` / `isItalic`）直接计算并赋予精确字体，解决此前 `result.font = Theme.Typography.text(size)` 抹平 `.code` 等宽字体以及 `.bold`/`.italic` 缺失字重与斜体样式导致引用块、Alert、表格内行内格式失效的问题；

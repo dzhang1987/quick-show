@@ -1,6 +1,7 @@
 // 来源拆分：AIChatMathViews.swift — 行内 NSAttributedString 渲染层（MarkdownInlineNS / MarkdownInlineText 及共用私有扩展）。
 import SwiftUI
 import AppKit
+import CoreText
 
 /// 行内 token → NSAttributedString（供含公式的段落使用）。
 /// 语义严格对齐 SwiftUI 版 MarkdownInline.render：
@@ -102,8 +103,12 @@ enum MarkdownInlineNS {
         for token in tokens {
             switch token {
             case let .text(value):
+                // 段内软换行转为 Unicode 行分隔符（\u{2028}），确保在 TextKit 中折行不断段：
+                // 既不提前触发 paragraphSpacing，又能在列表项内保持 headIndent 悬挂缩进对齐。
+                let normalized = MarkdownInline.normalizeQuotes(value)
+                    .replacingOccurrences(of: "\n", with: "\u{2028}")
                 let piece = NSAttributedString(
-                    string: MarkdownInline.normalizeQuotes(value),
+                    string: normalized,
                     attributes: [.font: baseFont, .foregroundColor: baseColor]
                 )
                 result.append(piece)
@@ -224,9 +229,41 @@ enum MarkdownInlineNS {
                     sizeDelta: -2, baselineOffset: 3, pending: &pending
                 )
 
+            case let .ruby(base, ruby, position):
+                let start = result.length
+                render(
+                    into: result,
+                    tokens: base,
+                    baseFont: baseFont,
+                    baseColor: baseColor,
+                    baseSize: baseSize,
+                    pending: &pending
+                )
+                let len = result.length - start
+                guard len > 0, !ruby.isEmpty else { break }
+
+                let ctPos: CTRubyPosition
+                switch position {
+                case .over: ctPos = .before
+                case .right: ctPos = .interCharacter
+                case .under: ctPos = .after
+                }
+                let annotation = CTRubyAnnotationCreateWithAttributes(
+                    .center,
+                    .none,
+                    ctPos,
+                    ruby as CFString,
+                    [:] as CFDictionary
+                )
+                result.addAttribute(
+                    kCTRubyAnnotationAttributeName as NSAttributedString.Key,
+                    value: annotation,
+                    range: NSRange(location: start, length: len)
+                )
+
             case .lineBreak:
                 result.append(NSAttributedString(
-                    string: "\n",
+                    string: "\u{2028}",
                     attributes: [.font: baseFont, .foregroundColor: baseColor]
                 ))
 
@@ -361,6 +398,13 @@ struct MarkdownInlineText: View {
             imageLayout
         } else if inlines.containsMath {
             MathParagraphView(
+                inlines: inlines,
+                baseSize: baseSize,
+                weight: weight,
+                color: explicitColor ?? bodyColor
+            )
+        } else if inlines.containsRuby {
+            RubyParagraphView(
                 inlines: inlines,
                 baseSize: baseSize,
                 weight: weight,
@@ -511,8 +555,31 @@ extension InlineToken {
             return inner.containsMath
         case let .link(text, _, _):
             return text.containsMath
+        case let .ruby(base, _, _):
+            return base.containsMath
         case .text, .code, .kbd, .image, .lineBreak, .footnoteRef:
             return false
         }
+    }
+
+    var containsRuby: Bool {
+        switch self {
+        case .ruby:
+            return true
+        case let .bold(inner), let .italic(inner),
+             let .strikethrough(inner), let .underline(inner), let .highlight(inner),
+             let .superscript(inner), let .`subscript`(inner):
+            return inner.containsRuby
+        case let .link(text, _, _):
+            return text.containsRuby
+        case .text, .code, .kbd, .image, .lineBreak, .footnoteRef, .math:
+            return false
+        }
+    }
+}
+
+extension Array where Element == InlineToken {
+    var containsRuby: Bool {
+        contains { $0.containsRuby }
     }
 }

@@ -99,15 +99,21 @@ extension MarkdownParser {
     static func scanLinkReferences(_ lines: [String]) -> (lines: [String], references: [String: LinkReference]) {
         var filtered: [String] = []
         var references: [String: LinkReference] = [:]
-        var inFence = false
+        var activeFence: (char: Character, count: Int)? = nil
         for line in lines {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") {
-                inFence.toggle()
+            if let fence = activeFence {
+                if isFenceClose(trimmed, char: fence.char, minCount: fence.count) {
+                    activeFence = nil
+                }
+                filtered.append(line)
+                continue
+            } else if let fence = parseFenceOpen(trimmed) {
+                activeFence = (fence.char, fence.count)
                 filtered.append(line)
                 continue
             }
-            if !inFence, let definition = parseLinkReferenceDefinition(line) {
+            if let definition = parseLinkReferenceDefinition(line) {
                 references[definition.key] = definition.reference
                 continue
             }
@@ -218,13 +224,29 @@ extension MarkdownParser {
 
     // MARK: - 内部：自动链接与裸 URL
 
-    /// `<https://…>` / `<mailto:…>` 自动链接。
+    /// `<https://…>` / `<mailto:…>` / `<user@domain>` 自动链接。
     static func parseAutolink(_ chars: [Character], from: Int) -> (token: InlineToken, next: Int)? {
         guard let gt = findCharacter(">", in: chars, from: from + 1) else { return nil }
         let inner = String(chars[(from + 1)..<gt])
-        guard !inner.isEmpty else { return nil }
-        guard inner.hasPrefix("http://") || inner.hasPrefix("https://") || inner.hasPrefix("mailto:") else { return nil }
-        return (.link(text: [.text(decodeHTMLEntities(inner))], url: inner, title: nil), gt + 1)
+        guard !inner.isEmpty, !inner.contains(where: { $0.isWhitespace }) else { return nil }
+        if inner.hasPrefix("http://") || inner.hasPrefix("https://") || inner.hasPrefix("mailto:") {
+            return (.link(text: [.text(decodeHTMLEntities(inner))], url: inner, title: nil), gt + 1)
+        }
+        if isEmailAddress(inner) {
+            return (.link(text: [.text(inner)], url: "mailto:" + inner, title: nil), gt + 1)
+        }
+        return nil
+    }
+
+    private static func isEmailAddress(_ candidate: String) -> Bool {
+        let parts = candidate.split(separator: "@", omittingEmptySubsequences: false)
+        guard parts.count == 2 else { return false }
+        let local = parts[0]
+        let domain = parts[1]
+        guard !local.isEmpty, !domain.isEmpty, domain.contains(".") else { return false }
+        guard !domain.hasPrefix("."), !domain.hasSuffix(".") else { return false }
+        let forbidden: Set<Character> = ["<", ">", "/", "\\", "\"", "'", ":"]
+        return !candidate.contains(where: { forbidden.contains($0) })
     }
 
     /// 裸 URL：`http://` / `https://` / `www.` 开头的连续非空白词。

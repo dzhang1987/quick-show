@@ -60,6 +60,9 @@ struct MarkdownBlockView: View {
         case let .unorderedList(items):
             MarkdownListView(items: items, ordered: false)
 
+        case let .definitionList(items):
+            MarkdownDefinitionListView(items: items)
+
         case let .blockquote(inner):
             MarkdownBlockquoteView(blocks: inner)
 
@@ -428,3 +431,45 @@ struct MarkdownFootnoteSection: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
+
+// MARK: - 定义列表（Definition List）
+
+/// Markdown Extra / Pandoc 定义列表：术语（Term）加粗置顶 + 释义项（`: Definition`）左侧竖线缩进。
+private struct MarkdownDefinitionListView: View {
+    let items: [MarkdownDefinitionItem]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                    MarkdownInlineText(
+                        inlines: item.term,
+                        bodyColor: Theme.Colors.contentPrimary,
+                        baseSize: 13,
+                        weight: .semibold,
+                        explicitColor: Theme.Colors.contentPrimary
+                    )
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                    VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                        ForEach(Array(item.definitions.enumerated()), id: \.offset) { _, def in
+                            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.lg) {
+                                Text("•")
+                                    .font(Theme.Typography.text(12, .semibold))
+                                    .foregroundColor(Theme.Colors.contentTertiary)
+                                MarkdownInlineText(inlines: def)
+                                    .lineSpacing(4)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(.leading, Theme.Spacing.xl)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+

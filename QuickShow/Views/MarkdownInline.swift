@@ -173,6 +173,38 @@ enum MarkdownInline {
                 )
                 result[start..<result.endIndex].baselineOffset = 3
 
+            case let .ruby(base, ruby, position):
+                append(
+                    base,
+                    into: &result,
+                    bodyColor: bodyColor,
+                    size: size,
+                    baseWeight: baseWeight,
+                    isBold: isBold,
+                    isItalic: isItalic
+                )
+                let rtSize = max(size * 0.58, 8)
+                switch position {
+                case .over:
+                    var rt = AttributedString("(\(ruby))")
+                    rt.font = resolveFont(size: rtSize, baseWeight: baseWeight, isBold: isBold, isItalic: isItalic)
+                    rt.foregroundColor = bodyColor.opacity(0.85)
+                    rt.baselineOffset = 3
+                    result.append(rt)
+                case .right:
+                    var rt = AttributedString(" \(ruby)")
+                    rt.font = resolveFont(size: rtSize, baseWeight: baseWeight, isBold: isBold, isItalic: isItalic)
+                    rt.foregroundColor = bodyColor.opacity(0.85)
+                    result.append(rt)
+                case .under:
+                    var rt = AttributedString("(\(ruby))")
+                    rt.font = resolveFont(size: rtSize, baseWeight: baseWeight, isBold: isBold, isItalic: isItalic)
+                    rt.foregroundColor = bodyColor.opacity(0.85)
+                    rt.baselineOffset = -3
+                    result.append(rt)
+                }
+
+
             case let .link(label, url, _):
                 // title 无视觉变化，忽略。
                 let start = result.endIndex

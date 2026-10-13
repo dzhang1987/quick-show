@@ -46,10 +46,10 @@ enum MarkdownBlockSegmenter {
         switch block {
         case let .heading(level, inlines):
             // H2 ~ H6 为纯排版标题；H1 带有底部分割线 Rectangle，作为独立 widget 渲染以保质感
-            return level >= 2 && !inlines.containsImage && !inlines.containsMath
+            return level >= 2 && !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby
         case let .paragraph(inlines):
-            // 普通段落无图片、无行内公式时直接进入文本流
-            return !inlines.containsImage && !inlines.containsMath
+            // 普通段落无图片、无行内公式、无东亚注音时直接进入文本流
+            return !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby
         case let .orderedList(items), let .unorderedList(items):
             // 列表项全部为文本流兼容块时整体进入文本流
             return items.allSatisfy { isListItemTextFlowCompatible($0) }
@@ -59,10 +59,12 @@ enum MarkdownBlockSegmenter {
     }
 
     private static func isListItemTextFlowCompatible(_ item: MarkdownListItem) -> Bool {
-        item.blocks.allSatisfy { block in
+        var paragraphCount = 0
+        return item.blocks.allSatisfy { block in
             switch block {
             case let .paragraph(inlines):
-                return !inlines.containsImage && !inlines.containsMath
+                paragraphCount += 1
+                return paragraphCount <= 1 && !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby
             case let .orderedList(subItems), let .unorderedList(subItems):
                 return subItems.allSatisfy { isListItemTextFlowCompatible($0) }
             default:

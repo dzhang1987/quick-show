@@ -47,6 +47,7 @@ enum MathLatexCollector {
                      let .superscript(inner):
                     walkInlineTokens(inner)
                 case let .link(text, _, _): walkInlineTokens(text)
+                case let .ruby(base, _, _): walkInlineTokens(base)
                 case .text, .code, .kbd, .image, .lineBreak, .footnoteRef: break
                 }
             }
@@ -64,6 +65,11 @@ enum MathLatexCollector {
                     addDisplay(latex)
                 case let .orderedList(items), let .unorderedList(items):
                     items.forEach(walkItem)
+                case let .definitionList(items):
+                    for item in items {
+                        walkInlineTokens(item.term)
+                        item.definitions.forEach(walkInlineTokens)
+                    }
                 case let .blockquote(inner), let .alert(_, inner):
                     walkBlocks(inner)
                 case let .details(summary, inner, _):
