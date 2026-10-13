@@ -53,6 +53,7 @@
 		2C21B8451DB6A2C6F905652B /* AIChatState+Notifications.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B946333D1317A323F75AC17 /* AIChatState+Notifications.swift */; };
 		2C366014EB994787155693AD /* MarkdownFootnoteRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 033F61EDE226617CD896BA19 /* MarkdownFootnoteRenderer.swift */; };
 		2D4DEF9BBB116977FA238E52 /* MarkdownTableRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 066E596FA0E17DE77BCD706F /* MarkdownTableRenderer.swift */; };
+		2F95BEEC3C97317C76A07FF8 /* mermaid_template.html in Resources */ = {isa = PBXBuildFile; fileRef = C9AD8F89889CD97CFB15D8A6 /* mermaid_template.html */; };
 		2FE8433EC0F02F3317099504 /* mathFonts.bundle in Resources */ = {isa = PBXBuildFile; fileRef = B447A4A50153BE5D3817D655 /* mathFonts.bundle */; };
 		30440526851B6CE2562C8459 /* MTLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = E84BDE0348FDAA9E49D752F1 /* MTLabel.swift */; };
 		321E4DFC3AA99F3C8829C9D5 /* AIChatService+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7695F4FF6C1E0DD5672E388 /* AIChatService+Streaming.swift */; };
@@ -77,7 +78,6 @@
 		52C20512446766AAB58B2144 /* pojoaque.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 751F343AA24F0685B3EFBE9A /* pojoaque.min.css */; };
 		52D662616D1B8849F6650A7C /* MermaidWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A0177177434B2AA7EF7DCA2 /* MermaidWebView.swift */; };
 		536AA6C6BE64E1651D587CEE /* AIChatService+RequestEncoding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D051C96C18F1878137BCF0B /* AIChatService+RequestEncoding.swift */; };
-		54B736345915049EB7B31FFF /* MermaidNormalizerScript.swift in Sources */ = {isa = PBXBuildFile; fileRef = 042454573B27BE37424580C8 /* MermaidNormalizerScript.swift */; };
 		54F3DBE5FAF2AC2BAC8FDB20 /* AppState+Actions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E96296DA3CAB83BC3CB9374 /* AppState+Actions.swift */; };
 		5625F42B68D7664BE35B33C0 /* InlineToken+Inspection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0907F093083B04C247174D05 /* InlineToken+Inspection.swift */; };
 		5860BE40BE412797192070A6 /* NowPlayingProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2CA444DE18DD444351B1C21 /* NowPlayingProvider.swift */; };
@@ -116,11 +116,13 @@
 		7B1CF349CFA5269F288D9612 /* MTFontMathTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 03458E0DB4A3F5DA4B1ABA3F /* MTFontMathTable.swift */; };
 		7B89B72C2D9E68B3B9F1DAD8 /* MapCardModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3ACE6938AE31D484DF9DE80E /* MapCardModels.swift */; };
 		7CA253BE4875CE3728B2A9CD /* MarkdownCodeBlockRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 888FDAA51B7F2835E46C44AE /* MarkdownCodeBlockRenderer.swift */; };
+		7CDCDF6A6DBAB8171A3A64E3 /* mermaid_base.css in Resources */ = {isa = PBXBuildFile; fileRef = 0390443924A53736AEA3BD13 /* mermaid_base.css */; };
 		7D894712465CA4E102E46212 /* MTMathList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B75DEE0C2484EC7C0E4D4828 /* MTMathList.swift */; };
 		7E7814E04576707C2E177CD2 /* WebTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */; };
 		7F3550D6676EC0182DD29A75 /* MTFontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29D2A7DA65EFB27452D51FD /* MTFontManager.swift */; };
 		809266C1C45B4248D7842710 /* AIToolCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D265EF154F546FE21365CDDE /* AIToolCardView.swift */; };
 		80FFA17FD32F15AB85C5BCC3 /* MTMathListDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B223DA2D2B28A9E5439782C /* MTMathListDisplay.swift */; };
+		816B8C5D277509C105B0A6F0 /* mermaid_bridge.js in Resources */ = {isa = PBXBuildFile; fileRef = F0B57B22DF1AFA5CCE157534 /* mermaid_bridge.js */; };
 		825D8E0668CA724C6E71CC37 /* SystemMetricsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1467F308D8D21AC801C2B0 /* SystemMetricsProvider.swift */; };
 		834BDB7A08B31C0CB997B081 /* highlight.min.js in Resources */ = {isa = PBXBuildFile; fileRef = F42092753AD4E207BC630CA5 /* highlight.min.js */; };
 		83A255FF6287FD1F95E319CF /* MathLatexCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C699FAD7F797752011F574 /* MathLatexCollector.swift */; };
@@ -135,6 +137,7 @@
 		8BC416244B1AE4F712EFFAC4 /* MarkdownDefinitionListRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0523C433963BF4C1F733A515 /* MarkdownDefinitionListRenderer.swift */; };
 		8CCF8BF71812D3A221D8CF4F /* LunarCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63AB70CD13631A39A802994 /* LunarCalendar.swift */; };
 		8EA9020A6D1DCEA1B41E831F /* MTTypesetter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88CB548F8258C555E4F510C /* MTTypesetter.swift */; };
+		8F04AE30EF1932CB89EDCFFC /* mermaid_normalizer.js in Resources */ = {isa = PBXBuildFile; fileRef = 0FEB2F0DEF81B4633CA945B6 /* mermaid_normalizer.js */; };
 		8F288B929638E67091C36B3A /* ImageAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */; };
 		91069499DDBCC2426DCC41CD /* ExpandedMonitoringView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F4584DE26B61ECF74718A252 /* ExpandedMonitoringView.swift */; };
 		91D8CED83406A2AED924E53F /* AIChatState+Streaming.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E148BD6697F69AF796E6C04 /* AIChatState+Streaming.swift */; };
@@ -246,10 +249,10 @@
 		02EDB0F7F9308986A84F3401 /* AIServiceSettingsForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIServiceSettingsForm.swift; sourceTree = "<group>"; };
 		033F61EDE226617CD896BA19 /* MarkdownFootnoteRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownFootnoteRenderer.swift; sourceTree = "<group>"; };
 		03458E0DB4A3F5DA4B1ABA3F /* MTFontMathTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontMathTable.swift; sourceTree = "<group>"; };
+		0390443924A53736AEA3BD13 /* mermaid_base.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = mermaid_base.css; sourceTree = "<group>"; };
 		03B0B0357916235B809E566B /* FloatingPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanel.swift; sourceTree = "<group>"; };
 		03CA1A414D9CFB03EA210EA2 /* TickEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TickEngine.swift; sourceTree = "<group>"; };
 		03E691C51CDD1D3AB278BC85 /* Highlightr.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Highlightr.swift; sourceTree = "<group>"; };
-		042454573B27BE37424580C8 /* MermaidNormalizerScript.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidNormalizerScript.swift; sourceTree = "<group>"; };
 		04AE831E93734F1F74D7F169 /* AIWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIWindowManager.swift; sourceTree = "<group>"; };
 		04F94926A222A5B89654606D /* AIChatState+SessionEdits.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+SessionEdits.swift"; sourceTree = "<group>"; };
 		0523C433963BF4C1F733A515 /* MarkdownDefinitionListRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDefinitionListRenderer.swift; sourceTree = "<group>"; };
@@ -259,6 +262,7 @@
 		0B223DA2D2B28A9E5439782C /* MTMathListDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTMathListDisplay.swift; sourceTree = "<group>"; };
 		0E6CE4C4D3B3C24C822C936D /* SystemActions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemActions.swift; sourceTree = "<group>"; };
 		0E743B480470624A4287B53E /* libSwiftMath.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libSwiftMath.a; sourceTree = BUILT_PRODUCTS_DIR; };
+		0FEB2F0DEF81B4633CA945B6 /* mermaid_normalizer.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mermaid_normalizer.js; sourceTree = "<group>"; };
 		11C47863F2E3FDEDECD77402 /* libHighlightrKit.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libHighlightrKit.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		12DECE3C3E44FC0DBDAC273F /* MathArgumentRewriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathArgumentRewriter.swift; sourceTree = "<group>"; };
 		13486C36433281599CC36C34 /* SystemStatusProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusProvider.swift; sourceTree = "<group>"; };
@@ -406,6 +410,7 @@
 		C6C9B117A903234A0E71078F /* CalendarEventDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventDetailView.swift; sourceTree = "<group>"; };
 		C755B39DA45592E57B2206C6 /* MarkdownASTCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownASTCache.swift; sourceTree = "<group>"; };
 		C999338FF00F2D0B30078083 /* ChatScrollCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatScrollCoordinator.swift; sourceTree = "<group>"; };
+		C9AD8F89889CD97CFB15D8A6 /* mermaid_template.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = mermaid_template.html; sourceTree = "<group>"; };
 		CC767F1D0494916BA069B3D7 /* MarkdownListRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownListRenderer.swift; sourceTree = "<group>"; };
 		D02AEC11818DC838F2930F60 /* MarkdownBlockSegmenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockSegmenter.swift; sourceTree = "<group>"; };
 		D11F7A6D46279250D573223B /* MathFont.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathFont.swift; sourceTree = "<group>"; };
@@ -439,6 +444,7 @@
 		EC406C9BEF26120A9D234C3D /* LaunchAgentTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LaunchAgentTool.swift; sourceTree = "<group>"; };
 		ED16FD8DF40DEA1024430822 /* AntigravityCloudCodeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityCloudCodeAdapter.swift; sourceTree = "<group>"; };
 		EF5BE1591E097DFDF1C55A4C /* CalendarProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarProvider.swift; sourceTree = "<group>"; };
+		F0B57B22DF1AFA5CCE157534 /* mermaid_bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mermaid_bridge.js; sourceTree = "<group>"; };
 		F20AF867571D5BCBBE336B6E /* QoderProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderProvider.swift; sourceTree = "<group>"; };
 		F29D2A7DA65EFB27452D51FD /* MTFontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontManager.swift; sourceTree = "<group>"; };
 		F2A3B0D346751AEDEDF6F425 /* MathSyntaxSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSyntaxSanitizer.swift; sourceTree = "<group>"; };
@@ -578,7 +584,6 @@
 			children = (
 				866A72EC3C1233BDDF97513F /* MermaidBlockView.swift */,
 				B99B39B40CDC4C20504B45A1 /* MermaidModels.swift */,
-				042454573B27BE37424580C8 /* MermaidNormalizerScript.swift */,
 				6531FF4B9DF2C2EF8776D15E /* MermaidScriptLoader.swift */,
 				1AE8B7761DA96513D560B46A /* MermaidTemplateProvider.swift */,
 				5A0177177434B2AA7EF7DCA2 /* MermaidWebView.swift */,
@@ -836,10 +841,22 @@
 				80187D648ECC52984FCD6D2C /* QuickShowApp.swift */,
 				727AE6DE1B375F15B376972B /* AI */,
 				208989162C61EB5089E7CF98 /* Core */,
+				E54B88E3CEAFA79D22BD79F5 /* Resources */,
 				1735B580DC3B51B3B6946295 /* Utilities */,
 				51140C791DB8B1B86DE4B6FC /* Views */,
 			);
 			path = QuickShow;
+			sourceTree = "<group>";
+		};
+		D200FF9DA7E5F9C3D7592F65 /* Mermaid */ = {
+			isa = PBXGroup;
+			children = (
+				0390443924A53736AEA3BD13 /* mermaid_base.css */,
+				F0B57B22DF1AFA5CCE157534 /* mermaid_bridge.js */,
+				0FEB2F0DEF81B4633CA945B6 /* mermaid_normalizer.js */,
+				C9AD8F89889CD97CFB15D8A6 /* mermaid_template.html */,
+			);
+			path = Mermaid;
 			sourceTree = "<group>";
 		};
 		DFCC69276BA764C418F6F57E /* Core */ = {
@@ -850,6 +867,14 @@
 				85A4755878CF39901ECD372A /* MarkdownDisplaySegment.swift */,
 			);
 			path = Core;
+			sourceTree = "<group>";
+		};
+		E54B88E3CEAFA79D22BD79F5 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				D200FF9DA7E5F9C3D7592F65 /* Mermaid */,
+			);
+			path = Resources;
 			sourceTree = "<group>";
 		};
 		EB69E8C255AD30A30BEEF6D2 /* Inline */ = {
@@ -902,13 +927,6 @@
 			);
 			name = Mermaid;
 			path = Vendor/Mermaid;
-			sourceTree = "<group>";
-		};
-		"TEMP_EFD2D720-0EA9-42C4-AB20-D6DAFE63F838" /* Resources */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Resources;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1019,6 +1037,10 @@
 				834BDB7A08B31C0CB997B081 /* highlight.min.js in Resources */,
 				2FE8433EC0F02F3317099504 /* mathFonts.bundle in Resources */,
 				34581C3B276C1518C6955262 /* mermaid.min.js in Resources */,
+				7CDCDF6A6DBAB8171A3A64E3 /* mermaid_base.css in Resources */,
+				816B8C5D277509C105B0A6F0 /* mermaid_bridge.js in Resources */,
+				8F04AE30EF1932CB89EDCFFC /* mermaid_normalizer.js in Resources */,
+				2F95BEEC3C97317C76A07FF8 /* mermaid_template.html in Resources */,
 				52C20512446766AAB58B2144 /* pojoaque.min.css in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1210,7 +1232,6 @@
 				2366D5FF5873667D5598EDEA /* MediaStore.swift in Sources */,
 				09D6526DE618574B059852AA /* MermaidBlockView.swift in Sources */,
 				4BF686A36F270EAE617CDA8F /* MermaidModels.swift in Sources */,
-				54B736345915049EB7B31FFF /* MermaidNormalizerScript.swift in Sources */,
 				94ADAA5D8827CE7183DC68A5 /* MermaidScriptLoader.swift in Sources */,
 				9BBE6FD0698319ED3A397787 /* MermaidTemplateProvider.swift in Sources */,
 				52D662616D1B8849F6650A7C /* MermaidWebView.swift in Sources */,

@@ -31,6 +31,15 @@
 
 ### Changed
 
+- **Markdown Mermaid 渲染器前端资源（HTML/CSS/JS）全面独立化与模块化解耦（`QuickShow/Resources/Mermaid/` 与 `MermaidTemplateProvider.swift`）**：
+  - **前端资产独立与多语言原生支持**：将原先在 Swift 源码中硬编码定义的近 1300 行前端代码彻底抽离为 4 个独立资源文件，获得完整的 HTML/CSS/JavaScript 语法高亮、Prettier 格式化与独立调试能力：
+    - `mermaid_template.html`：HTML 容器骨架与插槽占位；
+    - `mermaid_base.css`：容器重置、居中布局与隐藏原生错误指示器的基底样式；
+    - `mermaid_normalizer.js`：涵盖 10 余种子图语法的词法预归一化正则管线；
+    - `mermaid_bridge.js`：WebKit 消息桥、深浅色毛玻璃对比度样式动态生成与尺寸监听调度；
+  - **运行期零额外 I/O 与单例缓存（`MermaidTemplateProvider`）**：将 `MermaidTemplateProvider.swift` 从近 1000 行大幅缩减至 90 行纯装配逻辑，在应用启动/首次调用时从 Bundle 一次性读取并拼装缓存，彻底避免每次卡片渲染重复读盘；
+  - **冗余代码清理**：移除中间包装类 `MermaidNormalizerScript.swift`，保持 Swift 源码目录高度纯净。
+
 - **Markdown 渲染系统模块化与面向协议架构重构（`QuickShow/Views/Markdown/` 全链路）**：
   - **开闭原则（OCP）与协议化注册（`MarkdownBlockRenderer` / `MarkdownBlockRegistry`）**：
     - 确立「AST 解析 → 智能排版流切分（TextFlow vs. Widget）→ 注册表动态分发 → 原生 TextKit / SwiftUI 视图」清晰架构流水线；
