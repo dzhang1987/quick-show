@@ -31,6 +31,19 @@
 
 ### Changed
 
+- **Markdown 渲染系统模块化与面向协议架构重构（`QuickShow/Views/Markdown/` 全链路）**：
+  - **开闭原则（OCP）与协议化注册（`MarkdownBlockRenderer` / `MarkdownBlockRegistry`）**：
+    - 确立「AST 解析 → 智能排版流切分（TextFlow vs. Widget）→ 注册表动态分发 → 原生 TextKit / SwiftUI 视图」清晰架构流水线；
+    - 引入 `MarkdownBlockRenderer` 契约协议（统一调度优先级、排版能力、间距节奏、文本流拼接与组件渲染）与 `MarkdownBlockRegistry` 集中注册表，彻底废除核心视图内庞大的硬编码 `switch-case`，未来扩展新块类型主流程零修改；
+  - **千行大文件解耦与职责单一化**：
+    - `MermaidWebView.swift`（原 1555 行）彻底解耦为轻量 AppKit 宿主（188 行）、`MermaidModels`（外观/主题配置）、`MermaidScriptLoader`（单例脚本缓存）、`MermaidNormalizerScript`（语法预归一化）与 `MermaidTemplateProvider`（HTML/CSS 模板）；
+    - `MathLatexTranspiler.swift`（原 818 行）重构为 Pipeline 流水线（括号平衡匹配、符号清洗、环境转换与列收敛、带参命令重构、流水线宿主），对外保留 `MathLatexTranspiler` 兼容门面；
+    - `MarkdownBlocks.swift`（原 475 行）拆解为 12 个单一职责的独立 Renderer 与 View 组件，由门面视图 `MarkdownBlockView`（28 行）统一代理；
+    - `MarkdownTextFlow.swift`（原 504 行）拆解为 `MarkdownDisplaySegment`、`MarkdownBlockSegmenter`、`MarkdownTextFlowBuilder` 与 `NativeTextFlowView`，排版流切分完全由渲染器 `capabilities` 契约驱动；
+    - 行内渲染拆解为纯 TextKit 路径 `MarkdownInlineNS`、纯 SwiftUI 路径 `MarkdownInline`、统一门面 `MarkdownInlineText` 与 AST 属性检测 `InlineToken+Inspection`。
+  - **代码与资产零污染规范落地**：
+    - 渲染子系统源码统一收敛至 `QuickShow/Views/Markdown/` 子目录，单文件平均体量控制在 25 ~ 200 行，首帧自适应分批、落定态防抖全量渲染与 TextKit 精密排版 100% 保持零退化；架构设计文档归档至 `docs/MARKDOWN_REFACTOR_DESIGN.md`。
+
 - **单文本流升级为 AppKit 原生 TextKit 宿主架构（`NativeTextFlowView` / `NonScrollingTextView`）**：
   - **TextKit 底层系统级排版穿透**：彻底攻克 SwiftUI `Text(AttributedString)` 静默丢弃 `NSParagraphStyle` 的系统级缺陷，重构为基于原生 `NSTextView` 的 `NativeTextFlowView`；
   - **真·悬挂缩进与两列精密对齐**：完整支持 `headIndent` 悬挂缩进（折行文字垂直对齐至汉字首字）与 `NSTextTab` 制表对齐，彻底消除列表多行折行顶格在标号圆点下方的缺陷；

@@ -21,6 +21,10 @@ struct MermaidBlockView: View {
     @AppStorage(MermaidLook.storageKey) private var lookRaw: String = MermaidLook.classic.rawValue
     @AppStorage(MermaidTheme.storageKey) private var themeRaw: String = MermaidTheme.auto.rawValue
 
+    init(code: String) {
+        self.code = code
+    }
+
     private var currentLook: MermaidLook {
         MermaidLook(rawValue: lookRaw) ?? .classic
     }
@@ -144,7 +148,6 @@ struct MermaidBlockView: View {
 
             // 内容区：ZStack 双层常驻，确保流式期间 WebView 始终能接收增量代码并恢复渲染
             ZStack(alignment: .topLeading) {
-                // 矢量图表层：始终挂载以响应更新，但当用户切到代码或渲染未成功时隐藏
                 MermaidWebView(
                     code: code,
                     isDark: colorScheme == .dark,
@@ -157,7 +160,6 @@ struct MermaidBlockView: View {
                 .opacity((isShowingCode || renderFailed) ? 0 : 1)
                 .allowsHitTesting(!isShowingCode && !renderFailed)
 
-                // 代码层：当用户手动切换为代码、或语法解析暂未通过时显示
                 if isShowingCode || renderFailed {
                     CodeBlockText(code: code, language: "mermaid")
                 }
