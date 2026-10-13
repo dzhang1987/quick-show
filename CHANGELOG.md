@@ -58,7 +58,10 @@
   - **动态外观自适应提供器（`adaptiveLabel`）**：封装基于 `NSColor(name: nil, dynamicProvider:)` 的动态颜色构造器，依据当前宿主视图的 `effectiveAppearance` 正确分流深色（白字透明度）与浅色（黑字透明度），使正文与列表项在亮色模式下自然呈现高对比度深色文本；
   - **全链路外观联动与即时重绘**：将行内代码背景色、高亮底色与链接强调色同步升级为动态闭包提供，并在 `NonScrollingTextView` 中重写 `viewDidChangeEffectiveAppearance()`，确保系统或设置切换深浅模式时文字样式毫秒级无缝联动刷新。
 
-- **Mermaid 矢量图表渲染尺寸畸变与时序图泳道穿刺根治（`MermaidWebView.swift`）**：
+- **Mermaid 矢量图表渲染尺寸畸变、底部截断/留白与中文词法支持根治（`MermaidWebView.swift` / `mermaid.min.js`）**：
+  - **全量图表中文与 Unicode 词法打通**：排查定位 Mermaid 官方 Jison 词法分析器在 `quadrantChart`（象限图）、`xychart-beta`（XY 图）中将未加引号的 `ALPHA` Token 硬编码为 `/^(?:[A-Za-z]+)/i`（仅匹配纯英文 ASCII），在 `sankey-beta`（桑基图）中将 CSV 文本上限锁死在 `\u007E`，以及在 `erDiagram`、`gitGraph`、`requirementDiagram` 中将标识符限制在 ASCII `\w`，导致中文坐标轴、象限名、数据点名或实体名不加引号即抛出 `Lexical error` 降级回退；从词法器底层统一扩充 `\u0080-\uFFFF` Unicode 字符范围与半角括号标点支持；
+  - **`ResizeObserver` 实时高度同步（根治 `erDiagram` 等图表底部截断）**：解决原实现仅在 `mermaid.render` 完成单帧测量一次 `svgEl.getBoundingClientRect().height` 且漏算 `#container` 上下 12px 内边距的缺陷——当容器首帧处于较窄宽度完成测量后展开至完整宽度时，内部 `<svg width="100%">` 等比放大而外层 SwiftUI `renderedHeight` 锁死在旧高度导致底部节点被裁切；引入 `ResizeObserver` 监听 `document.body`、`#container` 与 `<svg>` 实时上报精确容器高度，并在 `clientWidth < 10` 时延后至布局就绪再渲染；
+  - **根治用户旅程图（`journey`）底部巨幅空白**：排查定位 `journey` 渲染器在设置响应式 `width="100%"` 后强行写入硬编码 `height="565"` 且将顶部标题高度 `70px` 误加至底部 `viewBox` 的问题；在 `normalizeDiagram` 中针对 `journey` 依据 `getBBox()` 实际几何边界收紧 `viewBox`，并移除带 `viewBox` 图表的硬编码 `height` 属性，使其严格按宽高比自适应高度；
   - **消除小图暴力放大畸变**：彻底移除 Web 模板中 `svg { max-width: 100% !important; }` 的破坏性样式覆盖，恢复 Mermaid 原生内联 `style="max-width: 自然宽"` 保护，彻底解决流程图（`flowchart TB`）、方块图（`block-beta`）、实体关系图（`erDiagram`）等窄图被强行拉扯放大 2~4 倍且高度暴增至数千像素的严重缺陷；
   - **根治时序图（`sequenceDiagram`）泳道竖线穿刺顶部参与者方框**：排查定位 Mermaid 底层生命线起笔于顶部方框内 `y=5` 处、依赖不透明实色背景遮盖的历史实现缺陷；在 SVG 渲染流水线中新增几何规范化裁剪（`normalizeDiagram`），自动将垂直生命线起点截断在顶部参与者底边（$bottomY = y + height$），即使在 macOS 深度毛玻璃半透明体系下亦能呈现规整干净的专业时序图。
 

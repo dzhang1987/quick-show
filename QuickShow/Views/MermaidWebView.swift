@@ -188,13 +188,14 @@ struct MermaidWebView: NSViewRepresentable {
                 width: 100%;
                 display: flex;
                 justify-content: center;
-                align-items: center;
+                align-items: flex-start;
                 overflow-x: auto;
                 overflow-y: hidden;
                 padding: 6px 0;
               }
               svg {
                 display: block;
+                height: auto;
               }
               #dmermaid-render-error, .error-icon, .error-text {
                 display: none !important;
@@ -206,6 +207,45 @@ struct MermaidWebView: NSViewRepresentable {
             <script>
               let renderCounter = 0;
               let renderTimer = null;
+              let lastReportedHeight = 0;
+              let pendingRenderArgs = null;
+
+              function reportContainerHeight() {
+                const container = document.getElementById('container');
+                const svgEl = container ? container.querySelector('svg') : null;
+                if (!container || !svgEl) return;
+
+                const svgRect = svgEl.getBoundingClientRect();
+                const containerRect = container.getBoundingClientRect();
+                let height = Math.ceil(Math.max(containerRect.height, svgRect.height + 12));
+                if (!height || height <= 0) {
+                  height = Math.ceil(container.scrollHeight);
+                }
+                const finalHeight = Math.max(height, 24);
+                if (Math.abs(finalHeight - lastReportedHeight) >= 1) {
+                  lastReportedHeight = finalHeight;
+                  window.webkit.messageHandlers.mermaidBridge.postMessage({
+                    type: 'rendered',
+                    height: finalHeight
+                  });
+                }
+              }
+
+              const resizeObserver = new ResizeObserver(() => {
+                if (pendingRenderArgs && document.body.clientWidth >= 10) {
+                  const args = pendingRenderArgs;
+                  pendingRenderArgs = null;
+                  doRenderDiagram(args.code, args.isDark);
+                  return;
+                }
+                requestAnimationFrame(reportContainerHeight);
+              });
+
+              window.addEventListener('DOMContentLoaded', () => {
+                const container = document.getElementById('container');
+                if (container) resizeObserver.observe(container);
+                resizeObserver.observe(document.body);
+              });
 
               function initMermaid(isDark) {
                 if (!window.mermaid) return;
@@ -251,10 +291,31 @@ struct MermaidWebView: NSViewRepresentable {
                 const svgEl = container.querySelector('svg');
                 if (!svgEl) return;
 
-                // 根治时序图泳道生命线穿刺顶部参与者方框：
-                // Mermaid 原生绘制生命线从顶部方框内的 y=5 起笔，依赖不透明背景遮挡；
-                // 在 macOS 毛玻璃半透明体系下，生命线会透过半透明方框暴露。
-                // 此处从几何底层将生命线起点截断在方框底边（bottomY），彻底根治穿刺。
+                // 1. 根治 journey 等图表硬编码 height 属性与冗余 viewBox 导致的底部巨幅留白：
+                //    journey 渲染器在设置 width="100%" 后又强行写入 height="565"，且将标题高度 70px 误加至底部 viewBox。
+                //    此处针对 journey 按实际图形几何边界 (getBBox) 收紧 viewBox，并移除所有带 viewBox 图表的硬编码 height 属性，
+                //    让 SVG 高度严格按 viewBox 宽高比随容器宽度等比缩放。
+                if (svgEl.getAttribute('aria-roledescription') === 'journey') {
+                  try {
+                    const bbox = svgEl.getBBox();
+                    if (bbox && bbox.width > 0 && bbox.height > 0) {
+                      const padX = 16;
+                      const padY = 12;
+                      svgEl.setAttribute(
+                        'viewBox',
+                        `${bbox.x - padX} ${bbox.y - padY} ${bbox.width + padX * 2} ${bbox.height + padY * 2}`
+                      );
+                    }
+                  } catch (_) {}
+                }
+                if (svgEl.getAttribute('viewBox')) {
+                  svgEl.removeAttribute('height');
+                }
+
+                // 2. 根治时序图泳道生命线穿刺顶部参与者方框：
+                //    Mermaid 原生绘制生命线从顶部方框内的 y=5 起笔，依赖不透明背景遮挡；
+                //    在 macOS 毛玻璃半透明体系下，生命线会透过半透明方框暴露。
+                //    此处从几何底层将生命线起点截断在方框底边（bottomY），彻底根治穿刺。
                 const topActors = svgEl.querySelectorAll('rect.actor-top, g.actor-top');
                 if (topActors.length > 0) {
                   const lines = svgEl.querySelectorAll('line');
@@ -291,8 +352,6 @@ struct MermaidWebView: NSViewRepresentable {
 
               async function doRenderDiagram(code, isDark) {
                 const container = document.getElementById('container');
-                const renderId = 'mermaid-render-' + (++renderCounter);
-
                 if (!window.mermaid) {
                   window.webkit.messageHandlers.mermaidBridge.postMessage({
                     type: 'error',
@@ -301,36 +360,37 @@ struct MermaidWebView: NSViewRepresentable {
                   return;
                 }
 
+                if (!code || !code.trim()) {
+                  container.innerHTML = '';
+                  lastReportedHeight = 0;
+                  window.webkit.messageHandlers.mermaidBridge.postMessage({
+                    type: 'rendered',
+                    height: 0
+                  });
+                  return;
+                }
+
+                if (document.body.clientWidth < 10) {
+                  pendingRenderArgs = { code, isDark };
+                  return;
+                }
+
+                const renderId = 'mermaid-render-' + (++renderCounter);
                 initMermaid(isDark);
 
                 try {
-                  if (!code || !code.trim()) {
-                    container.innerHTML = '';
-                    window.webkit.messageHandlers.mermaidBridge.postMessage({
-                      type: 'rendered',
-                      height: 0
-                    });
-                    return;
-                  }
-
                   const { svg } = await mermaid.render(renderId, code);
                   container.innerHTML = svg;
                   normalizeDiagram(container);
 
+                  const svgEl = container.querySelector('svg');
+                  if (svgEl) {
+                    resizeObserver.observe(svgEl);
+                  }
+
+                  lastReportedHeight = 0;
                   requestAnimationFrame(() => {
-                    const svgEl = container.querySelector('svg');
-                    let height = 0;
-                    if (svgEl) {
-                      const rect = svgEl.getBoundingClientRect();
-                      height = Math.ceil(rect.height);
-                    }
-                    if (!height || height === 0) {
-                      height = Math.ceil(container.scrollHeight);
-                    }
-                    window.webkit.messageHandlers.mermaidBridge.postMessage({
-                      type: 'rendered',
-                      height: Math.max(height, 24)
-                    });
+                    reportContainerHeight();
                   });
                 } catch (err) {
                   container.innerHTML = '';
