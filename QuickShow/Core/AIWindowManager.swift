@@ -67,6 +67,14 @@ final class AIPanel: NSPanel {
                 onClearSession?()
                 return
             }
+            // ⌘C 复制：优先精准复制窗口内当前选中文本（避免 accessory panel 下 sendEvent 直达 NSTextView.keyDown 吞掉 ⌘C 的底层缺陷）
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let cleanFlags = flags.subtracting([.capsLock, .numericPad, .function])
+            if cleanFlags == [.command] && event.keyCode == 8 { // ANSI 'C'
+                if copyActiveSelection() {
+                    return
+                }
+            }
             // 文本编辑聚焦时其余按键全部放行给第一响应者
             // （编辑表单 field editor 即 NSTextView；窗口级拦截先于第一响应者，
             //  会吞掉 ⏎/⇧⏎/←→/输入法组字，导致无法输入并误触全局动作）
@@ -95,6 +103,13 @@ final class AIPanel: NSPanel {
             onClearSession?()
             return
         }
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let cleanFlags = flags.subtracting([.capsLock, .numericPad, .function])
+        if cleanFlags == [.command] && event.keyCode == 8 { // ANSI 'C'
+            if copyActiveSelection() {
+                return
+            }
+        }
         if firstResponder is NSTextView {
             super.keyDown(with: event)
             return
@@ -106,23 +121,34 @@ final class AIPanel: NSPanel {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        // 1. 优先让输入框等子视图（firstResponder 等）尝试消费
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let cleanFlags = flags.subtracting([.capsLock, .numericPad, .function])
+
+        // 1. 针对 ⌘C 优先进行精准选区复制
+        if cleanFlags == [.command] && event.keyCode == 8 {
+            if copyActiveSelection() {
+                return true
+            }
+        }
+
+        // 2. 优先让输入框等子视图（firstResponder 等）尝试消费
         if super.performKeyEquivalent(with: event) {
             return true
         }
 
-        // 2. 作为 .accessory 轻量应用，macOS 顶层菜单栏不会自动接管按键等效派发。
+        // 3. 作为 .accessory 轻量应用，macOS 顶层菜单栏不会自动接管按键等效派发。
         // 若子视图未消费，先尝试交由 NSApp.mainMenu（剪切、拷贝、粘贴、全选等标准编辑动作）
         if let mainMenu = NSApp.mainMenu, mainMenu.performKeyEquivalent(with: event) {
             return true
         }
 
-        // 3. 针对 ⌘C（复制）、⌘A（全选）等通用编辑键做显式响应者链派发兜底，
+        // 4. 针对 ⌘C（复制）、⌘A（全选）等通用编辑键做显式响应者链派发兜底，
         // 确保 SwiftUI 文本选区（.textSelection）在无焦点 NSTextView 时按 ⌘C 也能稳定触发拷贝。
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        let cleanFlags = flags.subtracting([.capsLock, .numericPad, .function])
         if cleanFlags == [.command] {
             if event.keyCode == 8 { // ANSI 'C'
+                if copyActiveSelection() {
+                    return true
+                }
                 if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) {
                     return true
                 }
@@ -133,6 +159,40 @@ final class AIPanel: NSPanel {
             }
         }
 
+        return false
+    }
+
+    // MARK: - 选区探测与复制
+
+    /// 遍历寻找当前窗口内持有非空选区的文本视图（NSTextView 或 NSTextField 的 fieldEditor）
+    private func findActiveSelectionTextView(in view: NSView) -> NSTextView? {
+        if let tv = view as? NSTextView, tv.selectedRange().length > 0 {
+            return tv
+        }
+        if let tf = view as? NSTextField, let editor = tf.currentEditor() as? NSTextView, editor.selectedRange().length > 0 {
+            return editor
+        }
+        for sub in view.subviews {
+            if let found = findActiveSelectionTextView(in: sub) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    /// 优先复制当前窗口中任何处于选中状态的文本
+    @discardableResult
+    private func copyActiveSelection() -> Bool {
+        // 1. 若当前第一响应者本身就是含有选区的 NSTextView，直接触发拷贝
+        if let tv = firstResponder as? NSTextView, tv.selectedRange().length > 0 {
+            tv.copy(nil)
+            return true
+        }
+        // 2. 遍历当前窗口视图树，定位真正持有有效选区的 NSTextView / fieldEditor
+        if let contentView, let targetTV = findActiveSelectionTextView(in: contentView) {
+            targetTV.copy(nil)
+            return true
+        }
         return false
     }
 

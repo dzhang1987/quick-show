@@ -28,6 +28,11 @@
 
 ### Fixed
 
+- **彻底修复 AI Chat 会话选中文本按 `⌘ + C` 无法复制的系统级断链（`AIWindowManager.swift` / `AIChatInputFields.swift` / `MarkdownCodeBlock.swift`）**：
+  - **窗口级选区优先复制与事件闭环（`AIPanel.sendEvent` / `copyActiveSelection`）**：解决在 Accessory 窗口与无边框 Panel 下，`sendEvent` 遇到 `firstResponder is NSTextView` 直接放行导致 ⌘C 沦为普通文本按键并被 `keyDown` 静默丢弃的底层缺陷；在 `sendEvent`、`keyDown` 与 `performKeyEquivalent` 三层捕获 `⌘C`，若第一响应者或当前窗口视图树中存在持有非空选区的 `NSTextView` / `SelectionTextField` 节点，毫秒级直接触发拷贝；
+  - **输入框盲目拦截解除（`ChatInputNSTextView.performKeyEquivalent`）**：将输入框对 `⌘C` 与 `⌘X` 的消费条件严格限制为 `selectedRange.length > 0`；自身无选区时主动放行给窗口层，杜绝输入框持焦状态下吞噬外部会话划选复制事件；
+  - **代码块局部划选复制支持（`MarkdownCodeBlock.swift`）**：为 `CodeBlockText` 正文容器追加 `.textSelection(.enabled)`，支持鼠标自由框选局部代码片段并按 `⌘C` 复制。
+
 - **修复系统通知激活与单实例中继冲突引起的误开一瞥面板（`SingleInstanceGuard.swift` / `QuickShowApp.swift` / `AICompletionNotifier.swift`）**：
   - **通知点击防抖拦截**：记录用户点击通知的时间戳，在通知响应 2.0 秒内阻断由 LaunchServices 伴随拉起次级实例引起的误开一瞥面板；
   - **前台会话状态保护**：当 AI 对话窗口正处于可见状态时，严禁后台盲目广播打断正在进行的会话；

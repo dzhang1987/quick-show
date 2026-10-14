@@ -276,8 +276,16 @@ final class ChatInputNSTextView: NSTextView {
         if event.type == .keyDown, event.modifierFlags.contains(.command) {
             switch event.keyCode {
             case 9: paste(nil); return true       // V
-            case 8: copy(nil); return true        // C
-            case 7: cut(nil); return true         // X
+            case 8: // C：仅自身含有效选区时消费；无选区放行给窗口探测外层选区
+                if selectedRange.length > 0 {
+                    copy(nil)
+                    return true
+                }
+            case 7: // X：仅自身含有效选区时消费
+                if selectedRange.length > 0 {
+                    cut(nil)
+                    return true
+                }
             case 0: selectAll(nil); return true   // A
             case 6: // Z：⌘Z 撤销 / ⇧⌘Z 重做（与 ⌘V 同理显式接住，不依赖菜单键等效派发）
                 if event.modifierFlags.contains(.shift) {

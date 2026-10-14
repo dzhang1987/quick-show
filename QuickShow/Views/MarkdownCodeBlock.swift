@@ -118,6 +118,7 @@ struct CodeBlockText: View {
             }
             .lineSpacing(6)
             .fixedSize(horizontal: true, vertical: false)
+            .textSelection(.enabled)
         }
         .task(id: HighlightTask(code: code, language: language, darkMode: colorScheme == .dark)) {
             // 首帧保持纯色等宽（highlighted == nil）；后台计算高亮后替换。
