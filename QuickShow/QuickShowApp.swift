@@ -209,12 +209,12 @@ private final class SettingsWindow: NSWindow {
     @objc func openSettings() {
         if settingsWindow == nil {
             let window = SettingsWindow(
-                contentRect: NSRect(x: 0, y: 0, width: 720, height: 500),
+                contentRect: NSRect(x: 0, y: 0, width: 780, height: 540),
                 styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                 backing: .buffered,
                 defer: false
             )
-            window.minSize = NSSize(width: 700, height: 480)
+            window.minSize = NSSize(width: 720, height: 490)
             window.setFrameAutosaveName("QuickShowSettingsWindow")
             window.titlebarAppearsTransparent = true
             window.titleVisibility = .hidden
@@ -245,7 +245,7 @@ private final class SettingsWindow: NSWindow {
                 NSAnimationContext.runAnimationGroup({ ctx in
                     ctx.duration = 0
                     ctx.allowsImplicitAnimation = false
-                    glass.frame = NSRect(origin: .zero, size: NSMakeSize(720, 500))
+                    glass.frame = NSRect(origin: .zero, size: NSMakeSize(780, 540))
                     glass.contentView = hostingView
                 })
                 hostingView.autoresizingMask = [.width, .height]

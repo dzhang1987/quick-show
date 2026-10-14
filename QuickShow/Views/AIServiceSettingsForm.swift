@@ -1022,42 +1022,48 @@ struct AIServiceSettingsForm: View {
         VStack(spacing: 0) {
             // 主卡片行 (紧凑高质感条目)
             HStack(spacing: 10) {
-                // 1. 左侧名称与标识
+                // 1. 左侧名称与标识 (允许弹性收缩与尾部截断)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(model.name)
                         .font(.system(size: Theme.Typography.body, weight: .medium))
                         .foregroundColor(.primary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
 
                     Text(model.id)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.tail)
                 }
+                .layoutPriority(0)
 
                 Spacer(minLength: 8)
 
-                // 2. 中间能力胶囊
+                // 2. 中间能力胶囊 (锁定单行与固定尺寸，最高排版优先级，绝不折行)
                 HStack(spacing: 6) {
                     // 上下文胶囊
                     Text(formatTokens(model.contextWindow))
                         .font(.system(size: 11, weight: .medium, design: .monospaced))
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
                         .background(Color.primary.opacity(0.06))
                         .cornerRadius(5)
+                        .fixedSize()
                         .help("上下文窗口: \(model.contextWindow) tokens")
 
-                    // 视觉开关胶囊
+                    // 视觉开关胶囊 (恒定 2 字，绝不折行)
                     Button {
                         toggleModelVision(providerId: provider.id, modelId: model.id)
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: model.supportsVision ? "eye.fill" : "eye.slash")
                                 .font(.system(size: 10))
-                            Text(model.supportsVision ? "视觉" : "纯文本")
+                            Text("视觉")
                                 .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
                         }
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -1069,22 +1075,24 @@ struct AIServiceSettingsForm: View {
                         .foregroundColor(
                             model.supportsVision
                                 ? Color.teal
-                                : Color.secondary.opacity(0.65)
+                                : Color.secondary.opacity(0.55)
                         )
                         .cornerRadius(5)
                     }
                     .buttonStyle(.plain)
-                    .help(model.supportsVision ? "支持视觉看图 (点击切换)" : "仅纯文本，发图将委派 Observer 看图 (点击切换)")
+                    .fixedSize()
+                    .help(model.supportsVision ? "支持视觉看图 (点击关闭)" : "仅纯文本，发图将委派 Observer 看图 (点击开启)")
 
-                    // 思考开关胶囊
+                    // 思考开关胶囊 (恒定 2 字，绝不折行)
                     Button {
                         toggleModelThinking(providerId: provider.id, modelId: model.id)
                     } label: {
                         HStack(spacing: 3) {
                             Image(systemName: "brain.head.profile")
                                 .font(.system(size: 10))
-                            Text(model.supportsThinking ? "思考" : "无思考")
+                            Text("思考")
                                 .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
                         }
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
@@ -1096,27 +1104,30 @@ struct AIServiceSettingsForm: View {
                         .foregroundColor(
                             model.supportsThinking
                                 ? Color.purple
-                                : Color.secondary.opacity(0.65)
+                                : Color.secondary.opacity(0.55)
                         )
                         .cornerRadius(5)
                     }
                     .buttonStyle(.plain)
-                    .help(model.supportsThinking ? "支持深度思考链 (点击切换)" : "不输出思考过程 (点击切换)")
+                    .fixedSize()
+                    .help(model.supportsThinking ? "支持深度思考链 (点击关闭)" : "不输出思考过程 (点击开启)")
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
 
-                // 3. 右侧操作按钮组
+                // 3. 右侧操作按钮组 (锁定单行，尺寸收敛)
                 HStack(spacing: 2) {
                     // 上移
                     Button {
                         moveModel(providerId: provider.id, modelId: model.id, direction: -1)
                     } label: {
                         Image(systemName: "chevron.up")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 22, height: 22)
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 20, height: 20)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(index > 0 ? Color.secondary : Color.secondary.opacity(0.25))
+                    .foregroundColor(index > 0 ? Color.secondary : Color.secondary.opacity(0.2))
                     .disabled(index == 0)
                     .help("上移")
 
@@ -1125,12 +1136,12 @@ struct AIServiceSettingsForm: View {
                         moveModel(providerId: provider.id, modelId: model.id, direction: 1)
                     } label: {
                         Image(systemName: "chevron.down")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 22, height: 22)
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(width: 20, height: 20)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .foregroundColor(index < count - 1 ? Color.secondary : Color.secondary.opacity(0.25))
+                    .foregroundColor(index < count - 1 ? Color.secondary : Color.secondary.opacity(0.2))
                     .disabled(index == count - 1)
                     .help("下移")
 
@@ -1145,8 +1156,8 @@ struct AIServiceSettingsForm: View {
                         }
                     } label: {
                         Image(systemName: isEditing ? "xmark.circle.fill" : "slider.horizontal.3")
-                            .font(.system(size: 12))
-                            .frame(width: 24, height: 24)
+                            .font(.system(size: 11))
+                            .frame(width: 20, height: 20)
                             .foregroundColor(isEditing ? Color.accentColor : Color.secondary)
                             .contentShape(Rectangle())
                     }
@@ -1158,14 +1169,16 @@ struct AIServiceSettingsForm: View {
                         removeModel(providerId: provider.id, modelId: model.id)
                     } label: {
                         Image(systemName: "trash")
-                            .font(.system(size: 11))
-                            .frame(width: 22, height: 22)
-                            .foregroundColor(Color.red.opacity(0.75))
+                            .font(.system(size: 10))
+                            .frame(width: 20, height: 20)
+                            .foregroundColor(Color.secondary.opacity(0.55))
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("删除此模型")
                 }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
