@@ -15,6 +15,12 @@
 
 ### Changed
 
+- **思考过程卡片全功能 Markdown 排版与流式跟随展示（`AIChatMessageRow.swift` / `DesignTokens.swift`）**：
+  - **默认展开与自适应贴合**：思考过程默认展开（约 10 行 180pt 限高滚动区，内容少时自适应贴合不留空，超出时内滚）；落定后保持展开，可随时手动点击收起为单行摘要；
+  - **流式输出贴底跟随滚动**：流式生成思考增量时随最新输出实时平滑滚动贴底展示；
+  - **专有 ReasoningMarkdownView 渲染**：支持段落、列表、代码块（带语言标签与横向滚动及一键复制）、引用、数学公式、表格等全块级 Markdown 排版，同时屏蔽重型 WebView 预览以降低开销；
+  - **优雅视觉分层**：轻量内凹卡片背景、0.5pt 细描边、左侧引导细竖线与 11.5pt 字号次级色阶，层级清晰克制。
+
 - **Qoder Provider 原生工具调用链路打通与流式累积重构（`QoderProvider.swift` / `AIToolRegistry.swift` / `AIServiceSettingsForm.swift`）**：
   - 彻底废除请求体 `"tools": []` 硬编码，根据当前 Agent 授权权限动态序列化 Schema；
   - 适配 Qoder 流式工具分片传输规范，引入 `ChatToolCallAccumulator` 累积分片并在完成时产出完整 `tool_calls`；
@@ -22,6 +28,17 @@
 
 ### Fixed
 
+- **修复系统通知激活与单实例中继冲突引起的误开一瞥面板（`SingleInstanceGuard.swift` / `QuickShowApp.swift` / `AICompletionNotifier.swift`）**：
+  - **通知点击防抖拦截**：记录用户点击通知的时间戳，在通知响应 2.0 秒内阻断由 LaunchServices 伴随拉起次级实例引起的误开一瞥面板；
+  - **前台会话状态保护**：当 AI 对话窗口正处于可见状态时，严禁后台盲目广播打断正在进行的会话；
+  - **中继安全时延缩短**：将次级实例安全兜底定时器从 0.6 秒优化至 0.25 秒，提升唤醒即时响应体验；
+  - **启动阶段预热升级**：在应用启动时尽早预热 `AIProviderStore` 与 `AIAgentStore`，确保存量配置无感平滑升级。
+
+- **修复多智能体协作阻塞死锁与流式停滞假死缺陷（`AgentCoordinator.swift` / `AIChatService+Streaming.swift` / `AIAgentStore.swift`）**：
+  - **`awaitAgents` 并发等待与 180s 严格超时熔断**：改用 `withTaskGroup` 并发调度等待所有子任务，彻底消除形参超时未实现的无限挂起死锁问题，超时自动熔断并释放 Continuation 与后台 Task；
+  - **流式首帧精准判定与 60s 静默停滞看门狗**：排除首帧纯 `.usage` 导致 Watchdog 提前自杀的误判，仅实质内容（文本/思考/工具）到达时确认首帧，并新增 60 秒传输停滞看门狗，防范远端网络挂起导致的流永久假死；
+  - **存量智能体自动合并与中文别名语义路由**：启动时自动比对并补齐存量缺失的 `concierge`（系统管家）角色，并在任务派发中增加对“系统专家/运维/进程”等常见中文别名的精准语义映射，绝对杜绝子任务错误回退至编排中枢自身的递归调度；
+  - **级联中止与协作状态协同清理**：主会话取消或 ESC 双击中止时穿透联动取消该会话下属所有运行中的子任务，彻底消除状态残留。
 - **修复子智能体流式断流与工具调用丢弃缺陷（`AgentCoordinator.swift`）**：
   - 为子智能体流式执行内核注入完整的 Agentic Tool Loop（多轮 ReAct 回路，上限 6 轮），解决此前收到 `tool_calls` 事件时直接 `break` 忽略、导致工具从未执行且中枢死循环重试 4 次的问题；
 - **修复自动化测试套件主线程死锁问题（`QuickShowApp.swift`）**：

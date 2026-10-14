@@ -79,14 +79,31 @@ final class AgentCoordinator {
         let cleanTarget = agentTarget.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let agents = AIAgentStore.shared.agents
 
-        let matchedAgent = agents.first { agent in
+        // 1. 精确与包含匹配
+        var matched = agents.first { agent in
             agent.id.lowercased() == cleanTarget ||
             agent.name.lowercased() == cleanTarget ||
             cleanTarget.contains(agent.id.lowercased()) ||
             agent.name.lowercased().contains(cleanTarget)
-        } ?? (cleanTarget.contains("view") || cleanTarget.contains("视觉") || cleanTarget.contains("image") || cleanTarget.contains("图")
-            ? AIAgentStore.shared.visualDelegateAgent
-            : nil) ?? AIAgentStore.shared.activeAgent
+        }
+
+        // 2. 语义别名映射（解决大模型传“系统专家”、“运维专家”等无法命中“系统管家”的问题）
+        if matched == nil {
+            if cleanTarget.contains("系统") || cleanTarget.contains("运维") || cleanTarget.contains("进程") || cleanTarget.contains("管家") || cleanTarget.contains("硬件") || cleanTarget.contains("mac") {
+                matched = agents.first { $0.id == "concierge" }
+            } else if cleanTarget.contains("view") || cleanTarget.contains("视觉") || cleanTarget.contains("image") || cleanTarget.contains("图") || cleanTarget.contains("图片") {
+                matched = AIAgentStore.shared.visualDelegateAgent ?? agents.first { $0.id == "observer" }
+            } else if cleanTarget.contains("code") || cleanTarget.contains("代码") || cleanTarget.contains("写") || cleanTarget.contains("开发") || cleanTarget.contains("编程") || cleanTarget.contains("bug") {
+                matched = agents.first { $0.id == "coder" }
+            } else if cleanTarget.contains("search") || cleanTarget.contains("搜") || cleanTarget.contains("查") || cleanTarget.contains("文献") || cleanTarget.contains("知识") || cleanTarget.contains("情报") {
+                matched = agents.first { $0.id == "librarian" }
+            } else if cleanTarget.contains("reason") || cleanTarget.contains("推理") || cleanTarget.contains("深度") || cleanTarget.contains("分析") || cleanTarget.contains("架构") || cleanTarget.contains("决策") {
+                matched = agents.first { $0.id == "oracle" }
+            }
+        }
+
+        // 3. 兜底策略：绝对禁止回落到主中枢 orchestrator 自身，避免调度递归死循环
+        let matchedAgent = matched ?? agents.first { $0.id != "orchestrator" && $0.isEnabled } ?? AIAgentStore.shared.activeAgent
 
         let taskTopic = ChatSessionStore.summarizeTitle(from: task, maxLength: 12, fallback: matchedAgent.name)
         let sessionTitle = "[\(matchedAgent.name)] \(taskTopic)"
@@ -149,6 +166,7 @@ final class AgentCoordinator {
             let maxToolRounds = 6
 
             subagentLoop: while toolRounds < maxToolRounds {
+                if Task.isCancelled { break subagentLoop }
                 var roundText = ""
                 var roundReasoning = ""
                 var completedCalls: [CompletedToolCall] = []
@@ -177,6 +195,7 @@ final class AgentCoordinator {
                     )
 
                     for try await event in stream {
+                        if Task.isCancelled { break subagentLoop }
                         switch event {
                         case .text(let chunk):
                             roundText += chunk
@@ -204,6 +223,8 @@ final class AgentCoordinator {
                             break
                         }
                     }
+
+                    if Task.isCancelled { break subagentLoop }
 
                     // 没有工具调用：说明本次生成即为最终答复
                     if completedCalls.isEmpty {
@@ -240,6 +261,7 @@ final class AgentCoordinator {
 
                     // 3. 执行工具调用
                     for call in completedCalls {
+                        if Task.isCancelled { break subagentLoop }
                         AgentTaskRegistry.shared.updateTaskAction(
                             id: persistentTaskId,
                             action: "正在调用 \(call.name)…",
@@ -253,7 +275,9 @@ final class AgentCoordinator {
                         }
 
                         let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
-                        let result = await AIToolExecutor.shared.execute(call: request)
+                        let result = await ToolExecutionContext.$currentSessionId.withValue(childId) {
+                            await AIToolExecutor.shared.execute(call: request)
+                        }
 
                         ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
                             guard var calls = msg.toolCalls, let idx = calls.firstIndex(where: { $0.id == call.id }) else { return }
@@ -344,35 +368,95 @@ final class AgentCoordinator {
 
     // MARK: - 2. 同步等待 (Await)
 
-    /// 同步挂起等待一个或多个子 Agent 任务全部完成，并返回汇总成果
-    func awaitAgents(taskIds: [UUID], timeoutSeconds: TimeInterval = 180) async -> [UUID: (status: SubagentTaskStatus, output: String)] {
-        var results: [UUID: (status: SubagentTaskStatus, output: String)] = [:]
-
-        for id in taskIds {
-            guard let session = ChatSessionStore.shared.session(id: id) else {
-                results[id] = (.failed, "未找到任务会话 \(id)")
-                continue
-            }
-
+    /// 单个任务等待逻辑（带并发超时熔断保护，MainActor 上执行）
+    private func awaitSingleAgent(taskId: UUID, timeoutSeconds: TimeInterval) async -> (UUID, SubagentTaskStatus, String) {
+        if let session = ChatSessionStore.shared.session(id: taskId) {
             if session.taskStatus == .completed || session.taskStatus == .failed {
                 let lastAssistant = session.messages.last { $0.role == .assistant }
                 let text = lastAssistant?.content ?? ""
-                results[id] = (session.taskStatus ?? .completed, text)
-                continue
+                return (taskId, session.taskStatus ?? .completed, text)
+            }
+        } else {
+            return (taskId, .failed, "未找到任务会话 \(taskId)")
+        }
+
+        // 使用 TaskGroup 竞速：正常完成通知 vs 超时定时器
+        return await withTaskGroup(of: (SubagentTaskStatus, String).self) { group in
+            // 分支 1：挂起等待正常通知
+            group.addTask { @MainActor in
+                await withCheckedContinuation { continuation in
+                    var list = self.taskContinuations[taskId] ?? []
+                    list.append(continuation)
+                    self.taskContinuations[taskId] = list
+                }
+                let session = ChatSessionStore.shared.session(id: taskId)
+                let text = session?.messages.last(where: { $0.role == .assistant })?.content ?? ""
+                return (session?.taskStatus ?? .completed, text)
             }
 
-            // 仍在运行中：挂起等待通知或超时
-            let output = await withCheckedContinuation { continuation in
-                var list = self.taskContinuations[id] ?? []
-                list.append(continuation)
-                self.taskContinuations[id] = list
+            // 分支 2：超时定时器
+            let timeoutLimit = max(timeoutSeconds, 5)
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(timeoutLimit * 1_000_000_000))
+                return await MainActor.run { () -> (SubagentTaskStatus, String) in
+                    let timeoutMsg = "子智能体任务执行超时（\(Int(timeoutLimit)) 秒）"
+                    if let continuations = self.taskContinuations.removeValue(forKey: taskId) {
+                        for cont in continuations {
+                            cont.resume(returning: timeoutMsg)
+                        }
+                    }
+                    // 取消后台流式 Task
+                    self.runningTasks.removeValue(forKey: taskId)?.cancel()
+
+                    // 更新会话与注册表状态为失败
+                    ChatSessionStore.shared.updateTaskStatus(sessionId: taskId, status: .failed, summary: timeoutMsg)
+                    if let regTask = AgentTaskRegistry.shared.task(childSessionId: taskId) {
+                        AgentTaskRegistry.shared.settleTask(id: regTask.id, status: .failed, summary: timeoutMsg)
+                    }
+
+                    return (.failed, timeoutMsg)
+                }
             }
 
-            let updated = ChatSessionStore.shared.session(id: id)
-            results[id] = (updated?.taskStatus ?? .completed, output)
+            let firstResult = await group.next() ?? (.failed, "未知执行错误")
+            group.cancelAll()
+            return (taskId, firstResult.0, firstResult.1)
+        }
+    }
+
+    /// 同步挂起并发等待一个或多个子 Agent 任务全部完成，并返回汇总成果（严格支持超时熔断）
+    func awaitAgents(taskIds: [UUID], timeoutSeconds: TimeInterval = 180) async -> [UUID: (status: SubagentTaskStatus, output: String)] {
+        var results: [UUID: (status: SubagentTaskStatus, output: String)] = [:]
+        guard !taskIds.isEmpty else { return results }
+
+        await withTaskGroup(of: (UUID, SubagentTaskStatus, String).self) { group in
+            for id in taskIds {
+                group.addTask { @MainActor in
+                    await self.awaitSingleAgent(taskId: id, timeoutSeconds: timeoutSeconds)
+                }
+            }
+            for await (taskId, status, output) in group {
+                results[taskId] = (status, output)
+            }
         }
 
         return results
+    }
+
+    /// 级联取消特定主会话派生的所有正在运行中的子智能体任务
+    func abortSubagents(for parentSessionId: UUID) {
+        let runningRecords = AgentTaskRegistry.shared.runningTasks(parentSessionId: parentSessionId)
+        for record in runningRecords {
+            let childId = record.childSessionId
+            if let continuations = taskContinuations.removeValue(forKey: childId) {
+                for cont in continuations {
+                    cont.resume(returning: "用户已中止执行")
+                }
+            }
+            runningTasks.removeValue(forKey: childId)?.cancel()
+            ChatSessionStore.shared.updateTaskStatus(sessionId: childId, status: .failed, summary: "用户已中止")
+            AgentTaskRegistry.shared.settleTask(id: record.id, status: .cancelled, summary: "用户已中止")
+        }
     }
 
     // MARK: - 3. 智能体间点对点通信 (Send Message)

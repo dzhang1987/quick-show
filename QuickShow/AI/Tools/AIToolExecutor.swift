@@ -1,5 +1,12 @@
 import Foundation
 
+// MARK: - 工具执行会话上下文 (基于 Swift 结构化并发 TaskLocal 隔离)
+
+enum ToolExecutionContext {
+    /// 当前异步任务链条中发起工具调用的真实会话 ID（彻底隔离 UI 前台选中态，消除并发漂移）
+    @TaskLocal static var currentSessionId: UUID?
+}
+
 // MARK: - 工具执行器
 
 /// AI 工具执行器：串联注册表、危险确认、超时与统一结果序列化。

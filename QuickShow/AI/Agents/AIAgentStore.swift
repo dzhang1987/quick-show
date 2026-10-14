@@ -116,6 +116,16 @@ final class AIAgentStore: ObservableObject {
                     didMigrate = true
                 }
             }
+            // 自动补齐存量中缺失的官方默认智能体（如 concierge 系统管家）
+            let providerId = UserDefaults.standard.string(forKey: "ai.selectedProviderId.v2") ?? "qoder"
+            let defaults = AIAgent.defaultAgents(primaryProviderId: providerId)
+            let existingIds = Set(updated.map { $0.id })
+            for defAgent in defaults {
+                if !existingIds.contains(defAgent.id) {
+                    updated.append(defAgent)
+                    didMigrate = true
+                }
+            }
             self.agents = updated
             if didMigrate {
                 saveAgents()

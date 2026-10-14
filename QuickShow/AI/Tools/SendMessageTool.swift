@@ -38,8 +38,14 @@ final class SendMessageTool: AITool {
             throw ToolExecutionError("缺少必需参数：message")
         }
 
+        let executionSessionId = ToolExecutionContext.currentSessionId
         let (fromAgent, parentId) = await MainActor.run { () -> (AIAgent, UUID) in
-            let session = AIChatState.shared.store.ensureCurrentSession()
+            let session: ChatSession
+            if let execId = executionSessionId, let target = AIChatState.shared.store.session(id: execId) {
+                session = target
+            } else {
+                session = AIChatState.shared.store.ensureCurrentSession()
+            }
             let agentId = session.agentId ?? AIChatState.shared.effectiveAgentId
             let sender = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
             let rootId = session.parentSessionId ?? session.id

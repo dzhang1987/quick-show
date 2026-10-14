@@ -40,8 +40,48 @@ extension AIChatService {
 
     // MARK: - 内部调度机制
 
-    private final class FirstTokenFlag {
-        var received = false
+    private final class StreamMonitorFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _receivedFirstContent = false
+        private var _didStall = false
+        private var _lastActivity = Date()
+
+        var receivedFirstContent: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return _receivedFirstContent
+        }
+
+        var didStall: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return _didStall
+        }
+
+        var lastActivity: Date {
+            lock.lock()
+            defer { lock.unlock() }
+            return _lastActivity
+        }
+
+        func markContentReceived() {
+            lock.lock()
+            defer { lock.unlock() }
+            _receivedFirstContent = true
+            _lastActivity = Date()
+        }
+
+        func touchActivity() {
+            lock.lock()
+            defer { lock.unlock() }
+            _lastActivity = Date()
+        }
+
+        func markStalled() {
+            lock.lock()
+            defer { lock.unlock() }
+            _didStall = true
+        }
     }
 
     private final class TaskCancellationBox: @unchecked Sendable {
@@ -99,14 +139,31 @@ extension AIChatService {
         let modelSpec = effectiveProvider.model(for: resolvedModelId) ?? AIModelSpec(id: resolvedModelId, name: resolvedModelId)
         let llmProvider = LLMProviderRegistry.shared.provider(for: effectiveProvider.type)
 
-        let firstTokenFlag = FirstTokenFlag()
-        let watchdog = Task {
+        let monitor = StreamMonitorFlag()
+
+        // 1. 首帧内容看门狗（120秒内必须收到实质内容文本、思考或工具调用，纯 usage 统计包不计入）
+        let firstContentWatchdog = Task {
             try? await Task.sleep(nanoseconds: 120_000_000_000)
-            if !firstTokenFlag.received {
+            if !monitor.receivedFirstContent {
                 cancel?()
             }
         }
-        defer { watchdog.cancel() }
+        defer { firstContentWatchdog.cancel() }
+
+        // 2. 流传输中途停滞看门狗（若首内容到达后，网络停滞超过 60 秒无新分片，触发主动熔断）
+        let stallWatchdog = Task {
+            let stallLimit: TimeInterval = 60
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                if Task.isCancelled { break }
+                if monitor.receivedFirstContent && Date().timeIntervalSince(monitor.lastActivity) > stallLimit {
+                    monitor.markStalled()
+                    cancel?()
+                    break
+                }
+            }
+        }
+        defer { stallWatchdog.cancel() }
 
         do {
             let stream = llmProvider.stream(
@@ -118,14 +175,30 @@ extension AIChatService {
             )
 
             for try await event in stream {
-                if !firstTokenFlag.received {
-                    firstTokenFlag.received = true
-                    watchdog.cancel()
+                monitor.touchActivity()
+                let isSubstantialContent: Bool
+                switch event {
+                case .text(let t):
+                    isSubstantialContent = !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                case .reasoning(let r):
+                    isSubstantialContent = !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                case .toolCallDispatched, .toolCalls:
+                    isSubstantialContent = true
+                case .usage:
+                    isSubstantialContent = false
+                }
+
+                if isSubstantialContent && !monitor.receivedFirstContent {
+                    monitor.markContentReceived()
+                    firstContentWatchdog.cancel()
                 }
                 onEvent(event)
             }
         } catch is CancellationError {
-            if !firstTokenFlag.received {
+            if monitor.didStall {
+                throw AIChatError.streamError("大模型流式传输长时间停滞无响应（超过 60 秒）")
+            }
+            if !monitor.receivedFirstContent {
                 throw AIChatError.timeout
             }
             throw CancellationError()

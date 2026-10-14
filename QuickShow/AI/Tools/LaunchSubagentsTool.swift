@@ -50,8 +50,14 @@ final class LaunchSubagentsTool: AITool {
             throw ToolExecutionError("缺少必需参数：tasks 任务数组不能为空")
         }
 
+        let executionSessionId = ToolExecutionContext.currentSessionId
         let (parentId, sessionImages) = await MainActor.run { () -> (UUID, [ChatImageAttachment]) in
-            let session = AIChatState.shared.store.ensureCurrentSession()
+            let session: ChatSession
+            if let execId = executionSessionId, let target = AIChatState.shared.store.session(id: execId) {
+                session = target
+            } else {
+                session = AIChatState.shared.store.ensureCurrentSession()
+            }
             let rootId = session.parentSessionId ?? session.id
             let lastWithImages = session.messages.last { !$0.images.isEmpty }
             return (rootId, lastWithImages?.images ?? [])

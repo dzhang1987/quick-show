@@ -253,7 +253,9 @@ extension AIChatState {
                             // serial：保持旧逻辑（执行 → 落定 → 回传 → 下一段顶部再查中止）。
                             self.updateToolCallStatus(assistantID, callID: call.id, in: sessionId, status: .running)
                             let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
-                            let result = await AIToolExecutor.shared.execute(call: request)
+                            let result = await ToolExecutionContext.$currentSessionId.withValue(sessionId) {
+                                await AIToolExecutor.shared.execute(call: request)
+                            }
                             self.updateToolCallResult(
                                 assistantID,
                                 callID: call.id,
@@ -298,7 +300,9 @@ extension AIChatState {
                                         ))
                                     }
                                     let request = ToolCallRequest(id: item.id, name: item.name, argumentsJSON: item.arguments)
-                                    let result = await AIToolExecutor.shared.execute(call: request)
+                                    let result = await ToolExecutionContext.$currentSessionId.withValue(sessionId) {
+                                        await AIToolExecutor.shared.execute(call: request)
+                                    }
                                     return (index, result)
                                 }
                             }
@@ -440,7 +444,12 @@ extension AIChatState {
     func abortStreaming(sessionId target: UUID? = nil) {
         cancelAbortConfirmation()
         let sessionId = target ?? currentSessionId
-        guard let sessionId, let ctx = streamContexts[sessionId] else { return }
+        guard let sessionId else { return }
+
+        // 联动取消该主会话派生的所有后台子智能体
+        AgentCoordinator.shared.abortSubagents(for: sessionId)
+
+        guard let ctx = streamContexts[sessionId] else { return }
         ctx.abortRequested = true
         // 取消回路任务触发消费侧 CancellationError，进入 .aborted 分支；
         // 网络层取消经流的 onTermination 链路自动传导（AIChatService 无全局 abort）。
