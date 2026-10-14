@@ -299,55 +299,135 @@ struct BlinkingCaret: View {
     }
 }
 
-/// 思考过程（reasoning）折叠区：默认收起为单行摘要（时钟/大脑小图标 + 最近一段思考
-/// 单行截断 + 展开箭头），点击 toggle 展开为限高滚动多行区；落定后同样保留、默认收起。
-/// 流式期间 250ms 时间门控节流刷新（与正文增量渲染同节奏），收尾（isLive 翻 false）全量对账。
+// MARK: - 思考过程折叠卡片（10行默认展开 + 跟随输出 + Markdown排版 + 视觉分层）
+
+/// 思考过程（reasoning）折叠卡：
+/// - 默认展开（约 10 行限高滚动区，内容少时自适应贴合不留空，超出时内滚）；落定后保持展开，可随时手动点击标题收起为单行摘要；
+/// - 流式期间随输出实时自动贴底滚动展示（跟随输出展示）；
+/// - 支持完整块级 Markdown 排版（段落、列表、代码块、引用、数学公式、表格），通过专有 ReasoningMarkdownView 渲染；
+/// - 样式层级区别于正文：轻量内凹卡片背景 + 0.5pt 细描边 + 左侧引导细竖线 + 11.5pt 字号与次级文字色阶，代码块走紧凑模式（不启动 Mermaid WebView 预览）。
 struct ReasoningDisclosureView: View {
     let reasoning: String
     /// 是否仍在生成中：节流门控期间中间帧可丢，收尾帧必须全量（防止末尾增量被门控吞掉）。
     let isLive: Bool
 
-    @State private var expanded = false
+    @State private var expanded = true
     @State private var rendered: String = ""
     @State private var lastRenderAt: Date = .distantPast
+    @State private var contentHeight: CGFloat = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+        VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
             } label: {
                 HStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: "brain")
                         .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                    Text(summary)
-                        .font(Theme.Typography.text(Theme.Typography.footnote))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    // chevron 固定行尾：摘要流式更新时宽度变化不带动其位置，消除抖动
+                        .foregroundColor(isLive ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                    Text(isLive ? String(localized: "思考中…") : String(localized: "思考过程"))
+                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                        .foregroundColor(isLive ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
+                    if !expanded {
+                        Text(summary)
+                            .font(Theme.Typography.text(Theme.Typography.footnote))
+                            .foregroundColor(Theme.Colors.contentTertiary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
                     Spacer(minLength: Theme.Spacing.sm)
                     Image(systemName: expanded ? "chevron.up" : "chevron.down")
                         .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+                        .foregroundColor(Theme.Colors.contentTertiary)
                 }
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.md)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(Theme.Colors.contentTertiary)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(expanded ? String(localized: "收起思考过程") : String(localized: "展开思考过程"))
 
             if expanded {
-                ScrollView(.vertical, showsIndicators: false) {
-                    Text(rendered)
-                        .font(Theme.Typography.text(Theme.Typography.label))
-                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                        .lineSpacing(3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                Rectangle()
+                    .fill(Theme.Colors.cardStroke)
+                    .frame(height: Theme.Layout.dividerHeight)
+                    .padding(.horizontal, Theme.Spacing.md)
+
+                HStack(alignment: .top, spacing: Theme.Spacing.md) {
+                    RoundedRectangle(cornerRadius: 1.25, style: .continuous)
+                        .fill(isLive ? Theme.Colors.accent.opacity(0.45) : Theme.Colors.contentTertiary.opacity(0.35))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 2)
+
+                    ScrollViewReader { proxy in
+                        ScrollView(.vertical, showsIndicators: true) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                                if rendered.isEmpty && isLive {
+                                    HStack(spacing: Theme.Spacing.sm) {
+                                        BlinkingCaret()
+                                        Text("思考中…")
+                                            .font(Theme.Typography.text(Theme.Typography.footnote))
+                                            .foregroundColor(Theme.Colors.contentTertiary)
+                                    }
+                                    .padding(.vertical, 2)
+                                } else {
+                                    ReasoningMarkdownView(content: rendered, useCache: !isLive)
+                                    if isLive {
+                                        BlinkingCaret()
+                                    }
+                                }
+                                Color.clear
+                                    .frame(height: 1)
+                                    .id("reasoningBottomAnchor")
+                            }
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(key: ReasoningHeightPreferenceKey.self, value: geo.size.height)
+                                }
+                            )
+                        }
+                        .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
+                        .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
+                        .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
+                            if h > 0 { contentHeight = h }
+                        }
+                        .onChange(of: rendered) { _ in
+                            if isLive && expanded {
+                                DispatchQueue.main.async {
+                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onChange(of: expanded) { isExpanded in
+                            if isExpanded && isLive {
+                                DispatchQueue.main.async {
+                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                }
+                            }
+                        }
+                        .onAppear {
+                            if isLive && expanded {
+                                DispatchQueue.main.async {
+                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
                 }
-                .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.md)
                 .transition(.opacity)
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .fill(Theme.Colors.surfaceInset)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
+        )
         .onAppear {
             rendered = reasoning
             lastRenderAt = Date()
@@ -371,6 +451,282 @@ struct ReasoningDisclosureView: View {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         return paragraphs.last ?? String(localized: "思考中…")
+    }
+}
+
+// MARK: - 思考内容高度偏好键
+
+private struct ReasoningHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+// MARK: - 思考专有 Markdown 渲染器
+
+struct ReasoningMarkdownView: View {
+    let content: String
+    var useCache: Bool = true
+
+    var body: some View {
+        let blocks = MarkdownASTCache.blocks(for: content, useCache: useCache)
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                ReasoningBlockView(block: block)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct ReasoningBlockView: View {
+    let block: MarkdownBlock
+
+    var body: some View {
+        switch block {
+        case let .heading(level, inlines):
+            let size: CGFloat = level <= 2 ? 12.5 : 12.0
+            MarkdownInlineText(
+                inlines: inlines,
+                bodyColor: Theme.Colors.contentPrimary.opacity(0.85),
+                baseSize: size,
+                weight: .semibold,
+                explicitColor: Theme.Colors.contentPrimary.opacity(0.85)
+            )
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case let .paragraph(inlines):
+            MarkdownInlineText(
+                inlines: inlines,
+                bodyColor: Theme.Colors.contentSecondaryStrong,
+                baseSize: 11.5,
+                weight: .regular
+            )
+            .lineSpacing(3.5)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+        case let .orderedList(items):
+            ReasoningListView(items: items, ordered: true)
+
+        case let .unorderedList(items):
+            ReasoningListView(items: items, ordered: false)
+
+        case let .codeBlock(language, code):
+            // 思考过程内的代码块统一走紧凑代码框（10.5pt 等宽，不启动 Mermaid WebView 预览）
+            ReasoningCodeBlockView(language: language, code: code)
+
+        case let .blockquote(blocks):
+            ReasoningBlockquoteView(blocks: blocks)
+
+        case let .mathBlock(latex):
+            AsyncMathBlockView(latex: latex, fontSize: 12, color: Theme.Colors.contentSecondaryStrong)
+
+        case .horizontalRule:
+            Rectangle()
+                .fill(Theme.Colors.cardStroke)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(height: Theme.Layout.dividerHeight)
+
+        case let .table(table):
+            MarkdownTableView(table: table)
+
+        case let .alert(_, blocks):
+            ReasoningBlockquoteView(blocks: blocks)
+
+        case let .details(summary, blocks, _):
+            VStack(alignment: .leading, spacing: 4) {
+                MarkdownInlineText(
+                    inlines: summary,
+                    bodyColor: Theme.Colors.contentPrimary,
+                    baseSize: 11.5,
+                    weight: .medium
+                )
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, b in
+                    ReasoningBlockView(block: b)
+                }
+            }
+
+        case let .definitionList(items):
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    MarkdownInlineText(
+                        inlines: item.term,
+                        bodyColor: Theme.Colors.contentPrimary,
+                        baseSize: 11.5,
+                        weight: .semibold
+                    )
+                    ForEach(Array(item.definitions.enumerated()), id: \.offset) { _, def in
+                        MarkdownInlineText(
+                            inlines: def,
+                            bodyColor: Theme.Colors.contentSecondaryStrong,
+                            baseSize: 11.5,
+                            weight: .regular
+                        )
+                        .padding(.leading, 12)
+                    }
+                }
+            }
+
+        case .footnoteDefinition:
+            EmptyView()
+        }
+    }
+}
+
+struct ReasoningListView: View {
+    let items: [MarkdownListItem]
+    let ordered: Bool
+    var depth: Int = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                ReasoningListItemRow(item: item, ordered: ordered, depth: depth)
+            }
+        }
+    }
+}
+
+struct ReasoningListItemRow: View {
+    let item: MarkdownListItem
+    let ordered: Bool
+    var depth: Int = 0
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
+            marker
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(item.blocks.enumerated()), id: \.offset) { _, block in
+                    switch block {
+                    case let .orderedList(subItems):
+                        ReasoningListView(items: subItems, ordered: true, depth: depth + 1)
+                            .padding(.leading, 16)
+                    case let .unorderedList(subItems):
+                        ReasoningListView(items: subItems, ordered: false, depth: depth + 1)
+                            .padding(.leading, 16)
+                    default:
+                        ReasoningBlockView(block: block)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(item.taskState == true ? 0.55 : 1)
+        }
+    }
+
+    @ViewBuilder
+    private var marker: some View {
+        if let state = item.taskState {
+            Image(systemName: state ? "checkmark.circle.fill" : "circle")
+                .font(Theme.Typography.text(11, .medium))
+                .foregroundColor(state ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                .frame(minWidth: 12, alignment: .trailing)
+        } else if ordered {
+            Text("\(item.number ?? 1).")
+                .font(Theme.Typography.mono(10.5))
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .frame(minWidth: 12, alignment: .trailing)
+        } else {
+            Text(depth == 0 ? "•" : "◦")
+                .font(Theme.Typography.text(11, .medium))
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .frame(minWidth: 12, alignment: .trailing)
+        }
+    }
+}
+
+struct ReasoningCodeBlockView: View {
+    let language: String?
+    let code: String
+
+    @State private var hovered = false
+    @State private var copied = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            // 顶栏：语言标签 + 紧凑复制钮
+            HStack(spacing: Theme.Spacing.sm) {
+                if let language, !language.isEmpty {
+                    Text(language)
+                        .font(Theme.Typography.mono(9.5, .medium))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                }
+                Spacer(minLength: 0)
+                Button(action: copyCode) {
+                    HStack(spacing: 2) {
+                        Image(systemName: copied ? "checkmark" : "square.on.square")
+                            .font(Theme.Typography.text(9, .medium))
+                        Text(copied ? String(localized: "已复制") : String(localized: "复制"))
+                            .font(Theme.Typography.text(9, .medium))
+                    }
+                    .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(
+                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                            .fill(Theme.Colors.surfaceButton)
+                    )
+                }
+                .buttonStyle(.plain)
+                .fixedSize()
+                .opacity(hovered ? 1 : 0)
+                .allowsHitTesting(hovered)
+            }
+            .frame(minHeight: 12)
+
+            // 代码等宽横滚
+            ScrollView(.horizontal, showsIndicators: true) {
+                Text(code)
+                    .font(Theme.Typography.mono(10.5))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .fill(Theme.Colors.surfaceTrack.opacity(0.8))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                .stroke(Theme.Colors.chatStrokeStrong.opacity(0.5), lineWidth: 0.5)
+        )
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
+    }
+
+    private func copyCode() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(code, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+    }
+}
+
+struct ReasoningBlockquoteView: View {
+    let blocks: [MarkdownBlock]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, child in
+                ReasoningBlockView(block: child)
+            }
+        }
+        .padding(.leading, 8)
+        .overlay(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 1, style: .continuous)
+                .fill(Theme.Colors.accent.opacity(0.35))
+                .frame(width: 2)
+        }
     }
 }
 
