@@ -37,7 +37,7 @@ struct AIToolsSettingsSection: View {
         } header: {
             Text("工具")
         } footer: {
-            Text("按类别分组展示；灰色等宽小字是模型调用的工具标识。关闭后 AI 将无法调用对应工具，下一轮对话起生效；危险工具执行前仍会逐个弹窗确认。")
+            Text("关闭后 AI 将无法调用对应工具；涉及修改系统状态的敏感工具在执行前会弹窗确认。")
         }
         .onAppear { loadToolsIfNeeded() }
     }
@@ -163,7 +163,7 @@ struct AIFileWhitelistSettingsSection: View {
         } header: {
             Text("文件访问白名单")
         } footer: {
-            Text("AI 的 read_file / write_file 仅可访问白名单目录内文件。")
+            Text("AI 文件读取与保存操作仅允许访问所添加的白名单目录。")
         }
         .onAppear { paths = UserDefaults.standard.stringArray(forKey: whitelistKey) ?? [] }
     }
@@ -248,7 +248,7 @@ struct AIEnvVarsSettingsSection: View {
         } header: {
             Text("自定义环境变量")
         } footer: {
-            Text("供 AI 的 get_env / set_env 工具读写，独立于系统环境变量。")
+            Text("供 AI 会话读写专用的环境变量，独立于系统环境。")
         }
         .onAppear { load() }
     }
@@ -314,7 +314,7 @@ struct AIWebSearchSettingsSection: View {
         } header: {
             Text("联网搜索")
         } footer: {
-            Text("用于 web_search 联网搜索工具，免费注册 tavily.com 获取；支持环境变量 QUICKSHOW_TAVILY_API_KEY 兜底。")
+            Text("用于支持 AI 联网实时搜索，可前往 tavily.com 免费获取 API Key。")
         }
         .onAppear { loadStoredKey() }
     }
@@ -366,13 +366,13 @@ struct AIMermaidSettingsSection: View {
 
     var body: some View {
         Section {
-            Picker("外观风格 (look)", selection: lookBinding) {
+            Picker("外观风格", selection: lookBinding) {
                 ForEach(MermaidLook.allCases) { item in
                     Text(item.displayName).tag(item)
                 }
             }
 
-            Picker("内置主题 (theme)", selection: themeBinding) {
+            Picker("图表主题", selection: themeBinding) {
                 ForEach(MermaidTheme.allCases) { item in
                     Text(item.displayName).tag(item)
                 }
@@ -380,7 +380,7 @@ struct AIMermaidSettingsSection: View {
         } header: {
             Text("Mermaid 图表渲染")
         } footer: {
-            Text("直接映射 Mermaid 官方内置的 look 与 theme 参数，全局实时生效；也可在对话窗的 Mermaid 图表卡片右上角悬停快捷切换。")
+            Text("设置全局图表外观风格与主题配色；对话窗图表右上角也可快捷切换。")
         }
     }
 }

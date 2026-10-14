@@ -50,13 +50,14 @@ struct AIServiceSettingsForm: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部子页面导航
-            Picker("配置分类", selection: $selectedSubTab) {
+            // 顶部子页面导航 (隐藏多余 Label，保留纯粹分段切换)
+            Picker("", selection: $selectedSubTab) {
                 ForEach(AIServiceSubTab.allCases) { tab in
                     Text(tab.rawValue).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
+            .labelsHidden()
             .padding(.horizontal, 16)
             .padding(.top, 10)
             .padding(.bottom, 6)
@@ -118,7 +119,7 @@ struct AIServiceSettingsForm: View {
         } header: {
             Text("服务商列表")
         } footer: {
-            Text("支持配置主流服务商（阿里云百炼、OpenAI、Qoder、Antigravity），密钥独立安全隔离存储。")
+            Text("管理用于对话的 AI 模型服务商与连接配置。")
         }
 
         if let provider = currentProvider {
@@ -307,7 +308,7 @@ struct AIServiceSettingsForm: View {
                     }
                 }
             } header: {
-                Text("认证与授权 (浏览器 / 本机 / API Key)")
+                Text("认证与连接凭据")
             } footer: {
                 Text(apiKeyFooter(for: provider.type))
             }
@@ -428,7 +429,7 @@ struct AIServiceSettingsForm: View {
             } header: {
                 Text("模型能力池")
             } footer: {
-                Text("「支持视觉」是 A+B 多模态调度的核心开关：若当前模型未勾选支持视觉，带有图片的消息将自动交由视觉感知 (Observer) Agent 代理看图，提取 OCR 与结构化信息后再注入主对话。")
+                Text("开启「视觉」后模型可直接理解图片；未开启时，发送图片将由视觉助手协助分析。")
             }
 
             if providerStore.providers.count > 1 {
@@ -562,22 +563,22 @@ struct AIServiceSettingsForm: View {
             }
 
             Section {
-                Toggle("设为全局视觉感知担当 (Visual Observer)", isOn: agentVisualDelegateBinding(for: agent.id))
+                Toggle("作为图片分析助手 (Visual Observer)", isOn: agentVisualDelegateBinding(for: agent.id))
 
                 let boundModel = providerStore.modelSpec(providerId: agent.providerId, modelId: agent.modelId)
                 if boundModel?.supportsVision == false {
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundColor(Theme.Colors.statusWarning)
-                        Text("提示：当前绑定的模型未标记「支持视觉」，请确保绑定的模型具备多模态能力以承担视觉解析职责。")
+                        Text("提示：当前绑定的模型未开启视觉支持，请选择具备多模态能力并勾选了「视觉」的模型。")
                             .font(.system(size: Theme.Typography.footnote))
                             .foregroundColor(Theme.Colors.statusWarning)
                     }
                 }
             } header: {
-                Text("多模态协作机制")
+                Text("图片辅助分析")
             } footer: {
-                Text("🌟 混合双模设计：当你在与不支持看图的模型对话时，若附带了图片，系统将自动无感调度本视觉担当 Agent 提取图像结构、OCR 文字与视觉关键要素，再将多模态语义注入主对话，解决纯文本模型无法理解图像的痛点！")
+                Text("当主对话模型不支持解析图片时，由该助手协助分析图像内容并将结果带回主会话。")
             }
 
             Section {
@@ -640,17 +641,17 @@ struct AIServiceSettingsForm: View {
             } header: {
                 Text("可用工具授权")
             } footer: {
-                Text("最小权限原则：为该智能体限定其可见与可调用的工具集合。未授权的工具不会向模型暴露 Schema，节约 Token 并杜绝误调用。")
+                Text("配置该智能体可调用的工具与系统能力。")
             }
 
             Section {
-                TextField("特化角色提示词，留空继承全局", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
+                TextField("定制人设提示词，留空则使用全局默认", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(4...8)
             } header: {
-                Text("特化 System Prompt")
+                Text("系统设定 (System Prompt)")
             } footer: {
-                Text("为该智能体定制的系统设定、思维规范与工程职责。")
+                Text("定义该智能体的行为准则与角色设定。")
             }
 
             if agentStore.agents.count > 1 {
@@ -798,11 +799,11 @@ struct AIServiceSettingsForm: View {
     private func apiKeyFooter(for type: AIProviderType) -> String {
         switch type {
         case .qoderNative:
-            return "支持三方认证方式：① 浏览器登录授权（自动唤起网页并在确认后无感绑定）；② 自动检测本机 Qoder CLI 已登录账号一键导入；③ 手动填入 PAT 令牌 (以 pt- 开头)。"
+            return "支持通过浏览器登录授权、导入本机已登录凭据或手动填入访问令牌。"
         case .antigravityNative:
-            return "支持三方认证方式：① 浏览器登录授权（Google OAuth 2.0 PKCE 标准流）；② 自动检测本机 Gemini / gcloud 凭据一键导入；③ 手动填入 Google AI Studio API Key。"
+            return "支持通过浏览器登录授权、导入本机已登录凭据或手动填入 API Key。"
         default:
-            return "API Key 以仅当前用户可读的文件权限 (0600) 存储在本机应用支持目录，绝不随云端同步。"
+            return "连接凭据仅保存在本机，不会上传或云端同步。"
         }
     }
 
@@ -1209,7 +1210,7 @@ struct AIServiceSettingsForm: View {
                         }
 
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("模型 ID (底层路由 Key)")
+                            Text("模型标识 (Model ID)")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
                             TextField("模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
@@ -1219,7 +1220,7 @@ struct AIServiceSettingsForm: View {
 
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
-                            Text("上下文大小 (Tokens)")
+                            Text("上下文长度 (Tokens)")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
                             TextField("上下文", text: modelContextBinding(providerId: provider.id, modelId: model.id))

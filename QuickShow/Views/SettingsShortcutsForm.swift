@@ -53,7 +53,7 @@ struct ShortcutsSettingsForm: View {
                         .font(.system(size: Theme.Typography.label))
                         .foregroundColor(.red)
                 } else {
-                    Text("主面板与 AI 对话窗热键各自独立、并行生效；两者命中键冲突时后设置者被拒绝并保持原设置（左⌘ + 右⌘ 可共存，任意⌘ + 左⌘ 冲突）。")
+                    Text("主面板与 AI 对话窗热键各自独立生效；两者不可设置完全相同的快捷键。")
                 }
             }
             
