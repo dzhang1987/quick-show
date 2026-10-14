@@ -87,6 +87,8 @@ enum AIStreamEvent {
     /// 模型思考过程（reasoning）增量：Chat Completions 的 reasoning_content/reasoning，
     /// 或 Responses 的 reasoning_text/reasoning_summary_text；与正文分开累积。
     case reasoning(String)
+    /// 工具调用发起感知（流式首帧捕获到工具名时即时派发，驱动 UI 预显工具卡片消除假死感）。
+    case toolCallDispatched(id: String, name: String)
     case toolCalls([CompletedToolCall])
     /// 本轮真实 prompt token 用量（由服务端 usage 上报，端点在末片/完成事件携带）。
     case usage(promptTokens: Int)

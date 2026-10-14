@@ -52,6 +52,30 @@
 
 ### Changed
 
+- **多智能体层级导航、任务闭环同步与流式工具首帧预显（`SubagentTopNavBar.swift` / `AgentCoordinator.swift` / `AIChatWireModels.swift` / `AIChatState+Streaming.swift` / `AIChatKeyMonitor.swift` / `ChatSessionStore.swift`）**：
+  - **子智能体原生极简顶栏（`SubagentTopNavBar`）**：子会话顶部常驻极简原生导航条，提供返回主会话（`⌘↑`）、当前专家图标与子任务语义短标题，并支持原生下拉菜单在同级专家会话间无缝跳转；
+  - **全键盘多维导航系统（`AIChatKeyMonitor` / `AIChatView`）**：支持 `⌘↑`（返回主 Agent）、`⌘↓`（钻入首个子 Agent）、`⌘←` / `⌘→`（同级子 Agent 快速轮切），并在子会话输入框为空时支持 `ESC` 快捷返回主会话；
+  - **跨专家协同与成果闭环同步（`AgentCoordinator.syncChildOutputToParent`）**：支持在子会话中通过 `@main` / `@主会话` 或按钮将专家的核心产物与结论沉淀并结构化回传至主协调器，形成完整闭环；
+  - **流式工具调用首帧即时预显（`toolCallDispatched`）**：在流式累积器首次捕获到有效工具名称时即刻派发通知，实时挂载 pending 状态卡片（提示“正在组织调度参数…”），彻底消除大模型生成复杂 JSON 参数过程中的界面假死感；
+  - **子任务语义短标题智能提取（`ChatSessionStore.summarizeTitle`）**：清洗 Markdown 与“请帮我/搜索一下”等冗余动词前缀，智能切分核心谓宾短语，为同级子任务提炼紧凑高辨识度标题。
+
+- **会话侧栏可拖拽微光分割线与记忆持久化（`AIChatLayoutSupport.swift` / `AIChatSidebarView.swift` / `AIChatView.swift` / `AIWindowManager.swift` / `DesignTokens.swift`）**：
+  - **原生 AppKit 事件热区与防抖拖拽（`SidebarDividerHandleNSView`）**：基于原生 `resetCursorRects` 注册水平双向箭头光标（`resizeLeftRight`），精准捕获拖拽手势并支持 160pt ~ 360pt 弹性区间调节，双击立即复位至默认 216pt；
+  - **微光羽化分割线视觉表现（`SidebarDivider`）**：采用 0.5pt 两端渐隐微光羽化细线与居中 8pt 交互热区融合，视觉轻盈克制；
+  - **侧栏宽度记忆与窗口尺寸平滑联动**：持久化用户自定义的侧栏宽度，展开/收起侧栏时窗口宽度增减自适应对齐当前设定宽度；
+  - **侧栏折叠按钮布局对齐**：侧栏顶部新增收起按钮与主区标题栏等高齐平，主区在侧栏收起态下显露展开按钮并严格与阅读列左基准线对齐。
+
+- **Qoder 国际版官方模型全量对齐与动态迁移（`AIProvider.swift` / `QoderProvider.swift` / `AIProviderStore.swift` / `AIAgent.swift` / `AIAgentStore.swift`）**：
+  - **18 个全量官方模型 1:1 对齐**：严格对齐当前 `qodercli --list-models` 及官方后端 catalog-v6 目录，补齐 6 个新增模型（`Fast`、`Sonus`、`Cantus`、`Qwen3.8-Flash`、`GLM-5.3`、`GLM-5.3-Flash`）；
+  - **清理已下线与过时模型**：彻底下线官方已退役的 `qoder/lite`，升级 `qoder/qmodel_preview` 为正式 `qoder/qmodel_38max`，升级 `Kimi-K2.7-Code` 为 `Kimi-K2.8-Preview`，升级 `qoder/gm51model` (GLM 5.1/5.2) 为 `qoder/gmodel` (GLM-5.3)；
+  - **本地持久化平滑热更新**：在 `AIProviderStore.loadProviders()` 与 `AIAgentStore.loadAgents()` 中注入平滑迁移逻辑，自动将用户本地缓存的已废弃 Qoder 模型无感置换为最新版本，避免用户手动清空配置。
+
+- **AI 服务商设置协议只读收敛与模型能力池 Bento 紧凑重构（`AIServiceSettingsForm.swift`）**：
+  - **原生预设协议只读收敛**：针对 Qoder / Antigravity 等原生深度适配的服务商，移除易产生误导的可编辑协议 Picker 下拉框，转为优雅的只读信息展示；通信协议及 API 子协议切换仅在自定义第三方端点（`openAICompatible`）下开放；
+  - **模型能力池 Bento 紧凑卡片重构**：彻底废弃此前在 macOS Form 下被粗暴截断标签（`上下文 (to...`）与数十行巨大输入框生硬堆叠的排版，重构为 44pt 紧凑 Bento 条目流；
+  - **即点即切能力胶囊与紧凑数值**：模型上下文规格采用紧凑格式化呈现（如 `180K`、`600K`、`1M`）；“视觉看图”与“深度思考”采用交互式高亮胶囊（青色视觉 / 紫色思考），点击即可毫秒级无感切换，免去展开编辑；
+  - **折叠式参数微调抽屉与快捷操作**：卡片右侧集成轻量级上移、下移、删除与展开按钮；点击展开按钮平滑滑出精细编辑抽屉（支持修改底层路由 Key 与精确 Token 阈值），顶部常驻“恢复官方推荐”一键还原能力。
+
 - **AI 对话新建会话交互与草稿生命周期重构（`ChatSessionStore.swift` / `AIChatState.swift` / `AIChatSidebarView.swift` / `AIChatView.swift`）**：
   - **惰性会话与防重复新建（`newSession`）**：按下 `⌘N` 或点击「新对话」时进入「新会话草稿待命态」，不向会话列表插入条目，不写磁盘文件；若当前已处于草稿态，重复按 `⌘N` 直接保持并重新聚焦输入框，杜绝反复生成无内容空会话；
   - **独立新会话草稿记忆与消费转正**：在草稿态输入内容未发送时切换至其他会话，草稿独立持久化至后台（`newSessionDraft`），再次进入新对话自动恢复；当且仅当发送首条消息时，正式实例化会话并持久化，同时原子清空新会话草稿，彻底杜绝首条消息回写泄露到下一次新会话；

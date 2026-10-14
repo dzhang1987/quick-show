@@ -210,7 +210,7 @@ private struct ToolCallRow: View {
                 .font(Theme.Typography.text(10, .semibold))
                 .foregroundColor(Theme.Colors.contentTertiary)
             if record.arguments.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("（无参数）")
+                Text(record.status == .pending ? "（正在组织调度参数…）" : "（无参数）")
                     .font(Theme.Typography.mono(11))
                     .foregroundColor(Theme.Colors.contentTertiary)
             } else {

@@ -26,6 +26,10 @@ final class AIChatKeyMonitor {
     var onNewSession: () -> Void = {}
     var onToggleSidebar: () -> Void = {}
     var onFocusSearch: () -> Void = {}
+    var onNavigateUp: () -> Bool = { false }
+    var onNavigateDown: () -> Bool = { false }
+    var onNavigateLeft: () -> Bool = { false }
+    var onNavigateRight: () -> Bool = { false }
 
     func install() {
         guard monitor == nil else { return }
@@ -108,7 +112,12 @@ final class AIChatKeyMonitor {
         case 45: onNewSession(); return nil          // ⌘N: 新会话
         case 11: onToggleSidebar(); return nil       // ⌘B: 侧栏显隐
         case 3:  onFocusSearch(); return nil         // ⌘F: 聚焦搜索
+        case 126: return onNavigateUp() ? nil : event   // ⌘↑: 返回主 Agent
+        case 125: return onNavigateDown() ? nil : event // ⌘↓: 钻入子 Agent
+        case 123: return onNavigateLeft() ? nil : event // ⌘←: 切换到前一个同级子 Agent
+        case 124: return onNavigateRight() ? nil : event // ⌘→: 切换到后一个同级子 Agent
         default: return event
         }
+        return event
     }
 }

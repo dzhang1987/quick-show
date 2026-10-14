@@ -42,6 +42,7 @@ struct AIChatView: View {
         self.onClose = onClose
         // 侧栏显隐偏好与 AIWindowManager 共用同一 UserDefaults 键（窗口首次取尺寸早于视图出现）
         _sidebarVisible = State(initialValue: UserDefaults.standard.bool(forKey: AIWindowManager.sidebarVisibleKey))
+        _sidebarWidth = State(initialValue: AIChatLayout.currentSidebarWidth)
         // LRU 常驻集合以当前会话起步（避免首帧 ZStack 为空导致的闪烁/空窗）。
         _residentSessionIds = State(initialValue: state.store.currentSessionId.map { [$0] } ?? [])
         // 会话级阅读位置冷启动装载（跨重启记忆）：磁盘持久层 → 内存快照真源，
@@ -69,6 +70,10 @@ struct AIChatView: View {
     @State private var scrollCoordinator = ChatScrollCoordinator()
     /// 会话窄栏显隐（持久化到 UserDefaults，窗口宽度联动见 AIWindowManager）。
     @State private var sidebarVisible = false
+    /// 会话窄栏宽度（支持拖拽调节并在 UserDefaults 中持久化）。
+    @State private var sidebarWidth: CGFloat = AIChatLayout.currentSidebarWidth
+    /// 顶栏展开侧栏按钮 hover 态。
+    @State private var sidebarToggleHovered = false
     /// 会话视图树 LRU 常驻集合（0 = 最近使用）。切换会话只改 opacity，视图常驻零重建：
     /// 滚动位置/贴底跟随/流式状态随视图树天然保留，位置记忆不再依赖 scrollTo 时序。
     /// 超上限 K 时淘汰尾部会话（其视图卸载，重挂载时用 scrollSnapshots 兜底恢复）。
@@ -123,33 +128,38 @@ struct AIChatView: View {
             // 窗口渐宽再弹回」的跳变卡顿；.leading 锚定从左缘展开，clipped 裁掉溢出。
             AIChatSidebarView(
                 store: state.store,
+                width: sidebarWidth,
                 searchFocusRequest: searchFocusRequest,
                 renamingSessionId: $state.renamingSessionId,
                 streamingSessionIds: state.streamingSessionIds,
                 unreadSessionIds: state.unreadSessionIds,
                 onAbortStreaming: { id in state.abortStreaming(sessionId: id) },
                 onSelect: { id in state.selectSession(id: id) },
-                onNewSession: { newSession() }
+                onNewSession: { newSession() },
+                onToggleSidebar: { toggleSidebar() }
             )
             .opacity(sidebarVisible ? 1 : 0)
             .allowsHitTesting(sidebarVisible)
-            .frame(width: sidebarVisible ? AIChatLayout.sidebarWidth : 0, alignment: .leading)
+            .frame(width: sidebarVisible ? sidebarWidth : 0, alignment: .leading)
             .clipped()
 
-            // 竖向细分割线（与横分割线同款两端羽化语言）：随侧栏同参数收拢/展开
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.primary.opacity(0.0),
-                            Color.primary.opacity(Theme.Colors.dividerOpacity),
-                            Color.primary.opacity(0.0)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                )
-                .frame(width: sidebarVisible ? Theme.Layout.dividerHeight : 0)
+            // 竖向可交互微光分割线（随侧栏同参数收拢/展开，支持拖拽调节宽度及双击复位）
+            SidebarDivider(
+                sidebarWidth: $sidebarWidth,
+                onDragEnded: {
+                    UserDefaults.standard.set(Double(sidebarWidth), forKey: AIChatLayout.sidebarWidthKey)
+                },
+                onDoubleClick: {
+                    withAnimation(.easeInOut(duration: Theme.Motion.windowResize)) {
+                        sidebarWidth = AIChatLayout.defaultSidebarWidth
+                    }
+                    UserDefaults.standard.set(Double(AIChatLayout.defaultSidebarWidth), forKey: AIChatLayout.sidebarWidthKey)
+                }
+            )
+            .opacity(sidebarVisible ? 1 : 0)
+            .allowsHitTesting(sidebarVisible)
+            .frame(width: sidebarVisible ? AIChatLayout.dividerInteractiveWidth : 0)
+            .clipped()
 
             mainColumn
         }
@@ -248,6 +258,12 @@ struct AIChatView: View {
             isActive: interaction.request != nil
         ) {
             cancelActiveDrawerIfNeeded()
+        }
+        .escapeResponder(
+            id: "subagent_back",
+            isActive: (state.store.currentSession?.parentSessionId != nil) && state.inputText.isEmpty
+        ) {
+            navigateUpToParentAgent()
         }
         .onAppear {
             refreshEnvironment()
@@ -488,11 +504,32 @@ struct AIChatView: View {
 
     // MARK: - 顶部拖动条（移动窗口 + 图钉）
 
-    /// 顶部拖动条：36pt 全宽，左段为可拖动区域，右端图钉经 chatReadingColumn 对齐——
-    /// 图钉右缘 = 阅读列右缘（统一右基准线），与内容/坞卡同一条线，不再悬浮于真空中。
+    /// 顶部拖动条：36pt 全宽，左段为可拖动区域与展开按钮（侧栏收拢时），右端图钉经 chatReadingColumn 对齐——
+    /// 图钉右缘 = 阅读列右缘，展开钮左缘 = 阅读列左缘（统一基准线），与内容/坞卡同一条线。
     private var windowTopBar: some View {
         WindowDragHandle()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if let current = state.store.currentSession, current.parentSessionId != nil {
+                    SubagentTopNavBar(
+                        state: state,
+                        onNavigateUp: { _ = navigateUpToParentAgent() },
+                        onSelectPeer: { peerId in
+                            withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+                                state.selectSession(id: peerId)
+                            }
+                        }
+                    )
+                    .frame(maxWidth: .infinity)
+                    .padding(.trailing, Theme.Layout.iconButtonSize + Theme.Spacing.xxl)
+                } else if !sidebarVisible {
+                    HStack {
+                        sidebarToggleButton
+                            .chatReadingColumn(alignment: .leading)
+                        Spacer()
+                    }
+                }
+            }
             .overlay(alignment: .trailing) {
                 pinButton
                     .chatReadingColumn(alignment: .trailing)
@@ -502,6 +539,27 @@ struct AIChatView: View {
         // 纯透明热区：不铺 glass/底色/描边——顶栏只承担拖动与图钉命中功能，
         // 根部内容材质一铺到窗口圆角，恢复重构前的一体观感（告别独立「帽子」横带）。
         // WindowDragHandle 命中区完整保留，拖动/吸附功能不受影响。
+    }
+
+    /// 侧栏展开按钮（仅在侧栏收起时显示在主区顶栏左侧，与图钉对称并对齐阅读列左缘）
+    private var sidebarToggleButton: some View {
+        Button {
+            toggleSidebar()
+        } label: {
+            Image(systemName: "sidebar.leading")
+                .font(Theme.Typography.text(Theme.Typography.callout, .medium))
+                .foregroundColor(sidebarToggleHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
+                .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
+                .background(
+                    Circle().fill(sidebarToggleHovered ? Theme.Colors.iconHoverBg : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { sidebarToggleHovered = hovering }
+        }
+        .help("展开侧边栏 (⌘B)")
     }
 
     /// 图钉按钮：与主面板 StatusBarView 同一克制语言——静止 iconRest 灰、hover 提亮 + 圆底，
@@ -710,7 +768,7 @@ struct AIChatView: View {
         withAnimation(.easeInOut(duration: Theme.Motion.windowResize)) {
             sidebarVisible = visible
         }
-        AIWindowManager.shared.setSidebarVisible(visible)
+        AIWindowManager.shared.setSidebarVisible(visible, sidebarWidth: sidebarWidth)
     }
 
     // MARK: - 快捷键监听（⌘N/⌘B/⌘F/⌘P/⌘[] + 重命名/放大/快速切换态 ESC 先行消费）
@@ -742,7 +800,91 @@ struct AIChatView: View {
                 searchFocusRequest += 1
             }
         }
+        // ⌘ + 方向键导航（⌘↑ 返回主 Agent，⌘↓ 钻入子 Agent，⌘←/⌘→ 同级专家横向轮切）
+        keyMonitor.onNavigateUp = { [self] in
+            navigateUpToParentAgent()
+        }
+        keyMonitor.onNavigateDown = { [self] in
+            navigateDownToChildAgent()
+        }
+        keyMonitor.onNavigateLeft = { [self] in
+            navigateLeftPeerAgent()
+        }
+        keyMonitor.onNavigateRight = { [self] in
+            navigateRightPeerAgent()
+        }
         keyMonitor.install()
+    }
+
+    // MARK: - 多智能体层级与同级导航 (⌘ + 方向键)
+
+    /// ⌘↑: 返回主 Agent
+    @discardableResult
+    private func navigateUpToParentAgent() -> Bool {
+        guard let currentSession = state.store.currentSession,
+              let parentId = currentSession.parentSessionId else {
+            return false
+        }
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+            state.selectSession(id: parentId)
+        }
+        NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        return true
+    }
+
+    /// ⌘↓: 钻入第一个子 Agent (若当前处于主会话且存在派生的子会话)
+    @discardableResult
+    private func navigateDownToChildAgent() -> Bool {
+        guard let currentSession = state.store.currentSession else { return false }
+        let children = state.store.childSessions(of: currentSession.id)
+        guard let firstChild = children.first else { return false }
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+            state.selectSession(id: firstChild.id)
+        }
+        NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        return true
+    }
+
+    /// ⌘←: 切换到上一个同级子 Agent
+    @discardableResult
+    private func navigateLeftPeerAgent() -> Bool {
+        guard let currentSession = state.store.currentSession,
+              let parentId = currentSession.parentSessionId else {
+            return false
+        }
+        let peers = state.store.childSessions(of: parentId)
+        guard peers.count > 1,
+              let currentIndex = peers.firstIndex(where: { $0.id == currentSession.id }) else {
+            return false
+        }
+        let prevIndex = (currentIndex - 1 + peers.count) % peers.count
+        let targetId = peers[prevIndex].id
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+            state.selectSession(id: targetId)
+        }
+        NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        return true
+    }
+
+    /// ⌘→: 切换到下一个同级子 Agent
+    @discardableResult
+    private func navigateRightPeerAgent() -> Bool {
+        guard let currentSession = state.store.currentSession,
+              let parentId = currentSession.parentSessionId else {
+            return false
+        }
+        let peers = state.store.childSessions(of: parentId)
+        guard peers.count > 1,
+              let currentIndex = peers.firstIndex(where: { $0.id == currentSession.id }) else {
+            return false
+        }
+        let nextIndex = (currentIndex + 1) % peers.count
+        let targetId = peers[nextIndex].id
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+            state.selectSession(id: targetId)
+        }
+        NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        return true
     }
 
     /// 切换快速会话切换 / 全局搜索面板显隐（⌘P）

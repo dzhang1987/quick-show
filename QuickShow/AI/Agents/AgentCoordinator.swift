@@ -88,10 +88,8 @@ final class AgentCoordinator {
             ? AIAgentStore.shared.visualDelegateAgent
             : nil) ?? AIAgentStore.shared.activeAgent
 
-        let taskSnippet = task.trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
-            .prefix(20)
-        let sessionTitle = "[\(matchedAgent.name)] \(taskSnippet)"
+        let taskTopic = ChatSessionStore.summarizeTitle(from: task, maxLength: 12, fallback: matchedAgent.name)
+        let sessionTitle = "[\(matchedAgent.name)] \(taskTopic)"
 
         // 1. 创建子 Agent 专属独立会话（保留在主会话，不强制跳转）
         let childSession = ChatSessionStore.shared.createChildSession(
@@ -186,6 +184,20 @@ final class AgentCoordinator {
                         case .reasoning(let reasoningChunk):
                             roundReasoning += reasoningChunk
                             ChatSessionStore.shared.appendReasoningToken(reasoningChunk, to: currentAssistantId, in: childId)
+                        case .toolCallDispatched(let callId, let name):
+                            // 实时同步任务动作到托盘与注册表
+                            AgentTaskRegistry.shared.updateTaskAction(
+                                id: persistentTaskId,
+                                action: "正在准备调用 \(name)…",
+                                status: .toolExecuting
+                            )
+                            ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                                var calls = msg.toolCalls ?? []
+                                if !calls.contains(where: { $0.id == callId }) {
+                                    calls.append(ToolCallRecord(id: callId, name: name, arguments: "", result: nil, status: .pending))
+                                    msg.toolCalls = calls
+                                }
+                            }
                         case .toolCalls(let calls):
                             completedCalls = calls
                         case .usage:
@@ -521,5 +533,50 @@ final class AgentCoordinator {
 
         // 4. 未明确命中任何单一子任务：留给主会话
         return nil
+    }
+
+    // MARK: - 5. 子任务结论回传与同步至主会话 (Sync to Main Agent)
+
+    /// 将特定子 Agent 的产物与结论沉淀并同步回主会话，形成协同闭环
+    func syncChildOutputToParent(childSessionId: UUID, userNote: String? = nil) {
+        guard let childSession = ChatSessionStore.shared.session(id: childSessionId),
+              let parentId = childSession.parentSessionId else {
+            return
+        }
+
+        let agent = AIAgentStore.shared.agent(for: childSession.agentId ?? "")
+        let agentName = agent?.name ?? "专项专家"
+
+        // 获取最新一条 assistant 消息与产物
+        let lastAssistant = childSession.messages.last { $0.role == .assistant && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let conclusionText = childSession.taskSummary ?? lastAssistant?.content ?? ""
+        let regTask = AgentTaskRegistry.shared.task(childSessionId: childSessionId)
+
+        var syncContent = "💡 **【\(agentName)】已完成专项任务并提报成果：**\n\n"
+        if !conclusionText.isEmpty {
+            let snippet = conclusionText.count > 500 ? String(conclusionText.prefix(500)) + "..." : conclusionText
+            syncContent += "> \(snippet.replacingOccurrences(of: "\n", with: "\n> "))\n\n"
+        }
+        if let artifacts = regTask?.artifacts, !artifacts.isEmpty {
+            syncContent += "**生成产物：**\n"
+            for art in artifacts {
+                syncContent += "- `\(art)`\n"
+            }
+            syncContent += "\n"
+        }
+        if let note = userNote?.trimmingCharacters(in: .whitespacesAndNewlines), !note.isEmpty {
+            syncContent += "补充要求：\(note)\n\n"
+        }
+        syncContent += "请基于上述专家的结论与产物，继续推进任务。"
+
+        let syncUserMsg = ChatMessage(
+            role: .user,
+            content: syncContent,
+            state: .done
+        )
+        ChatSessionStore.shared.appendMessage(syncUserMsg, to: parentId)
+
+        // 平滑切换回主会话
+        ChatSessionStore.shared.currentSessionId = parentId
     }
 }

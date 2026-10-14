@@ -29,25 +29,12 @@ extension AIChatState {
                 )
             ]
             guard let raw = try? await self.service.complete(messages: messages) else { return }
-            let title = Self.sanitizeTitle(raw)
-            guard !title.isEmpty else { return }
+            let title = ChatSessionStore.summarizeTitle(from: raw, maxLength: 16)
+            guard !title.isEmpty && title != "新对话" else { return }
             // 生成期间用户可能已手动重命名，二次确认后再写入。
             guard let latest = self.store.session(id: sessionId), latest.titleNeedsSummary else { return }
             self.store.setTitle(id: sessionId, title: title, markSummarized: true)
         }
-    }
-
-    /// 清洗标题：去换行、引号与标点符号，保留完整语义；仅在异常超长时平滑截断。
-    private static func sanitizeTitle(_ raw: String) -> String {
-        let cleaned = raw
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "「」\"'“”《》#*·-：:。，,!！?？"))
-        guard !cleaned.isEmpty else { return "" }
-        if cleaned.count <= 16 {
-            return cleaned
-        }
-        return String(cleaned.prefix(15)) + "…"
     }
 
     // MARK: - 流式完成通知

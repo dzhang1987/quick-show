@@ -28,6 +28,21 @@ extension AIChatState {
             return
         }
 
+        // 0. 支持在子会话中直接通过 @main 或 @主会话 提报同步给主协调器
+        if let current = store.currentSession, current.parentSessionId != nil {
+            let lower = userInput.lowercased()
+            if lower.hasPrefix("@main") || lower.hasPrefix("@主会话") {
+                let note = userInput.replacingOccurrences(of: "@main", with: "")
+                    .replacingOccurrences(of: "@主会话", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                inputText = ""
+                imageAttachments = []
+                AgentCoordinator.shared.syncChildOutputToParent(childSessionId: current.id, userNote: note.isEmpty ? nil : note)
+                showAgentSteeringNotice("已将当前专家结论同步回主会话")
+                return
+            }
+        }
+
         let isCreatingNewSession = (store.currentSession == nil)
         if isCreatingNewSession {
             isPromotingDraft = true
@@ -166,6 +181,10 @@ extension AIChatState {
                         case let .reasoning(token):
                             // 思考增量与正文分开累积，落定后仍保留供折叠查看。
                             self.appendReasoning(token, to: assistantID, in: sessionId)
+                        case let .toolCallDispatched(callId, name):
+                            // 流式首帧捕获到工具名：立即冲刷打字机尾部并挂载预备卡片，杜绝参数生成期的假死感
+                            self.forceFlushPendingTokens(in: sessionId)
+                            self.prepareStreamingToolCall(assistantID, callID: callId, name: name, in: sessionId)
                         case let .toolCalls(calls):
                             completedCalls = calls
                         case let .usage(promptTokens):
@@ -592,6 +611,23 @@ extension AIChatState {
                 message.state = state
             default:
                 break
+            }
+        }
+    }
+
+    /// 在流式期间即时挂载工具调用预显记录（消除大模型生成复杂 JSON 参数期间 UI 的数秒卡顿假死感）
+    private func prepareStreamingToolCall(_ id: UUID, callID: String, name: String, in sessionId: UUID) {
+        store.updateMessage(id: id, in: sessionId) { message in
+            var calls = message.toolCalls ?? []
+            if !calls.contains(where: { $0.id == callID }) {
+                calls.append(ToolCallRecord(
+                    id: callID,
+                    name: name,
+                    arguments: "",
+                    result: nil,
+                    status: .pending
+                ))
+                message.toolCalls = calls
             }
         }
     }

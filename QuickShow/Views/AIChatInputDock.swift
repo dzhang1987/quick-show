@@ -16,6 +16,8 @@ struct AIChatInputDock: View {
     @ObservedObject var state: AIChatState
     /// 输入坞抽屉交互中心：观察 request 驱动抽屉展开/收起（权限确认 / AI 提问）。
     @ObservedObject private var interaction = ChatInteractionCenter.shared
+    /// 多智能体任务注册表：观察并发子任务生命周期与动态活动脉搏，驱动托盘即时升降与高度重算。
+    @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
     /// 坞体实测总高（单向写回父级：供消息列表尾部留白 / 空态 overlay / toast 位置消费；
     /// 值单向流出、绝不反向影响坞体布局，无反馈环）。
     @Binding var dockTotalHeight: CGFloat
@@ -28,8 +30,15 @@ struct AIChatInputDock: View {
     /// ESC 兜底出口（父级 handleEscape：抽屉 → 重命名 → 中止 → 关窗）。
     let onEscape: () -> Void
 
-    /// 输入框占位文案（快捷键语义由各控件 .help() tooltip 承担，占位只留一句）。
-    private let inputPlaceholder = String(localized: "问点什么…")
+    /// 输入框占位文案（子智能体会话动态展示当前专家名）。
+    private var inputPlaceholder: String {
+        if let current = state.store.currentSession,
+           let agentId = current.agentId,
+           let agent = AIAgentStore.shared.agent(for: agentId) {
+            return String(localized: "与【\(agent.name)】对话…")
+        }
+        return String(localized: "问点什么…")
+    }
 
     /// 输入内容空态：独立于 state.inputText 的回写通道（IME 组字期间由 setMarkedText 回调驱动）。
     /// 显隐判据须与 state.inputText.isEmpty 取与：@State 初值固定为 true 且首挂载无变化事件
@@ -141,9 +150,12 @@ struct AIChatInputDock: View {
     }
 
     private var hasActiveSubagentTasks: Bool {
-        guard let parentId = state.store.currentSessionId else { return false }
-        return !AgentTaskRegistry.shared.runningTasks(parentSessionId: parentId).isEmpty
-            || state.agentSteeringNotice != nil
+        let current = state.store.currentSession
+        let rootId = current?.parentSessionId ?? current?.id
+        let isChild = current?.parentSessionId != nil
+        let tasks = rootId != nil ? taskRegistry.runningTasks(parentSessionId: rootId!) : []
+        let otherActive = isChild ? tasks.filter { $0.childSessionId != current?.id } : tasks
+        return !otherActive.isEmpty || state.agentSteeringNotice != nil
     }
 
     private var inputArea: some View {

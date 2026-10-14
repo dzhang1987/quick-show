@@ -191,8 +191,9 @@ enum AgentFunctionalTests {
             type: "function",
             function: DeltaToolCall.DeltaFunction(name: "launch_subagents", arguments: "{\"tasks\":[")
         )
-        accumulator.ingest([delta1])
+        let dispatched1 = accumulator.ingest([delta1])
         assertTest(!accumulator.isEmpty, "注入首片后累积器不为空")
+        assertTest(dispatched1.count == 1 && dispatched1.first?.name == "launch_subagents", "首片捕获到工具名并成功产出即时预显派发信号")
 
         // 模拟第 2 片（参数尾段，id/name 为 nil）
         let delta2 = DeltaToolCall(
@@ -201,7 +202,8 @@ enum AgentFunctionalTests {
             type: nil,
             function: DeltaToolCall.DeltaFunction(name: nil, arguments: "{\"agent_id\":\"coder\",\"task\":\"test\"}]}")
         )
-        accumulator.ingest([delta2])
+        let dispatched2 = accumulator.ingest([delta2])
+        assertTest(dispatched2.isEmpty, "后续参数增量分片不重复产出预显派发信号")
 
         let completed = accumulator.completed
         assertTest(completed.count == 1, "流结束时成功归并产出 1 个完整工具调用")

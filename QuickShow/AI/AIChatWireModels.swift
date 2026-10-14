@@ -454,11 +454,15 @@ final class ChatToolCallAccumulator {
         var id: String?
         var name: String?
         var arguments: String = ""
+        var didDispatchStarted: Bool = false
     }
 
     private var byIndex: [Int: Partial] = [:]
 
-    func ingest(_ deltas: [DeltaToolCall]) {
+    /// 消费增量分片，并在首次捕获到有效工具名称时即时返回 (id, name)（用于流式首帧预显）
+    @discardableResult
+    func ingest(_ deltas: [DeltaToolCall]) -> [(id: String, name: String)] {
+        var newStarts: [(id: String, name: String)] = []
         for delta in deltas {
             let index = delta.index ?? 0
             var partial = byIndex[index] ?? Partial()
@@ -468,8 +472,17 @@ final class ChatToolCallAccumulator {
                 partial.name = (partial.name ?? "") + name
             }
             if let args = delta.function?.arguments { partial.arguments += args }
+
+            if !partial.didDispatchStarted, let name = partial.name, !name.isEmpty {
+                partial.didDispatchStarted = true
+                let callId = partial.id ?? "call_\(index)_\(UUID().uuidString.prefix(6))"
+                partial.id = callId
+                newStarts.append((id: callId, name: name))
+            }
+
             byIndex[index] = partial
         }
+        return newStarts
     }
 
     var isEmpty: Bool { byIndex.isEmpty }
@@ -551,6 +564,7 @@ final class ResponsesToolCallAccumulator {
         var callId: String?
         var name: String?
         var arguments: String = ""
+        var didDispatchStarted: Bool = false
     }
 
     private var byKey: [String: Partial] = [:]
@@ -562,13 +576,24 @@ final class ResponsesToolCallAccumulator {
         return Partial()
     }
 
-    /// 登记/更新一个 function_call 项（added / done / arguments.done 共用）。
-    func register(key: String, callID: String?, name: String?, arguments: String?) {
+    /// 登记/更新一个 function_call 项（added / done / arguments.done 共用），首次确定 name 时返回 (id, name)
+    @discardableResult
+    func register(key: String, callID: String?, name: String?, arguments: String?) -> (id: String, name: String)? {
         var partial = ensure(key)
         if let callID, !callID.isEmpty { partial.callId = callID }
         if let name, !name.isEmpty { partial.name = name }
         if let arguments, !arguments.isEmpty { partial.arguments = arguments }
+
+        var newlyDispatched: (id: String, name: String)? = nil
+        if !partial.didDispatchStarted, let n = partial.name, !n.isEmpty {
+            partial.didDispatchStarted = true
+            let cid = partial.callId ?? key
+            partial.callId = cid
+            newlyDispatched = (id: cid, name: n)
+        }
+
         byKey[key] = partial
+        return newlyDispatched
     }
 
     func appendArguments(key: String, delta: String) {

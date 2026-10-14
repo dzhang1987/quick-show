@@ -9,11 +9,26 @@ struct SubagentTaskTray: View {
     @ObservedObject var state: AIChatState
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
 
-    var body: some View {
-        let parentSessionId = state.store.currentSessionId
-        let activeTasks = parentSessionId != nil ? taskRegistry.runningTasks(parentSessionId: parentSessionId!) : []
+    private var currentSession: ChatSession? {
+        state.store.currentSession
+    }
 
-        if !activeTasks.isEmpty || state.agentSteeringNotice != nil {
+    private var isChildSession: Bool {
+        currentSession?.parentSessionId != nil
+    }
+
+    private var rootSessionId: UUID? {
+        currentSession?.parentSessionId ?? state.store.currentSessionId
+    }
+
+    var body: some View {
+        // 仅在有活跃的后台子任务运行，或有转发转向提示时显示托盘
+        let activeTasks = rootSessionId != nil ? taskRegistry.runningTasks(parentSessionId: rootSessionId!) : []
+        let otherActiveTasks = isChildSession ? activeTasks.filter { $0.childSessionId != currentSession?.id } : activeTasks
+
+        let hasContent = !otherActiveTasks.isEmpty || state.agentSteeringNotice != nil
+
+        if hasContent {
             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                 // 1. 转发反馈轻提示（当用户追加输入成功分流给某个子 Agent 时显示）
                 if let notice = state.agentSteeringNotice {
@@ -38,10 +53,10 @@ struct SubagentTaskTray: View {
                     .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
                 }
 
-                // 2. 活跃子任务卡片列表
-                if !activeTasks.isEmpty {
+                // 2. 活跃子任务卡片列表（在子会话展示其他后台同伴；在主会话展示所有并发任务）
+                if !otherActiveTasks.isEmpty {
                     VStack(spacing: Theme.Spacing.xs) {
-                        ForEach(activeTasks) { task in
+                        ForEach(otherActiveTasks) { task in
                             SubagentTaskCapsule(task: task) {
                                 state.selectSession(id: task.childSessionId)
                             }

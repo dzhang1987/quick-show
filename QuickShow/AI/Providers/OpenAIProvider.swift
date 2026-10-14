@@ -85,24 +85,28 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                             case "response.output_item.added", "response.output_item.done":
                                 guard let item = event.item, item.type == "function_call" else { continue }
                                 let key = item.id ?? "index-\(event.outputIndex ?? 0)"
-                                responsesAccumulator.register(
+                                if let newly = responsesAccumulator.register(
                                     key: key,
                                     callID: item.callId,
                                     name: item.name,
                                     arguments: item.arguments
-                                )
+                                ) {
+                                    continuation.yield(.toolCallDispatched(id: newly.id, name: newly.name))
+                                }
                             case "response.function_call_arguments.delta":
                                 guard let delta = event.delta, !delta.isEmpty else { continue }
                                 let key = event.itemId ?? "index-\(event.outputIndex ?? 0)"
                                 responsesAccumulator.appendArguments(key: key, delta: delta)
                             case "response.function_call_arguments.done":
                                 guard let itemID = event.itemId else { continue }
-                                responsesAccumulator.register(
+                                if let newly = responsesAccumulator.register(
                                     key: itemID,
                                     callID: nil,
                                     name: nil,
                                     arguments: event.arguments
-                                )
+                                ) {
+                                    continuation.yield(.toolCallDispatched(id: newly.id, name: newly.name))
+                                }
                             case "response.completed":
                                 if !responsesAccumulator.isEmpty {
                                     continuation.yield(.toolCalls(responsesAccumulator.completed))
@@ -138,7 +142,10 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                                 continuation.yield(.reasoning(reasoning))
                             }
                             if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
-                                chatAccumulator.ingest(toolCalls)
+                                let newStarts = chatAccumulator.ingest(toolCalls)
+                                for item in newStarts {
+                                    continuation.yield(.toolCallDispatched(id: item.id, name: item.name))
+                                }
                             }
                         }
                     }

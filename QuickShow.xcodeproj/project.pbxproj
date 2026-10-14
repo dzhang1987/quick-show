@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -222,6 +222,7 @@
 		FA8AB9E209F88AE07E9E7664 /* MarkdownHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5570F43DFA4FADCF1C25059 /* MarkdownHighlighter.swift */; };
 		FBD6DE159190607DB6CA536D /* MarkdownParagraphRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F872717476C949C8D8DECC3C /* MarkdownParagraphRenderer.swift */; };
 		FF20A8CDFF1E33DB20B6A3C9 /* MathArgumentRewriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12DECE3C3E44FC0DBDAC273F /* MathArgumentRewriter.swift */; };
+		FF5D33B95E663FABBF621C7E /* SubagentTopNavBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69017B0F6C42B31CEC0CD897 /* SubagentTopNavBar.swift */; };
 		FF86284F7EB2DF312039B7E2 /* MTFontMathTableV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8306490C02B02B7D9AC1528 /* MTFontMathTableV2.swift */; };
 		FFB923C1D21F1CD1B375660E /* ChatTickRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = 935E9F331F9AE538660984C0 /* ChatTickRail.swift */; };
 /* End PBXBuildFile section */
@@ -334,6 +335,7 @@
 		6531FF4B9DF2C2EF8776D15E /* MermaidScriptLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidScriptLoader.swift; sourceTree = "<group>"; };
 		66C3EBA7C75476E2B3B637D2 /* AIChatQuickSwitcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatQuickSwitcher.swift; sourceTree = "<group>"; };
 		6899045187A73D4B76895FE6 /* CalendarEventEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarEventEditView.swift; sourceTree = "<group>"; };
+		69017B0F6C42B31CEC0CD897 /* SubagentTopNavBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentTopNavBar.swift; sourceTree = "<group>"; };
 		69D3D4B60B8DE26010CF69E1 /* AIAuthManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAuthManager.swift; sourceTree = "<group>"; };
 		6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontV2.swift; sourceTree = "<group>"; };
 		6C3ED14E818FD6A81E2993F6 /* AIChatLayoutSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatLayoutSupport.swift; sourceTree = "<group>"; };
@@ -658,6 +660,7 @@
 				B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */,
 				63AE6828207BF9FDF55E3684 /* StatusBarView.swift */,
 				9DBCD8B7FC49C22DCE98FAEF /* SubagentTaskTray.swift */,
+				69017B0F6C42B31CEC0CD897 /* SubagentTopNavBar.swift */,
 				17C89A3F83C8CCA758C24A0C /* TimeDisplayView.swift */,
 				6F2DD99010D040E245B74EB6 /* ToolConfirmationDrawer.swift */,
 				43F92A8FBA3124D94941090E /* ToolJSONText.swift */,
@@ -955,8 +958,6 @@
 			dependencies = (
 			);
 			name = SwiftMath;
-			packageProductDependencies = (
-			);
 			productName = SwiftMath;
 			productReference = 0E743B480470624A4287B53E /* libSwiftMath.a */;
 			productType = "com.apple.product-type.library.static";
@@ -973,8 +974,6 @@
 			dependencies = (
 			);
 			name = HighlightrKit;
-			packageProductDependencies = (
-			);
 			productName = HighlightrKit;
 			productReference = 11C47863F2E3FDEDECD77402 /* libHighlightrKit.a */;
 			productType = "com.apple.product-type.library.static";
@@ -994,8 +993,6 @@
 				135C32D5292F69C79A3C1477 /* PBXTargetDependency */,
 			);
 			name = QuickShow;
-			packageProductDependencies = (
-			);
 			productName = QuickShow;
 			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
 			productType = "com.apple.product-type.application";
@@ -1022,6 +1019,7 @@
 				};
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
+			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -1030,9 +1028,6 @@
 				"zh-Hans",
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
-			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
-			productRefGroup = 9B0F05138AE231E7D18DDCA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -1281,6 +1276,7 @@
 				3B12C41823DE91014225C158 /* SingleInstanceGuard.swift in Sources */,
 				9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */,
 				9BE46273222E5B78A4A09A9E /* SubagentTaskTray.swift in Sources */,
+				FF5D33B95E663FABBF621C7E /* SubagentTopNavBar.swift in Sources */,
 				DB289B1C35342CF3AC4D608A /* SystemActions.swift in Sources */,
 				825D8E0668CA724C6E71CC37 /* SystemMetricsProvider.swift in Sources */,
 				9CC49B9EED1B8F61AF97F815 /* SystemStatusModels.swift in Sources */,

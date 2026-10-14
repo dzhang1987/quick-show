@@ -165,6 +165,23 @@ final class ChatSessionStore: ObservableObject {
             .sorted { $0.createdAt < $1.createdAt }
     }
 
+    /// 获取指定子会话对应的父主会话
+    func parentSession(of childSessionId: UUID) -> ChatSession? {
+        guard let child = session(id: childSessionId),
+              let parentId = child.parentSessionId else { return nil }
+        return session(id: parentId)
+    }
+
+    /// 获取与当前子会话同属一个父会话的所有同级子会话（按创建时间升序）
+    func peerChildSessions(of sessionId: UUID) -> [ChatSession] {
+        guard let current = session(id: sessionId) else { return [] }
+        if let parentId = current.parentSessionId {
+            return childSessions(of: parentId)
+        } else {
+            return childSessions(of: sessionId)
+        }
+    }
+
     /// 更新子任务状态与结论
     func updateTaskStatus(sessionId: UUID, status: SubagentTaskStatus, summary: String? = nil) {
         mutate(sessionId) { session in
@@ -507,6 +524,73 @@ final class ChatSessionStore: ObservableObject {
         result = result.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
 
         return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - 任务与标题精简摘要工具 (Task & Title Summarization)
+
+    /// 根据用户任务或输入表述，提炼提取语义紧凑、小于等于指定长度的短标题
+    /// - Parameters:
+    ///   - text: 原始任务描述或输入文本（可包含 Markdown、换行、通用口头动词等）
+    ///   - maxLength: 最大字符长度（默认 12）
+    ///   - fallback: 提取为空时的兜底文案（默认 "新对话"）
+    /// - Returns: 精炼清洗后的短标题，超出 maxLength 自动平滑截断加省略号
+    static func summarizeTitle(
+        from text: String,
+        maxLength: Int = 12,
+        fallback: String = "新对话"
+    ) -> String {
+        let clean = cleanPlainText(from: text)
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !clean.isEmpty else { return fallback }
+
+        // 1. 去除常见的指令动词与口头语前缀
+        let redundantPrefixes = [
+            "请帮我搜索一下", "请帮我搜索", "请搜索一下", "请搜索", "搜索一下", "搜索",
+            "请帮我查询一下", "请帮我查询", "请查询一下", "请查询", "查询一下", "查询",
+            "请帮我查找一下", "请帮我查找", "请查找一下", "请查找", "查找一下", "查找",
+            "请帮我汇总一下", "请帮我汇总", "请汇总一下", "请汇总", "汇总一下", "汇总",
+            "请帮我总结一下", "请帮我总结", "请总结一下", "请总结", "总结一下", "总结",
+            "请帮我调研一下", "请帮我调研", "请调研一下", "请调研", "调研一下", "调研",
+            "请帮我分析一下", "请帮我分析", "请分析一下", "请分析", "分析一下", "分析",
+            "请帮我评估一下", "请帮我评估", "请评估一下", "请评估", "评估一下", "评估",
+            "请帮我查一下", "请查一下", "查一下", "查查", "查下", "搜下", "检索一下", "检索",
+            "请编写一个", "请编写", "编写一个", "编写", "请写一个", "请写", "写一个", "写份",
+            "请实现一个", "请实现", "实现一个", "实现", "请生成一个", "请生成", "生成一个", "生成",
+            "请帮我写", "请帮我做", "帮我做", "帮我写", "帮我查", "帮我搜", "帮我", "请问"
+        ]
+
+        var stripped = clean
+        for prefix in redundantPrefixes {
+            if stripped.hasPrefix(prefix) {
+                stripped = String(stripped.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                break
+            }
+        }
+
+        // 去除首尾标点符号（如中英文冒号、逗号、问号、引号等）
+        let trimPunctuation = CharacterSet(charactersIn: "「」\"'“”《》#*·-—：:。，,!！?？ \t\n")
+        stripped = stripped.trimmingCharacters(in: trimPunctuation)
+
+        guard !stripped.isEmpty else { return fallback }
+
+        // 2. 尝试按分句标点截断，提取最前面的核心主谓宾短语
+        let clauseSeparators = CharacterSet(charactersIn: "，,。；;：:\n")
+        let clauses = stripped.components(separatedBy: clauseSeparators).filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        var coreText = clauses.first?.trimmingCharacters(in: trimPunctuation) ?? stripped
+
+        if coreText.isEmpty {
+            coreText = stripped
+        }
+
+        // 3. 长度裁剪：小于等于 maxLength 保持原样；超出则截取并平滑加省略号
+        if coreText.count <= maxLength {
+            return coreText
+        } else {
+            let limit = max(maxLength - 1, 1)
+            return String(coreText.prefix(limit)) + "…"
+        }
     }
 
     /// 从消息正文中提取围绕关键词的单行上下文片段（自动清洗 Markdown 符号）
