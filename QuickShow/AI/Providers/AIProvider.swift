@@ -150,7 +150,7 @@ extension AIProvider {
         )
     }
 
-    /// Qoder 国际版原生预设 (14个官方模型)
+    /// Qoder 国际版原生预设 (18个官方模型)
     static func qoderPreset() -> AIProvider {
         AIProvider(
             id: "qoder",
@@ -161,19 +161,23 @@ extension AIProvider {
             isEnabled: true,
             models: [
                 AIModelSpec(id: "qoder/auto", name: "Qoder Auto (智能路由)", contextWindow: 180000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/ultimate", name: "Qoder Ultimate (旗舰1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/performance", name: "Qoder Performance (高性能1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/efficient", name: "Qoder Efficient (轻快经济)", contextWindow: 180000, supportsVision: true, supportsThinking: false),
-                AIModelSpec(id: "qoder/lite", name: "Qoder Lite (免费纯文本)", contextWindow: 180000, supportsVision: false, supportsThinking: false),
-                AIModelSpec(id: "qoder/qmodel", name: "Qwen3.7 Plus (Qoder 视觉)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/qmodel_latest", name: "Qwen3.7 Max (Qoder 视觉旗舰)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/qmodel_preview", name: "Qwen3.8 Max Preview (Qoder)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/dfmodel", name: "DeepSeek V4 Flash (Qoder)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/dmodel", name: "DeepSeek V4 Pro (Qoder)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/gm51model", name: "GLM 5.2 (Qoder 编排主力)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
-                AIModelSpec(id: "qoder/kmodel_latest", name: "Kimi K3 (Qoder 架构决策)", contextWindow: 1000000, supportsVision: true, supportsThinking: false),
-                AIModelSpec(id: "qoder/kmodel", name: "Kimi K2.7 Code (Qoder 代码专家)", contextWindow: 256000, supportsVision: true, supportsThinking: false),
-                AIModelSpec(id: "qoder/mmodel", name: "MiniMax M3 (Qoder 长文理解)", contextWindow: 1000000, supportsVision: true, supportsThinking: false)
+                AIModelSpec(id: "qoder/ultimate", name: "Qoder Ultimate (旗舰主力1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/fast", name: "Qoder Fast (轻快极速)", contextWindow: 180000, supportsVision: true, supportsThinking: false),
+                AIModelSpec(id: "qoder/performance", name: "Qoder Performance (高性能1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: false),
+                AIModelSpec(id: "qoder/efficient", name: "Qoder Efficient (经济免费层)", contextWindow: 180000, supportsVision: true, supportsThinking: false),
+                AIModelSpec(id: "qoder/smodel", name: "Sonus (Qoder 多模态)", contextWindow: 180000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/cmodel", name: "Cantus (Qoder 推理专家)", contextWindow: 180000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/qmodel_38max", name: "Qwen3.8 Max (通义旗舰)", contextWindow: 600000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/qfmodel", name: "Qwen3.8 Flash (通义极速)", contextWindow: 600000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/qmodel_latest", name: "Qwen3.7 Max (通义视觉旗舰)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/qmodel", name: "Qwen3.7 Plus (通义视觉全能)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/kmodel_latest", name: "Kimi K3 (长文推理/架构)", contextWindow: 1000000, supportsVision: true, supportsThinking: false),
+                AIModelSpec(id: "qoder/kmodel", name: "Kimi K2.8 Preview (代码专家)", contextWindow: 256000, supportsVision: true, supportsThinking: false),
+                AIModelSpec(id: "qoder/gmodel", name: "GLM 5.3 (智谱旗舰编排)", contextWindow: 180000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/gfmodel", name: "GLM 5.3 Flash (智谱极速长文1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/dmodel", name: "DeepSeek V4 Pro (深度推理1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/dfmodel", name: "DeepSeek Flash (极速推理1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
+                AIModelSpec(id: "qoder/mmodel", name: "MiniMax M3 (海量上下文1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: false)
             ]
         )
     }

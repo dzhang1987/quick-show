@@ -264,7 +264,10 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                                     continuation.yield(.text(text))
                                 }
                                 if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
-                                    chatAccumulator.ingest(toolCalls)
+                                    let newStarts = chatAccumulator.ingest(toolCalls)
+                                    for item in newStarts {
+                                        continuation.yield(.toolCallDispatched(id: item.id, name: item.name))
+                                    }
                                 }
                             }
                         } else if let chunk = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any] {
@@ -305,21 +308,25 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
     }
 
     func fetchModels(provider: AIProvider, apiKey: String) async throws -> [String] {
-        // 返回 Qoder 国际版官方支持的模型列表
+        // 返回 Qoder 国际版官方支持的模型列表 (18个最新模型)
         [
             "qoder/auto",
             "qoder/ultimate",
+            "qoder/fast",
             "qoder/performance",
             "qoder/efficient",
-            "qoder/lite",
-            "qoder/qmodel",
+            "qoder/smodel",
+            "qoder/cmodel",
+            "qoder/qmodel_38max",
+            "qoder/qfmodel",
             "qoder/qmodel_latest",
-            "qoder/qmodel_preview",
-            "qoder/dfmodel",
-            "qoder/dmodel",
-            "qoder/gm51model",
-            "qoder/kmodel",
+            "qoder/qmodel",
             "qoder/kmodel_latest",
+            "qoder/kmodel",
+            "qoder/gmodel",
+            "qoder/gfmodel",
+            "qoder/dmodel",
+            "qoder/dfmodel",
             "qoder/mmodel"
         ]
     }

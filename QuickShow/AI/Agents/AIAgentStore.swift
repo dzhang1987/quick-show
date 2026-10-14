@@ -102,7 +102,24 @@ final class AIAgentStore: ObservableObject {
         if let data = UserDefaults.standard.data(forKey: Keys.agentsData),
            let loaded = try? JSONDecoder().decode([AIAgent].self, from: data),
            !loaded.isEmpty {
-            self.agents = loaded
+            var updated = loaded
+            var didMigrate = false
+            for i in 0..<updated.count {
+                if updated[i].modelId == "qoder/gm51model" {
+                    updated[i].modelId = "qoder/gmodel"
+                    didMigrate = true
+                } else if updated[i].modelId == "qoder/qmodel_preview" {
+                    updated[i].modelId = "qoder/qmodel_38max"
+                    didMigrate = true
+                } else if updated[i].modelId == "qoder/lite" {
+                    updated[i].modelId = "qoder/efficient"
+                    didMigrate = true
+                }
+            }
+            self.agents = updated
+            if didMigrate {
+                saveAgents()
+            }
             self.activeAgentId = UserDefaults.standard.string(forKey: Keys.activeAgentId) ?? "orchestrator"
             return
         }

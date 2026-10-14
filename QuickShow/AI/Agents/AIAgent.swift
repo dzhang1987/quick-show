@@ -88,7 +88,7 @@ extension AIAgent {
                     面对复杂多步骤工程，使用 `launch_subagents` 并发调度专业专家（Coder、Librarian、Oracle、Concierge、Observer），汇总成果后输出清晰结构化的解答。
                     """,
                     providerId: "qoder",
-                    modelId: "qoder/gm51model",
+                    modelId: "qoder/gmodel",
                     thinkingLevel: .medium,
                     isEnabled: true,
                     isVisualDelegate: false,
@@ -169,7 +169,7 @@ extension AIAgent {
                     表达风格亲切得体、利落简洁，突出原生 macOS 桌面交互的流畅质感。
                     """,
                     providerId: "qoder",
-                    modelId: "qoder/gm51model",
+                    modelId: "qoder/gmodel",
                     thinkingLevel: .low,
                     isEnabled: true,
                     isVisualDelegate: false,

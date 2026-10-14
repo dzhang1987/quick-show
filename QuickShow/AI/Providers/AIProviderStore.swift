@@ -225,6 +225,25 @@ final class AIProviderStore: ObservableObject {
                     }
                 }
             }
+
+            // 确保 qoder 原生预设模型对齐最新 18 个官方模型并清理已下线模型
+            if let idx = updated.firstIndex(where: { $0.id == "qoder" }) {
+                let preset = AIProvider.qoderPreset()
+                let hasLegacyRetiredModels = updated[idx].models.contains {
+                    $0.id == "qoder/lite" || $0.id == "qoder/gm51model" || $0.id == "qoder/qmodel_preview"
+                }
+                if hasLegacyRetiredModels || updated[idx].models.count < preset.models.count || updated[idx].models.isEmpty {
+                    updated[idx].models = preset.models
+                } else {
+                    var existingIds = Set(updated[idx].models.map { $0.id })
+                    for m in preset.models {
+                        if !existingIds.contains(m.id) {
+                            updated[idx].models.append(m)
+                            existingIds.insert(m.id)
+                        }
+                    }
+                }
+            }
             self.providers = updated
             saveProviders()
             self.selectedProviderId = UserDefaults.standard.string(forKey: Keys.selectedProviderId) ?? loaded.first?.id ?? "alibaba"
