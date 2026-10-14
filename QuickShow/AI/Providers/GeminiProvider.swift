@@ -334,6 +334,9 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
         }
     }
 
+    private static let thinkingOpenTag = "<<<BEGIN_THINKING>>>"
+    private static let thinkingCloseTag = "<<<END_THINKING>>>"
+
     private static func buildPrompt(
         from messages: [ChatCompletionMessage],
         enableThinking: Bool
@@ -360,7 +363,10 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
 
         if enableThinking {
             return """
-[系统指令]：你具备深度思考能力。在给出最终答复前，请务必先将你详尽的推理逻辑、演算步骤或思考过程完整包裹在 [THINK] 和 [/THINK] 标签中；在 [/THINK] 之后再输出面向用户的最终清晰答复。注意：在 [THINK] 与 [/THINK] 标签内部严禁嵌套或输出包含 [/THINK] 的字样。
+[系统指令]：你具备深度思考能力。在给出最终答复前，请务必先将你详尽的推理逻辑、演算步骤或思考过程完整包裹在 \(thinkingOpenTag) 和 \(thinkingCloseTag) 标签之间；在 \(thinkingCloseTag) 之后再输出面向用户的最终答复。
+注意规范：
+1. 思考过程必须以 \(thinkingOpenTag) 开头，并在思考结束时输出 \(thinkingCloseTag)。
+2. 在思考过程中严禁提及或输出 \(thinkingCloseTag) 的字样。
 
 \(basePrompt)
 """
@@ -374,8 +380,10 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
 private final class ThinkingStreamParser: @unchecked Sendable {
     private var inThinking = false
     private var buffer = ""
+    private var activeCloseTag: String?
 
     private let tagPairs: [(open: String, close: String)] = [
+        ("<<<BEGIN_THINKING>>>", "<<<END_THINKING>>>"),
         ("[THINK]", "[/THINK]"),
         ("<thought>", "</thought>"),
         ("<think>", "</think>"),
@@ -396,28 +404,54 @@ private final class ThinkingStreamParser: @unchecked Sendable {
 
         while !buffer.isEmpty {
             if inThinking {
+                // 当前正处于思考状态：寻找匹配的闭合标签
+                let closeTagsToCheck: [String] = activeCloseTag != nil ? [activeCloseTag!] : tagPairs.map { $0.close }
                 var earliestCloseRange: Range<String.Index>?
                 var matchedCloseTag: String?
 
-                for pair in tagPairs {
-                    if let range = buffer.range(of: pair.close) {
+                for close in closeTagsToCheck {
+                    if let range = buffer.range(of: close) {
                         if earliestCloseRange == nil || range.lowerBound < earliestCloseRange!.lowerBound {
                             earliestCloseRange = range
-                            matchedCloseTag = pair.close
+                            matchedCloseTag = close
                         }
                     }
                 }
 
                 if let closeRange = earliestCloseRange, let _ = matchedCloseTag {
+                    // 防假闭合检测：如果 closeTag 紧邻反引号（例如模型在复述规则或引用 `<<<END_THINKING>>>` / `[/THINK]`），
+                    // 这是行内引用，绝不能作为思考结束的标记！将其作为普通思考内容安全放出，继续留在思考态。
+                    let isInlineQuoted: Bool = {
+                        let beforeIndex = closeRange.lowerBound
+                        let afterIndex = closeRange.upperBound
+                        if beforeIndex > buffer.startIndex && afterIndex < buffer.endIndex {
+                            let prevChar = buffer[buffer.index(before: beforeIndex)]
+                            let nextChar = buffer[afterIndex]
+                            if (prevChar == "`" && nextChar == "`") || (prevChar == "\"" && nextChar == "\"") || (prevChar == "“" && nextChar == "”") {
+                                return true
+                            }
+                        }
+                        return false
+                    }()
+
+                    if isInlineQuoted {
+                        // 假闭合：作为思考内容放出，吸收直到 closeTag 之后
+                        let segment = String(buffer[..<closeRange.upperBound])
+                        onReasoning(segment)
+                        buffer = String(buffer[closeRange.upperBound...])
+                        continue
+                    }
+
                     let reasoningPart = String(buffer[..<closeRange.lowerBound])
                     if !reasoningPart.isEmpty {
                         onReasoning(reasoningPart)
                     }
-                    // 彻底吸收 closeTag，退出思考状态
+                    // 彻底吸收真正的 closeTag，退出思考状态
                     buffer = String(buffer[closeRange.upperBound...])
                     inThinking = false
+                    activeCloseTag = nil
                 } else {
-                    let maxCloseLen = 12
+                    let maxCloseLen = 24
                     let safeCount = max(0, buffer.count - maxCloseLen)
                     if safeCount > 0 {
                         let safeIndex = buffer.index(buffer.startIndex, offsetBy: safeCount)
@@ -428,7 +462,7 @@ private final class ThinkingStreamParser: @unchecked Sendable {
                     break
                 }
             } else {
-                // 非思考状态（正文状态）：首先检查是否存在残留的孤立 closeTag（例如模型复述或误吐的 [/THINK]）
+                // 非思考状态（正文状态）：首先检查是否存在残留的孤立 closeTag（例如模型意外误吐）
                 var earliestCloseRange: Range<String.Index>?
                 for pair in tagPairs {
                     if let range = buffer.range(of: pair.close) {
@@ -439,38 +473,38 @@ private final class ThinkingStreamParser: @unchecked Sendable {
                 }
 
                 if let closeRange = earliestCloseRange {
-                    // closeTag 之前的文本作为正文分发
                     let textPart = cleanTextDelta(String(buffer[..<closeRange.lowerBound]))
                     if !textPart.isEmpty {
                         onText(textPart)
                     }
-                    // 将孤立的 closeTag 丢弃并吸收
+                    // 将孤立 closeTag 吸收丢弃
                     buffer = String(buffer[closeRange.upperBound...])
                     continue
                 }
 
                 // 正常检查 openTag
                 var earliestOpenRange: Range<String.Index>?
-                var matchedOpenTag: String?
+                var matchedOpenPair: (open: String, close: String)?
 
                 for pair in tagPairs {
                     if let range = buffer.range(of: pair.open) {
                         if earliestOpenRange == nil || range.lowerBound < earliestOpenRange!.lowerBound {
                             earliestOpenRange = range
-                            matchedOpenTag = pair.open
+                            matchedOpenPair = pair
                         }
                     }
                 }
 
-                if let openRange = earliestOpenRange, let _ = matchedOpenTag {
+                if let openRange = earliestOpenRange, let pair = matchedOpenPair {
                     let textPart = cleanTextDelta(String(buffer[..<openRange.lowerBound]))
                     if !textPart.isEmpty {
                         onText(textPart)
                     }
                     buffer = String(buffer[openRange.upperBound...])
                     inThinking = true
+                    activeCloseTag = pair.close
                 } else {
-                    let maxOpenLen = 11
+                    let maxOpenLen = 24
                     let safeCount = max(0, buffer.count - maxOpenLen)
                     if safeCount > 0 {
                         let safeIndex = buffer.index(buffer.startIndex, offsetBy: safeCount)

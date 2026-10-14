@@ -28,6 +28,10 @@
 
 ### Fixed
 
+- **彻底修复 Gemini 模型思考过程提前假闭合截断与思考卡片打字卡顿不贴底缺陷（`GeminiProvider.swift` / `AIChatMessageRow.swift`）**：
+  - **思考标签高熵隔离与防假闭合识别（`GeminiProvider.ThinkingStreamParser`）**：将原先易被大模型在元分析（思考系统角色与规则）时口语复述的 `[THINK] ... [/THINK]` 升级为高区分度标记 `<<<BEGIN_THINKING>>>` 与 `<<<END_THINKING>>>`；解析状态机支持动态绑定对应闭合标签并加入行内引用保护，若闭合标签出现在反引号（如 `` `<<<END_THINKING>>>` ``、`` `[/THINK]` ``）或引号中，判定为模型在引用规则而非协议闭合，继续安全保留在思考态中，彻底根除思考内容大面积泄漏进正文区的历史顽疾；
+  - **思考组件平滑打字与动态贴底滚动（`ReasoningDisclosureView`）**：将思考卡片渲染节流由 250ms 优化为 80ms，彻底消除原先“一大段一大段蹦出”的卡顿感；在内容超出 180pt 限高进入内部滚动时，增加轻柔平滑滚动动画贴底跟随，确保思考过程随着最新增量顺畅推展。
+
 - **彻底修复 AI Chat 会话选中文本按 `⌘ + C` 无法复制的系统级断链（`AIWindowManager.swift` / `AIChatInputFields.swift` / `MarkdownCodeBlock.swift`）**：
   - **窗口级选区优先复制与事件闭环（`AIPanel.sendEvent` / `copyActiveSelection`）**：解决在 Accessory 窗口与无边框 Panel 下，`sendEvent` 遇到 `firstResponder is NSTextView` 直接放行导致 ⌘C 沦为普通文本按键并被 `keyDown` 静默丢弃的底层缺陷；在 `sendEvent`、`keyDown` 与 `performKeyEquivalent` 三层捕获 `⌘C`，若第一响应者或当前窗口视图树中存在持有非空选区的 `NSTextView` / `SelectionTextField` 节点，毫秒级直接触发拷贝；
   - **输入框盲目拦截解除（`ChatInputNSTextView.performKeyEquivalent`）**：将输入框对 `⌘C` 与 `⌘X` 的消费条件严格限制为 `selectedRange.length > 0`；自身无选区时主动放行给窗口层，杜绝输入框持焦状态下吞噬外部会话划选复制事件；

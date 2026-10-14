@@ -395,14 +395,18 @@ struct ReasoningDisclosureView: View {
                         .onChange(of: rendered) { _ in
                             if isLive && expanded {
                                 DispatchQueue.main.async {
-                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                    withAnimation(.easeOut(duration: 0.12)) {
+                                        proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                    }
                                 }
                             }
                         }
                         .onChange(of: expanded) { isExpanded in
                             if isExpanded && isLive {
                                 DispatchQueue.main.async {
-                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                    withAnimation(.easeOut(duration: 0.12)) {
+                                        proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                    }
                                 }
                             }
                         }
@@ -434,7 +438,7 @@ struct ReasoningDisclosureView: View {
         }
         .onChange(of: reasoning) { newValue in
             let now = Date()
-            guard now.timeIntervalSince(lastRenderAt) >= 0.25 else { return }
+            guard now.timeIntervalSince(lastRenderAt) >= 0.08 else { return }
             lastRenderAt = now
             rendered = newValue
         }
