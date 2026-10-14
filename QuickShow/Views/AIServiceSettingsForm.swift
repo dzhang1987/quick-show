@@ -44,6 +44,10 @@ struct AIServiceSettingsForm: View {
     @State private var availableModels: [String] = []
     @State private var modelFilter: String = ""
 
+    // 模型列表行内编辑与悬停状态
+    @State private var editingModelId: String? = nil
+    @State private var hoveredModelId: String? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             // 顶部子页面导航
@@ -122,9 +126,19 @@ struct AIServiceSettingsForm: View {
                 TextField("显示名称", text: providerNameBinding(for: provider.id))
                     .textFieldStyle(.roundedBorder)
 
-                Picker("通信协议类型", selection: providerTypeBinding(for: provider.id)) {
-                    ForEach(AIProviderType.allCases) { type in
-                        Text(type.displayName).tag(type)
+                if isPresetProvider(provider) || provider.type == .qoderNative || provider.type == .antigravityNative {
+                    HStack {
+                        Text("通信协议类型")
+                        Spacer()
+                        Text(provider.type.displayName)
+                            .font(.system(size: Theme.Typography.footnote))
+                            .foregroundColor(.secondary)
+                    }
+                } else {
+                    Picker("通信协议类型", selection: providerTypeBinding(for: provider.id)) {
+                        ForEach(AIProviderType.allCases) { type in
+                            Text(type.displayName).tag(type)
+                        }
                     }
                 }
 
@@ -298,115 +312,119 @@ struct AIServiceSettingsForm: View {
                 Text(apiKeyFooter(for: provider.type))
             }
 
-            // 模型池管理
+            // 模型能力池
             Section {
-                if provider.models.isEmpty {
-                    Text("尚未配置模型，请点击下方「添加模型」或「从 API 拉取」。")
-                        .font(.system(size: Theme.Typography.body))
-                        .foregroundColor(.secondary)
-                } else {
-                    ForEach(provider.models) { model in
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 8) {
-                                TextField("显示名", text: modelNameBinding(providerId: provider.id, modelId: model.id))
-                                    .textFieldStyle(.roundedBorder)
-                                TextField("模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                            HStack(spacing: 12) {
-                                TextField("上下文 (tokens)", text: modelContextBinding(providerId: provider.id, modelId: model.id))
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(maxWidth: 160)
+                VStack(alignment: .leading, spacing: 10) {
+                    // 顶部操作栏
+                    HStack(alignment: .center, spacing: 8) {
+                        Text("共 \(provider.models.count) 个模型")
+                            .font(.system(size: Theme.Typography.footnote, weight: .medium))
+                            .foregroundColor(.secondary)
 
-                                Toggle(isOn: modelVisionBinding(providerId: provider.id, modelId: model.id)) {
-                                    Label("支持视觉", systemImage: "eye.fill")
-                                        .font(.system(size: Theme.Typography.footnote))
-                                }
-                                .toggleStyle(.checkbox)
-                                .help("开启后，该模型可直接接收并解析图片。若关闭，用户发送图片时系统将自动委派视觉担当 (Observer) 先行分析")
+                        Spacer()
 
-                                Toggle(isOn: modelThinkingBinding(providerId: provider.id, modelId: model.id)) {
-                                    Label("支持思考", systemImage: "brain.head.profile")
-                                        .font(.system(size: Theme.Typography.footnote))
-                                }
-                                .toggleStyle(.checkbox)
+                        if isPresetProvider(provider) {
+                            Button {
+                                resetToPresetModels(providerId: provider.id)
+                            } label: {
+                                Label("恢复官方推荐", systemImage: "arrow.counterclockwise")
+                                    .font(.system(size: Theme.Typography.footnote))
                             }
-
-                            HStack(spacing: 10) {
-                                let mIndex = provider.models.firstIndex(where: { $0.id == model.id }) ?? 0
-                                Button("上移") { moveModel(providerId: provider.id, modelId: model.id, direction: -1) }
-                                    .disabled(mIndex == 0)
-                                Button("下移") { moveModel(providerId: provider.id, modelId: model.id, direction: 1) }
-                                    .disabled(mIndex == provider.models.count - 1)
-                                Button("删除", role: .destructive) { removeModel(providerId: provider.id, modelId: model.id) }
-                                Spacer()
-                            }
-                            .font(.system(size: Theme.Typography.footnote))
                             .buttonStyle(.borderless)
+                            .help("恢复为该服务商官方最新推荐的模型规格与能力列表")
                         }
-                        .padding(.vertical, 4)
-                        Divider()
-                    }
-                }
 
-                HStack {
-                    Button("添加模型") {
-                        addNewModel(providerId: provider.id)
-                    }
-                    Spacer()
-                    if provider.type == .openAICompatible {
-                        Button("从 API 拉取模型") {
-                            fetchModelsForProvider(provider)
+                        Button {
+                            addNewModel(providerId: provider.id)
+                        } label: {
+                            Label("添加模型", systemImage: "plus")
+                                .font(.system(size: Theme.Typography.footnote))
                         }
-                        .disabled(isFetchingModels)
-                        if isFetchingModels {
-                            ProgressView().controlSize(.small)
-                        }
-                    }
-                }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
 
-                if let fetchError {
-                    Text(fetchError)
-                        .font(.system(size: Theme.Typography.footnote))
-                        .foregroundColor(Theme.Colors.statusWarning)
-                }
-
-                if !availableModels.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        TextField("在拉取的候选中搜索...", text: $modelFilter)
-                            .textFieldStyle(.roundedBorder)
-
-                        ScrollView(.vertical) {
-                            LazyVStack(alignment: .leading, spacing: 2) {
-                                ForEach(filteredAvailableModels, id: \.self) { mid in
-                                    HStack {
-                                        Text(mid)
-                                            .font(.system(size: Theme.Typography.footnote, design: .monospaced))
-                                        Spacer()
-                                        if provider.models.contains(where: { $0.id == mid }) {
-                                            Text("已添加").font(.system(size: Theme.Typography.micro)).foregroundColor(.secondary)
-                                        } else {
-                                            Button {
-                                                addModelFromAvailable(providerId: provider.id, modelId: mid)
-                                            } label: {
-                                                Image(systemName: "plus.circle")
-                                            }
-                                            .buttonStyle(.borderless)
-                                        }
-                                    }
-                                    .padding(.vertical, 2)
+                        if provider.type == .openAICompatible {
+                            Button {
+                                fetchModelsForProvider(provider)
+                            } label: {
+                                if isFetchingModels {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label("拉取模型", systemImage: "arrow.down.circle")
+                                        .font(.system(size: Theme.Typography.footnote))
                                 }
                             }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(isFetchingModels)
                         }
-                        .frame(height: 120)
-
-                        Button("清空拉取的候选列表") {
-                            availableModels = []
-                        }
-                        .font(.system(size: Theme.Typography.micro))
                     }
-                    .padding(.top, 4)
+                    .padding(.bottom, 2)
+
+                    if provider.models.isEmpty {
+                        HStack {
+                            Spacer()
+                            Text("尚未配置模型，点击上方「添加模型」或「恢复官方推荐」")
+                                .font(.system(size: Theme.Typography.footnote))
+                                .foregroundColor(.secondary)
+                                .padding(.vertical, 16)
+                            Spacer()
+                        }
+                        .background(Color.primary.opacity(0.02))
+                        .cornerRadius(8)
+                    } else {
+                        // 紧凑卡片列表
+                        VStack(spacing: 6) {
+                            ForEach(Array(provider.models.enumerated()), id: \.element.id) { index, model in
+                                modelRowView(provider: provider, model: model, index: index, count: provider.models.count)
+                            }
+                        }
+                    }
+
+                    if let fetchError {
+                        Text(fetchError)
+                            .font(.system(size: Theme.Typography.footnote))
+                            .foregroundColor(Theme.Colors.statusWarning)
+                    }
+
+                    if !availableModels.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("在拉取的候选中搜索...", text: $modelFilter)
+                                .textFieldStyle(.roundedBorder)
+
+                            ScrollView(.vertical) {
+                                LazyVStack(alignment: .leading, spacing: 2) {
+                                    ForEach(filteredAvailableModels, id: \.self) { mid in
+                                        HStack {
+                                            Text(mid)
+                                                .font(.system(size: Theme.Typography.footnote, design: .monospaced))
+                                            Spacer()
+                                            if provider.models.contains(where: { $0.id == mid }) {
+                                                Text("已添加").font(.system(size: Theme.Typography.micro)).foregroundColor(.secondary)
+                                            } else {
+                                                Button {
+                                                    addModelFromAvailable(providerId: provider.id, modelId: mid)
+                                                } label: {
+                                                    Image(systemName: "plus.circle")
+                                                }
+                                                .buttonStyle(.borderless)
+                                            }
+                                        }
+                                        .padding(.vertical, 2)
+                                    }
+                                }
+                            }
+                            .frame(height: 120)
+
+                            Button("清空拉取的候选列表") {
+                                availableModels = []
+                            }
+                            .font(.system(size: Theme.Typography.micro))
+                        }
+                        .padding(.top, 4)
+                    }
                 }
+                .padding(.vertical, 4)
             } header: {
                 Text("模型能力池")
             } footer: {
@@ -950,6 +968,282 @@ struct AIServiceSettingsForm: View {
         guard targetIdx >= 0, targetIdx < p.models.count else { return }
         p.models.swapAt(idx, targetIdx)
         providerStore.saveProvider(p)
+    }
+
+    private func toggleModelVision(providerId: String, modelId: String) {
+        guard var p = providerStore.provider(for: providerId),
+              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
+        p.models[idx].supportsVision.toggle()
+        providerStore.saveProvider(p)
+    }
+
+    private func toggleModelThinking(providerId: String, modelId: String) {
+        guard var p = providerStore.provider(for: providerId),
+              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
+        p.models[idx].supportsThinking.toggle()
+        providerStore.saveProvider(p)
+    }
+
+    private func formatTokens(_ count: Int) -> String {
+        if count >= 1_000_000 {
+            let m = Double(count) / 1_000_000.0
+            return m.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(m))M" : String(format: "%.1fM", m)
+        } else if count >= 1_000 {
+            let k = Double(count) / 1_000.0
+            return k.truncatingRemainder(dividingBy: 1) == 0 ? "\(Int(k))K" : String(format: "%.0fK", k)
+        } else {
+            return "\(count)"
+        }
+    }
+
+    private func isPresetProvider(_ provider: AIProvider) -> Bool {
+        provider.id == "qoder" || provider.id == "antigravity" || provider.id == "alibaba" || provider.id == "openai"
+    }
+
+    private func resetToPresetModels(providerId: String) {
+        guard var p = providerStore.provider(for: providerId) else { return }
+        if providerId == "qoder" {
+            p.models = AIProvider.qoderPreset().models
+        } else if providerId == "antigravity" {
+            p.models = AIProvider.antigravityPreset().models
+        } else if providerId == "alibaba" {
+            p.models = AIProvider.alibabaPreset().models
+        } else if providerId == "openai" {
+            p.models = AIProvider.openAIPreset().models
+        }
+        providerStore.saveProvider(p)
+    }
+
+    @ViewBuilder
+    private func modelRowView(provider: AIProvider, model: AIModelSpec, index: Int, count: Int) -> some View {
+        let isEditing = (editingModelId == model.id)
+        let isHovered = (hoveredModelId == model.id)
+
+        VStack(spacing: 0) {
+            // 主卡片行 (紧凑高质感条目)
+            HStack(spacing: 10) {
+                // 1. 左侧名称与标识
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.name)
+                        .font(.system(size: Theme.Typography.body, weight: .medium))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+
+                    Text(model.id)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                // 2. 中间能力胶囊
+                HStack(spacing: 6) {
+                    // 上下文胶囊
+                    Text(formatTokens(model.contextWindow))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.06))
+                        .cornerRadius(5)
+                        .help("上下文窗口: \(model.contextWindow) tokens")
+
+                    // 视觉开关胶囊
+                    Button {
+                        toggleModelVision(providerId: provider.id, modelId: model.id)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: model.supportsVision ? "eye.fill" : "eye.slash")
+                                .font(.system(size: 10))
+                            Text(model.supportsVision ? "视觉" : "纯文本")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            model.supportsVision
+                                ? Color.teal.opacity(0.16)
+                                : Color.primary.opacity(0.05)
+                        )
+                        .foregroundColor(
+                            model.supportsVision
+                                ? Color.teal
+                                : Color.secondary.opacity(0.65)
+                        )
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.supportsVision ? "支持视觉看图 (点击切换)" : "仅纯文本，发图将委派 Observer 看图 (点击切换)")
+
+                    // 思考开关胶囊
+                    Button {
+                        toggleModelThinking(providerId: provider.id, modelId: model.id)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 10))
+                            Text(model.supportsThinking ? "思考" : "无思考")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(
+                            model.supportsThinking
+                                ? Color.purple.opacity(0.16)
+                                : Color.primary.opacity(0.05)
+                        )
+                        .foregroundColor(
+                            model.supportsThinking
+                                ? Color.purple
+                                : Color.secondary.opacity(0.65)
+                        )
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.supportsThinking ? "支持深度思考链 (点击切换)" : "不输出思考过程 (点击切换)")
+                }
+
+                // 3. 右侧操作按钮组
+                HStack(spacing: 2) {
+                    // 上移
+                    Button {
+                        moveModel(providerId: provider.id, modelId: model.id, direction: -1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(index > 0 ? Color.secondary : Color.secondary.opacity(0.25))
+                    .disabled(index == 0)
+                    .help("上移")
+
+                    // 下移
+                    Button {
+                        moveModel(providerId: provider.id, modelId: model.id, direction: 1)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 22, height: 22)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(index < count - 1 ? Color.secondary : Color.secondary.opacity(0.25))
+                    .disabled(index == count - 1)
+                    .help("下移")
+
+                    // 编辑参数展开
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            if editingModelId == model.id {
+                                editingModelId = nil
+                            } else {
+                                editingModelId = model.id
+                            }
+                        }
+                    } label: {
+                        Image(systemName: isEditing ? "xmark.circle.fill" : "slider.horizontal.3")
+                            .font(.system(size: 12))
+                            .frame(width: 24, height: 24)
+                            .foregroundColor(isEditing ? Color.accentColor : Color.secondary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(isEditing ? "关闭编辑" : "展开精细调整")
+
+                    // 删除
+                    Button {
+                        removeModel(providerId: provider.id, modelId: model.id)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 11))
+                            .frame(width: 22, height: 22)
+                            .foregroundColor(Color.red.opacity(0.75))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("删除此模型")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isEditing ? Color.accentColor.opacity(0.06) : (isHovered ? Color.primary.opacity(0.04) : Color.primary.opacity(0.02)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isEditing ? Color.accentColor.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 0.5)
+            )
+            .onHover { h in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    hoveredModelId = h ? model.id : nil
+                }
+            }
+
+            // 行内精细编辑抽屉（展开态）
+            if isEditing {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("显示名称")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("显示名", text: modelNameBinding(providerId: provider.id, modelId: model.id))
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("模型 ID (底层路由 Key)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("上下文大小 (Tokens)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("上下文", text: modelContextBinding(providerId: provider.id, modelId: model.id))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 180)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                editingModelId = nil
+                            }
+                        } label: {
+                            Text("完成编辑")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 16)
+                    }
+                }
+                .labelsHidden()
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.primary.opacity(0.02))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
     }
 
     // MARK: - Agent Bindings
