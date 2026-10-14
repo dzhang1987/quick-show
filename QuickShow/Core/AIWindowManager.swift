@@ -339,7 +339,7 @@ final class AIWindowManager {
     private func targetAIChatSize(on screen: NSScreen) -> NSSize {
         var size = aiChatSize(on: screen)
         if UserDefaults.standard.bool(forKey: Self.sidebarVisibleKey) {
-            size.width += AIChatLayout.sidebarWidth
+            size.width += AIChatLayout.currentSidebarWidth + AIChatLayout.dividerInteractiveWidth
         }
         return size
     }
@@ -347,12 +347,13 @@ final class AIWindowManager {
     /// 侧栏显隐联动（由 AIChatView ⌘B / 折叠按钮调用）：
     /// 写偏好持久化；窗口可见时**保锚点缩放**——不再居中重排，
     /// 保持当前左上角（若贴右缘则保右缘），宽度 ±sidebarWidth，clamp 到屏幕内。
-    func setSidebarVisible(_ visible: Bool) {
+    func setSidebarVisible(_ visible: Bool, sidebarWidth: CGFloat? = nil) {
         UserDefaults.standard.set(visible, forKey: Self.sidebarVisibleKey)
         guard let panel, panel.isVisible else { return }
         let screen = panel.screen ?? ScreenHelper.activeScreen
         let visibleFrame = screen.visibleFrame
-        let delta = AIChatLayout.sidebarWidth * (visible ? 1 : -1)
+        let width = (sidebarWidth ?? AIChatLayout.currentSidebarWidth) + AIChatLayout.dividerInteractiveWidth
+        let delta = width * (visible ? 1 : -1)
 
         var frame = panel.frame
         let wasRightAnchored = abs(frame.maxX - visibleFrame.maxX) <= 20

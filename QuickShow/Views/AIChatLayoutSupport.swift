@@ -163,3 +163,128 @@ extension View {
         modifier(ChatReadingColumn(alignment: alignment))
     }
 }
+
+// MARK: - 会话侧栏可拖拽微光分割线
+
+/// 侧栏分割线底层的 AppKit 事件与光标处理视图。
+/// 采用原生 resetCursorRects 保证光标实时响应且绝对零泄漏；
+/// 捕获 mouseDown / mouseDragged / mouseUp 驱动增量宽度变化，双击触发复位。
+final class SidebarDividerHandleNSView: NSView {
+    var onWidthDelta: ((CGFloat) -> Void)?
+    var onDragEnded: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
+
+    private var initialMouseX: CGFloat = 0
+    private var isDragging = false
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        window?.invalidateCursorRects(for: self)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2 {
+            onDoubleClick?()
+            return
+        }
+        isDragging = true
+        initialMouseX = event.locationInWindow.x
+        NSCursor.resizeLeftRight.push()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isDragging else { return }
+        let currentX = event.locationInWindow.x
+        let delta = currentX - initialMouseX
+        initialMouseX = currentX
+        onWidthDelta?(delta)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if isDragging {
+            isDragging = false
+            NSCursor.pop()
+            onDragEnded?()
+        }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window == nil && isDragging {
+            isDragging = false
+            NSCursor.pop()
+        }
+    }
+}
+
+/// AppKit 分割线拖拽热区桥接。
+struct SidebarDividerHandleRepresentable: NSViewRepresentable {
+    var onWidthDelta: (CGFloat) -> Void
+    var onDragEnded: () -> Void
+    var onDoubleClick: () -> Void
+
+    func makeNSView(context: Context) -> SidebarDividerHandleNSView {
+        let view = SidebarDividerHandleNSView(frame: .zero)
+        view.onWidthDelta = onWidthDelta
+        view.onDragEnded = onDragEnded
+        view.onDoubleClick = onDoubleClick
+        return view
+    }
+
+    func updateNSView(_ nsView: SidebarDividerHandleNSView, context: Context) {
+        nsView.onWidthDelta = onWidthDelta
+        nsView.onDragEnded = onDragEnded
+        nsView.onDoubleClick = onDoubleClick
+    }
+}
+
+/// 侧栏微光分割线：0.5pt 两端羽化细线 + 居中 8pt 交互热区（支持悬停光标、拖拽调宽与双击复位）。
+struct SidebarDivider: View {
+    @Binding var sidebarWidth: CGFloat
+    let onDragEnded: () -> Void
+    let onDoubleClick: () -> Void
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.primary.opacity(0.0),
+                            Color.primary.opacity(Theme.Colors.dividerOpacity),
+                            Color.primary.opacity(0.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: Theme.Layout.dividerHeight)
+
+            SidebarDividerHandleRepresentable(
+                onWidthDelta: { delta in
+                    let newWidth = sidebarWidth + delta
+                    let clamped = min(max(newWidth, AIChatLayout.minSidebarWidth), AIChatLayout.maxSidebarWidth)
+                    sidebarWidth = clamped
+                },
+                onDragEnded: onDragEnded,
+                onDoubleClick: onDoubleClick
+            )
+            .frame(width: AIChatLayout.dividerInteractiveWidth)
+        }
+        .frame(maxHeight: .infinity)
+    }
+}

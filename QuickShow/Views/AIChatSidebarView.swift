@@ -3,16 +3,40 @@ import SwiftUI
 // MARK: - 布局常量（AI 窗专属，未入全局令牌）
 
 enum AIChatLayout {
-    /// 会话窄栏宽度（AIWindowManager 窗口加宽联动也引用此值）。
-    static let sidebarWidth: CGFloat = 216
+    /// 默认会话窄栏宽度。
+    static let defaultSidebarWidth: CGFloat = 216
+    /// 最小宽度。
+    static let minSidebarWidth: CGFloat = 160
+    /// 最大宽度。
+    static let maxSidebarWidth: CGFloat = 360
+    /// 分割线交互热区物理宽度。
+    static let dividerInteractiveWidth: CGFloat = 8
+    /// 持久化偏好键。
+    static let sidebarWidthKey = "aiChatSidebarWidth"
+
+    /// 获取当前生效的侧栏宽度（已钳制在合法区间内）。
+    static var currentSidebarWidth: CGFloat {
+        let saved = UserDefaults.standard.double(forKey: sidebarWidthKey)
+        if saved >= Double(minSidebarWidth) && saved <= Double(maxSidebarWidth) {
+            return CGFloat(saved)
+        }
+        return defaultSidebarWidth
+    }
+
+    /// 兼容旧引用的只读属性。
+    static var sidebarWidth: CGFloat {
+        currentSidebarWidth
+    }
 }
 
 // MARK: - 会话窄栏
 
-/// 左侧会话栏：顶部搜索框（⌘F 聚焦）→ 分组列表（置顶/今天/昨天/过去 7 天/更早）→ 底部新对话。
+/// 左侧会话栏：顶部拖动栏/折叠按钮 → 搜索框（⌘F 聚焦）→ 分组列表（置顶/今天/昨天/过去 7 天/更早）→ 底部新对话。
 /// 搜索态切换为扁平结果列表；无会话/无结果各有空态文案。
 struct AIChatSidebarView: View {
     @ObservedObject var store: ChatSessionStore
+    /// 会话栏当前宽度（支持用户拖拽动态调节）。
+    var width: CGFloat = AIChatLayout.currentSidebarWidth
     /// ⌘F 聚焦令牌：父视图递增，本栏观察变化后聚焦搜索框。
     var searchFocusRequest: Int
     /// 重命名进行中的会话 id（父视图持有：ESC 优先取消重命名而非关窗）。
@@ -25,9 +49,12 @@ struct AIChatSidebarView: View {
     let onAbortStreaming: (UUID) -> Void
     let onSelect: (UUID) -> Void
     let onNewSession: () -> Void
+    /// 切换侧栏显隐（点击收拢按钮）。
+    var onToggleSidebar: (() -> Void)? = nil
 
     @State private var searchText = ""
     @State private var renamingText = ""
+    @State private var sidebarToggleHovered = false
     /// 全局单悬停令牌：同一时刻至多一行处于 hover。
     /// 行内私有 @State hovered 在流式重排/重建时可能丢失 onHover(exit) 导致残留双高亮，
     /// 故提升到父级：enter 覆盖式赋值天然单悬停，exit 仅匹配自身 id 时清除（防乱序），
@@ -50,9 +77,11 @@ struct AIChatSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            sidebarTopBar
+
             searchField
                 .padding(.horizontal, Theme.Spacing.xxl)
-                .padding(.top, Theme.Spacing.xxl)
+                .padding(.top, Theme.Spacing.xs)
                 .padding(.bottom, Theme.Spacing.lg)
 
             sessionList
@@ -87,7 +116,7 @@ struct AIChatSidebarView: View {
             .buttonStyle(.plain)
             .help("新建会话（⌘N）")
         }
-        .frame(width: AIChatLayout.sidebarWidth)
+        .frame(width: width)
         .frame(maxHeight: .infinity)
         // 侧栏底板：比主区深半档的轻纱层（低透明度令整窗玻璃折射从侧栏透出，分区
         // 靠深浅差；选中/hover 语言在玻璃上同样成立，见 SessionRowView）
@@ -108,6 +137,40 @@ struct AIChatSidebarView: View {
             hoveredSessionId = nil
             lastGroupedIDSequence = sequence
         }
+    }
+
+    // MARK: - 侧栏顶栏（与主区 windowTopBar 等高齐平）
+
+    private var sidebarTopBar: some View {
+        HStack(spacing: 0) {
+            sidebarToggleButton
+                .padding(.leading, Theme.Spacing.lg)
+
+            WindowDragHandle()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(height: Theme.Layout.chatTopBarHeight)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var sidebarToggleButton: some View {
+        Button {
+            onToggleSidebar?()
+        } label: {
+            Image(systemName: "sidebar.leading")
+                .font(Theme.Typography.text(Theme.Typography.callout, .medium))
+                .foregroundColor(sidebarToggleHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
+                .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
+                .background(
+                    Circle().fill(sidebarToggleHovered ? Theme.Colors.iconHoverBg : Color.clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { sidebarToggleHovered = hovering }
+        }
+        .help("收拢侧边栏 (⌘B)")
     }
 
     // MARK: - 搜索框

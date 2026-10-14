@@ -121,6 +121,7 @@ enum Theme {
         
         // 结构性元素（亮玻璃对比度下限保护：黑色低 alpha 是"阴影"型弱对比，需高于暗色白线的发光感）
         static let dividerOpacity: Double = 0.25          // 分割线中段峰值
+        static let divider = Color.primary.opacity(0.25)  // 分割线基色
         // 一瞥倒计时微光进度条（贴面板底边、水平居中，随倒计时从左右两侧向中间对称收拢：
         // 峰值强于分割线 0.25 保证剩余时间可读，又显著弱于内容色，克制不抢戏；
         // featherEdge = 光带单侧羽化带宽度比例，两端渐隐至透明，与分割线的对称渐隐语言一致）
@@ -161,6 +162,7 @@ enum Theme {
         
         // 状态语义色（全主题固定：绿=接电/健康、红=低电警告，惯例不被主题洗掉）
         static let statusGood = Color(red: 0.35, green: 0.90, blue: 0.45)
+        static let statusPositive = statusGood                   // 正向/成功状态别名
         static let statusWarning = Color(red: 1.0, green: 0.35, blue: 0.35)
         
         // 变体通道（计算属性，随 Theme.variant 切换；调用点无需感知主题存在）
