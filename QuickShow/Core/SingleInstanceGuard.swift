@@ -101,8 +101,8 @@ final class SecondaryRelayDelegate: NSObject, NSApplicationDelegate, UNUserNotif
         // 安装通知代理以接收可能由 LaunchServices 派发的通知点击
         UNUserNotificationCenter.current().delegate = self
         
-        // 安全兜底定时器：0.6 秒内无通知点击事件（如命令行/双击拉起），转交常规唤醒后立刻退出
-        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 0.6, repeats: false) { [weak self] _ in
+        // 安全兜底定时器：0.25 秒内无通知点击事件（如命令行/双击拉起），转交常规唤醒后立刻退出
+        timeoutTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: false) { [weak self] _ in
             self?.relayAndExit(action: "showPanel", sessionId: nil)
         }
     }

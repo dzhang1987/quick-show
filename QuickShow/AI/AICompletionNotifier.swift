@@ -19,6 +19,22 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
     /// 用户是否已在本会话中拒绝/跳过通知。
     private var suppressed = false
 
+    /// 最近一次用户点击通知的时间戳（纳秒级即时写入，供中继监听识别拦截次级实例误报）。
+    private let lastResponseLock = NSLock()
+    private var _lastNotificationResponseTimestamp: Date = .distantPast
+
+    var lastNotificationResponseTimestamp: Date {
+        lastResponseLock.lock()
+        defer { lastResponseLock.unlock() }
+        return _lastNotificationResponseTimestamp
+    }
+
+    func recordNotificationResponse() {
+        lastResponseLock.lock()
+        _lastNotificationResponseTimestamp = Date()
+        lastResponseLock.unlock()
+    }
+
     private override init() { super.init() }
 
     /// 尽早安装通知代理（AppDelegate.applicationDidFinishLaunching 调用）：
@@ -134,6 +150,7 @@ final class AICompletionNotifier: NSObject, UNUserNotificationCenterDelegate {
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        recordNotificationResponse()
         let userInfo = response.notification.request.content.userInfo
         let rawSessionId = userInfo["sessionId"] as? String
         let sessionId = rawSessionId.flatMap { UUID(uuidString: $0) }

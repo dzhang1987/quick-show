@@ -35,6 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 注册内置富卡片（地图卡等）：须在任何聊天视图渲染前完成
         RichCardRegistry.shared.registerBuiltIns()
 
+        // 预热 AI 智能体与服务商存储，触发存量配置平滑升级
+        _ = AIProviderStore.shared
+        _ = AIAgentStore.shared
+
         // 尽早安装通知代理：通知点击可能在冷启动时先于用户交互到达
         AICompletionNotifier.shared.installDelegateIfNeeded()
 
@@ -52,6 +56,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 AIWindowManager.shared.show()
             } else {
+                // 防护 1：若近期（2.0 秒内）刚被通知响应激活，阻断伴随拉起次级实例引起的误开一瞥面板
+                let elapsed = Date().timeIntervalSince(AICompletionNotifier.shared.lastNotificationResponseTimestamp)
+                if elapsed < 2.0 {
+                    return
+                }
+                // 防护 2：若当前 AI 对话窗口正处于可见状态，严禁后台盲目广播打断正在进行的会话
+                if AIWindowManager.shared.isPanelVisible {
+                    return
+                }
                 state.show(mode: .glance)
             }
         }
