@@ -111,6 +111,7 @@ struct AIChatInputDock: View {
             && state.inputText.isEmpty
             && state.imageAttachments.isEmpty
             && state.pendingQueue.isEmpty
+            && !hasActiveSubagentTasks
             && !state.isStreaming
             && interaction.request == nil
             && !dockHovered
@@ -132,21 +133,27 @@ struct AIChatInputDock: View {
     /// 发送钮实心态判据：可发送或生成中（驱动 禁用灰箭头 ⇄ 实心强调色 的淡变）。
     private var sendButtonSolid: Bool { state.isStreaming || canSend }
 
-    /// 生长区是否在场（队列/附件任一非空）：与 inputArea 生长区容器的 if 判据同源。
+    /// 生长区是否在场（队列/附件/活跃子智能体任一非空）：与 inputArea 生长区容器的 if 判据同源。
     private var hasDockGrowth: Bool {
         !state.pendingQueue.isEmpty
             || !state.imageAttachments.isEmpty
+            || hasActiveSubagentTasks
+    }
+
+    private var hasActiveSubagentTasks: Bool {
+        guard let parentId = state.store.currentSessionId else { return false }
+        return !AgentTaskRegistry.shared.runningTasks(parentSessionId: parentId).isEmpty
+            || state.agentSteeringNotice != nil
     }
 
     private var inputArea: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-            // 生长区（输入卡上方：队列胶囊 / 附件条）：容器化以便整段实测高度
-            // （background 内 GeometryReader + preference，macOS 13 无 onGeometryChange；
-            // 先例见 ChatReadingColumn 的宽度读取）。间距语义与三段直接并列完全等价——
-            // 段间 lg 收进内层，末段与输入卡的 lg 仍由外层承担，三段全空时容器整体缺席，
-            // 布局与展开前逐点一致。
+            // 生长区（输入卡上方：多智能体并发托盘 / 队列胶囊 / 附件条）：容器化以便整段实测高度
             if hasDockGrowth {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                    // 并发子智能体任务浮动监控托盘
+                    SubagentTaskTray(state: state)
+
                     // 待注入队列（steering 转向 / follow-up 追问）：生成中 ⏎/⌥⏎ 的消息在此排队，
                     // 点击胶囊取回编辑；队列区置于坞体顶部、随内容向上生长，宽度与坞一致。
                     if !state.pendingQueue.isEmpty {

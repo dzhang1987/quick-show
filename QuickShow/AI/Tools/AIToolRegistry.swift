@@ -151,9 +151,7 @@ final class AIToolRegistry {
             ShowMapTool(),
             MyLocationTool(),
             AskUserTool(),
-            DelegateToAgentTool(),
-            LaunchAgentTool(),
-            AwaitAgentsTool(),
+            LaunchSubagentsTool(),
             SendMessageTool()
         ]
     }
@@ -161,14 +159,52 @@ final class AIToolRegistry {
     /// 全部已注册工具（含默认关闭的 run_shell）
     func allTools() -> [AITool] { tools }
 
-    /// 按配置启用的工具：读取 UserDefaults 键 "ai.tools.enabled"（[String] 工具名数组），
-    /// 键不存在时默认除危险工具 run_shell 外全部启用
+    /// 按配置启用的工具：读取 UserDefaults 键 "ai.tools.enabled"（[String] 工具名数组）。
+    /// 自动合并机制：若代码中新注册了未禁用的工具（如 launch_subagents），自动并入启用集合并回写落盘。
     func enabledTools() -> [AITool] {
         guard let names = UserDefaults.standard.stringArray(forKey: Self.enabledToolsKey) else {
             return tools.filter { !Self.defaultDisabledToolNames.contains($0.name) }
         }
-        let enabled = Set(names)
+        var enabled = Set(names)
+        var needsSave = false
+
+        // 清理已废弃的旧工具名
+        let obsoleteNames: Set<String> = ["delegate_to_agent", "launch_agent", "await_agents"]
+        for obs in obsoleteNames {
+            if enabled.contains(obs) {
+                enabled.remove(obs)
+                needsSave = true
+            }
+        }
+
+        // 自动并入新注册工具（如 launch_subagents），确保版本升级后不被静默禁用
+        for t in tools {
+            if !enabled.contains(t.name) && !Self.defaultDisabledToolNames.contains(t.name) {
+                if t.name == "launch_subagents" {
+                    enabled.insert(t.name)
+                    needsSave = true
+                }
+            }
+        }
+
+        if needsSave {
+            let ordered = tools.map(\.name).filter { enabled.contains($0) }
+            UserDefaults.standard.set(ordered, forKey: Self.enabledToolsKey)
+        }
+
         return tools.filter { enabled.contains($0.name) }
+    }
+
+    /// 获取特定 Agent 实际可用的工具集合（Agent 授权白名单与全局启用工具的交集）
+    func tools(for agent: AIAgent?) -> [AITool] {
+        let global = enabledTools()
+        guard let agent = agent else { return global }
+        let allowed = Set(agent.resolvedTools)
+        // 若角色的白名单为空，默认返回全局全部已启用工具
+        if allowed.isEmpty {
+            return global
+        }
+        return global.filter { allowed.contains($0.name) }
     }
 
     /// 按名查找（含未启用，用于执行校验时判断“存在但被禁用”）

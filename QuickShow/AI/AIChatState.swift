@@ -110,6 +110,18 @@ final class AIChatState: ObservableObject {
     /// 视觉感知 Observer 先行解析状态提示（供 UI 弱化胶囊展示，nil = 无解析进行中）。
     @Published var observerStatus: String? = nil
 
+    /// 多智能体 Steering 路由反馈提示（如 "已将补充要求转发给【知识检索专家】"）。
+    @Published var agentSteeringNotice: String? = nil
+
+    func showAgentSteeringNotice(_ text: String) {
+        agentSteeringNotice = text
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            if self?.agentSteeringNotice == text {
+                self?.agentSteeringNotice = nil
+            }
+        }
+    }
+
     /// 当前会话的最近一次压缩结果；非当前会话的结果不回传——自动压缩在流结束后
     /// 异步触发，用户可能已切换会话，跨会话的 toast/详情行会错位（防串会话反馈）。
     var currentSessionOutcome: CompactionOutcome? {

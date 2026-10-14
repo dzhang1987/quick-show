@@ -15,6 +15,14 @@ extension AIChatState {
         guard let sessionId = currentSessionId else { return }
         var content = userInput
         if content.isEmpty, !images.isEmpty { content = "请查看图片。" }
+
+        // 多智能体协同转向路由 (A+B 方案)：检查当前会话是否有活跃子任务
+        if let routed = AgentCoordinator.shared.routeInput(text: content, parentSessionId: sessionId) {
+            AgentCoordinator.shared.injectSteering(taskId: routed.taskId, text: routed.cleanText)
+            showAgentSteeringNotice("已将补充要求转发给【\(routed.subagentName)】")
+            return
+        }
+
         pendingQueues[sessionId, default: []].append(
             QueuedChatInput(id: UUID(), kind: .steering, text: content, images: images)
         )

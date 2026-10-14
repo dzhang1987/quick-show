@@ -9,6 +9,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var shared: AppDelegate?
     
     static func main() {
+        if CommandLine.arguments.contains("--test-agent-suite") {
+            Task { @MainActor in
+                await AgentFunctionalTests.run()
+            }
+            CFRunLoopRun()
+            return
+        }
+
         let app = NSApplication.shared
         if SingleInstanceGuard.shared.tryAcquirePrimaryLock() {
             let delegate = AppDelegate()

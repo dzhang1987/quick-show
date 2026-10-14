@@ -6,6 +6,27 @@
 
 ### Added
 
+- **多智能体并发调度与协作体系（`LaunchSubagentsTool` / `AgentCoordinator` / `AgentTaskRegistry` / `SubagentTaskTray`）**：
+  - **原子调度工具收敛（`launch_subagents`）**：收敛旧版分散的 `launch_agent`、`await_agents`、`delegate_to_agent` 三工具为单一批处理并发调度工具 `launch_subagents`，支持编排中枢向多个垂类专家下发专项任务，底层真并发并行执行并一次性归并返回成果；
+  - **6 大垂类智能体矩阵与最小权限隔离**：确立编排中枢（Orchestrator）、视觉感知（Observer）、代码专家（Coder）、深度推理（Oracle）、知识检索（Librarian）、系统管家（Concierge）6 大垂类智能体矩阵，实行严格的工具白名单隔离；
+  - **本地任务与大产物持久化中枢（`AgentTaskRegistry`）**：建立 `~/.quickshow/agent_tasks.json` 本地持久化注册表，全生命周期跟踪各子任务状态；大产物与分析报告自动隔离写入 `~/.quickshow/artifacts/<sessionId>/<taskId>/` 目录，防止上下文膨胀；
+  - **输入框上方浮动任务托盘（`SubagentTaskTray`）**：主 Agent 并发调度期间，在输入坞生长区实时浮动展开各专家的实时活动动效与执行进度（告别假死感），支持一键点击直达对应子会话；
+  - **智能 Steering 转向路由引擎（A+B 方案）**：用户在主会话中途追加输入时，支持 `@librarian` / `@coder` 显式前缀或语义自动识别分流，将指令实时穿透注入正在运行的子任务 Tool Loop，并在输入框上方呈现轻反馈通知。
+
+### Changed
+
+- **Qoder Provider 原生工具调用链路打通与流式累积重构（`QoderProvider.swift` / `AIToolRegistry.swift` / `AIServiceSettingsForm.swift`）**：
+  - 彻底废除请求体 `"tools": []` 硬编码，根据当前 Agent 授权权限动态序列化 Schema；
+  - 适配 Qoder 流式工具分片传输规范，引入 `ChatToolCallAccumulator` 累积分片并在完成时产出完整 `tool_calls`；
+  - 偏好设置面板新增“可用工具授权”区域，支持显示各 Agent 授权工具数、一键恢复推荐及逐项开关。
+
+### Fixed
+
+- **修复子智能体流式断流与工具调用丢弃缺陷（`AgentCoordinator.swift`）**：
+  - 为子智能体流式执行内核注入完整的 Agentic Tool Loop（多轮 ReAct 回路，上限 6 轮），解决此前收到 `tool_calls` 事件时直接 `break` 忽略、导致工具从未执行且中枢死循环重试 4 次的问题；
+- **修复自动化测试套件主线程死锁问题（`QuickShowApp.swift`）**：
+  - 命令行测试分支 `--test-agent-suite` 改用 `CFRunLoopRun()` 替代 `semaphore.wait()`，彻底消除主线程与 `@MainActor` 的互锁。
+
 - **东亚注音文本（Ruby Annotation `<ruby>/<rt>`）全生命周期解析与诗词/散文双轨原生排版（`MarkdownAST.swift` / `MarkdownParser+HTML.swift` / `MarkdownRubyView.swift` / `MarkdownInlineNS.swift`）**：
   - **规范级东亚多区域注音解析**：在 `MarkdownParser+HTML` 中完整支持 `<ruby>`、`<rt>`、`<rp>` 标签解析，根据字符集与属性智能识别注音方位（普通话拼音与日文假名置于汉字正上方 `.over`、台湾注音符号 ㄅㄆㄇㄈ 置于字符右侧同行 `.right`、显式 `ruby-position="under"` 置于字符正下方 `.under`）；
   - **诗词对仗等宽网格排版（`PoetryRubyGridView`）**：针对三言至八言古诗律绝（如《静夜思》），建立 38pt 黄金基准列宽网格，拼音与底字严格纵向居中对齐，标点紧随尾字右侧，跨联跨节严密对齐；严格限定单行 3~8 字、无句内停顿逗号且各行字数规整，防止文赋散文误入网格；

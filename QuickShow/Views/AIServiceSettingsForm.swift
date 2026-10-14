@@ -563,6 +563,69 @@ struct AIServiceSettingsForm: View {
             }
 
             Section {
+                let resolved = agent.resolvedTools
+                HStack {
+                    Text("当前授权工具数")
+                    Spacer()
+                    Text("\(resolved.count) 项")
+                        .font(.system(size: Theme.Typography.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Button("恢复为角色推荐工具") {
+                        var copy = agent
+                        copy.enabledTools = AIAgent.defaultToolNames(for: agent.id)
+                        agentStore.saveAgent(copy)
+                    }
+                    .font(.system(size: Theme.Typography.footnote))
+
+                    Spacer()
+
+                    Button("授权全部已启用工具") {
+                        var copy = agent
+                        copy.enabledTools = AIToolRegistry.shared.enabledTools().map(\.name)
+                        agentStore.saveAgent(copy)
+                    }
+                    .font(.system(size: Theme.Typography.footnote))
+                }
+
+                DisclosureGroup("展开工具授权明细 (\(resolved.count) / \(AIToolRegistry.shared.allTools().count))") {
+                    ForEach(AIToolRegistry.shared.allTools(), id: \.name) { tool in
+                        let isGranted = resolved.contains(tool.name)
+                        Toggle(isOn: Binding(
+                            get: { isGranted },
+                            set: { newValue in
+                                var currentSet = Set(agent.resolvedTools)
+                                if newValue {
+                                    currentSet.insert(tool.name)
+                                } else {
+                                    currentSet.remove(tool.name)
+                                }
+                                var copy = agent
+                                copy.enabledTools = Array(currentSet)
+                                agentStore.saveAgent(copy)
+                            }
+                        )) {
+                            HStack {
+                                Text(tool.displayName)
+                                    .font(.system(size: Theme.Typography.body))
+                                Spacer()
+                                Text(tool.name)
+                                    .font(.system(size: Theme.Typography.micro, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
+                }
+            } header: {
+                Text("可用工具授权")
+            } footer: {
+                Text("最小权限原则：为该智能体限定其可见与可调用的工具集合。未授权的工具不会向模型暴露 Schema，节约 Token 并杜绝误调用。")
+            }
+
+            Section {
                 TextField("特化角色提示词，留空继承全局", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(4...8)

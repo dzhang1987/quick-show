@@ -105,19 +105,13 @@ struct AIToolsSettingsSection: View {
         )
     }
 
-    /// 首次进入：键缺失时按默认值（除 run_shell 外全部启用）初始化并写入，再展示。
+    /// 首次进入：读取注册表当前启用的工具集合（自动合并新增工具与清理废弃工具）。
     private func loadToolsIfNeeded() {
         let registry = AIToolRegistry.shared
         tools = registry.allTools()
         groups = registry.toolsGroupedByCategory()
-        let defaults = UserDefaults.standard
-        if let stored = defaults.stringArray(forKey: AIToolRegistry.enabledToolsKey) {
-            enabledNames = Set(stored)
-        } else {
-            let defaultEnabled = registry.enabledTools().map { $0.name }
-            enabledNames = Set(defaultEnabled)
-            defaults.set(defaultEnabled, forKey: AIToolRegistry.enabledToolsKey)
-        }
+        let active = registry.enabledTools().map(\.name)
+        enabledNames = Set(active)
     }
 
     /// 写完整启用列表（按注册表顺序，保证落盘内容稳定可读）。

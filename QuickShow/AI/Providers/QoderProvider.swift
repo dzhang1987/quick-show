@@ -62,6 +62,25 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                     let isReasoning = (options.thinkingLevel == .off) ? false : model.supportsThinking
 
                     var systemText = ""
+                    let currentAgent = await MainActor.run {
+                        AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
+                    }
+                    let agentTools = await MainActor.run {
+                        AIToolRegistry.shared.tools(for: currentAgent)
+                    }
+
+                    var toolsPayload: [[String: Any]] = []
+                    for tool in agentTools {
+                        toolsPayload.append([
+                            "type": "function",
+                            "function": [
+                                "name": tool.name,
+                                "description": tool.description,
+                                "parameters": tool.parametersSchema
+                            ]
+                        ])
+                    }
+
                     var userMessages: [[String: Any]] = []
                     var lastUserText = ""
 
@@ -72,17 +91,21 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                                 systemText += (systemText.isEmpty ? "" : "\n") + text
                             }
                         } else {
-                            let isTool = (msg.role == "tool")
-                            let role = isTool ? "user" : msg.role
-                            let rawContent = msg.content?.extractedText ?? ""
-                            let content = isTool ? "[工具执行结果]: \(rawContent)" : rawContent
-                            if role == "user" && !isTool {
-                                lastUserText = content
+                            if msg.role == "user" {
+                                if let text = msg.content?.extractedText, !text.isEmpty {
+                                    lastUserText = text
+                                }
                             }
-                            userMessages.append([
-                                "role": role,
-                                "content": content
-                            ])
+                            if let encodedMsgData = try? JSONEncoder().encode(msg),
+                               let dict = try? JSONSerialization.jsonObject(with: encodedMsgData) as? [String: Any] {
+                                userMessages.append(dict)
+                            } else {
+                                let rawContent = msg.content?.extractedText ?? ""
+                                userMessages.append([
+                                    "role": msg.role,
+                                    "content": rawContent
+                                ])
+                            }
                         }
                     }
 
@@ -116,7 +139,7 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                         "aliyun_user_type": "",
                         "system": systemText.isEmpty ? "你是一个专业的人工智能助手。" : systemText,
                         "messages": userMessages,
-                        "tools": [],
+                        "tools": toolsPayload,
                         "parameters": [
                             "max_tokens": 4096
                         ],
@@ -205,6 +228,8 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                         throw AIChatError.http(status: status, message: errorDetail)
                     }
 
+                    let chatAccumulator = ChatToolCallAccumulator()
+
                     streaming: for try await line in bytes.lines {
                         try Task.checkCancellation()
                         guard line.hasPrefix("data:") else { continue }
@@ -225,31 +250,50 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                             continue
                         }
 
-                        guard let chunkData = bodyStr.data(using: .utf8),
-                              let chunk = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any] else {
-                            continue
-                        }
+                        guard let chunkData = bodyStr.data(using: .utf8) else { continue }
 
-                        if let errObj = chunk["error"] as? [String: Any],
-                           let errMsg = errObj["message"] as? String {
-                            throw AIChatError.streamError(errMsg)
-                        }
-
-                        if let usage = chunk["usage"] as? [String: Any],
-                           let promptTokens = usage["prompt_tokens"] as? Int {
-                            continuation.yield(.usage(promptTokens: promptTokens))
-                        }
-
-                        if let choices = chunk["choices"] as? [[String: Any]], let first = choices.first {
-                            if let delta = first["delta"] as? [String: Any] {
-                                if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                        if let streamChunk = try? JSONDecoder().decode(StreamChunk.self, from: chunkData) {
+                            if let usage = streamChunk.usage, let promptTokens = usage.resolvedPromptTokens, promptTokens > 0 {
+                                continuation.yield(.usage(promptTokens: promptTokens))
+                            }
+                            if let delta = streamChunk.choices.first?.delta {
+                                if let reasoning = delta.resolvedReasoning, !reasoning.isEmpty {
                                     continuation.yield(.reasoning(reasoning))
                                 }
-                                if let text = delta["content"] as? String, !text.isEmpty {
+                                if let text = delta.content, !text.isEmpty {
                                     continuation.yield(.text(text))
+                                }
+                                if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
+                                    chatAccumulator.ingest(toolCalls)
+                                }
+                            }
+                        } else if let chunk = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any] {
+                            if let errObj = chunk["error"] as? [String: Any],
+                               let errMsg = errObj["message"] as? String {
+                                throw AIChatError.streamError(errMsg)
+                            }
+
+                            if let usage = chunk["usage"] as? [String: Any],
+                               let promptTokens = usage["prompt_tokens"] as? Int {
+                                continuation.yield(.usage(promptTokens: promptTokens))
+                            }
+
+                            if let choices = chunk["choices"] as? [[String: Any]], let first = choices.first {
+                                if let delta = first["delta"] as? [String: Any] {
+                                    if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                                        continuation.yield(.reasoning(reasoning))
+                                    }
+                                    if let text = delta["content"] as? String, !text.isEmpty {
+                                        continuation.yield(.text(text))
+                                    }
                                 }
                             }
                         }
+                    }
+
+                    if !chatAccumulator.isEmpty {
+                        continuation.yield(.toolCalls(chatAccumulator.completed))
+                        chatAccumulator.clear()
                     }
                     continuation.finish()
                 } catch {

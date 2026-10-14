@@ -17,7 +17,55 @@ final class AgentCoordinator {
     /// 等待特定子任务完成的挂起 Continuation 队列
     private var taskContinuations: [UUID: [CheckedContinuation<String, Never>]] = [:]
 
+    /// 每个子任务专属的实时 steering 转向队列（按 childSessionId 索引）
+    private var subagentSteeringQueues: [UUID: [String]] = [:]
+
     private init() {}
+
+    // MARK: - 0. 统一并发调度 (Launch Subagents)
+
+    /// 统一并发调度派发并等待所有子智能体任务完成
+    func launchSubagents(
+        parentId: UUID,
+        tasks: [(agentId: String, task: String, attachments: [ChatImageAttachment])]
+    ) async -> [[String: Any]] {
+        guard !tasks.isEmpty else { return [] }
+
+        var launchedTasks: [(taskId: UUID, agent: AIAgent, startTime: Date)] = []
+        for req in tasks {
+            let (taskId, agent, _) = launchAgent(
+                parentId: parentId,
+                agentTarget: req.agentId,
+                task: req.task,
+                attachments: req.attachments
+            )
+            launchedTasks.append((taskId, agent, Date()))
+        }
+
+        let taskIds = launchedTasks.map(\.taskId)
+        let awaited = await awaitAgents(taskIds: taskIds)
+
+        var results: [[String: Any]] = []
+        for item in launchedTasks {
+            let res = awaited[item.taskId]
+            let duration = Int(Date().timeIntervalSince(item.startTime) * 1000)
+            let regTask = AgentTaskRegistry.shared.task(childSessionId: item.taskId)
+            var payload: [String: Any] = [
+                "session_id": item.taskId.uuidString,
+                "agent_id": item.agent.id,
+                "agent_name": item.agent.name,
+                "status": res?.status.rawValue ?? "completed",
+                "output": res?.output ?? "",
+                "duration_ms": duration
+            ]
+            if let artifacts = regTask?.artifacts, !artifacts.isEmpty {
+                payload["artifacts"] = artifacts
+            }
+            results.append(payload)
+        }
+
+        return results
+    }
 
     // MARK: - 1. 异步并发派发 (Launch)
 
@@ -54,6 +102,17 @@ final class AgentCoordinator {
         )
         let childId = childSession.id
 
+        // 登记到本地持久化任务注册表 (~/.quickshow/agent_tasks.json)
+        let persistentTaskId = "task_\(matchedAgent.id)_\(UUID().uuidString.prefix(8).lowercased())"
+        AgentTaskRegistry.shared.registerTask(
+            id: persistentTaskId,
+            subagentId: matchedAgent.id,
+            subagentName: matchedAgent.name,
+            parentSessionId: parentId,
+            childSessionId: childId,
+            taskDescription: task
+        )
+
         // 2. 插入初始用户指令与占位助手消息
         let userMsg = ChatMessage(
             role: .user,
@@ -83,50 +142,188 @@ final class AgentCoordinator {
         }
         requestMessages.append(ChatCompletionMessage(role: "user", content: .parts(userParts)))
 
-        // 4. 后台并发拉起流式生成 Task
+        // 4. 后台并发拉起流式生成 Task（支持多轮 Agentic Tool Loop 与动态 Steering）
         let taskRunner = Task { [weak self] in
             guard let self else { return }
-            var accumulatedText = ""
-            var accumulatedReasoning = ""
+            var currentAssistantId = assistantID
+            var accumulatedFinalText = ""
+            var toolRounds = 0
+            let maxToolRounds = 6
 
-            do {
-                let stream = AIProviderService.shared.send(
-                    messages: requestMessages,
-                    agent: matchedAgent
-                )
+            subagentLoop: while toolRounds < maxToolRounds {
+                var roundText = ""
+                var roundReasoning = ""
+                var completedCalls: [CompletedToolCall] = []
 
-                for try await event in stream {
-                    switch event {
-                    case .text(let chunk):
-                        accumulatedText += chunk
-                        ChatSessionStore.shared.appendStreamToken(chunk, to: assistantID, in: childId)
-                    case .reasoning(let reasoningChunk):
-                        accumulatedReasoning += reasoningChunk
-                        ChatSessionStore.shared.appendReasoningToken(reasoningChunk, to: assistantID, in: childId)
-                    case .usage, .toolCalls:
-                        break
+                // 检查并消费注入的实时 Steering 指令
+                if let steerings = self.subagentSteeringQueues[childId], !steerings.isEmpty {
+                    self.subagentSteeringQueues[childId] = []
+                    for steer in steerings {
+                        requestMessages.append(ChatCompletionMessage(
+                            role: "user",
+                            content: "[用户中途补充要求]：\n\(steer)"
+                        ))
                     }
                 }
 
-                // 标记该子会话正常完成
-                ChatSessionStore.shared.updateMessageState(assistantID, state: .done, in: childId)
+                AgentTaskRegistry.shared.updateTaskAction(
+                    id: persistentTaskId,
+                    action: toolRounds == 0 ? "正在思考与组织行动…" : "结合工具反馈继续分析…",
+                    status: .running
+                )
+
+                do {
+                    let stream = AIProviderService.shared.send(
+                        messages: requestMessages,
+                        agent: matchedAgent
+                    )
+
+                    for try await event in stream {
+                        switch event {
+                        case .text(let chunk):
+                            roundText += chunk
+                            ChatSessionStore.shared.appendStreamToken(chunk, to: currentAssistantId, in: childId)
+                        case .reasoning(let reasoningChunk):
+                            roundReasoning += reasoningChunk
+                            ChatSessionStore.shared.appendReasoningToken(reasoningChunk, to: currentAssistantId, in: childId)
+                        case .toolCalls(let calls):
+                            completedCalls = calls
+                        case .usage:
+                            break
+                        }
+                    }
+
+                    // 没有工具调用：说明本次生成即为最终答复
+                    if completedCalls.isEmpty {
+                        accumulatedFinalText = roundText
+                        ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .done, in: childId)
+                        ChatSessionStore.shared.updateTaskStatus(
+                            sessionId: childId,
+                            status: .completed,
+                            summary: String(roundText.prefix(120))
+                        )
+                        break subagentLoop
+                    }
+
+                    // 存在工具调用：
+                    // 1. 将工具调用记录挂到当前子会话助手消息（使子会话 UI 实时呈现工具卡片）
+                    let records = completedCalls.map {
+                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending)
+                    }
+                    ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                        msg.content = roundText
+                        msg.toolCalls = records
+                    }
+
+                    // 2. 将助手消息（携带 tool_calls）追加到请求上下文 wire
+                    let wireCalls = completedCalls.map {
+                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+                    }
+                    requestMessages.append(ChatCompletionMessage(
+                        role: "assistant",
+                        content: roundText.isEmpty ? nil : .text(roundText),
+                        toolCalls: wireCalls,
+                        toolCallId: nil
+                    ))
+
+                    // 3. 执行工具调用
+                    for call in completedCalls {
+                        AgentTaskRegistry.shared.updateTaskAction(
+                            id: persistentTaskId,
+                            action: "正在调用 \(call.name)…",
+                            status: .toolExecuting
+                        )
+
+                        ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                            guard var calls = msg.toolCalls, let idx = calls.firstIndex(where: { $0.id == call.id }) else { return }
+                            calls[idx].status = .running
+                            msg.toolCalls = calls
+                        }
+
+                        let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
+                        let result = await AIToolExecutor.shared.execute(call: request)
+
+                        ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                            guard var calls = msg.toolCalls, let idx = calls.firstIndex(where: { $0.id == call.id }) else { return }
+                            calls[idx].status = result.status
+                            calls[idx].result = result.resultJSON
+                            msg.toolCalls = calls
+                        }
+
+                        requestMessages.append(ChatCompletionMessage.toolResult(
+                            callID: call.id,
+                            content: result.resultJSON
+                        ))
+                    }
+
+                    AgentTaskRegistry.shared.updateTaskAction(
+                        id: persistentTaskId,
+                        action: "工具调用完成，正在汇总分析…",
+                        status: .running
+                    )
+
+                    // 4. 当前助手消息标记为完成
+                    ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .done, in: childId)
+                    toolRounds += 1
+
+                    // 5. 为下一轮 LLM 迭代预建助手消息占位
+                    currentAssistantId = UUID()
+                    let nextAssistantMsg = ChatMessage(
+                        id: currentAssistantId,
+                        role: .assistant,
+                        content: "",
+                        state: .streaming
+                    )
+                    ChatSessionStore.shared.appendMessage(nextAssistantMsg, to: childId)
+
+                } catch {
+                    let errMsg = error.localizedDescription
+                    ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .failed(errMsg), in: childId)
+                    ChatSessionStore.shared.updateTaskStatus(
+                        sessionId: childId,
+                        status: .failed,
+                        summary: "执行失败：\(errMsg)"
+                    )
+                    accumulatedFinalText = "执行失败：\(errMsg)"
+                    AgentTaskRegistry.shared.settleTask(
+                        id: persistentTaskId,
+                        status: .failed,
+                        summary: "执行失败：\(errMsg)"
+                    )
+                    break subagentLoop
+                }
+            }
+
+            if toolRounds >= maxToolRounds && accumulatedFinalText.isEmpty {
+                accumulatedFinalText = "子智能体工具调用达到上限轮数（\(maxToolRounds) 轮），已停止继续调用。"
                 ChatSessionStore.shared.updateTaskStatus(
                     sessionId: childId,
                     status: .completed,
-                    summary: String(accumulatedText.prefix(120))
-                )
-            } catch {
-                let errMsg = error.localizedDescription
-                ChatSessionStore.shared.updateMessageState(assistantID, state: .failed(errMsg), in: childId)
-                ChatSessionStore.shared.updateTaskStatus(
-                    sessionId: childId,
-                    status: .failed,
-                    summary: "执行失败：\(errMsg)"
+                    summary: accumulatedFinalText
                 )
             }
 
+            // 大产物检测与本地隔离存储 (~/.quickshow/artifacts/<parentId>/<taskId>/report.md)
+            var savedArtifactPath: String?
+            if accumulatedFinalText.count > 2500 || accumulatedFinalText.contains("```") {
+                let artifactURL = AgentTaskRegistry.shared.makeArtifactPath(
+                    parentSessionId: parentId,
+                    taskId: persistentTaskId,
+                    fileName: "report.md"
+                )
+                try? accumulatedFinalText.write(to: artifactURL, atomically: true, encoding: .utf8)
+                savedArtifactPath = artifactURL.path
+            }
+
+            AgentTaskRegistry.shared.settleTask(
+                id: persistentTaskId,
+                status: .completed,
+                summary: String(accumulatedFinalText.prefix(120)),
+                artifactPath: savedArtifactPath
+            )
+
             // 完成通知：唤醒所有挂起等待该任务的协程
-            self.notifyTaskCompletion(taskId: childId, result: accumulatedText)
+            self.notifyTaskCompletion(taskId: childId, result: accumulatedFinalText)
         }
 
         runningTasks[childId] = taskRunner
@@ -239,5 +436,90 @@ final class AgentCoordinator {
         for cont in continuations {
             cont.resume(returning: result)
         }
+    }
+
+    // MARK: - 4. 实时 Steering 转向与输入路由 (A+B 方案)
+
+    /// 向特定子任务注入实时 steering 转向指令
+    func injectSteering(taskId: String, text: String) {
+        guard let record = AgentTaskRegistry.shared.task(id: taskId) else { return }
+        let childId = record.childSessionId
+        var list = subagentSteeringQueues[childId] ?? []
+        list.append(text)
+        subagentSteeringQueues[childId] = list
+
+        // 同时向该子会话追加一条消息，以便用户切过去能看到
+        let userMsg = ChatMessage(
+            role: .user,
+            content: text,
+            state: .done,
+            isSteered: true
+        )
+        ChatSessionStore.shared.appendMessage(userMsg, to: childId)
+    }
+
+    /// 智能路由判定：将用户在主会话追加的输入路由至具体的活跃子任务（支持 A+B 方案）
+    func routeInput(text: String, parentSessionId: UUID) -> (taskId: String, subagentName: String, cleanText: String)? {
+        let running = AgentTaskRegistry.shared.runningTasks(parentSessionId: parentSessionId)
+        guard !running.isEmpty else { return nil }
+
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+
+        // 1. 显式前缀或专家指称匹配 (@librarian, @coder, 给搜索专家, 让代码专家 等)
+        for task in running {
+            let agentId = task.subagentId.lowercased()
+            let agentName = task.subagentName.lowercased()
+
+            // @id 或 @name
+            if lower.hasPrefix("@" + agentId) {
+                let clean = trimmed.dropFirst(agentId.count + 1).trimmingCharacters(in: .whitespacesAndNewlines)
+                return (task.id, task.subagentName, clean.isEmpty ? trimmed : clean)
+            }
+            if lower.hasPrefix("@" + agentName) {
+                let clean = trimmed.dropFirst(agentName.count + 1).trimmingCharacters(in: .whitespacesAndNewlines)
+                return (task.id, task.subagentName, clean.isEmpty ? trimmed : clean)
+            }
+
+            // 中文自然称谓（如 "给搜索专家"、"让代码专家"、"对librarian说"）
+            if lower.contains("给\(agentName)") || lower.contains("让\(agentName)") || lower.contains("对\(agentName)") {
+                return (task.id, task.subagentName, trimmed)
+            }
+        }
+
+        // 2. 若只有一个正在干活的子任务，所有输入直接无缝流向它
+        if running.count == 1, let only = running.first {
+            return (only.id, only.subagentName, trimmed)
+        }
+
+        // 3. 多任务时的语义特征度评分匹配
+        let keywordsMap: [String: [String]] = [
+            "librarian": ["搜", "查", "找", "网", "股", "价", "财报", "新闻", "资讯", "行情", "市值", "google", "yahoo", "雪球"],
+            "coder": ["代码", "写", "改", "函数", "类", "bug", "修复", "重构", "swift", "python", "编译", "脚本"],
+            "oracle": ["分析", "评估", "推演", "架构", "逻辑", "估值", "模型", "对比", "优劣", "深度", "价值", "研报"],
+            "observer": ["看", "图", "图片", "视觉", "截图", "ui", "界面", "排版"],
+            "concierge": ["打开", "系统", "设置", "应用", "地图", "定位", "通知", "日历"]
+        ]
+
+        var bestMatch: (task: AgentTaskRecord, score: Int)?
+        for task in running {
+            let kws = keywordsMap[task.subagentId] ?? []
+            var score = 0
+            for kw in kws {
+                if lower.contains(kw) {
+                    score += 1
+                }
+            }
+            if score > (bestMatch?.score ?? 0) {
+                bestMatch = (task, score)
+            }
+        }
+
+        if let best = bestMatch, best.score >= 1 {
+            return (best.task.id, best.task.subagentName, trimmed)
+        }
+
+        // 4. 未明确命中任何单一子任务：留给主会话
+        return nil
     }
 }

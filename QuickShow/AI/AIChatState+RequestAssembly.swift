@@ -40,9 +40,9 @@ extension AIChatState {
             }
         }
 
-        let delegateEnabled = AIToolRegistry.shared.enabledTools()
-            .contains { $0.name == "delegate_to_agent" }
-        if delegateEnabled {
+        let subagentsEnabled = AIToolRegistry.shared.tools(for: agent)
+            .contains { $0.name == "launch_subagents" }
+        if subagentsEnabled {
             let availableSubagents = AIAgentStore.shared.agents
                 .filter { $0.isEnabled && $0.id != agent.id }
             if !availableSubagents.isEmpty {
@@ -51,15 +51,14 @@ extension AIChatState {
                     return "- `\($0.id)` (\($0.name))\(visionTag)：\($0.description)"
                 }.joined(separator: "\n")
                 let delegationGuidance = """
-                团队协作与子智能体通信指引：
-                你拥有强大的多智能体团队协作与通信工具集，可向以下专业子智能体委派任务或进行点对点通信：
+                团队协作与子智能体派发指引：
+                你拥有强大的多智能体团队协作能力，可通过 `launch_subagents` 向以下专业垂类子智能体派发任务：
                 \(subagentDescriptions)
 
-                协作与通信模式：
-                1. 异步并发派发（推荐）：调用 `launch_agent(agent_id, task, include_attachments)` 异步启动子智能体，它将在专属独立会话中后台并行运行，立即返回 task_id。支持在一轮中同时启动多个子智能体并发执行；当前会话的多模态媒体附件（图片/音频/视频/文档）默认自动传递；
-                2. 成果汇总等待：当后续决策需要依赖子任务结论时，调用 `await_agents(task_ids)` 等待它们完成并获取专业成果；
-                3. 智能体间点对点通信：所有智能体相互之间均可随时调用 `send_message(recipient, message)` 进行直接提问、咨询或数据转交；
-                4. 便捷同步委派：调用 `delegate_to_agent(agent_id, task, include_attachments)` 自动拉起子会话并等待返回。
+                协作原则：
+                1. 任务派发与真并发：调用 `launch_subagents(tasks: [...])` 向一个或多个专家派发任务。单任务传入 1 项；若需求包含多个独立环节（例如既要全网检索文档又要编写代码），必须在 `tasks` 数组中同时传入多个任务，系统后台将真正并行流式执行，并一次性汇聚返回所有专家的汇报成果；
+                2. 附件自动传递：用户上传的多模态图片默认自动传递给子智能体，无需额外配置；
+                3. 专精分工：中枢负责统筹规划与最终答卷，重活脏活交由专家办理。
                 """
                 systemParts.append(delegationGuidance)
             }

@@ -37,12 +37,14 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
 
                     let thinkingFields = self.thinkingFields(for: model.id, level: options.thinkingLevel)
                     let bodyData = try await MainActor.run {
-                        try AIChatService.shared.encodeRequestBody(
+                        let agent = AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
+                        return try AIChatService.shared.encodeRequestBody(
                             proto: proto,
                             model: model.id,
                             messages: messages,
                             stream: true,
                             includeTools: true,
+                            agent: agent,
                             thinkingFields: thinkingFields
                         )
                     }

@@ -27,12 +27,13 @@ extension AIChatService {
         messages: [ChatCompletionMessage],
         stream: Bool,
         includeTools: Bool,
+        agent: AIAgent? = nil,
         thinkingFields: [String: Any] = [:],
         maxTokens: Int? = nil
     ) throws -> Data {
-        // 启用的工具声明：为空时返回 nil，自定义编码省略该字段。
-        let chatTools = includeTools ? chatToolDefinitions() : nil
-        let responsesTools = includeTools ? responsesToolDefinitions() : nil
+        let toolsToUse = AIToolRegistry.shared.tools(for: agent)
+        let chatTools = (includeTools && !toolsToUse.isEmpty) ? chatToolDefinitions(from: toolsToUse) : nil
+        let responsesTools = (includeTools && !toolsToUse.isEmpty) ? responsesToolDefinitions(from: toolsToUse) : nil
 
         var extra = thinkingFields
         if proto == .chatCompletions && stream {
@@ -68,9 +69,8 @@ extension AIChatService {
         )
     }
 
-    /// 基于启用的工具构造 Chat Completions 工具声明；无工具返回 nil。
-    private func chatToolDefinitions() -> [ChatToolDefinition]? {
-        let tools = AIToolRegistry.shared.enabledTools()
+    /// 基于给定的工具列表构造 Chat Completions 工具声明；无工具返回 nil。
+    private func chatToolDefinitions(from tools: [AITool]) -> [ChatToolDefinition]? {
         guard !tools.isEmpty else { return nil }
         return tools.map { tool in
             ChatToolDefinition(
@@ -84,9 +84,8 @@ extension AIChatService {
         }
     }
 
-    /// 基于启用的工具构造 Responses 工具声明；无工具返回 nil。
-    private func responsesToolDefinitions() -> [ResponsesToolDefinition]? {
-        let tools = AIToolRegistry.shared.enabledTools()
+    /// 基于给定的工具列表构造 Responses 工具声明；无工具返回 nil。
+    private func responsesToolDefinitions(from tools: [AITool]) -> [ResponsesToolDefinition]? {
         guard !tools.isEmpty else { return nil }
         return tools.map { tool in
             ResponsesToolDefinition(
