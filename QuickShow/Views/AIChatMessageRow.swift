@@ -361,7 +361,7 @@ struct ReasoningDisclosureView: View {
                         .padding(.vertical, 2)
 
                     ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: true) {
+                        ScrollView(.vertical, showsIndicators: false) {
                             VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                                 if rendered.isEmpty && isLive {
                                     HStack(spacing: Theme.Spacing.sm) {
