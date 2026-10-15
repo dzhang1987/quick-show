@@ -354,71 +354,72 @@ struct ReasoningDisclosureView: View {
                     .frame(height: Theme.Layout.dividerHeight)
                     .padding(.horizontal, Theme.Spacing.md)
 
-                HStack(alignment: .top, spacing: Theme.Spacing.md) {
-                    RoundedRectangle(cornerRadius: 1.25, style: .continuous)
-                        .fill(isLive ? Theme.Colors.accent.opacity(0.45) : Theme.Colors.contentTertiary.opacity(0.35))
-                        .frame(width: 2.5)
-                        .padding(.vertical, 2)
-
-                    ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: true) {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                                if rendered.isEmpty && isLive {
-                                    HStack(spacing: Theme.Spacing.sm) {
-                                        BlinkingCaret()
-                                        Text("思考中…")
-                                            .font(Theme.Typography.text(Theme.Typography.footnote))
-                                            .foregroundColor(Theme.Colors.contentTertiary)
-                                    }
-                                    .padding(.vertical, 2)
-                                } else {
-                                    ReasoningMarkdownView(content: rendered, useCache: !isLive)
-                                    if isLive {
-                                        BlinkingCaret()
-                                    }
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            if rendered.isEmpty && isLive {
+                                HStack(spacing: Theme.Spacing.sm) {
+                                    BlinkingCaret()
+                                    Text("思考中…")
+                                        .font(Theme.Typography.text(Theme.Typography.footnote))
+                                        .foregroundColor(Theme.Colors.contentTertiary)
                                 }
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("reasoningBottomAnchor")
-                            }
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear.preference(key: ReasoningHeightPreferenceKey.self, value: geo.size.height)
-                                }
-                            )
-                        }
-                        .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
-                        .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
-                        .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
-                            if h > 0 { contentHeight = h }
-                        }
-                        .onChange(of: rendered) { _ in
-                            if isLive && expanded {
-                                DispatchQueue.main.async {
-                                    withAnimation(.easeOut(duration: 0.12)) {
-                                        proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                                    }
+                                .padding(.vertical, 2)
+                            } else {
+                                ReasoningMarkdownView(content: rendered, useCache: !isLive)
+                                if isLive {
+                                    BlinkingCaret()
                                 }
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id("reasoningBottomAnchor")
                         }
-                        .onChange(of: expanded) { isExpanded in
-                            if isExpanded && isLive {
-                                DispatchQueue.main.async {
-                                    withAnimation(.easeOut(duration: 0.12)) {
-                                        proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                                    }
-                                }
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: ReasoningHeightPreferenceKey.self, value: geo.size.height)
                             }
-                        }
-                        .onAppear {
-                            if isLive && expanded {
-                                DispatchQueue.main.async {
+                        )
+                    }
+                    .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
+                    .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
+                    .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
+                        if h > 0 { contentHeight = h }
+                    }
+                    .onChange(of: rendered) { _ in
+                        if isLive && expanded {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.12)) {
                                     proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
                                 }
                             }
                         }
                     }
+                    .onChange(of: expanded) { isExpanded in
+                        if isExpanded && isLive {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.12)) {
+                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                    .onAppear {
+                        if isLive && expanded {
+                            DispatchQueue.main.async {
+                                proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                            }
+                        }
+                    }
                 }
+                .padding(.leading, 2.5 + Theme.Spacing.md)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.25, style: .continuous)
+                        .fill(isLive ? Theme.Colors.accent.opacity(0.45) : Theme.Colors.contentTertiary.opacity(0.35))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 2)
+                }
+                .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
                 .padding(.horizontal, Theme.Spacing.xl)
                 .padding(.vertical, Theme.Spacing.md)
                 .transition(.opacity)

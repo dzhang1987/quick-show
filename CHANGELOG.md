@@ -6,6 +6,10 @@
 
 ### Added
 
+- **聊天区统一自适应限高滚动容器（`AdaptiveScrollBox`）与两档高度阶梯规范（`DesignTokens.swift` / `AIChatLayoutSupport.swift`）**：
+  - **两档通用高度阶梯**：在 `Theme.Layout` 确立主交付内容级（`chatBlockMaxHeight = 380`，约 20 行）与次级元信息级（`chatMetaBlockMaxHeight = 180`，约 10 行）两档设计阶梯，统一管理长内容展示；
+  - **泛型统一自适应容器**：封装 `AdaptiveScrollBox`，内置内容几何尺寸动态测量；内容低于限高时 shrink-to-fit 精准贴合零留白，超出限高时严格锁死并开启平滑内滚动。
+
 - **大模型供应商多授权方式抽象与行为策略化自治架构（`AIAuthMethod` / `BiometricImportAuthMethod` / `InteractiveBrowserAuthMethod` / `StandardAPIKeyAuthMethod` / `OAuthLoopbackServer`）**：
   - **授权方式一等公民抽象**：将 API Key、Touch ID 本地导入、浏览器外部授权（OAuth PKCE 与 Device Flow）抽象为统一面向接口的协议族，支持单一模型供应商 1 对多聚合多套授权方案；
   - **服务商能力统一聚合（`LLMProvider`）**：由 `LLMProvider` 统一收拢通信推理与所支持的 `supportedAuthMethods` 矩阵，彻底消除此前平行冗余的双轨制映射；
@@ -20,6 +24,11 @@
   - **智能 Steering 转向路由引擎（A+B 方案）**：用户在主会话中途追加输入时，支持 `@librarian` / `@coder` 显式前缀或语义自动识别分流，将指令实时穿透注入正在运行的子任务 Tool Loop，并在输入框上方呈现轻反馈通知。
 
 ### Changed
+
+- **三大长内容组件统一收敛接入 `AdaptiveScrollBox`（`MarkdownCodeBlock.swift` / `AIToolCardView.swift` / `MarkdownTableView.swift`）**：
+  - **代码块（`MarkdownCodeBlock.swift`）**：接入双向自适应滚动，超长代码（如 Rust / Python / Swift 等源码）限制在约 20 行（380pt）内垂直滚动并保留横向长行不折行特性，短代码紧凑贴合，删除内部重复手写的高度测量逻辑；
+  - **工具调用结果（`AIToolCardView.swift`）**：`ToolCallResultBlock` 接入自适应容器，彻底消除短 JSON（如 `{"ok":true}`）由于盲目撑满 180pt 产生的 150pt 浅色留白，长结果在 180pt（或展开 260pt）内滚动；
+  - **数据表格（`MarkdownTableView.swift`）**：数据行接入自适应容器，短表紧凑无空隙，超长表在 380pt 内滚动并自然呈现表头常驻置顶（Sticky Header）交互。
 
 - **`AIAuthManager` 门面调度与纯数据驱动设置面板（`AIAuthManager.swift` / `AIServiceSettingsForm.swift`）**：
   - 彻底移除 `AIAuthManager` 内部私有字典与硬编码，统一由 `LLMProviderRegistry` 暴露的 `supportedAuthMethods` 动态调度探测与鉴权；
@@ -38,6 +47,9 @@
   - 偏好设置面板新增“可用工具授权”区域，支持显示各 Agent 授权工具数、一键恢复推荐及逐项开关。
 
 ### Fixed
+
+- **彻底修复思考卡片展开态左侧引导线无界撑大导致下半部大片浅灰留白缺陷（`AIChatMessageRow.swift`）**：
+  - 消除 `HStack` 并列排布中 `RoundedRectangle` Shape 贪婪索取无界垂直空间的底层根因，重构为 `.overlay(alignment: .leading)` 依附宿主内容卡片，彻底根除数百像素的异常空白。
 
 - **彻底拔除 Keychain 跨应用未授权刺探与“登录钥匙串密码”弹窗骚扰（`AntigravityCloudCodeAdapter.swift` / `AIProviderStore.swift`）**：
   - **切断未授权钥匙串访问**：运行时 100% 仅访问 QuickShow 专属 0600 凭据文件，彻底拔除对系统钥匙串（`service: "gemini"`）及外部私有目录的跨进程刺探；

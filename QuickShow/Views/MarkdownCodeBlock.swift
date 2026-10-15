@@ -98,15 +98,11 @@ struct CodeBlockText: View {
     @State private var highlighted: AttributedString?
 
     var body: some View {
-        // 高亮版优先、否则降级为纯色等宽文本（现状行为）。
+        // 高亮版优先、否则降级为纯色等宽文本。
         // 代码块内不转 Markdown，纯等宽显示。
         // 长行不折行：横向滚动承载超长行——折行会破坏缩进结构、复制粘贴混入换行符。
-        // 嵌套滚动安全：底层 NSScrollView 不消费垂直滚轮 delta（沿 responder chain 上传
-        // 外层垂直滚动，滚轮鼠标体验与现状一致），仅消费水平 delta（shift+滚轮/双指横滑）；
-        // 内容短于视口时贴 scroll origin（leading），与旧 frame(alignment: .leading) 等价。
-        // fixedSize(horizontal: true)：水平按固有宽度布局（ScrollView 提议无限宽，双保险防
-        // 折行）；vertical: false 服从容器高度（= 内容固有行高，无循环依赖）。
-        ScrollView(.horizontal, showsIndicators: true) {
+        // 垂直限高：使用统一自适应容器 AdaptiveScrollBox（约 20 行 / 380pt 内部滚动，低于限高零留白）。
+        AdaptiveScrollBox(axes: [.horizontal, .vertical], maxHeight: Theme.Layout.chatBlockMaxHeight) {
             Group {
                 if let highlighted {
                     Text(highlighted)
