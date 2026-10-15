@@ -187,9 +187,9 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         style.tabStops = [NSTextTab(textAlignment: .left, location: hangingIndent)]
 
         if !subLists.isEmpty {
-            style.paragraphSpacing = 6
+            style.paragraphSpacing = 8
         } else if hasNextListItem {
-            style.paragraphSpacing = 10
+            style.paragraphSpacing = 14
         } else if let next = nextBlock {
             if case .heading = next {
                 style.paragraphSpacing = 22
@@ -234,7 +234,7 @@ struct MarkdownListView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 MarkdownListItemRow(item: item, ordered: ordered, depth: depth)
             }

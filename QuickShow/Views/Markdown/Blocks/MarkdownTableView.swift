@@ -27,7 +27,7 @@ struct MarkdownTableView: View {
                 }
             }
             .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.lg)
             .background(Theme.Colors.chatTableHeader)
 
             // 表头下实线（提亮档，确保在斑马纹前清晰可辨）
@@ -47,13 +47,14 @@ struct MarkdownTableView: View {
                                     baseSize: 12.5,
                                     explicitColor: Theme.Colors.contentPrimary
                                 )
+                                .lineSpacing(Theme.Spacing.xs)
                                 .multilineTextAlignment(textAlignment(at: column))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .frame(maxWidth: .infinity, alignment: frameAlignment(at: column))
                             }
                         }
                         .padding(.horizontal, Theme.Spacing.xl)
-                        .padding(.vertical, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xl)
                         .background(rowIndex % 2 == 1 ? Theme.Colors.chatTableRowAlternate : Color.clear)
                     }
                 }

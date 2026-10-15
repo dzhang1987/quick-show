@@ -25,6 +25,10 @@
 
 ### Changed
 
+- **Markdown 列表与表格排版呼吸感精修（`MarkdownListRenderer.swift` / `MarkdownTableView.swift`）**：
+  - **列表条目边界强化**：TextKit 文本流路径条目间距 10 → 14pt（原与行距 6pt 仅差 4pt，条目边界视觉上粘连难辨），带子列表的条目间距 6 → 8pt；SwiftUI Widget 路径条目间距 lg(8) → xxl(12)；
+  - **表格数据行呼吸感**：数据行垂直内边距 md(6) → xl(10)、表头 md → lg(8)，单元格文本新增 3pt 行距，长文本细节列不再顶格挤压。
+
 - **三大长内容组件统一收敛接入 `AdaptiveScrollBox`（`MarkdownCodeBlock.swift` / `AIToolCardView.swift` / `MarkdownTableView.swift`）**：
   - **代码块（`MarkdownCodeBlock.swift`）**：接入双向自适应滚动，超长代码（如 Rust / Python / Swift 等源码）限制在约 20 行（380pt）内垂直滚动并保留横向长行不折行特性，短代码紧凑贴合，删除内部重复手写的高度测量逻辑；
   - **工具调用结果（`AIToolCardView.swift`）**：`ToolCallResultBlock` 接入自适应容器，彻底消除短 JSON（如 `{"ok":true}`）由于盲目撑满 180pt 产生的 150pt 浅色留白，长结果在 180pt（或展开 260pt）内滚动；
