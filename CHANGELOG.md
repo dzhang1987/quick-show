@@ -61,6 +61,11 @@
   - **人设与 Schema 补全联网专长**：将 `librarian` 人设、Schema 及存量迁移描述明确为“联网资料检索与实时情报专家，专属配备 `web_search` 与 `fetch_url` 工具，负责全网搜索最新行情、新闻与文档”；
   - **协同规则明确派发指引**：在 Orchestrator 提示词中明确指出：编排中枢自身虽未挂载 `web_search`，但遇到实时股票行情、汇率、天气、新闻及公网文档时，必须通过 `launch_subagents` 派发给 `librarian` 代理检索并汇总汇报。
 
+- **Google Antigravity OAuth 客户端凭据解耦与动态多级配置化（`AntigravityOAuthConfig.swift` / `AntigravityCloudCodeAdapter.swift` / `AntigravityOAuthSettingsSection.swift`）**：
+  - **彻底拔除源码明文常量**：将 Google OAuth Client ID / Secret 从静态硬编码常量重构为 `AntigravityOAuthConfig` 动态决议策略，彻底根除代码泄露与 Git 远程推送保护拦截；
+  - **多级动态配置覆盖**：支持用户自定义偏好设置（UserDefaults）、环境变量（`ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET`）、本地私有配置文件（`~/.quickshow/antigravity_oauth.json`）及底层无静态特征的安全回退；
+  - **偏好设置 UI 交互支持**：在模型服务商设置页中新增“OAuth 高级配置”区域，支持企业与开发者自主绑定自建 Google Cloud 凭据，并支持一键恢复默认。
+
 - **彻底修复 Markdown 嵌套列表在 TextKit 流式排版中换行符丢失导致子项粘连与前导圆点丢失缺陷（`MarkdownListRenderer.swift`）**：
   - **段落隔离与独立排版**：消除原先因误判叶子节点导致子列表末尾丢失换行符 `\n` 的底层缺陷，确保每个列表条目（无论处于第几层嵌套或是否为当前子列表末尾）在 TextKit 中均保留独立的换行符与完整的 `NSParagraphStyle`；
   - **上下文感知精准间距与尾部收敛**：引入 `hasNextListItem` 上下文链，精准识别多层嵌套列表中列表项与后续兄弟分支的连贯性，使大分支间的列表项恢复标准 10pt 留白；仅在整棵列表树的绝对末尾（且后无其他块）时收敛末尾多余换行符，彻底消除前导符被吞及缩进对齐错乱。
