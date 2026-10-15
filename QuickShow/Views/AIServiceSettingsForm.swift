@@ -330,6 +330,11 @@ struct AIServiceSettingsForm: View {
                 }
             }
 
+            // Antigravity 专属：OAuth 高级配置
+            if provider.id == "antigravity" {
+                AntigravityOAuthSettingsSection()
+            }
+
             // 模型能力池
             Section {
                 VStack(alignment: .leading, spacing: 10) {
@@ -1374,3 +1379,4 @@ struct AIServiceSettingsForm: View {
         )
     }
 }
+

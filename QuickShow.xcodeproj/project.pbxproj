@@ -62,6 +62,7 @@
 		39760048DBDB878931394AC3 /* AIModelAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4270992A33D3DD27F0515539 /* AIModelAdapter.swift */; };
 		39F9006016E24A97ED82F9F8 /* MarkdownTextFlowBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3498D0CFD8D60642CEE1A29 /* MarkdownTextFlowBuilder.swift */; };
 		3B12C41823DE91014225C158 /* SingleInstanceGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 012BB8E364D322E4DFD64D9A /* SingleInstanceGuard.swift */; };
+		3C4D88E68F6D2CF524D19201 /* AntigravityOAuthConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEB34897E985BEA3CD3C3B0 /* AntigravityOAuthConfig.swift */; };
 		3F030C8F6AC7AAC865530EFF /* FocusWorkCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2167D019993E6060D6D375A /* FocusWorkCard.swift */; };
 		3FC1DB5D580A579E2803DF5A /* MTMathAtomFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B220E8199511E133A53FEA /* MTMathAtomFactory.swift */; };
 		429644B19C6C9476A5A1FF53 /* AIChatKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0661EBAA94210CA4383157 /* AIChatKeyMonitor.swift */; };
@@ -137,6 +138,7 @@
 		8742492B9C134C04AD14358A /* MarkdownImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85B8699E1E8A77A02CC99293 /* MarkdownImageView.swift */; };
 		88D107F260F069314667B3BB /* QoderProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20AF867571D5BCBBE336B6E /* QoderProvider.swift */; };
 		890BDB806B48148067D0E4F0 /* RichCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97C435AE3528691A109E6D1 /* RichCard.swift */; };
+		89E86B2C72B6EFB972DD2085 /* AntigravityOAuthSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BAA5448CC407DCD8747C7E9 /* AntigravityOAuthSettingsSection.swift */; };
 		8BC416244B1AE4F712EFFAC4 /* MarkdownDefinitionListRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0523C433963BF4C1F733A515 /* MarkdownDefinitionListRenderer.swift */; };
 		8CCF8BF71812D3A221D8CF4F /* LunarCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63AB70CD13631A39A802994 /* LunarCalendar.swift */; };
 		8EA9020A6D1DCEA1B41E831F /* MTTypesetter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B88CB548F8258C555E4F510C /* MTTypesetter.swift */; };
@@ -279,6 +281,7 @@
 		1AA50A500CD868147CD9442B /* MyLocationTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MyLocationTool.swift; sourceTree = "<group>"; };
 		1AE8B7761DA96513D560B46A /* MermaidTemplateProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidTemplateProvider.swift; sourceTree = "<group>"; };
 		1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolExecutor.swift; sourceTree = "<group>"; };
+		1BAA5448CC407DCD8747C7E9 /* AntigravityOAuthSettingsSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityOAuthSettingsSection.swift; sourceTree = "<group>"; };
 		1C19E16F89AEEA11760C20BF /* InteractiveMapView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractiveMapView.swift; sourceTree = "<group>"; };
 		1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatAttachmentViews.swift; sourceTree = "<group>"; };
 		1F1ABE973C45DEBC63A9D9B6 /* MathEnvironmentMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathEnvironmentMapper.swift; sourceTree = "<group>"; };
@@ -351,6 +354,7 @@
 		6E96296DA3CAB83BC3CB9374 /* AppState+Actions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Actions.swift"; sourceTree = "<group>"; };
 		6EBB220C3DE2C9A87217EC24 /* SettingsShortcutsForm.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsShortcutsForm.swift; sourceTree = "<group>"; };
 		6EC8BA98E9C478A6D25D3962 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6EEB34897E985BEA3CD3C3B0 /* AntigravityOAuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityOAuthConfig.swift; sourceTree = "<group>"; };
 		6EEC1734C7857CABA40F8EC4 /* MarkdownBlockRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockRegistry.swift; sourceTree = "<group>"; };
 		6F2DD99010D040E245B74EB6 /* ToolConfirmationDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolConfirmationDrawer.swift; sourceTree = "<group>"; };
 		701C4A6F6EA8CB5F9B11E942 /* PreviewFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewFileTool.swift; sourceTree = "<group>"; };
@@ -647,6 +651,7 @@
 				02EDB0F7F9308986A84F3401 /* AIServiceSettingsForm.swift */,
 				94BD4B04C800A479129E797F /* AISettingsSections.swift */,
 				D265EF154F546FE21365CDDE /* AIToolCardView.swift */,
+				1BAA5448CC407DCD8747C7E9 /* AntigravityOAuthSettingsSection.swift */,
 				4EBFCA705B22FA81D696553E /* AskUserToolViews.swift */,
 				C6C9B117A903234A0E71078F /* CalendarEventDetailView.swift */,
 				6899045187A73D4B76895FE6 /* CalendarEventEditView.swift */,
@@ -837,6 +842,7 @@
 			children = (
 				69D3D4B60B8DE26010CF69E1 /* AIAuthManager.swift */,
 				F0C6C3784ACB8FAC5B4F0D4B /* AIAuthMethod.swift */,
+				6EEB34897E985BEA3CD3C3B0 /* AntigravityOAuthConfig.swift */,
 				8D3297FE65CF234E49F00924 /* OAuthLoopbackServer.swift */,
 				EBD6398EC2180D7CE3B4E160 /* Methods */,
 			);
@@ -1190,6 +1196,8 @@
 				55CE4CE50988B2857EC44061 /* AntigravityAuthMethods.swift in Sources */,
 				014193ACDD080820A1EA300C /* AntigravityCloudCodeAdapter.swift in Sources */,
 				1FCB6755CE9734879FC56056 /* AntigravityNativeAdapter.swift in Sources */,
+				3C4D88E68F6D2CF524D19201 /* AntigravityOAuthConfig.swift in Sources */,
+				89E86B2C72B6EFB972DD2085 /* AntigravityOAuthSettingsSection.swift in Sources */,
 				54F3DBE5FAF2AC2BAC8FDB20 /* AppState+Actions.swift in Sources */,
 				5CCB1AA7FCD1E076C224113C /* AppState+Forwarding.swift in Sources */,
 				C778FB23F5A4619CABDD5A3F /* AppState.swift in Sources */,

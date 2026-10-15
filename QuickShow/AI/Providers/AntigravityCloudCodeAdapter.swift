@@ -11,10 +11,10 @@ enum AntigravityCloudCodeAdapter {
     private static let logger = Logger(subsystem: "cn.chiproad.QuickShow", category: "AntigravityDirect")
     private static let endpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
 
-    // MARK: - Google OAuth 与云端网关常量配置
+    // MARK: - Google OAuth 与云端网关配置
     static let oauthTokenEndpoint = "https://oauth2.googleapis.com/token"
-    static let oauthClientId = "PLACEHOLDER_OAUTH_CLIENT_ID"
-    static let oauthClientSecret = "PLACEHOLDER_OAUTH_CLIENT_SECRET"
+    static var oauthClientId: String { AntigravityOAuthConfig.clientId }
+    static var oauthClientSecret: String { AntigravityOAuthConfig.clientSecret }
     private static let loadCodeAssistEndpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
     private static let fallbackProjectId = "aicode-consumers"
     private static let userAgent = "antigravity/2.0.6 darwin/arm64"
