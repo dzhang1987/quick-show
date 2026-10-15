@@ -4,7 +4,6 @@
 // 针对 SSE 流式协议进行定制优化：历史上下文严格交替归一合并，杜绝 MALFORMED_FUNCTION_CALL；独立专用会话隔离管理。
 
 import Foundation
-import Security
 import os
 
 enum AntigravityCloudCodeAdapter {
@@ -33,46 +32,8 @@ enum AntigravityCloudCodeAdapter {
         let expiryDate: Date?
     }
 
-    /// 从 macOS 系统钥匙串读取 Antigravity OAuth Token 包
-    static func fetchKeyringTokenBundle() -> TokenBundle? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "gemini",
-            kSecAttrAccount as String: "antigravity",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              let rawStr = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        // 格式形如: go-keyring-base64:<base64-payload>
-        let b64 = rawStr.replacingOccurrences(of: "go-keyring-base64:", with: "")
-        guard let jsonData = Data(base64Encoded: b64),
-              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let tokenObj = json["token"] as? [String: Any],
-              let accessToken = tokenObj["access_token"] as? String,
-              !accessToken.isEmpty else {
-            return nil
-        }
-
-        let refreshToken = tokenObj["refresh_token"] as? String
-        var expiryDate: Date?
-        if let expiryStr = tokenObj["expiry"] as? String {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            expiryDate = formatter.date(from: expiryStr) ?? ISO8601DateFormatter().date(from: expiryStr)
-        }
-
-        return TokenBundle(accessToken: accessToken, refreshToken: refreshToken, expiryDate: expiryDate)
-    }
-
     /// 从本地凭据文件读取 (~/.gemini/jetski-standalone-oauth-token)
-    static func fetchFileToken() -> String? {
+    static func fetchFileTokenBundle() -> TokenBundle? {
         let path = "\(NSHomeDirectory())/.gemini/jetski-standalone-oauth-token"
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -81,35 +42,47 @@ enum AntigravityCloudCodeAdapter {
               !accessToken.isEmpty else {
             return nil
         }
-        return accessToken
+        let refreshToken = tokenObj["refresh_token"] as? String
+        var expiryDate: Date?
+        if let expiryStr = tokenObj["expiry"] as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            expiryDate = formatter.date(from: expiryStr) ?? ISO8601DateFormatter().date(from: expiryStr)
+        }
+        return TokenBundle(accessToken: accessToken, refreshToken: refreshToken, expiryDate: expiryDate)
     }
 
-    /// 统一解析可用的 Access Token (内存缓存优先，钥匙串真源第一优先级，绝对杜绝陈旧静态死 Token)
+    /// 从本地凭据文件读取 Access Token (~/.gemini/jetski-standalone-oauth-token)
+    static func fetchFileToken() -> String? {
+        fetchFileTokenBundle()?.accessToken
+    }
+
+    /// 统一解析可用的 Access Token (单一真源：优先 QuickShow 专属持久化密钥，内存活跃缓存协同，绝不主动刺探系统钥匙串)
     static func resolveAccessToken(explicitKey: String?) -> String? {
         // 0. 优先使用最近生效的内存 Token
         if let active = activeAccessToken, !active.isEmpty {
             return active
         }
 
-        // 1. 优先系统钥匙串（由官方客户端/CLI 保持最新自动续期状态，真源绝对优先）
-        if let bundle = fetchKeyringTokenBundle() {
-            return bundle.accessToken
-        }
-
-        // 2. 尝试本地凭据文件 (~/.gemini/jetski-standalone-oauth-token)
-        if let file = fetchFileToken() {
-            return file
-        }
-
-        // 3. 兜底使用显式传入的 key（仅当非 AIzaSy 密钥且包含有效 OAuth 前缀时）
+        // 1. 优先使用 QuickShow 自身持久化保存的显式 Key (用户配置或 Touch ID 导入并已安全落盘至 keys/antigravity.key)
         let trimmed = explicitKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmed.isEmpty && !trimmed.hasPrefix("AIzaSy") {
-            if trimmed.hasPrefix("ya29.") {
-                return trimmed
-            }
+            let token: String
             if trimmed.hasPrefix("Bearer ") {
-                return String(trimmed.dropFirst(7))
+                token = String(trimmed.dropFirst(7))
+            } else {
+                token = trimmed
             }
+            if !token.isEmpty {
+                activeAccessToken = token
+                return token
+            }
+        }
+
+        // 2. 兜底读取本地独立凭据文件 (~/.gemini/jetski-standalone-oauth-token)
+        if let fileToken = fetchFileToken() {
+            activeAccessToken = fileToken
+            return fileToken
         }
 
         return nil
@@ -288,10 +261,10 @@ enum AntigravityCloudCodeAdapter {
                         throw AIChatError.network("Antigravity 直连未收到 HTTP 响应")
                     }
 
-                    // 自愈机制：如果遇到 401 Unauthorized，尝试检测钥匙串是否已更新并重试一次
+                    // 自愈机制：如果遇到 401 Unauthorized，尝试检测本地独立凭据是否已刷新并重试一次
                     if http.statusCode == 401 {
-                        logger.warning("[AntigravityDirect] 收到 HTTP 401，尝试检测钥匙串最新凭据...")
-                        if let freshToken = fetchKeyringTokenBundle()?.accessToken, freshToken != currentToken {
+                        logger.warning("[AntigravityDirect] 收到 HTTP 401，尝试检测本地凭据文件是否已更新...")
+                        if let freshToken = fetchFileToken(), freshToken != currentToken {
                             currentToken = freshToken
                             activeAccessToken = freshToken
                             req = try buildRequest(

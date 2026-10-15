@@ -6,6 +6,12 @@
 
 ### Added
 
+- **大模型供应商多授权方式抽象与行为策略化自治架构（`AIAuthMethod` / `BiometricImportAuthMethod` / `InteractiveBrowserAuthMethod` / `StandardAPIKeyAuthMethod` / `OAuthLoopbackServer`）**：
+  - **授权方式一等公民抽象**：将 API Key、Touch ID 本地导入、浏览器外部授权（OAuth PKCE 与 Device Flow）抽象为统一面向接口的协议族，支持单一模型供应商 1 对多聚合多套授权方案；
+  - **服务商能力统一聚合（`LLMProvider`）**：由 `LLMProvider` 统一收拢通信推理与所支持的 `supportedAuthMethods` 矩阵，彻底消除此前平行冗余的双轨制映射；
+  - **本地轻量级 OAuth 回环服务器与密码学套件（`OAuthLoopbackServer` / `OAuthCrypto`）**：原生实现支持 S256 PKCE 随机校验码生成的本地轻量 HTTP 回环监听与安全回调；
+  - **多厂商专属授权策略落地**：包含 Antigravity Google PKCE 与触控 ID 免密导入、Qoder Device Flow 与触控 ID 导入、DashScope 与 OpenAI 环境变量静默探测与存量迁移。
+
 - **多智能体并发调度与协作体系（`LaunchSubagentsTool` / `AgentCoordinator` / `AgentTaskRegistry` / `SubagentTaskTray`）**：
   - **原子调度工具收敛（`launch_subagents`）**：收敛旧版分散的 `launch_agent`、`await_agents`、`delegate_to_agent` 三工具为单一批处理并发调度工具 `launch_subagents`，支持编排中枢向多个垂类专家下发专项任务，底层真并发并行执行并一次性归并返回成果；
   - **6 大垂类智能体矩阵与最小权限隔离**：确立编排中枢（Orchestrator）、视觉感知（Observer）、代码专家（Coder）、深度推理（Oracle）、知识检索（Librarian）、系统管家（Concierge）6 大垂类智能体矩阵，实行严格的工具白名单隔离；
@@ -14,6 +20,11 @@
   - **智能 Steering 转向路由引擎（A+B 方案）**：用户在主会话中途追加输入时，支持 `@librarian` / `@coder` 显式前缀或语义自动识别分流，将指令实时穿透注入正在运行的子任务 Tool Loop，并在输入框上方呈现轻反馈通知。
 
 ### Changed
+
+- **`AIAuthManager` 门面调度与纯数据驱动设置面板（`AIAuthManager.swift` / `AIServiceSettingsForm.swift`）**：
+  - 彻底移除 `AIAuthManager` 内部私有字典与硬编码，统一由 `LLMProviderRegistry` 暴露的 `supportedAuthMethods` 动态调度探测与鉴权；
+  - 设置界面消灭所有针对厂商类型的 hardcoded 判断，纯数据驱动自适应渲染已绑定卡片、触控 ID 导入按钮、浏览器登录按钮及 API Key 输入框；
+  - 全项目 Key 统一收归 `~/Library/Application Support/QuickShow/keys/<name>.key`（POSIX 0600 访问控制），业务配置迁移为专属 json 存储（`providers.json` / `agents.json`）。
 
 - **思考过程卡片全功能 Markdown 排版与流式跟随展示（`AIChatMessageRow.swift` / `DesignTokens.swift`）**：
   - **默认展开与自适应贴合**：思考过程默认展开（约 10 行 180pt 限高滚动区，内容少时自适应贴合不留空，超出时内滚）；落定后保持展开，可随时手动点击收起为单行摘要；
@@ -27,6 +38,11 @@
   - 偏好设置面板新增“可用工具授权”区域，支持显示各 Agent 授权工具数、一键恢复推荐及逐项开关。
 
 ### Fixed
+
+- **彻底拔除 Keychain 跨应用未授权刺探与“登录钥匙串密码”弹窗骚扰（`AntigravityCloudCodeAdapter.swift` / `AIProviderStore.swift`）**：
+  - **切断未授权钥匙串访问**：运行时 100% 仅访问 QuickShow 专属 0600 凭据文件，彻底拔除对系统钥匙串（`service: "gemini"`）及外部私有目录的跨进程刺探；
+  - **根除 cdhash 变动弹窗**：解决重新编译后因代码签名哈希变化导致 macOS `securityd` 频繁强制索要系统登录密码的顽疾，实现一次指纹授权即永久静默落盘、重启绝对零打扰。
+
 
 - **彻底修复 Gemini 模型思考过程提前假闭合截断与思考卡片打字卡顿不贴底缺陷（`GeminiProvider.swift` / `AIChatMessageRow.swift`）**：
   - **思考标签高熵隔离与防假闭合识别（`GeminiProvider.ThinkingStreamParser`）**：将原先易被大模型在元分析（思考系统角色与规则）时口语复述的 `[THINK] ... [/THINK]` 升级为高区分度标记 `<<<BEGIN_THINKING>>>` 与 `<<<END_THINKING>>>`；解析状态机支持动态绑定对应闭合标签并加入行内引用保护，若闭合标签出现在反引号（如 `` `<<<END_THINKING>>>` ``、`` `[/THINK]` ``）或引号中，判定为模型在引用规则而非协议闭合，继续安全保留在思考态中，彻底根除思考内容大面积泄漏进正文区的历史顽疾；

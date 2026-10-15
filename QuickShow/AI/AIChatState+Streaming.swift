@@ -57,6 +57,20 @@ extension AIChatState {
 
         let session = store.currentSession ?? store.createSession()
         let sessionId = session.id
+        if isCreatingNewSession {
+            if let agentId = draftAgentId {
+                store.setSessionAgent(id: sessionId, agentId: agentId)
+                draftAgentId = nil
+            }
+            if let modelId = draftModelId {
+                store.setSessionModel(id: sessionId, modelId: modelId)
+                draftModelId = nil
+            }
+            if let thinking = draftThinkingLevel {
+                store.setThinkingLevel(id: sessionId, level: thinking)
+                draftThinkingLevel = nil
+            }
+        }
 
         // 新建该会话的流式上下文；旧上下文若残留（异常路径兜底）先强制冲刷半截内容再重建。
         if streamContexts[sessionId] != nil {
@@ -140,7 +154,7 @@ extension AIChatState {
 
             if !supportsVision && !userImages.isEmpty {
                 if let observer = AIAgentStore.shared.visualDelegateAgent {
-                    self.observerStatus = String(localized: "👁️ 视觉感知 (\(observer.name)) 正在解析图片…")
+                    self.observerStatus = String(localized: "\(observer.name) 正在解析图片…")
                     do {
                         let prompt = """
                         请客观、详细地分析用户提供的图片内容，提取其中的核心要素、布局、图表数据、文字信息（OCR）以及关键视觉细节。以精炼、清晰的 Markdown 格式输出，以便主模型参考并准确解答用户的问题。

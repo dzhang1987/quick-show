@@ -79,13 +79,13 @@ extension AIAgent {
             return [
                 AIAgent(
                     id: "orchestrator",
-                    name: "编排中枢",
+                    name: "全能助理",
                     iconName: "sparkles",
-                    description: "主控指挥官，负责通用对话、需求拆解与多领域调度协调。",
+                    description: "主控助理，负责通用对话、需求拆解与多领域调度协调。",
                     systemPrompt: """
-                    你是一个专业博学的 AI 编排助手（Orchestrator），崇尚从第一性原理分析问题。
+                    你是一个专业博学的 AI 全能助理（Orchestrator），崇尚从第一性原理分析问题。
                     说话做事直接了当，实事求是。遇到不清楚的边界主动调用 `ask_user` 确认。
-                    面对复杂多步骤工程，使用 `launch_subagents` 并发调度专业专家（Coder、Librarian、Oracle、Concierge、Observer），汇总成果后输出清晰结构化的解答。
+                    面对复杂多步骤工程，使用 `launch_subagents` 并发调度专业专家（代码专家、资料检索、深度思考、系统管家、识图助理），汇总成果后输出清晰结构化的解答。
                     """,
                     providerId: "qoder",
                     modelId: "qoder/gmodel",
@@ -96,11 +96,11 @@ extension AIAgent {
                 ),
                 AIAgent(
                     id: "observer",
-                    name: "视觉感知",
-                    iconName: "eye.fill",
-                    description: "多模态视觉专家，专门负责图片分析、图表解析与屏幕截图特征提取。",
+                    name: "识图助理",
+                    iconName: "eye",
+                    description: "图文与多模态解析助手，专门负责图片分析、图表解析与屏幕截图特征提取。",
                     systemPrompt: """
-                    你是专业的视觉分析专家（Observer）。你的核心职责是精准理解用户提供的各类图像（界面截图、架构图、表格图、流程图或照片）。
+                    你是专业的识图助手（Observer）。你的核心职责是精准理解用户提供的各类图像（界面截图、架构图、表格图、流程图或照片）。
                     请客观、详细地提取图像中的文字（OCR）、布局结构、核心要素与异常信息，以结构化 Markdown 清晰呈现。
                     """,
                     providerId: "qoder",
@@ -128,7 +128,7 @@ extension AIAgent {
                 ),
                 AIAgent(
                     id: "oracle",
-                    name: "深度推理",
+                    name: "深度思考",
                     iconName: "brain.head.profile",
                     description: "高思考强度分析师，擅长数学逻辑推演、复杂系统方案决策与深度论证。",
                     systemPrompt: """
@@ -144,11 +144,11 @@ extension AIAgent {
                 ),
                 AIAgent(
                     id: "librarian",
-                    name: "知识检索",
-                    iconName: "books.vertical.fill",
-                    description: "快速检索与知识提炼专家，擅长阅读大量信息并输出要点摘要。",
+                    name: "资料检索",
+                    iconName: "books.vertical",
+                    description: "快速检索与资料提炼助手，擅长阅读大量信息并输出要点摘要。",
                     systemPrompt: """
-                    你是高效的知识情报员（Librarian），擅长快速提取长文本、文档与背景材料中的核心要点。
+                    你是高效的资料研究员（Librarian），擅长快速提取长文本、文档与背景材料中的核心要点。
                     回答言简意赅、条理分明，用最少的废话呈现最高密度的信息。
                     """,
                     providerId: "qoder",
@@ -179,16 +179,16 @@ extension AIAgent {
         }
 
         return [
-            // 1. 编排中枢 (Orchestrator)
+            // 1. 全能助理 (Orchestrator)
             AIAgent(
                 id: "orchestrator",
-                name: "编排中枢",
+                name: "全能助理",
                 iconName: "sparkles",
-                description: "主控指挥官，负责通用对话、需求拆解与多领域调度协调。",
+                description: "主控助理，负责通用对话、需求拆解与多领域调度协调。",
                 systemPrompt: """
-                你是一个专业博学的 AI 编排助手（Orchestrator），崇尚从第一性原理分析问题。
+                你是一个专业博学的 AI 全能助理（Orchestrator），崇尚从第一性原理分析问题。
                 说话做事直接了当，实事求是。遇到不清楚的边界主动调用 `ask_user` 确认。
-                面对复杂多步骤工程，使用 `launch_subagents` 并发调度专业专家（Coder、Librarian、Oracle、Concierge、Observer），汇总成果后输出清晰结构化的解答。
+                面对复杂多步骤工程，使用 `launch_subagents` 并发调度专业专家（代码专家、资料检索、深度思考、系统管家、识图助理），汇总成果后输出清晰结构化的解答。
                 """,
                 providerId: primaryProviderId,
                 modelId: "glm-5.3",
@@ -198,14 +198,14 @@ extension AIAgent {
                 enabledTools: defaultToolNames(for: "orchestrator")
             ),
 
-            // 2. 视觉感知 (Observer)
+            // 2. 识图助理 (Observer)
             AIAgent(
                 id: "observer",
-                name: "视觉感知",
-                iconName: "eye.fill",
-                description: "多模态视觉专家，专门负责图片分析、图表解析与屏幕截图特征提取。",
+                name: "识图助理",
+                iconName: "eye",
+                description: "图文与多模态解析助手，专门负责图片分析、图表解析与屏幕截图特征提取。",
                 systemPrompt: """
-                你是专业的视觉分析专家（Observer）。你的核心职责是精准理解用户提供的各类图像（界面截图、架构图、表格图、流程图或照片）。
+                你是专业的识图助手（Observer）。你的核心职责是精准理解用户提供的各类图像（界面截图、架构图、表格图、流程图或照片）。
                 请客观、详细地提取图像中的文字（OCR）、布局结构、核心要素与异常信息，以结构化 Markdown 清晰呈现。
                 """,
                 providerId: primaryProviderId,
@@ -234,10 +234,10 @@ extension AIAgent {
                 enabledTools: defaultToolNames(for: "coder")
             ),
 
-            // 4. 深度推理 (Oracle)
+            // 4. 深度思考 (Oracle)
             AIAgent(
                 id: "oracle",
-                name: "深度推理",
+                name: "深度思考",
                 iconName: "brain.head.profile",
                 description: "高思考强度分析师，擅长数学逻辑推演、复杂系统方案决策与深度论证。",
                 systemPrompt: """
@@ -255,11 +255,11 @@ extension AIAgent {
             // 5. 资料检索 (Librarian)
             AIAgent(
                 id: "librarian",
-                name: "知识检索",
-                iconName: "books.vertical.fill",
-                description: "快速检索与知识提炼专家，擅长阅读大量信息并输出要点摘要。",
+                name: "资料检索",
+                iconName: "books.vertical",
+                description: "快速检索与资料提炼助手，擅长阅读大量信息并输出要点摘要。",
                 systemPrompt: """
-                你是高效的知识情报员（Librarian），擅长快速提取长文本、文档与背景材料中的核心要点。
+                你是高效的资料研究员（Librarian），擅长快速提取长文本、文档与背景材料中的核心要点。
                 回答言简意赅、条理分明，用最少的废话呈现最高密度的信息。
                 """,
                 providerId: primaryProviderId,

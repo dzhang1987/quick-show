@@ -14,9 +14,20 @@ enum WebToolsConfig {
     private static let legacyKeychainService = "com.dzhang.quickshow.ai"
     private static let legacyKeychainAccount = "tavilyApiKey"
 
-    /// Tavily Key 落盘文件：`~/Library/Application Support/QuickShow/tavily_apikey`（纯文本单行）。
-    /// 放弃 Keychain 的原因：本地开发频繁重编译导致签名变化，Keychain 条目 ACL 每次读取都弹密码授权。
+    /// Tavily Key 落盘文件：`~/Library/Application Support/QuickShow/keys/tavily.key`（纯文本单行，0600 权限）。
     private static var apiKeyFileURL: URL? {
+        guard let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = appSupport
+            .appendingPathComponent("QuickShow", isDirectory: true)
+            .appendingPathComponent("keys", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("tavily.key")
+    }
+
+    private static var legacyApiKeyFileURL: URL? {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?
@@ -24,11 +35,22 @@ enum WebToolsConfig {
             .appendingPathComponent("tavily_apikey")
     }
 
-    /// 读取 Tavily Key（对外兼容旧属性名）：文件 → 旧 Keychain 一次性迁移 → 环境变量兜底。
+    /// 读取 Tavily Key（对外兼容旧属性名）：文件 → 旧文件/旧 Keychain 一次性迁移 → 环境变量兜底。
     static var tavilyAPIKey: String? { loadAPIKey() }
 
-    /// 读取 Tavily Key。文件不存在时尝试从旧 Keychain 条目搬家；任何异常静默返回 nil，不阻塞主流程。
+    /// 读取 Tavily Key。文件不存在时尝试从旧文件或旧 Keychain 条目搬家；任何异常静默返回 nil，不阻塞主流程。
     static func loadAPIKey() -> String? {
+        if let legacy = legacyApiKeyFileURL,
+           FileManager.default.fileExists(atPath: legacy.path),
+           let data = try? Data(contentsOf: legacy),
+           let text = String(data: data, encoding: .utf8) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                setTavilyAPIKey(trimmed)
+            }
+            try? FileManager.default.removeItem(at: legacy)
+        }
+
         if let url = apiKeyFileURL, FileManager.default.fileExists(atPath: url.path) {
             // 读取前顺手把过宽权限收紧到 0600。
             tightenPermissionsIfNeeded(at: url)

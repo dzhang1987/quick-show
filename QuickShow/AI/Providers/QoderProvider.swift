@@ -41,6 +41,20 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
 
     init() {}
 
+    func supportedAuthMethods(for provider: AIProvider) -> [any AIAuthMethod] {
+        [
+            DefaultAPIKeyAuthMethod(
+                providerId: provider.id,
+                displayName: "Personal Access Token",
+                detailDescription: "手工配置 Qoder 访问令牌 (PAT)",
+                placeholder: "输入 Personal Access Token",
+                footerText: "令牌仅保存在本机受保护目录，绝不上云"
+            ),
+            QoderBiometricAuthMethod(),
+            QoderDeviceFlowBrowserAuthMethod()
+        ]
+    }
+
     func stream(
         provider: AIProvider,
         model: AIModelSpec,

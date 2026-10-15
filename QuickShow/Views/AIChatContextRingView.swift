@@ -43,11 +43,10 @@ struct AIChatContextRingView: View {
     /// 停止时禁用动画归零——不残留中间角度、不继续微转，下次启动恒从 12 点干净起步。
     @State private var spinnerAngle: Double = 0
 
-    /// 环体直径 14pt：比 13pt 图标略大一档——空心描边环无填充、视觉偏小，
-    /// 与电池图标「视觉偏小需加大一档」同思路；点击区仍对齐 24pt 图标钮档位。
-    private let ringDiameter: CGFloat = 14
-    /// 线宽 1.5pt：1x 屏不发虚（1pt 底线之上），2x 屏不臃肿（2pt 之下）。
-    private let ringLineWidth: CGFloat = 1.5
+    /// 环体直径 10pt：与左侧胶囊字高与图标高度（9~10pt）同量级，精致克制，杜绝笨重
+    private let ringDiameter: CGFloat = 10
+    /// 线宽 1.1pt：细腻清爽，高分屏上精致锐利
+    private let ringLineWidth: CGFloat = 1.1
     /// 警戒阈值：与调用侧 watermarkBreaksThrough（showDockSecondaryTools 破格）同源。
     private let warningRatio: Double = 0.8
     /// 不定态弧长：固定 1/4 圈。
@@ -92,9 +91,8 @@ struct AIChatContextRingView: View {
                 }
             }
             .frame(width: ringDiameter, height: ringDiameter)
-            // 点击/hover 区对齐全组统一的 24pt 图标钮档位；hover 圆底是家族语言
-            //（压缩中禁用点击，圆底不出——但 onHover 仍驱动详情卡上报）
-            .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
+            // 点击/hover 区调至 20pt，既保持舒适触控，又与小尺寸环体聚拢协调
+            .frame(width: 20, height: 20)
             .background(
                 Circle().fill(hovered && !isCompacting ? Theme.Colors.iconHoverBg : Color.clear)
             )

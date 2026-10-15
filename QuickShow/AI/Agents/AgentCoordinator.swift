@@ -91,13 +91,13 @@ final class AgentCoordinator {
         if matched == nil {
             if cleanTarget.contains("系统") || cleanTarget.contains("运维") || cleanTarget.contains("进程") || cleanTarget.contains("管家") || cleanTarget.contains("硬件") || cleanTarget.contains("mac") {
                 matched = agents.first { $0.id == "concierge" }
-            } else if cleanTarget.contains("view") || cleanTarget.contains("视觉") || cleanTarget.contains("image") || cleanTarget.contains("图") || cleanTarget.contains("图片") {
+            } else if cleanTarget.contains("view") || cleanTarget.contains("视觉") || cleanTarget.contains("image") || cleanTarget.contains("图") || cleanTarget.contains("图片") || cleanTarget.contains("识图") {
                 matched = AIAgentStore.shared.visualDelegateAgent ?? agents.first { $0.id == "observer" }
             } else if cleanTarget.contains("code") || cleanTarget.contains("代码") || cleanTarget.contains("写") || cleanTarget.contains("开发") || cleanTarget.contains("编程") || cleanTarget.contains("bug") {
                 matched = agents.first { $0.id == "coder" }
-            } else if cleanTarget.contains("search") || cleanTarget.contains("搜") || cleanTarget.contains("查") || cleanTarget.contains("文献") || cleanTarget.contains("知识") || cleanTarget.contains("情报") {
+            } else if cleanTarget.contains("search") || cleanTarget.contains("搜") || cleanTarget.contains("查") || cleanTarget.contains("文献") || cleanTarget.contains("知识") || cleanTarget.contains("情报") || cleanTarget.contains("资料") {
                 matched = agents.first { $0.id == "librarian" }
-            } else if cleanTarget.contains("reason") || cleanTarget.contains("推理") || cleanTarget.contains("深度") || cleanTarget.contains("分析") || cleanTarget.contains("架构") || cleanTarget.contains("决策") {
+            } else if cleanTarget.contains("reason") || cleanTarget.contains("推理") || cleanTarget.contains("深度") || cleanTarget.contains("分析") || cleanTarget.contains("架构") || cleanTarget.contains("决策") || cleanTarget.contains("思考") {
                 matched = agents.first { $0.id == "oracle" }
             }
         }
@@ -590,10 +590,10 @@ final class AgentCoordinator {
 
         // 3. 多任务时的语义特征度评分匹配
         let keywordsMap: [String: [String]] = [
-            "librarian": ["搜", "查", "找", "网", "股", "价", "财报", "新闻", "资讯", "行情", "市值", "google", "yahoo", "雪球"],
+            "librarian": ["搜", "查", "找", "网", "股", "价", "财报", "新闻", "资讯", "行情", "市值", "google", "yahoo", "雪球", "资料", "文献"],
             "coder": ["代码", "写", "改", "函数", "类", "bug", "修复", "重构", "swift", "python", "编译", "脚本"],
-            "oracle": ["分析", "评估", "推演", "架构", "逻辑", "估值", "模型", "对比", "优劣", "深度", "价值", "研报"],
-            "observer": ["看", "图", "图片", "视觉", "截图", "ui", "界面", "排版"],
+            "oracle": ["分析", "评估", "推演", "架构", "逻辑", "估值", "模型", "对比", "优劣", "深度", "价值", "研报", "思考"],
+            "observer": ["看", "图", "图片", "视觉", "截图", "ui", "界面", "排版", "识图"],
             "concierge": ["打开", "系统", "设置", "应用", "地图", "定位", "通知", "日历"]
         ]
 

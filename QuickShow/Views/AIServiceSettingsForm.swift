@@ -170,147 +170,164 @@ struct AIServiceSettingsForm: View {
                 let accountInfo = providerStore.accountInfo(for: provider.id)
                 let authState = authManager.state(for: provider.id)
                 let detected = authManager.detectedAccount(for: provider.id)
+                let methods = authManager.authMethods(for: provider)
 
-                // A. 针对支持浏览器/本机探测的服务商 (Qoder / Antigravity)
-                if provider.type == .qoderNative || provider.type == .antigravityNative {
-                    if !storedKey.isEmpty {
-                        // 已认证授权状态卡片
-                        VStack(alignment: .leading, spacing: 8) {
+                let browserMethods = methods.compactMap { $0 as? InteractiveBrowserAuthMethod }
+                let biometricMethods = methods.compactMap { $0 as? BiometricImportAuthMethod }
+                let apiKeyMethods = methods.compactMap { $0 as? StandardAPIKeyAuthMethod }
+                let primaryAPIKeyMethod = apiKeyMethods.first
+
+                // 1. 已认证授权状态卡片展示
+                if !storedKey.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(Theme.Colors.statusGood)
+                            Text("已完成认证授权")
+                                .font(.system(size: Theme.Typography.body, weight: .semibold))
+                            Spacer()
+                            Button("退出登录 / 清除") {
+                                authManager.logout(for: provider.id)
+                                apiKeyInput = ""
+                            }
+                            .font(.system(size: Theme.Typography.footnote))
+                            .foregroundColor(Theme.Colors.statusWarning)
+                        }
+
+                        if let acc = accountInfo {
                             HStack(spacing: 8) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(Theme.Colors.statusGood)
-                                Text("已完成认证授权")
-                                    .font(.system(size: Theme.Typography.body, weight: .semibold))
-                                Spacer()
-                                Button("退出登录 / 清除") {
-                                    authManager.logout(for: provider.id)
-                                    apiKeyInput = ""
-                                }
-                                .font(.system(size: Theme.Typography.footnote))
-                                .foregroundColor(Theme.Colors.statusWarning)
-                            }
-
-                            if let acc = accountInfo {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "person.crop.circle")
-                                        .foregroundColor(.secondary)
-                                    Text(acc.displayName)
-                                        .font(.system(size: Theme.Typography.body))
-                                    if !acc.email.isEmpty {
-                                        Text("(\(acc.email))")
-                                            .font(.system(size: Theme.Typography.footnote))
-                                            .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    Text(acc.authMethod == "browser" ? "浏览器授权" : ((acc.authMethod == "biometric_import" || acc.authMethod == "auto_detect") ? "触控 ID 导入" : "手动凭据"))
-                                        .font(.system(size: Theme.Typography.micro))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(Color.secondary.opacity(0.15))
-                                        .cornerRadius(4)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    } else {
-                        // 未授权状态：快捷操作组 (浏览器登录 / 本机检测导入)
-                        VStack(alignment: .leading, spacing: 10) {
-                            if case .authorizing(let msg) = authState {
-                                HStack(spacing: 8) {
-                                    ProgressView()
-                                        .controlSize(.small)
-                                    Text(msg)
-                                        .font(.system(size: Theme.Typography.body))
-                                        .foregroundColor(.primary)
-                                    Spacer()
-                                    Button("取消") {
-                                        authManager.cancelAuth(for: provider.id)
-                                    }
-                                    .font(.system(size: Theme.Typography.footnote))
-                                }
-                                .padding(.vertical, 4)
-                            } else {
-                                HStack(spacing: 10) {
-                                    Button {
-                                        authManager.startBrowserAuth(for: provider.id)
-                                    } label: {
-                                        Label("🌐 浏览器登录授权", systemImage: "globe")
-                                            .font(.system(size: Theme.Typography.body, weight: .medium))
-                                    }
-                                    .buttonStyle(.borderedProminent)
-
-                                    if let local = detected {
-                                        Button {
-                                            authManager.importDetectedAccount(for: provider.id)
-                                        } label: {
-                                            Label("触控 ID 导入 (\(local.displayName))", systemImage: "touchid")
-                                                .font(.system(size: Theme.Typography.body))
-                                        }
-                                        .buttonStyle(.bordered)
-                                    }
-                                }
-
-                                if case .failed(let err) = authState {
-                                    Text(err)
+                                Image(systemName: "person.crop.circle")
+                                    .foregroundColor(.secondary)
+                                Text(acc.displayName)
+                                    .font(.system(size: Theme.Typography.body))
+                                if !acc.email.isEmpty {
+                                    Text("(\(acc.email))")
                                         .font(.system(size: Theme.Typography.footnote))
-                                        .foregroundColor(Theme.Colors.statusWarning)
+                                        .foregroundColor(.secondary)
                                 }
+                                Spacer()
+                                Text(formatAuthMethodTag(acc.authMethod))
+                                    .font(.system(size: Theme.Typography.micro))
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.15))
+                                    .cornerRadius(4)
                             }
                         }
-                        .padding(.vertical, 2)
                     }
+                    .padding(.vertical, 4)
 
                     Divider().padding(.vertical, 2)
                 }
 
-                // B. 方式 ①：手动填入 API Key / Token (通用保底)
-                VStack(alignment: .leading, spacing: 6) {
-                    if !storedKey.isEmpty {
-                        HStack {
-                            Text("已保存凭据 ····\(String(storedKey.suffix(4)))")
+                // 2. 外部交互/免密导入方式 (浏览器登录 / 触控 ID 导入)
+                if !browserMethods.isEmpty || (!biometricMethods.isEmpty && detected != nil) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        if case .authorizing(let msg) = authState {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text(msg)
+                                    .font(.system(size: Theme.Typography.body))
+                                    .foregroundColor(.primary)
+                                Spacer()
+                                Button("取消") {
+                                    authManager.cancelAuth(for: provider.id)
+                                }
                                 .font(.system(size: Theme.Typography.footnote))
-                                .foregroundColor(.secondary)
-                            Spacer()
-                            if provider.type != .qoderNative && provider.type != .antigravityNative {
+                            }
+                            .padding(.vertical, 4)
+                        } else {
+                            HStack(spacing: 10) {
+                                ForEach(browserMethods, id: \.displayName) { bm in
+                                    Button {
+                                        authManager.startBrowserAuth(for: provider, method: bm)
+                                    } label: {
+                                        Label(bm.displayName, systemImage: "globe")
+                                            .font(.system(size: Theme.Typography.body, weight: .medium))
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                }
+
+                                if let local = detected, let bioMethod = biometricMethods.first {
+                                    Button {
+                                        authManager.importDetectedAccount(for: provider, method: bioMethod)
+                                    } label: {
+                                        Label("触控 ID 导入 (\(local.displayName))", systemImage: "touchid")
+                                            .font(.system(size: Theme.Typography.body))
+                                    }
+                                    .buttonStyle(.bordered)
+                                }
+                            }
+
+                            if case .failed(let err) = authState {
+                                Text(err)
+                                    .font(.system(size: Theme.Typography.footnote))
+                                    .foregroundColor(Theme.Colors.statusWarning)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+
+                    if primaryAPIKeyMethod != nil {
+                        Divider().padding(.vertical, 2)
+                    }
+                }
+
+                // 3. 手工录入 API Key / 凭据 (纯策略化驱动)
+                if let keyMethod = primaryAPIKeyMethod {
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !storedKey.isEmpty {
+                            HStack {
+                                Text("已保存凭据 ····\(String(storedKey.suffix(4)))")
+                                    .font(.system(size: Theme.Typography.footnote))
+                                    .foregroundColor(.secondary)
+                                Spacer()
                                 Button("清除") {
                                     providerStore.clearAPIKey(for: provider.id)
+                                    providerStore.clearAccountInfo(for: provider.id)
                                     apiKeyInput = ""
                                 }
                                 .font(.system(size: Theme.Typography.footnote))
                             }
+                            SecureField("输入新的密钥以替换", text: $apiKeyInput)
+                                .textFieldStyle(.roundedBorder)
+                        } else {
+                            SecureField(keyMethod.placeholder, text: $apiKeyInput)
+                                .textFieldStyle(.roundedBorder)
                         }
-                        SecureField("输入新的密钥以替换", text: $apiKeyInput)
-                            .textFieldStyle(.roundedBorder)
-                    } else {
-                        SecureField(apiKeyPlaceholder(for: provider.type), text: $apiKeyInput)
-                            .textFieldStyle(.roundedBorder)
-                    }
 
-                    let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !trimmedKey.isEmpty {
-                        HStack {
-                            Spacer()
-                            Button("保存手动密钥") {
-                                providerStore.setAPIKey(trimmedKey, for: provider.id)
-                                let acc = ProviderAccountInfo(
-                                    displayName: "手动凭据",
-                                    email: "",
-                                    avatarURL: nil,
-                                    authMethod: "manual",
-                                    authorizedAt: Date(),
-                                    refreshToken: nil
-                                )
-                                providerStore.saveAccountInfo(acc, for: provider.id)
-                                apiKeyInput = ""
+                        let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmedKey.isEmpty {
+                            HStack {
+                                Spacer()
+                                Button("保存手动密钥") {
+                                    providerStore.setAPIKey(trimmedKey, for: provider.id)
+                                    let acc = ProviderAccountInfo(
+                                        displayName: "手动凭据",
+                                        email: "",
+                                        avatarURL: nil,
+                                        authMethod: "manual",
+                                        authorizedAt: Date(),
+                                        refreshToken: nil
+                                    )
+                                    providerStore.saveAccountInfo(acc, for: provider.id)
+                                    apiKeyInput = ""
+                                }
+                                .font(.system(size: Theme.Typography.body, weight: .medium))
                             }
-                            .font(.system(size: Theme.Typography.body, weight: .medium))
                         }
                     }
                 }
             } header: {
                 Text("认证与连接凭据")
             } footer: {
-                Text(apiKeyFooter(for: provider.type))
+                let methods = authManager.authMethods(for: provider)
+                if let keyMethod = methods.compactMap({ $0 as? StandardAPIKeyAuthMethod }).first {
+                    Text(keyMethod.footerText)
+                } else {
+                    Text("连接凭据仅保存在本机受保护目录，绝不上云。")
+                }
             }
 
             // 模型能力池
@@ -454,7 +471,7 @@ struct AIServiceSettingsForm: View {
                             Image(systemName: a.iconName)
                             Text(a.name)
                             if a.isVisualDelegate {
-                                Text("[视觉担当]").foregroundColor(.secondary)
+                                Text("[识图]").foregroundColor(.secondary)
                             }
                         }
                         .tag(a.id)
@@ -466,7 +483,7 @@ struct AIServiceSettingsForm: View {
                         addNewAgent()
                     }
                     Divider()
-                    Button("重置为官方默认团队 (Orchestrator, Observer, Coder, Oracle, Librarian)") {
+                    Button("重置为官方默认团队 (全能助理、识图助理、代码专家、深度思考、资料检索、系统管家)") {
                         agentStore.resetToDefaults()
                     }
                 } label: {
@@ -495,7 +512,7 @@ struct AIServiceSettingsForm: View {
                         .cornerRadius(6)
 
                     // 预置常用图标按钮组
-                    ForEach(["sparkles", "eye.fill", "curlybraces", "brain.head.profile", "books.vertical.fill", "bolt.fill"], id: \.self) { sym in
+                    ForEach(["sparkles", "eye", "curlybraces", "brain.head.profile", "books.vertical", "macbook.and.iphone"], id: \.self) { sym in
                         Button {
                             var copy = agent
                             copy.iconName = sym
@@ -787,25 +804,14 @@ struct AIServiceSettingsForm: View {
         }
     }
 
-    private func apiKeyPlaceholder(for type: AIProviderType) -> String {
-        switch type {
-        case .openAICompatible: return "输入 Bearer API Key"
-        case .qoderNative: return "输入 Qoder PAT 访问令牌 (pt-...)"
-        case .antigravityNative: return "输入 Google AI Studio API Key 或 OAuth Token"
-        case .nativeBridge: return "输入本地代理鉴权密钥 (如有)"
+    private func formatAuthMethodTag(_ rawMethod: String) -> String {
+        switch rawMethod {
+        case "browser": return "浏览器授权"
+        case "biometric_import", "auto_detect": return "触控 ID 导入"
+        default: return "手动凭据"
         }
     }
 
-    private func apiKeyFooter(for type: AIProviderType) -> String {
-        switch type {
-        case .qoderNative:
-            return "支持通过浏览器登录授权、导入本机已登录凭据或手动填入访问令牌。"
-        case .antigravityNative:
-            return "支持通过浏览器登录授权、导入本机已登录凭据或手动填入 API Key。"
-        default:
-            return "连接凭据仅保存在本机，不会上传或云端同步。"
-        }
-    }
 
     // MARK: - Provider Bindings
 

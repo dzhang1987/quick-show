@@ -202,3 +202,28 @@ extension AIProvider {
         )
     }
 }
+
+// MARK: - 官方服务商品牌 Logo 图标 (SF Symbols 单色矢量)
+extension AIProvider {
+    /// 服务商官方品牌/分类对应的单色 SF Symbol 矢量图标
+    var iconName: String {
+        let lowerId = id.lowercased()
+        let lowerName = name.lowercased()
+        if lowerId.contains("alibaba") || lowerName.contains("阿里") || lowerName.contains("dashscope") || lowerName.contains("通义") {
+            return "cloud"
+        } else if lowerId.contains("qoder") || lowerName.contains("qoder") {
+            return "cube"
+        } else if lowerId.contains("antigravity") || lowerId.contains("gemini") || lowerName.contains("google") {
+            return "atom"
+        } else if lowerId.contains("openai") || lowerName.contains("openai") {
+            return "network"
+        } else if lowerId.contains("deepseek") || lowerName.contains("deepseek") {
+            return "brain"
+        } else if lowerId.contains("ollama") || lowerName.contains("ollama") || lowerName.contains("本地") {
+            return "desktopcomputer"
+        } else {
+            return "server.rack"
+        }
+    }
+}
+

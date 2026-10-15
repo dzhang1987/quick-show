@@ -8,6 +8,42 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
 
     init() {}
 
+    func supportedAuthMethods(for provider: AIProvider) -> [any AIAuthMethod] {
+        if provider.id == "alibaba" {
+            return [
+                DefaultAPIKeyAuthMethod(
+                    providerId: "alibaba",
+                    displayName: "DashScope API Key",
+                    detailDescription: "阿里云百炼 (DashScope) API Key",
+                    placeholder: "sk-...",
+                    footerText: "密钥仅保存在本机受保护目录，绝不上云"
+                ),
+                AlibabaBiometricAuthMethod()
+            ]
+        } else if provider.id == "openai" {
+            return [
+                DefaultAPIKeyAuthMethod(
+                    providerId: "openai",
+                    displayName: "OpenAI API Key",
+                    detailDescription: "OpenAI 官方 API Key",
+                    placeholder: "sk-...",
+                    footerText: "密钥仅保存在本机受保护目录，绝不上云"
+                ),
+                OpenAIBiometricAuthMethod()
+            ]
+        } else {
+            return [
+                DefaultAPIKeyAuthMethod(
+                    providerId: provider.id,
+                    displayName: "\(provider.name) API Key",
+                    detailDescription: "配置 \(provider.name) API Key",
+                    placeholder: "输入 API Key",
+                    footerText: "密钥仅保存在本机受保护目录，绝不上云"
+                )
+            ]
+        }
+    }
+
     func stream(
         provider: AIProvider,
         model: AIModelSpec,

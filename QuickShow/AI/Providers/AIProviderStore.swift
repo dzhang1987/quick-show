@@ -91,10 +91,6 @@ final class AIProviderStore: ObservableObject {
     func apiKey(for providerId: String) -> String? {
         guard let url = keyFileURL(for: providerId),
               FileManager.default.fileExists(atPath: url.path) else {
-            // 兜底：若是 alibaba 且独立 key 尚未写入，尝试读取旧版全局 key
-            if providerId == "alibaba" {
-                return loadLegacyApiKey()
-            }
             return nil
         }
         tightenPermissionsIfNeeded(at: url)
@@ -167,43 +163,42 @@ final class AIProviderStore: ObservableObject {
         }
     }
 
-    private func loadLegacyApiKey() -> String? {
+    // MARK: - 结构化持久化 (providers.json 单一真源，脱离 UserDefaults)
+
+    private var providersFileURL: URL? {
         guard let appSupport = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-        let legacy = appSupport
-            .appendingPathComponent("QuickShow", isDirectory: true)
-            .appendingPathComponent("apikey")
-        if let data = try? Data(contentsOf: legacy),
-           let str = String(data: data, encoding: .utf8) {
-            let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { return trimmed }
+        let dir = appSupport.appendingPathComponent("QuickShow", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }
-        // 再兜底：读取 OpenCode auth.json 中的 alibaba-cn key
-        return loadOpenCodeAlibabaKey()
+        return dir.appendingPathComponent("providers.json")
     }
-
-    private func loadOpenCodeAlibabaKey() -> String? {
-        let home = NSHomeDirectory()
-        let authPath = "\(home)/.local/share/opencode/auth.json"
-        guard let data = try? Data(contentsOf: URL(fileURLWithPath: authPath)),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let ali = json["alibaba-cn"] as? [String: Any],
-              let key = ali["key"] as? String else {
-            return nil
-        }
-        return key.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    // MARK: - 持久化与迁移
 
     private func saveProviders() {
-        if let data = try? JSONEncoder().encode(providers) {
-            UserDefaults.standard.set(data, forKey: Keys.providersData)
+        guard let url = providersFileURL else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(providers) {
+            try? data.write(to: url, options: .atomic)
+            tightenPermissionsIfNeeded(at: url)
         }
     }
 
     private func loadProviders() {
-        if let data = UserDefaults.standard.data(forKey: Keys.providersData),
+        var rawData: Data? = nil
+        var needsMigrationFromUserDefaults = false
+
+        if let fileURL = providersFileURL,
+           FileManager.default.fileExists(atPath: fileURL.path),
+           let fileData = try? Data(contentsOf: fileURL) {
+            rawData = fileData
+        } else if let udData = UserDefaults.standard.data(forKey: Keys.providersData) {
+            rawData = udData
+            needsMigrationFromUserDefaults = true
+        }
+
+        if let data = rawData,
            let loaded = try? JSONDecoder().decode([AIProvider].self, from: data),
            !loaded.isEmpty {
             var updated = loaded
@@ -246,11 +241,14 @@ final class AIProviderStore: ObservableObject {
             }
             self.providers = updated
             saveProviders()
+            if needsMigrationFromUserDefaults {
+                UserDefaults.standard.removeObject(forKey: Keys.providersData)
+            }
             self.selectedProviderId = UserDefaults.standard.string(forKey: Keys.selectedProviderId) ?? loaded.first?.id ?? "alibaba"
             return
         }
 
-        // 首次加载：执行自动迁移与 OpenCode 默认值同步
+        // 首次加载：执行自动迁移与初始化默认值
         migrateAndSeedDefaults()
     }
 
@@ -284,11 +282,6 @@ final class AIProviderStore: ObservableObject {
             }
         }
         seeded.append(alibaba)
-
-        // 迁移/写入 Alibaba 的 API Key
-        if let aliKey = loadLegacyApiKey() {
-            setAPIKey(aliKey, for: "alibaba")
-        }
 
         // 2. 预设 OpenAI
         seeded.append(AIProvider.openAIPreset())

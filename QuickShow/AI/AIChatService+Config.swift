@@ -216,57 +216,47 @@ extension AIChatService {
             .appendingPathComponent("apikey")
     }
 
-    /// 读取 API Key（对外兼容旧属性名）：文件 → 旧 Keychain 一次性迁移 → 环境变量兜底。
+    /// 读取 API Key（单一真源收敛：统一委派给 AIProviderStore 管理 alibaba 默认服务商）
     var apiKey: String? { loadAPIKey() }
 
-    /// 读取 API Key。文件不存在时尝试从旧 Keychain 条目搬家；任何异常静默返回 nil，不阻塞主流程。
+    /// 读取 API Key。平滑迁移存量 QuickShow/apikey 文件，统一归入 keys/alibaba.key；环境变量作为无感知兜底。
     func loadAPIKey() -> String? {
+        // 1. 若旧版 apikey 文件仍存在，执行一次性平滑迁移至 AIProviderStore (keys/alibaba.key)
         if let url = apiKeyFileURL, FileManager.default.fileExists(atPath: url.path) {
-            // 读取前顺手把过宽权限收紧到 0600。
             tightenPermissionsIfNeeded(at: url)
             if let data = try? Data(contentsOf: url),
                let key = String(data: data, encoding: .utf8) {
                 let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty { return trimmed }
+                if !trimmed.isEmpty {
+                    AIProviderStore.shared.setAPIKey(trimmed, for: "alibaba")
+                }
             }
-        } else if let migrated = migrateLegacyKeychainKeyIfNeeded() {
-            // 文件尚不存在：从旧 Keychain 搬家（v1.5.2 前旧版本存量数据），成功后直接返回。
-            return migrated
+            try? FileManager.default.removeItem(at: url)
         }
 
-        // 环境变量兜底：仅内存注入，绝不落盘。
-        if let envKey = environmentValue("QUICKSHOW_AI_API_KEY") { return envKey }
+        // 2. 统一从 AIProviderStore 获取当前默认 alibaba 的密钥
+        if let key = AIProviderStore.shared.apiKey(for: "alibaba"), !key.isEmpty {
+            return key
+        }
+
+        // 3. 环境变量兜底：仅内存注入，绝不落盘。
+        if let envKey = environmentValue("QUICKSHOW_AI_API_KEY") ?? environmentValue("DASHSCOPE_API_KEY") {
+            return envKey
+        }
         return nil
     }
 
-    /// 保存 API Key：原子写文件并设 0600 权限。任何错误静默忽略。
+    /// 保存 API Key：统一委派给 AIProviderStore 并写入 keys/alibaba.key
     func saveAPIKey(_ key: String) {
-        guard let url = apiKeyFileURL else { return }
-        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8) else { return }
-
-        let fileManager = FileManager.default
-        let directory = url.deletingLastPathComponent()
-        do {
-            // 目录不存在则创建并设 0700（已存在则复用，不覆盖其权限）。
-            if !fileManager.fileExists(atPath: directory.path) {
-                try fileManager.createDirectory(
-                    at: directory,
-                    withIntermediateDirectories: true,
-                    attributes: [.posixPermissions: 0o700]
-                )
-            }
-            // 原子写：先写临时文件再替换，避免中途崩溃留下半截内容。
-            try data.write(to: url, options: .atomic)
-            // 文件权限收紧为仅当前用户可读写。
-            try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        } catch {
-            logger.warning("API Key 写入失败：\(error.localizedDescription)")
+        AIProviderStore.shared.setAPIKey(key, for: "alibaba")
+        if let url = apiKeyFileURL {
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
-    /// 清除 API Key：删文件，并尽力删除旧 Keychain 遗留条目（错误忽略）。
+    /// 清除 API Key：统一清除 AIProviderStore 存储
     func clearAPIKey() {
+        AIProviderStore.shared.clearAPIKey(for: "alibaba")
         if let url = apiKeyFileURL {
             try? FileManager.default.removeItem(at: url)
         }

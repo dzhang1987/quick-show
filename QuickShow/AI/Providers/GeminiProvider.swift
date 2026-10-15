@@ -10,6 +10,20 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
 
     init() {}
 
+    func supportedAuthMethods(for provider: AIProvider) -> [any AIAuthMethod] {
+        [
+            DefaultAPIKeyAuthMethod(
+                providerId: provider.id,
+                displayName: "Gemini API Key",
+                detailDescription: "直接输入 Google AI Studio API Key",
+                placeholder: "AIzaSy...",
+                footerText: "密钥仅保存在本机受保护目录，绝不上云"
+            ),
+            AntigravityBiometricAuthMethod(),
+            AntigravityGooglePKCEMethod()
+        ]
+    }
+
     func stream(
         provider: AIProvider,
         model: AIModelSpec,

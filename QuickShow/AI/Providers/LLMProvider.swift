@@ -3,10 +3,13 @@
 
 import Foundation
 
-/// 大模型服务提供商通用协议
+/// 大模型服务提供商通用协议 (聚合通信推理与多授权策略)
 protocol LLMProvider: Sendable {
     /// 该 Provider 所对应的服务商类型
     var providerType: AIProviderType { get }
+
+    /// 该 Provider 针对具体配置支持的授权方式列表 (1 对多聚合，一等公民)
+    func supportedAuthMethods(for provider: AIProvider) -> [any AIAuthMethod]
 
     /// 发起流式推理请求，向外部统一输出打字机文本、思考流、工具调用与 Token 用量
     func stream(
@@ -50,4 +53,16 @@ final class LLMProviderRegistry {
     func provider(for type: AIProviderType) -> LLMProvider {
         providers[type] ?? OpenAIProvider()
     }
+
+    /// 获取所有注册的 Provider 实现
+    func allProviders() -> [LLMProvider] {
+        Array(providers.values)
+    }
+
+    /// 根据 provider 实体查询支持的所有授权方式
+    func authMethods(for provider: AIProvider) -> [any AIAuthMethod] {
+        let impl = self.provider(for: provider.type)
+        return impl.supportedAuthMethods(for: provider)
+    }
 }
+
