@@ -1,6 +1,6 @@
 // AntigravityCloudCodeAdapter: 原生 Swift 直连 Google Cloud Code PA (Antigravity 官方云端网关) SSE 通道。
 // 彻底剥离 agy CLI 本地进程 5.5 秒冷启动开销，首字上屏降至 1~2 秒，原生直通服务端 candidate.parts.thought 结构化思考流。
-// 基于系统钥匙串动态感知活跃凭据，遇到 HTTP 401 自动检测钥匙串更新并执行自愈重试。
+// 基于 Google OAuth 自动刷新机制与钥匙串协同：遇 Token 过期或 HTTP 401 自动使用 refresh_token 秒级刷新自愈。
 // 针对 SSE 流式协议进行定制优化：历史上下文严格交替归一合并，杜绝 MALFORMED_FUNCTION_CALL；独立专用会话隔离管理。
 
 import Foundation
@@ -11,8 +11,23 @@ enum AntigravityCloudCodeAdapter {
     private static let logger = Logger(subsystem: "cn.chiproad.QuickShow", category: "AntigravityDirect")
     private static let endpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
 
+    // MARK: - Google OAuth 与云端网关常量配置
+    static let oauthTokenEndpoint = "https://oauth2.googleapis.com/token"
+    static let oauthClientId = "PLACEHOLDER_OAUTH_CLIENT_ID"
+    static let oauthClientSecret = "PLACEHOLDER_OAUTH_CLIENT_SECRET"
+    private static let loadCodeAssistEndpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+    private static let fallbackProjectId = "aicode-consumers"
+    private static let userAgent = "antigravity/2.0.6 darwin/arm64"
+
+    private static let lock = NSLock()
     /// 内存中缓存的最新有效 Token
     private static var activeAccessToken: String?
+    /// Token 过期时间
+    private static var tokenExpiryDate: Date?
+    /// 活跃的 refresh_token
+    private static var activeRefreshToken: String?
+    /// 缓存的 Project ID
+    private static var cachedProjectId: String?
 
     /// 专用于 SSE 流式长连接的 URLSession
     private static let directSession: URLSession = {
@@ -57,43 +72,208 @@ enum AntigravityCloudCodeAdapter {
         fetchFileTokenBundle()?.accessToken
     }
 
-    /// 统一解析可用的 Access Token (单一真源：优先 QuickShow 专属持久化密钥，内存活跃缓存协同，绝不主动刺探系统钥匙串)
-    static func resolveAccessToken(explicitKey: String?) -> String? {
-        // 0. 优先使用最近生效的内存 Token
-        if let active = activeAccessToken, !active.isEmpty {
-            return active
+    /// 同步回写本地独立凭据文件 (~/.gemini/jetski-standalone-oauth-token)，让系统内其它协同工具同步受益
+    static func updateLocalJetskiTokenFile(accessToken: String, expiresIn: Double) {
+        let path = "\(NSHomeDirectory())/.gemini/jetski-standalone-oauth-token"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var tokenObj = json["token"] as? [String: Any] else {
+            return
+        }
+        tokenObj["access_token"] = accessToken
+        let expiryDate = Date().addingTimeInterval(expiresIn)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        tokenObj["expiry"] = formatter.string(from: expiryDate)
+        json["token"] = tokenObj
+        if let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+            try? updatedData.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+
+    /// 使用 refresh_token 向 Google OAuth 端点刷新最新的 access_token
+    @discardableResult
+    static func refreshAccessToken(force: Bool = false) async -> String? {
+        lock.lock()
+        // 若未强制刷新，且当前 Token 距离过期超过 60 秒，直接复用
+        if !force, let token = activeAccessToken, let expiry = tokenExpiryDate, expiry > Date().addingTimeInterval(60) {
+            lock.unlock()
+            return token
+        }
+        let existingRefreshToken = activeRefreshToken
+        lock.unlock()
+
+        // 尝试从多渠道提取可用的 refresh_token
+        var rToken: String? = existingRefreshToken
+        if rToken == nil || rToken?.isEmpty == true {
+            rToken = fetchFileTokenBundle()?.refreshToken
+        }
+        if rToken == nil || rToken?.isEmpty == true {
+            let saved = await MainActor.run { AIProviderStore.shared.accountInfo(for: "antigravity") }
+            rToken = saved?.refreshToken
         }
 
-        // 1. 优先使用 QuickShow 自身持久化保存的显式 Key (用户配置或 Touch ID 导入并已安全落盘至 keys/antigravity.key)
+        guard let validRefreshToken = rToken, !validRefreshToken.isEmpty else {
+            logger.warning("[AntigravityDirect] 未找到可用的 refresh_token，无法执行自动刷新")
+            return nil
+        }
+
+        guard let url = URL(string: oauthTokenEndpoint) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+
+        let params: [String: String] = [
+            "client_id": oauthClientId,
+            "client_secret": oauthClientSecret,
+            "grant_type": "refresh_token",
+            "refresh_token": validRefreshToken
+        ]
+        let bodyString = params.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }.joined(separator: "&")
+        request.httpBody = bodyString.data(using: .utf8)
+        request.timeoutInterval = 10
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let newAccessToken = json["access_token"] as? String, !newAccessToken.isEmpty else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                logger.error("[AntigravityDirect] OAuth Token 刷新失败，HTTP: \(status)")
+                return nil
+            }
+
+            let expiresIn = (json["expires_in"] as? Double) ?? 3600
+            let newExpiry = Date().addingTimeInterval(expiresIn - 60)
+
+            lock.lock()
+            activeAccessToken = newAccessToken
+            tokenExpiryDate = newExpiry
+            activeRefreshToken = validRefreshToken
+            lock.unlock()
+
+            logger.info("[AntigravityDirect] OAuth Token 自动刷新成功，有效时长: \(expiresIn)s")
+
+            // 安全回写本地凭据与持久化存储
+            updateLocalJetskiTokenFile(accessToken: newAccessToken, expiresIn: expiresIn)
+            await MainActor.run {
+                AIProviderStore.shared.setAPIKey(newAccessToken, for: "antigravity")
+                if var account = AIProviderStore.shared.accountInfo(for: "antigravity") {
+                    account.refreshToken = validRefreshToken
+                    AIProviderStore.shared.saveAccountInfo(account, for: "antigravity")
+                }
+            }
+
+            return newAccessToken
+        } catch {
+            logger.error("[AntigravityDirect] 刷新 OAuth Token 网络异常: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// 确保返回一个最新有效的 Access Token（若无有效 Token 或已过期，自动执行刷新自愈）
+    static func ensureFreshAccessToken(explicitKey: String?) async -> String? {
         let trimmed = explicitKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmed.isEmpty && !trimmed.hasPrefix("AIzaSy") {
-            let token: String
-            if trimmed.hasPrefix("Bearer ") {
-                token = String(trimmed.dropFirst(7))
-            } else {
-                token = trimmed
+            let token = trimmed.hasPrefix("Bearer ") ? String(trimmed.dropFirst(7)) : trimmed
+            lock.lock()
+            if let active = activeAccessToken, active == token, let expiry = tokenExpiryDate, expiry > Date().addingTimeInterval(60) {
+                lock.unlock()
+                return active
             }
+            lock.unlock()
+        }
+
+        if let bundle = fetchFileTokenBundle() {
+            lock.lock()
+            if let exp = bundle.expiryDate, exp > Date().addingTimeInterval(60) {
+                activeAccessToken = bundle.accessToken
+                tokenExpiryDate = exp
+                activeRefreshToken = bundle.refreshToken
+                lock.unlock()
+                return bundle.accessToken
+            }
+            if let r = bundle.refreshToken {
+                activeRefreshToken = r
+            }
+            lock.unlock()
+        }
+
+        lock.lock()
+        if let active = activeAccessToken, let expiry = tokenExpiryDate, expiry > Date().addingTimeInterval(60) {
+            lock.unlock()
+            return active
+        }
+        lock.unlock()
+
+        // 执行秒级自动刷新
+        return await refreshAccessToken()
+    }
+
+    /// 统一同步解析 Access Token（保底回退或显式 Key）
+    static func resolveAccessToken(explicitKey: String?) -> String? {
+        lock.lock()
+        if let active = activeAccessToken, !active.isEmpty {
+            lock.unlock()
+            return active
+        }
+        lock.unlock()
+
+        let trimmed = explicitKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty && !trimmed.hasPrefix("AIzaSy") {
+            let token = trimmed.hasPrefix("Bearer ") ? String(trimmed.dropFirst(7)) : trimmed
             if !token.isEmpty {
+                lock.lock()
                 activeAccessToken = token
+                lock.unlock()
                 return token
             }
         }
 
-        // 2. 兜底读取本地独立凭据文件 (~/.gemini/jetski-standalone-oauth-token)
         if let fileToken = fetchFileToken() {
+            lock.lock()
             activeAccessToken = fileToken
+            lock.unlock()
             return fileToken
         }
 
         return nil
     }
 
-    /// 解析当前 Google Cloud Project ID
-    static func resolveProjectId() -> String {
+    /// 动态解析当前 Google Cloud Project ID
+    static func resolveProjectId(token: String) async -> String {
         let env = ProcessInfo.processInfo.environment
         if let p = env["GOOGLE_CLOUD_PROJECT"], !p.isEmpty { return p }
         if let p = env["GOOGLE_CLOUD_PROJECT_ID"], !p.isEmpty { return p }
-        return "363803525110"
+
+        lock.lock()
+        if let cached = cachedProjectId, !cached.isEmpty {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        guard let url = URL(string: loadCodeAssistEndpoint) else { return fallbackProjectId }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.httpBody = "{}".data(using: .utf8)
+        req.timeoutInterval = 5
+
+        if let (data, response) = try? await URLSession.shared.data(for: req),
+           let http = response as? HTTPURLResponse, http.statusCode == 200,
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let proj = json["cloudaicompanionProject"] as? String, !proj.isEmpty {
+            lock.lock()
+            cachedProjectId = proj
+            lock.unlock()
+            logger.info("[AntigravityDirect] 动态解析 Cloud Code Project 成功: \(proj)")
+            return proj
+        }
+
+        return fallbackProjectId
     }
 
     // MARK: - 模型与思考强度映射
@@ -102,23 +282,18 @@ enum AntigravityCloudCodeAdapter {
     static func resolveModelId(_ id: String, effort: ThinkingLevel?) -> String {
         let clean = id.replacingOccurrences(of: "antigravity/", with: "")
         switch clean {
-        case "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash":
-            switch effort {
-            case .high: return "gemini-3.6-flash-high"
-            case .medium: return "gemini-3.6-flash-medium"
-            case .low, .off: return "gemini-3.6-flash-low"
-            case nil: return "gemini-3.6-flash-high"
-            }
-        case "gemini-3.1-pro", "gemini-2.5-pro":
-            switch effort {
-            case .low, .off: return "gemini-3.1-pro-low"
-            default: return "gemini-pro-agent" // gemini-3.1-pro-high 会报 400 INVALID_ARGUMENT，pro 模型统一映射为 gemini-pro-agent
-            }
-        case "claude-opus", "claude-opus-4-6":
+        case "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.8-flash-tiered",
+             "gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low":
+            return "gemini-3.8-flash-tiered"
+        case "gemini-3-flash", "gemini-3-flash-agent":
+            return "gemini-3-flash"
+        case "gemini-3.1-pro", "gemini-2.5-pro", "gemini-pro", "gemini-pro-agent":
+            return "gemini-3.8-flash-tiered"
+        case "claude-opus", "claude-opus-4-6", "claude-opus-4-6-thinking":
             return "claude-opus-4-6-thinking"
         case "claude-sonnet", "claude-sonnet-4-6":
             return "claude-sonnet-4-6"
-        case "gpt-oss-120b":
+        case "gpt-oss-120b", "gpt-oss-120b-medium":
             return "gpt-oss-120b-medium"
         default:
             return clean
@@ -126,7 +301,6 @@ enum AntigravityCloudCodeAdapter {
     }
 
     private static func shouldEnableThinking(for modelId: String, level: ThinkingLevel?) -> Bool {
-        // 只要用户未显式关闭思考（.off），所有 Antigravity 模型默认开启服务端原生深度思考链
         if level == .off { return false }
         return true
     }
@@ -243,8 +417,8 @@ enum AntigravityCloudCodeAdapter {
             let task = Task.detached(priority: .userInitiated) {
                 do {
                     let resolvedModel = resolveModelId(model.id, effort: options.thinkingLevel)
-                    let projectId = resolveProjectId()
                     var currentToken = initialToken
+                    let projectId = await resolveProjectId(token: currentToken)
 
                     logger.info("[AntigravityDirect] 发起原生直连请求: model=\(resolvedModel), project=\(projectId)")
 
@@ -261,12 +435,11 @@ enum AntigravityCloudCodeAdapter {
                         throw AIChatError.network("Antigravity 直连未收到 HTTP 响应")
                     }
 
-                    // 自愈机制：如果遇到 401 Unauthorized，尝试检测本地独立凭据是否已刷新并重试一次
+                    // 自愈机制：如果遇到 401 Unauthorized，调用 OAuth 端点强制刷新并重试一次
                     if http.statusCode == 401 {
-                        logger.warning("[AntigravityDirect] 收到 HTTP 401，尝试检测本地凭据文件是否已更新...")
-                        if let freshToken = fetchFileToken(), freshToken != currentToken {
+                        logger.warning("[AntigravityDirect] 收到 HTTP 401，立即执行 Token 自动刷新自愈...")
+                        if let freshToken = await refreshAccessToken(force: true) {
                             currentToken = freshToken
-                            activeAccessToken = freshToken
                             req = try buildRequest(
                                 modelId: resolvedModel,
                                 messages: messages,
@@ -278,7 +451,7 @@ enum AntigravityCloudCodeAdapter {
                             if let retryHttp = retryResponse as? HTTPURLResponse {
                                 bytes = retryBytes
                                 http = retryHttp
-                                logger.info("[AntigravityDirect] 重试完成，HTTP 状态码: \(http.statusCode)")
+                                logger.info("[AntigravityDirect] 自愈重试完成，HTTP 状态码: \(http.statusCode)")
                             }
                         }
                     }

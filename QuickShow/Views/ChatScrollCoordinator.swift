@@ -177,12 +177,28 @@ final class ChatScrollCoordinator {
     /// 命中判定与事件派发同一条 hit-test 路径：哪个会话的 scrollView 被命中，
     /// 滚轮就滚哪个、时间戳就记哪个——多会话并存路由自洽；命中坞/输入框/
     /// 隐藏会话时不记录，列表同期被动 clamp 不误判。
+    /// 命中判定与事件派发：哪个会话的滚动区被命中，滚轮就记哪个——
+    /// 1. 直接命中 NSScrollView 或其子视图；
+    /// 2. 命中悬浮在 ScrollView 上方的 overlay（如底部的输入坞 AIChatInputDock、刻度轨、导航层等）：
+    ///    光标落在消息列横向宽度与纵向投影范围内，滚轮意图均诚实归属于该会话，消除在输入框上方滑动被吞的问题。
     private func noteUserScrollWheel(_ event: NSEvent) {
         guard let window = event.window, let contentView = window.contentView,
               let hit = contentView.hitTest(event.locationInWindow) else { return }
         for (sessionId, box) in attached {
-            guard let sv = box.view, sv.window === window else { continue }
+            guard let sv = box.view, sv.window === window, sv.superview != nil, !sv.isHidden else { continue }
             if hit === sv || hit.isDescendant(of: sv) {
+                lastUserScrollWheelAt[sessionId] = Date()
+                continue
+            }
+            let svFrameInWindow = sv.convert(sv.bounds, to: nil)
+            let loc = event.locationInWindow
+            let chatColumnRect = CGRect(
+                x: svFrameInWindow.minX,
+                y: 0,
+                width: svFrameInWindow.width,
+                height: max(svFrameInWindow.maxY, contentView.bounds.height)
+            )
+            if chatColumnRect.contains(loc) {
                 lastUserScrollWheelAt[sessionId] = Date()
             }
         }
@@ -191,6 +207,13 @@ final class ChatScrollCoordinator {
     /// 底层 NSScrollView 弱引用读取（跳底直滚 / 桥可用性判定）。
     func scrollView(for sessionId: UUID) -> NSScrollView? {
         attached[sessionId]?.view
+    }
+
+    /// 主动刷新指定会话的导航显隐状态（供会话切回、挂载完成等关键时序校准几何）。
+    func refreshNavVisibility(for sessionId: UUID) {
+        if let sv = attached[sessionId]?.view {
+            updateNavVisibility(sessionId: sessionId, scrollView: sv)
+        }
     }
 
     // MARK: - 程序化滚动仲裁
@@ -233,12 +256,20 @@ final class ChatScrollCoordinator {
 
     // MARK: - 浏览导航显隐（离底距离门槛）
 
-    /// 浏览导航显隐判定：unpinned 且离底距离超过 `chatNavRevealDistance`。
-    /// 幂等写（变化才通知）。调用点：setPinned（pin 翻转）/ attach（重挂载）/
-    /// handleBoundsChanged 与 handleDocumentFrameChanged 的 defer（每次几何变化
-    /// 重估，且在 handler 内 pin 写入之后执行——读到最终态）。
+    /// 浏览导航显隐判定（第一性原理几何真源）：
+    /// 导航刻度与回底按钮的物理本质是「视口当前偏离底部的空间导航」，直接由离底距离决定：
+    /// - 离底距离超过 `chatNavRevealDistance`（120pt）即刻浮现；贴底时自然淡出。
+    /// - 几何纠偏：若视口客观上已远离底部，且非程序化执行中，自动同步解除跟随（setPinned = false），
+    ///   既消除跟随状态死锁，又彻底防止后台输出新 token 时将正在查看历史的用户视口暴力拽回。
     private func updateNavVisibility(sessionId: UUID, scrollView: NSScrollView) {
-        let visible = !isPinned(sessionId) && distanceFromBottom(scrollView) > Theme.Layout.chatNavRevealDistance
+        let dist = distanceFromBottom(scrollView)
+        let shouldReveal = dist > Theme.Layout.chatNavRevealDistance
+
+        if shouldReveal, isPinned(sessionId), !isProgrammaticActive(sessionId: sessionId) {
+            setPinned(sessionId, false)
+        }
+
+        let visible = shouldReveal
         if navVisibleStates[sessionId] != visible {
             navVisibleStates[sessionId] = visible
             navVisibilityHandlers[sessionId]?(visible)

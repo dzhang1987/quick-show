@@ -33,9 +33,8 @@ struct SessionMessageList: View {
     /// 写路径单一（见 ChatScrollCoordinator）：用户输入回底/发送跳底 → true；
     /// 用户输入离底 → false。内容高度变化永不直接改写本态。
     @State private var isPinned = true
-    /// 浏览导航（刻度轨/回底钮）显隐镜像：unpinned 且离底超过
-    /// `Theme.Layout.chatNavRevealDistance` 才为 true（真源在 coordinator，本回调同步）。
-    /// 与 isPinned（跟随态）刻意解耦：上滚一点点时跟随照常暂停，但 UI 不冒出来。
+    /// 浏览导航（刻度轨/回底钮）显隐镜像：物理几何离底超过
+    /// `Theme.Layout.chatNavRevealDistance` 才为 true（真源在 coordinator 几何计算，本回调同步）。
     @State private var isNavVisible = false
     /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
     /// 切走时作为恢复锚点，刻度轨「当前条」判定也据此定位。
@@ -238,6 +237,7 @@ struct SessionMessageList: View {
                     consumePendingJumpRequest(proxy)
                     restoreScroll(proxy)
                     withAnimation(nil) { isInitialHistoryLoad = false }
+                    scrollCoordinator.refreshNavVisibility(for: sessionId)
                 }
             }
             // 卸载：兜底保存快照 + 注销 coordinator 注册。覆盖「同 runloop 连续切换、中间会话
@@ -268,17 +268,19 @@ struct SessionMessageList: View {
             .onChange(of: isStreamingSession) { streaming in
                 if !streaming, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
-            // 活跃态切换：只保存快照，**不做任何 restoreScroll、不注销注册**。
+            // 活跃态切换：失活保存快照；激活时按当前几何位置刷新导航显隐镜像。
             // 常驻视图的 NSScrollView 偏移天然保留；激活时无条件 restoreScroll 是唯一破坏源
             // （会把用户强制拉走）。位置恢复只发生在挂载/LRU 重挂载的 onAppear。
             // pinned 会话若在隐藏期间并行生成，coordinator 的 frame 路径持续贴底。
             .onChange(of: isActive) { active in
-                if !active { saveSnapshot() }
+                if !active {
+                    saveSnapshot()
+                } else {
+                    scrollCoordinator.refreshNavVisibility(for: sessionId)
+                }
             }
-            // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套 → Dock 放大刻度轨）：
-            // 显隐 = isNavVisible（unpinned 且离底超过 chatNavRevealDistance）且活跃，
-            // 0.15s 淡入淡出；贴底或门槛内隐藏。**显隐与 pin 解耦**：上滚一点点
-            // （门槛内）跟随照常暂停但不冒 UI；越过门槛才浮现，滚回门槛内即淡出。
+            // 浏览导航：显隐 = isNavVisible（几何离底超过 chatNavRevealDistance）且活跃，
+            // 0.15s 淡入淡出；贴底或门槛内隐藏。物理几何位置驱动，真实反映视口偏离状态。
             // 两件套各自挂 overlay（浮于滚动内容之上，真穿透后内容与坞/导航同层互不遮罩）：
             // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick，
             //   静止紧凑密排、光标接近时按余弦钟形衰减放大推开（详见 ChatTickRail）；

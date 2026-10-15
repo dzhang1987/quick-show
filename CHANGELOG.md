@@ -48,8 +48,14 @@
 
 ### Fixed
 
-- **彻底修复思考卡片展开态左侧引导线无界撑大导致下半部大片浅灰留白缺陷（`AIChatMessageRow.swift`）**：
-  - 消除 `HStack` 并列排布中 `RoundedRectangle` Shape 贪婪索取无界垂直空间的底层根因，重构为 `.overlay(alignment: .leading)` 依附宿主内容卡片，彻底根除数百像素的异常空白。
+- **彻底修复 Markdown 嵌套列表在 TextKit 流式排版中换行符丢失导致子项粘连与前导圆点丢失缺陷（`MarkdownListRenderer.swift`）**：
+  - **段落隔离与独立排版**：消除原先因误判叶子节点导致子列表末尾丢失换行符 `\n` 的底层缺陷，确保每个列表条目（无论处于第几层嵌套或是否为当前子列表末尾）在 TextKit 中均保留独立的换行符与完整的 `NSParagraphStyle`；
+  - **上下文感知精准间距与尾部收敛**：引入 `hasNextListItem` 上下文链，精准识别多层嵌套列表中列表项与后续兄弟分支的连贯性，使大分支间的列表项恢复标准 10pt 留白；仅在整棵列表树的绝对末尾（且后无其他块）时收敛末尾多余换行符，彻底消除前导符被吞及缩进对齐错乱。
+
+- **优化滚动协调器几何真实驱动与命中判定扩展（`ChatScrollCoordinator.swift` / `AIChatMessageList.swift`）**：
+  - **扩大滚动命中投影**：将滚轮事件检测区域扩展覆盖输入坞等悬浮覆盖层（Overlay），彻底解决在输入框上方滑动无法滚动消息列表的问题；
+  - **几何驱动导航与解开跟随死锁**：浏览导航（刻度轨与回底按钮）显隐完全由物理几何离底距离驱动；当用户客观远离底部时自动同步解除跟随，防止后台生成新 Token 时强制拽回视口。
+
 
 - **彻底拔除 Keychain 跨应用未授权刺探与“登录钥匙串密码”弹窗骚扰（`AntigravityCloudCodeAdapter.swift` / `AIProviderStore.swift`）**：
   - **切断未授权钥匙串访问**：运行时 100% 仅访问 QuickShow 专属 0600 凭据文件，彻底拔除对系统钥匙串（`service: "gemini"`）及外部私有目录的跨进程刺探；

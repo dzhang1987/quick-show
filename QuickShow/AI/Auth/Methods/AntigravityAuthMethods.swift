@@ -197,7 +197,7 @@ final class AntigravityGooglePKCEMethod: InteractiveBrowserAuthMethod {
 
         let verifier = OAuthCrypto.generateRandomBase64URL(byteCount: 64)
         let challenge = OAuthCrypto.sha256Base64URL(from: verifier)
-        let clientId = "PLACEHOLDER_OAUTH_CLIENT_ID"
+        let clientId = AntigravityCloudCodeAdapter.oauthClientId
 
         let server = OAuthLoopbackServer()
         self.loopbackServer = server
@@ -250,7 +250,7 @@ final class AntigravityGooglePKCEMethod: InteractiveBrowserAuthMethod {
         onSuccess: @escaping @Sendable (AuthCredentials) -> Void
     ) async {
         let redirectURI = "http://127.0.0.1:\(port)/oauth2callback"
-        guard let url = URL(string: "https://oauth2.googleapis.com/token") else { return }
+        guard let url = URL(string: AntigravityCloudCodeAdapter.oauthTokenEndpoint) else { return }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
