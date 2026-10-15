@@ -79,7 +79,7 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                             model: model.id,
                             messages: messages,
                             stream: true,
-                            includeTools: true,
+                            includeTools: !options.disableTools,
                             agent: agent,
                             thinkingFields: thinkingFields
                         )

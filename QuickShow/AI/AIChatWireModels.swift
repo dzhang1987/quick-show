@@ -77,11 +77,13 @@ struct WireToolCall: Codable {
     let id: String
     let type: String
     let function: WireToolCallFunction
+    var thoughtSignature: String?
 
-    init(id: String, name: String, arguments: String) {
+    init(id: String, name: String, arguments: String, thoughtSignature: String? = nil) {
         self.id = id
         self.type = "function"
         self.function = WireToolCallFunction(name: name, arguments: arguments)
+        self.thoughtSignature = thoughtSignature
     }
 }
 

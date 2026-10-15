@@ -234,13 +234,13 @@ extension AIChatState {
 
                     // 有工具调用：先把记录挂到当前助手消息（状态逐个 pending）。
                     let records = completedCalls.map {
-                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending)
+                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending, thoughtSignature: $0.thoughtSignature)
                     }
                     self.attachToolCalls(assistantID, text: roundText, records: records, in: sessionId)
 
                     // assistant 的 tool_calls 追加到 wire（随后每条结果紧跟其后）。
                     let wireCalls = completedCalls.map {
-                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, thoughtSignature: $0.thoughtSignature)
                     }
                     wireMessages.append(ChatCompletionMessage(
                         role: "assistant",

@@ -80,7 +80,8 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                         AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
                     }
                     let agentTools = await MainActor.run {
-                        AIToolRegistry.shared.tools(for: currentAgent)
+                        if options.disableTools { return [AITool]() }
+                        return AIToolRegistry.shared.tools(for: currentAgent)
                     }
 
                     var toolsPayload: [[String: Any]] = []

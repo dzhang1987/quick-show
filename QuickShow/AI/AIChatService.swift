@@ -77,6 +77,15 @@ struct CompletedToolCall: Equatable {
     let name: String
     /// 完整参数 JSON 字符串。
     let arguments: String
+    /// Gemini 3 思考签名（多轮对话工具回传必需校验）。
+    var thoughtSignature: String?
+
+    init(id: String, name: String, arguments: String, thoughtSignature: String? = nil) {
+        self.id = id
+        self.name = name
+        self.arguments = arguments
+        self.thoughtSignature = thoughtSignature
+    }
 }
 
 /// 流式事件：文本增量（打字机）、思考过程增量或一次完整的工具调用集合。
@@ -124,11 +133,14 @@ struct AIChatRequestOptions {
     var thinkingLevel: ThinkingLevel?
     /// 会话绑定智能体 id（nil = 使用全局激活智能体）。
     var agentId: String?
+    /// 是否强制禁用工具声明（常用于收敛总结阶段）
+    var disableTools: Bool
 
-    init(modelId: String? = nil, thinkingLevel: ThinkingLevel? = nil, agentId: String? = nil) {
+    init(modelId: String? = nil, thinkingLevel: ThinkingLevel? = nil, agentId: String? = nil, disableTools: Bool = false) {
         self.modelId = modelId
         self.thinkingLevel = thinkingLevel
         self.agentId = agentId
+        self.disableTools = disableTools
     }
 }
 

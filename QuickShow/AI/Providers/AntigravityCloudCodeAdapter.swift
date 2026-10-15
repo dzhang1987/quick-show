@@ -28,7 +28,20 @@ enum AntigravityCloudCodeAdapter {
     private static var activeRefreshToken: String?
     /// 缓存的 Project ID
     private static var cachedProjectId: String?
+    /// 缓存每个 toolCallId 对应的 Gemini 3 thoughtSignature（跨轮回传必需）
+    private static var callSignatures: [String: String] = [:]
 
+    static func saveSignature(callId: String, signature: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        callSignatures[callId] = signature
+    }
+
+    static func resolveCachedSignature(for callId: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return callSignatures[callId]
+    }
     /// 专用于 SSE 流式长连接的 URLSession
     private static let directSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -307,12 +320,23 @@ enum AntigravityCloudCodeAdapter {
 
     // MARK: - 请求构造与流式直连
 
+    /// 根据 callId 溯源对应调用的工具名称（主要用于将 toolResult 映射为 Gemini 的 functionResponse）
+    private static func resolveToolName(for callId: String, in messages: [ChatCompletionMessage]) -> String {
+        for msg in messages {
+            if let calls = msg.toolCalls, let match = calls.first(where: { $0.id == callId }) {
+                return match.function.name
+            }
+        }
+        return "launch_subagents"
+    }
+
     static func buildRequest(
         modelId: String,
         messages: [ChatCompletionMessage],
         options: AIChatRequestOptions,
         token: String,
-        projectId: String
+        projectId: String,
+        tools: [AITool] = []
     ) throws -> URLRequest {
         guard let url = URL(string: endpoint) else {
             throw AIChatError.network("无效的 Antigravity 直连端点: \(endpoint)")
@@ -326,6 +350,19 @@ enum AntigravityCloudCodeAdapter {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("antigravity/2.0.6 darwin/arm64", forHTTPHeaderField: "User-Agent")
 
+        // 1. 提取当前启用的工具并映射为 Gemini function_declarations 结构
+        var geminiTools: [[String: Any]] = []
+        if !tools.isEmpty {
+            let declarations = tools.map { tool -> [String: Any] in
+                [
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parametersSchema
+                ]
+            }
+            geminiTools.append(["function_declarations": declarations])
+        }
+
         var normalizedContents: [[String: Any]] = []
         var systemParts: [[String: Any]] = []
 
@@ -337,9 +374,38 @@ enum AntigravityCloudCodeAdapter {
                 continue
             }
 
+            // 处理工具执行结果回传（role == "tool"）
+            if msg.role == "tool" {
+                let toolCallId = msg.toolCallId ?? ""
+                let contentText = msg.content?.plainText ?? ""
+                let callName = resolveToolName(for: toolCallId, in: messages)
+                var responseObj: [String: Any] = ["result": contentText]
+                if let data = contentText.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    responseObj = json
+                }
+                let toolPart: [String: Any] = [
+                    "functionResponse": [
+                        "name": callName,
+                        "response": responseObj
+                    ]
+                ]
+                // Gemini 要求 functionResponse 归属于 user 角色
+                let role = "user"
+                if let last = normalizedContents.last, (last["role"] as? String) == role {
+                    var mergedParts = last["parts"] as? [[String: Any]] ?? []
+                    mergedParts.append(toolPart)
+                    normalizedContents[normalizedContents.count - 1]["parts"] = mergedParts
+                } else {
+                    normalizedContents.append(["role": role, "parts": [toolPart]])
+                }
+                continue
+            }
+
             let role = (msg.role == "assistant") ? "model" : "user"
             var parts: [[String: Any]] = []
 
+            // 普通正文或图片
             if let content = msg.content {
                 switch content {
                 case .text(let txt):
@@ -364,11 +430,33 @@ enum AntigravityCloudCodeAdapter {
                 }
             }
 
+            // assistant 消息如果包含工具调用：按 Gemini 规范转为 functionCall 并附带 thoughtSignature
+            if msg.role == "assistant", let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
+                for call in toolCalls {
+                    var fc: [String: Any] = [
+                        "name": call.function.name,
+                        "id": call.id
+                    ]
+                    var argsObj: [String: Any] = [:]
+                    if let data = call.function.arguments.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        argsObj = parsed
+                    }
+                    fc["args"] = argsObj
+
+                    var callPart: [String: Any] = ["functionCall": fc]
+                    let sig = call.thoughtSignature ?? resolveCachedSignature(for: call.id)
+                    if let sig, !sig.isEmpty {
+                        callPart["thoughtSignature"] = sig
+                    }
+                    parts.append(callPart)
+                }
+            }
+
             // 过滤空消息（例如截断残留或异常助手空轮次）
             guard !parts.isEmpty else { continue }
 
             // 关键合规修复：Gemini 要求 role 严格交替 (user -> model -> user -> model)。
-            // 若历史消息存在连续相同角色（例如连续两次 user 提问或空轮次被忽略后形成的同角色），直接将其 parts 合并为一个 turn，彻底消除 MALFORMED_FUNCTION_CALL 截断
             if let last = normalizedContents.last, (last["role"] as? String) == role {
                 var mergedParts = last["parts"] as? [[String: Any]] ?? []
                 mergedParts.append(contentsOf: parts)
@@ -383,9 +471,17 @@ enum AntigravityCloudCodeAdapter {
             normalizedContents.removeFirst()
         }
 
+        // 防御性规范约束：严禁输出裸 call: 格式
+        systemParts.append([
+            "text": "【重要执行规范】在不需要调用工具或未声明外部工具时，严禁输出任何裸露的 `call:...` 或伪函数格式，必须以标准自然语言直接回答。"
+        ])
+
         var requestObj: [String: Any] = ["contents": normalizedContents]
         if !systemParts.isEmpty {
             requestObj["system_instruction"] = ["parts": systemParts]
+        }
+        if !geminiTools.isEmpty {
+            requestObj["tools"] = geminiTools
         }
 
         if shouldEnableThinking(for: modelId, level: options.thinkingLevel) {
@@ -422,12 +518,19 @@ enum AntigravityCloudCodeAdapter {
 
                     logger.info("[AntigravityDirect] 发起原生直连请求: model=\(resolvedModel), project=\(projectId)")
 
+                    let toolsToUse = await MainActor.run {
+                        if options.disableTools { return [AITool]() }
+                        let agent = AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
+                        return AIToolRegistry.shared.tools(for: agent)
+                    }
+
                     var req = try buildRequest(
                         modelId: resolvedModel,
                         messages: messages,
                         options: options,
                         token: currentToken,
-                        projectId: projectId
+                        projectId: projectId,
+                        tools: toolsToUse
                     )
 
                     var (bytes, response) = try await directSession.bytes(for: req)
@@ -445,7 +548,8 @@ enum AntigravityCloudCodeAdapter {
                                 messages: messages,
                                 options: options,
                                 token: currentToken,
-                                projectId: projectId
+                                projectId: projectId,
+                                tools: toolsToUse
                             )
                             let (retryBytes, retryResponse) = try await directSession.bytes(for: req)
                             if let retryHttp = retryResponse as? HTTPURLResponse {
@@ -461,6 +565,8 @@ enum AntigravityCloudCodeAdapter {
                     }
 
                     var hasReceivedFirstChunk = false
+                    var completedCalls: [CompletedToolCall] = []
+                    var lastReportedError: String? = nil
 
                     for try await line in bytes.lines {
                         try Task.checkCancellation()
@@ -485,26 +591,65 @@ enum AntigravityCloudCodeAdapter {
                             continuation.yield(.usage(promptTokens: inputTokens))
                         }
 
-                        // Candidates 分发 (含服务端原生结构化思考流与正文流)
+                        // Candidates 分发 (含服务端原生结构化思考流、正文流与函数调用流)
                         if let candidates = resp["candidates"] as? [[String: Any]],
-                           let firstCandidate = candidates.first,
-                           let content = firstCandidate["content"] as? [String: Any],
-                           let parts = content["parts"] as? [[String: Any]] {
-                            for part in parts {
-                                let isThought = part["thought"] as? Bool ?? false
-                                if let text = part["text"] as? String, !text.isEmpty {
-                                    if !hasReceivedFirstChunk {
-                                        hasReceivedFirstChunk = true
-                                        logger.info("[AntigravityDirect] 收到首个直连数据块 (isThought: \(isThought))")
+                           let firstCandidate = candidates.first {
+                            if let finishReason = firstCandidate["finishReason"] as? String {
+                                if finishReason == "MALFORMED_FUNCTION_CALL" {
+                                    let msg = (firstCandidate["finishMessage"] as? String) ?? "云端网关拦截到格式异常的函数调用"
+                                    lastReportedError = msg
+                                    logger.error("[AntigravityDirect] 收到 finishReason: MALFORMED_FUNCTION_CALL: \(msg)")
+                                }
+                            }
+
+                            if let content = firstCandidate["content"] as? [String: Any],
+                               let parts = content["parts"] as? [[String: Any]] {
+                                for part in parts {
+                                    let isThought = part["thought"] as? Bool ?? false
+                                    let thoughtSig = (part["thoughtSignature"] as? String) ?? (part["thought_signature"] as? String)
+
+                                    // 1. 函数调用分片
+                                    if let fc = part["functionCall"] as? [String: Any],
+                                       let name = fc["name"] as? String {
+                                        let callId = (fc["id"] as? String) ?? "call_\(UUID().uuidString.prefix(8))"
+                                        var argsString = "{}"
+                                        if let args = fc["args"] as? [String: Any],
+                                           let argsData = try? JSONSerialization.data(withJSONObject: args),
+                                           let str = String(data: argsData, encoding: .utf8) {
+                                            argsString = str
+                                        }
+                                        if let sig = thoughtSig {
+                                            saveSignature(callId: callId, signature: sig)
+                                        }
+                                        if !hasReceivedFirstChunk {
+                                            hasReceivedFirstChunk = true
+                                            logger.info("[AntigravityDirect] 收到首个直连数据块 (FunctionCall: \(name))")
+                                        }
+                                        continuation.yield(.toolCallDispatched(id: callId, name: name))
+                                        completedCalls.append(CompletedToolCall(id: callId, name: name, arguments: argsString, thoughtSignature: thoughtSig))
                                     }
-                                    if isThought {
-                                        continuation.yield(.reasoning(text))
-                                    } else {
-                                        continuation.yield(.text(text))
+
+                                    // 2. 文本分片 (思考增量 vs 正文增量)
+                                    if let text = part["text"] as? String, !text.isEmpty {
+                                        if !hasReceivedFirstChunk {
+                                            hasReceivedFirstChunk = true
+                                            logger.info("[AntigravityDirect] 收到首个直连数据块 (isThought: \(isThought))")
+                                        }
+                                        if isThought {
+                                            continuation.yield(.reasoning(text))
+                                        } else {
+                                            continuation.yield(.text(text))
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
+
+                    if !completedCalls.isEmpty {
+                        continuation.yield(.toolCalls(completedCalls))
+                    } else if !hasReceivedFirstChunk, let err = lastReportedError {
+                        throw AIChatError.streamError("云端网关拦截请求截断：\(err)")
                     }
 
                     logger.info("[AntigravityDirect] 直连流顺利完成")

@@ -26,7 +26,7 @@ final class LaunchSubagentsTool: AITool {
                         "properties": [
                             "agent_id": [
                                 "type": "string",
-                                "description": "目标子智能体 ID。可选值：'observer' (识图助理与图文分析), 'coder' (代码专家与工程规范), 'librarian' (资料检索与文档提炼), 'oracle' (深度思考与逻辑推演), 'concierge' (系统管家与桌面控制)"
+                                "description": "目标子智能体 ID。可选值：'observer' (识图助理与图文分析), 'coder' (代码专家与工程规范), 'librarian' (资料检索与实时情报专家，专属配备 web_search 与 fetch_url 联网工具，负责全网搜索最新行情、新闻与文档), 'oracle' (深度思考与逻辑推演), 'concierge' (系统管家与桌面控制)"
                             ],
                             "task": [
                                 "type": "string",

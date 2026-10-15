@@ -32,6 +32,7 @@ enum AgentFunctionalTests {
         testWireModelsAndToolCallAccumulator()
         testRequestEncodingForAgents()
         testTaskRegistryAndInputRouting()
+        testAntigravityToolsAndThoughtSignature()
 
         print("==================================================")
         print("📊 测试完成汇总：通过 \(passedCount) 项，失败 \(failedCount) 项")
@@ -349,5 +350,91 @@ enum AgentFunctionalTests {
         // 清理测试任务状态
         registry.settleTask(id: taskLibId, status: .completed)
         registry.settleTask(id: taskCoderId, status: .completed)
+    }
+
+    // MARK: - 7. Antigravity 直连 Gemini Function Calling 与 ThoughtSignature 测试
+    private static func testAntigravityToolsAndThoughtSignature() {
+        print("\n[Suite 7] Antigravity 直连 Gemini Function Calling 与 ThoughtSignature 规格测试...")
+
+        let orch = AIAgent.defaultAgents().first { $0.id == "orchestrator" }!
+        let orchTools = AIToolRegistry.shared.tools(for: orch)
+
+        // 1. 验证 Tools 声明装配
+        let userMsg = ChatCompletionMessage(role: "user", content: "满帮最新的股价")
+        let req = try? AntigravityCloudCodeAdapter.buildRequest(
+            modelId: "gemini-3.8-flash-tiered",
+            messages: [userMsg],
+            options: AIChatRequestOptions(agentId: orch.id),
+            token: "fake-test-token",
+            projectId: "aicode-consumers",
+            tools: orchTools
+        )
+        assertTest(req != nil, "Antigravity 请求对象构造成功")
+        if let body = req?.httpBody, let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let requestObj = json["request"] as? [String: Any] {
+            let tools = requestObj["tools"] as? [[String: Any]] ?? []
+            assertTest(!tools.isEmpty, "request 中包含 tools 字段")
+            if let firstTool = tools.first, let fns = firstTool["function_declarations"] as? [[String: Any]] {
+                let fnNames = Set(fns.compactMap { $0["name"] as? String })
+                assertTest(fnNames.contains("launch_subagents"), "Gemini tools 中成功声明 launch_subagents")
+            } else {
+                assertTest(false, "tools 必须为 function_declarations 结构")
+            }
+        }
+
+        // 2. 验证多轮历史中 toolCalls 与 thoughtSignature 的回传装配
+        let wireCall = WireToolCall(
+            id: "call_9999",
+            name: "launch_subagents",
+            arguments: "{\"tasks\":[{\"agent_id\":\"librarian\",\"task\":\"查询股价\"}]}",
+            thoughtSignature: "sig_test_thought_signature_xyz"
+        )
+        let assistantMsg = ChatCompletionMessage(
+            role: "assistant",
+            content: nil,
+            toolCalls: [wireCall],
+            toolCallId: nil
+        )
+        let toolResultMsg = ChatCompletionMessage.toolResult(
+            callID: "call_9999",
+            content: "{\"result\":\"10.25 USD\"}"
+        )
+
+        let multiTurnReq = try? AntigravityCloudCodeAdapter.buildRequest(
+            modelId: "gemini-3.8-flash-tiered",
+            messages: [userMsg, assistantMsg, toolResultMsg],
+            options: AIChatRequestOptions(agentId: orch.id),
+            token: "fake-test-token",
+            projectId: "aicode-consumers",
+            tools: orchTools
+        )
+        assertTest(multiTurnReq != nil, "多轮工具调用请求构造成功")
+
+        if let body = multiTurnReq?.httpBody, let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+           let requestObj = json["request"] as? [String: Any],
+           let contents = requestObj["contents"] as? [[String: Any]] {
+            // 验证 contents 结构
+            assertTest(contents.count == 3, "contents 严格包含 3 轮交替消息 (user -> model -> user)")
+            if contents.count >= 3 {
+                assertTest((contents[0]["role"] as? String) == "user", "第 1 轮为 user 提问")
+                assertTest((contents[1]["role"] as? String) == "model", "第 2 轮为 model 工具调用")
+                assertTest((contents[2]["role"] as? String) == "user", "第 3 轮为 user 工具结果")
+
+                // 验证第 2 轮中的 thoughtSignature 与 functionCall
+                let modelParts = contents[1]["parts"] as? [[String: Any]] ?? []
+                if let firstPart = modelParts.first {
+                    assertTest(firstPart["thoughtSignature"] as? String == "sig_test_thought_signature_xyz", "model 消息严格携带 thoughtSignature")
+                    let fc = firstPart["functionCall"] as? [String: Any]
+                    assertTest(fc?["name"] as? String == "launch_subagents", "functionCall 名称正确")
+                }
+
+                // 验证第 3 轮中的 functionResponse
+                let toolParts = contents[2]["parts"] as? [[String: Any]] ?? []
+                if let toolPart = toolParts.first, let fr = toolPart["functionResponse"] as? [String: Any] {
+                    assertTest(fr["name"] as? String == "launch_subagents", "functionResponse 对应工具名称为 launch_subagents")
+                    assertTest(fr["response"] != nil, "functionResponse 载荷非空")
+                }
+            }
+        }
     }
 }

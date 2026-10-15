@@ -154,10 +154,25 @@ final class AIAgentStore: ObservableObject {
                     updated[i].name = "深度思考"
                     didMigrate = true
                 }
-                if updated[i].id == "librarian" && (updated[i].name == "知识检索" || updated[i].name.isEmpty) {
-                    updated[i].name = "资料检索"
-                    updated[i].iconName = "books.vertical"
-                    didMigrate = true
+                if updated[i].id == "librarian" {
+                    if updated[i].name == "知识检索" || updated[i].name.isEmpty {
+                        updated[i].name = "资料检索"
+                        updated[i].iconName = "books.vertical"
+                        didMigrate = true
+                    }
+                    if updated[i].description.contains("快速检索与资料提炼助手") || updated[i].description.isEmpty {
+                        updated[i].description = "联网资料检索与情报专家，专属配备 web_search 公网搜索引擎与 fetch_url 网页抓取工具，擅长全网检索最新实时行情、新闻资讯、技术文档与财报，并输出高密度要点报告。"
+                        didMigrate = true
+                    }
+                    if updated[i].systemPrompt.contains("你是高效的资料研究员（Librarian）") && !updated[i].systemPrompt.contains("web_search") {
+                        updated[i].systemPrompt = """
+                        你是高效的资料研究员与联网情报专家（Librarian）。
+                        你专属配备了 `web_search`（公网搜索引擎）与 `fetch_url`（网页全文抓取）等联网工具。
+                        当需要获取最新的实时行情、新闻资讯、技术动态、百科或企业财报时，优先通过这些工具搜索公网最新信息，并迅速提炼关键数据。
+                        回答言简意赅、条理分明，用最少的废话呈现最高密度的信息，并给出可靠的数据来源或链接。
+                        """
+                        didMigrate = true
+                    }
                 }
             }
             // 自动补齐存量中缺失的官方默认智能体（如 concierge 系统管家）

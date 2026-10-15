@@ -163,7 +163,7 @@ final class AgentCoordinator {
             var currentAssistantId = assistantID
             var accumulatedFinalText = ""
             var toolRounds = 0
-            let maxToolRounds = 6
+            let maxToolRounds = 3
 
             subagentLoop: while toolRounds < maxToolRounds {
                 if Task.isCancelled { break subagentLoop }
@@ -241,7 +241,7 @@ final class AgentCoordinator {
                     // 存在工具调用：
                     // 1. 将工具调用记录挂到当前子会话助手消息（使子会话 UI 实时呈现工具卡片）
                     let records = completedCalls.map {
-                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending)
+                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending, thoughtSignature: $0.thoughtSignature)
                     }
                     ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
                         msg.content = roundText
@@ -250,7 +250,7 @@ final class AgentCoordinator {
 
                     // 2. 将助手消息（携带 tool_calls）追加到请求上下文 wire
                     let wireCalls = completedCalls.map {
-                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, thoughtSignature: $0.thoughtSignature)
                     }
                     requestMessages.append(ChatCompletionMessage(
                         role: "assistant",
@@ -330,13 +330,60 @@ final class AgentCoordinator {
                 }
             }
 
-            if toolRounds >= maxToolRounds && accumulatedFinalText.isEmpty {
-                accumulatedFinalText = "子智能体工具调用达到上限轮数（\(maxToolRounds) 轮），已停止继续调用。"
-                ChatSessionStore.shared.updateTaskStatus(
-                    sessionId: childId,
-                    status: .completed,
-                    summary: accumulatedFinalText
+            // 达到工具轮数上限且尚未输出最终答复：执行强制收敛总结（Force Synthesis）
+            if toolRounds >= maxToolRounds && accumulatedFinalText.isEmpty && !Task.isCancelled {
+                AgentTaskRegistry.shared.updateTaskAction(
+                    id: persistentTaskId,
+                    action: "信息检索完毕，正在撰写最终报告…",
+                    status: .running
                 )
+
+                requestMessages.append(ChatCompletionMessage(
+                    role: "user",
+                    content: "[系统提示]：工具调用轮次已达上限（\(maxToolRounds) 轮），信息收集阶段已结束。请基于上述已获取的所有工具返回结果，直接撰写完整、结构清晰、详尽的最终 Markdown 总结答卷，严禁再次发起工具调用。"
+                ))
+
+                do {
+                    let synthStream = AIProviderService.shared.send(
+                        messages: requestMessages,
+                        agent: matchedAgent,
+                        disableTools: true
+                    )
+                    var synthText = ""
+                    for try await event in synthStream {
+                        if Task.isCancelled { break }
+                        switch event {
+                        case .text(let chunk):
+                            synthText += chunk
+                            ChatSessionStore.shared.appendStreamToken(chunk, to: currentAssistantId, in: childId)
+                        case .reasoning(let reasoningChunk):
+                            ChatSessionStore.shared.appendReasoningToken(reasoningChunk, to: currentAssistantId, in: childId)
+                        case .usage, .toolCallDispatched, .toolCalls:
+                            break
+                        }
+                    }
+                    accumulatedFinalText = synthText
+                    ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .done, in: childId)
+                    ChatSessionStore.shared.updateTaskStatus(
+                        sessionId: childId,
+                        status: .completed,
+                        summary: String(synthText.prefix(120))
+                    )
+                } catch {
+                    let errMsg = error.localizedDescription
+                    ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .failed(errMsg), in: childId)
+                    accumulatedFinalText = "总结报告生成失败：\(errMsg)"
+                }
+            }
+
+            // 彻底兜底：确保当前助手消息状态落定，绝不遗留悬挂 .streaming 状态
+            ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                if case .streaming = msg.state {
+                    if msg.content.isEmpty {
+                        msg.content = accumulatedFinalText.isEmpty ? "执行已完成" : accumulatedFinalText
+                    }
+                    msg.state = .done
+                }
             }
 
             // 大产物检测与本地隔离存储 (~/.quickshow/artifacts/<parentId>/<taskId>/report.md)

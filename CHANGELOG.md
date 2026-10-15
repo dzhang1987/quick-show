@@ -52,6 +52,15 @@
 
 ### Fixed
 
+- **子智能体工具调用死循环与卡在【思考中...】假死问题（`AgentCoordinator.swift` / `AIProviderService.swift` / 各 Providers）**：
+  - **强制收敛总结机制（Force Synthesis）**：将子智能体最大工具调用轮数收敛至 3 轮；当达到轮次上限后，不再无休止调用工具，自动触发强制收敛生成，通过在上下文末尾注入强收敛提示并向底层 Provider 传递 `disableTools: true` 剔除所有工具声明，强迫大模型基于已有搜集到的数据直接撰写完整 Markdown 最终报告；
+  - **根除悬挂流式消息（Dangling Streaming Message）**：修复原代码在每轮工具结束后预建空助手消息占位但达到上限跳出时未处理该消息状态的严重 Bug（原逻辑导致其永久停留在 `.streaming`，UI 表现为永远旋转的【思考中...】直到 180 秒超时报错）；增加统一落定兜底，确保退出时任何状态均落地为 `.done` 或 `.failed`。
+
+- **消除主智能体（全能助理 Orchestrator）认为子智能体 Librarian 无法联网的认知幻觉（`AIAgent.swift` / `AIChatState+RequestAssembly.swift` / `LaunchSubagentsTool.swift` / `AIAgentStore.swift`）**：
+  - **透出独占工具声明**：在全能助理的子智能体派发指引中，为每个专家显式注入其配备的核心工具清单（如 `[web_search, fetch_url]`），消除大模型盲猜；
+  - **人设与 Schema 补全联网专长**：将 `librarian` 人设、Schema 及存量迁移描述明确为“联网资料检索与实时情报专家，专属配备 `web_search` 与 `fetch_url` 工具，负责全网搜索最新行情、新闻与文档”；
+  - **协同规则明确派发指引**：在 Orchestrator 提示词中明确指出：编排中枢自身虽未挂载 `web_search`，但遇到实时股票行情、汇率、天气、新闻及公网文档时，必须通过 `launch_subagents` 派发给 `librarian` 代理检索并汇总汇报。
+
 - **彻底修复 Markdown 嵌套列表在 TextKit 流式排版中换行符丢失导致子项粘连与前导圆点丢失缺陷（`MarkdownListRenderer.swift`）**：
   - **段落隔离与独立排版**：消除原先因误判叶子节点导致子列表末尾丢失换行符 `\n` 的底层缺陷，确保每个列表条目（无论处于第几层嵌套或是否为当前子列表末尾）在 TextKit 中均保留独立的换行符与完整的 `NSParagraphStyle`；
   - **上下文感知精准间距与尾部收敛**：引入 `hasNextListItem` 上下文链，精准识别多层嵌套列表中列表项与后续兄弟分支的连贯性，使大分支间的列表项恢复标准 10pt 留白；仅在整棵列表树的绝对末尾（且后无其他块）时收敛末尾多余换行符，彻底消除前导符被吞及缩进对齐错乱。
