@@ -805,11 +805,16 @@ final class ChatSessionStore: ObservableObject {
             return true
         }
 
-        // 自动纠偏自愈：修复因历史并发竞速取消缺陷被误判为「执行超时」但实际已顺利完成（有 done 状态助手回复）的子会话
+        // 自动纠偏自愈：
+        // 1. 修复因历史并发竞速取消缺陷被误判为「执行超时」但实际已顺利完成（有 done 状态助手回复）的子会话；
+        // 2. 跨进程重启自愈：冷启动时内存中必定无活跃任务，若子会话仍停留在 taskStatus == .running：
+        //    - 若最后一条助手消息已完成（state == .done 且非空），自愈为 .completed；
+        //    - 若中途打断（流式未完结），自愈为 .failed，并将半截消息落定为 .aborted。
         for i in 0..<loaded.count {
             var session = loaded[i]
-            if session.parentSessionId != nil,
-               session.taskStatus == .failed,
+            guard session.parentSessionId != nil else { continue }
+
+            if session.taskStatus == .failed,
                session.taskSummary?.contains("超时") == true {
                 if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
                    lastAssistant.state == .done,
@@ -819,6 +824,23 @@ final class ChatSessionStore: ObservableObject {
                     loaded[i] = session
                     persist(session)
                 }
+            } else if session.taskStatus == .running {
+                if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
+                   lastAssistant.state == .done,
+                   !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    session.taskStatus = .completed
+                    session.taskSummary = String(lastAssistant.content.prefix(120))
+                } else {
+                    session.taskStatus = .failed
+                    session.taskSummary = String(localized: "应用重启，任务已中断")
+                    for mIndex in 0..<session.messages.count {
+                        if session.messages[mIndex].state == .streaming || session.messages[mIndex].state == .sending {
+                            session.messages[mIndex].state = .aborted
+                        }
+                    }
+                }
+                loaded[i] = session
+                persist(session)
             }
         }
 

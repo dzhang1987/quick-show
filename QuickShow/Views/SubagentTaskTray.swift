@@ -63,9 +63,17 @@ struct SubagentTaskTray: View {
                 if !otherActiveTasks.isEmpty {
                     VStack(spacing: Theme.Spacing.xs) {
                         ForEach(otherActiveTasks) { task in
-                            SubagentTaskCapsule(task: task) {
-                                state.selectSession(id: task.childSessionId)
-                            }
+                            SubagentTaskCapsule(
+                                task: task,
+                                onTap: {
+                                    state.selectSession(id: task.childSessionId)
+                                },
+                                onAbort: {
+                                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                        AgentCoordinator.shared.abortSubagent(childSessionId: task.childSessionId)
+                                    }
+                                }
+                            )
                             .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
                         }
                     }
@@ -80,77 +88,114 @@ struct SubagentTaskTray: View {
 private struct SubagentTaskCapsule: View {
     let task: AgentTaskRecord
     let onTap: () -> Void
+    var onAbort: (() -> Void)? = nil
 
     @State private var hovered = false
+    @State private var isCloseHovered = false
 
     private var iconName: String {
         AgentRoleRegistry.shared.trayIcon(for: task.subagentId, fallback: "person.2.fill")
     }
 
     var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: Theme.Spacing.md) {
-                // 专家图标与指示动效
-                HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: iconName)
-                        .font(Theme.Typography.text(11, .semibold))
-                        .foregroundColor(Theme.Colors.accent)
+        HStack(spacing: Theme.Spacing.md) {
+            // 主体区域：点击进入子会话
+            Button(action: onTap) {
+                HStack(spacing: Theme.Spacing.md) {
+                    // 专家图标与指示动效
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Image(systemName: iconName)
+                            .font(Theme.Typography.text(11, .semibold))
+                            .foregroundColor(Theme.Colors.accent)
 
-                    Text(task.subagentName)
-                        .font(Theme.Typography.text(11, .semibold))
-                        .foregroundColor(Theme.Colors.accent)
-                }
-
-                // 动态脉搏指示器
-                ProgressView()
-                    .controlSize(.mini)
-                    .scaleEffect(0.65)
-                    .frame(width: 12, height: 12)
-
-                // 实时动作描述
-                Text(task.currentAction)
-                    .font(Theme.Typography.text(11, .medium))
-                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-
-                Spacer(minLength: 0)
-
-                // 跳转引导提示
-                HStack(spacing: 2) {
-                    Text(String(localized: "查看"))
-                        .font(Theme.Typography.text(10))
-                    Image(systemName: "chevron.right")
-                        .font(Theme.Typography.text(8, .bold))
-                }
-                .foregroundColor(hovered ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                .opacity(hovered ? 1 : 0.6)
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.sm)
-            .background(
-                ZStack {
-                    // 100% 实底垫底，彻底物理阻断下层正文 Markdown 文字透出
-                    Capsule(style: .continuous)
-                        .fill(Color(nsColor: .windowBackgroundColor))
-                    Capsule(style: .continuous)
-                        .fill(Theme.Colors.chatNavFloatFill)
-                    if hovered {
-                        Capsule(style: .continuous)
-                            .fill(Theme.Colors.iconHoverBg)
+                        Text(task.subagentName)
+                            .font(Theme.Typography.text(11, .semibold))
+                            .foregroundColor(Theme.Colors.accent)
                     }
+
+                    // 动态脉搏指示器
+                    ProgressView()
+                        .controlSize(.mini)
+                        .scaleEffect(0.65)
+                        .frame(width: 12, height: 12)
+
+                    // 实时动作描述
+                    Text(task.currentAction)
+                        .font(Theme.Typography.text(11, .medium))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Spacer(minLength: 0)
+
+                    // 跳转引导提示
+                    HStack(spacing: 2) {
+                        Text(String(localized: "查看"))
+                            .font(Theme.Typography.text(10))
+                        Image(systemName: "chevron.right")
+                            .font(Theme.Typography.text(8, .bold))
+                    }
+                    .foregroundColor(hovered ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                    .opacity(hovered ? 1 : 0.6)
                 }
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(hovered ? Theme.Colors.accent.opacity(0.4) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-            )
-            .contentShape(Capsule(style: .continuous))
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            // 悬停时显现的中止/清理微按钮（对齐 QueuedMessageCardRow 设计语言）
+            if hovered {
+                Button {
+                    onAbort?()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(Theme.Typography.text(9, .bold))
+                        .foregroundColor(isCloseHovered ? Theme.Colors.contentPrimary : Theme.Colors.contentTertiary)
+                        .frame(width: 16, height: 16)
+                        .background(
+                            Circle()
+                                .fill(isCloseHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { isCloseHovered = $0 }
+                .help("中止并清理此子任务")
+                .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.sm)
+        .background(
+            ZStack {
+                // 100% 实底垫底，彻底物理阻断下层正文 Markdown 文字透出
+                Capsule(style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                Capsule(style: .continuous)
+                    .fill(Theme.Colors.chatNavFloatFill)
+                if hovered {
+                    Capsule(style: .continuous)
+                        .fill(Theme.Colors.iconHoverBg)
+                }
+            }
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(hovered ? Theme.Colors.accent.opacity(0.4) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+        )
+        .contentShape(Capsule(style: .continuous))
         .onHover { isHovered in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                 hovered = isHovered
+            }
+        }
+        .contextMenu {
+            Button("查看子会话详情") {
+                onTap()
+            }
+            Divider()
+            Button(role: .destructive) {
+                onAbort?()
+            } label: {
+                Label("中止子任务", systemImage: "xmark.circle")
             }
         }
         .help("任务诉求：\(task.taskDescription)\n点击进入该子智能体专属会话，可在输入框追加要求或使用 @\(task.subagentId) 专门沟通。")

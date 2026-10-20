@@ -183,14 +183,45 @@ final class AgentTaskRegistry: ObservableObject {
         }
     }
 
+    /// 强制中止并清理特定任务
+    func cancelTask(id: String) {
+        settleTask(id: id, status: .cancelled, summary: String(localized: "用户已中止"))
+    }
+
     private func loadTasks() {
         guard FileManager.default.fileExists(atPath: tasksFileURL.path) else { return }
         do {
             let data = try Data(contentsOf: tasksFileURL)
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            let loaded = try decoder.decode([AgentTaskRecord].self, from: data)
+            var loaded = try decoder.decode([AgentTaskRecord].self, from: data)
+
+            // 跨进程冷启动自愈：扫描历史未完结任务（running / toolExecuting / queued）
+            var didHeal = false
+            for i in 0..<loaded.count {
+                var record = loaded[i]
+                if record.status == .running || record.status == .toolExecuting || record.status == .queued {
+                    // 查询对应子会话自愈状态
+                    if let childSession = ChatSessionStore.shared.session(id: record.childSessionId),
+                       let lastAssistant = childSession.messages.last(where: { $0.role == .assistant }),
+                       lastAssistant.state == .done,
+                       !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        record.status = .completed
+                        record.currentAction = childSession.taskSummary ?? String(lastAssistant.content.prefix(120))
+                    } else {
+                        record.status = .cancelled
+                        record.currentAction = String(localized: "应用重启，任务已中断")
+                    }
+                    record.updatedAt = Date()
+                    loaded[i] = record
+                    didHeal = true
+                }
+            }
+
             self.tasks = loaded
+            if didHeal {
+                persist()
+            }
         } catch {
             logger.error("读取 agent_tasks.json 失败: \(error.localizedDescription)")
         }

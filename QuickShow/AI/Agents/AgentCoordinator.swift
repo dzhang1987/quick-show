@@ -513,16 +513,27 @@ final class AgentCoordinator {
     func abortSubagents(for parentSessionId: UUID) {
         let runningRecords = AgentTaskRegistry.shared.runningTasks(parentSessionId: parentSessionId)
         for record in runningRecords {
-            let childId = record.childSessionId
-            if let continuations = taskContinuations.removeValue(forKey: childId) {
-                for cont in continuations {
-                    cont.resume(returning: "用户已中止执行")
-                }
+            abortSubagent(childSessionId: record.childSessionId)
+        }
+    }
+
+    /// 单独取消/中止特定子智能体任务
+    func abortSubagent(childSessionId: UUID) {
+        if let continuations = taskContinuations.removeValue(forKey: childSessionId) {
+            for cont in continuations {
+                cont.resume(returning: "用户已中止执行")
             }
-            runningTasks.removeValue(forKey: childId)?.cancel()
-            ChatSessionStore.shared.updateTaskStatus(sessionId: childId, status: .failed, summary: "用户已中止")
+        }
+        runningTasks.removeValue(forKey: childSessionId)?.cancel()
+        ChatSessionStore.shared.updateTaskStatus(sessionId: childSessionId, status: .failed, summary: "用户已中止")
+        if let record = AgentTaskRegistry.shared.task(childSessionId: childSessionId) {
             AgentTaskRegistry.shared.settleTask(id: record.id, status: .cancelled, summary: "用户已中止")
         }
+    }
+
+    /// 查询特定子会话任务是否正在当前进程中活跃执行
+    func isSubagentRunning(childSessionId: UUID) -> Bool {
+        runningTasks[childSessionId] != nil
     }
 
     // MARK: - 3. 智能体间点对点通信 (Send Message)

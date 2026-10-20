@@ -72,6 +72,13 @@
 
 ### Fixed
 
+- **彻底根治应用重启后孤儿子智能体（Orphan Subagent）任务永久旋转与托盘假死缺陷（`AgentTaskRegistry.swift` / `ChatSessionStore.swift` / `AgentCoordinator.swift` / `SubagentTaskTray.swift`）**：
+  - **根本成因根除（First-Principles Root Cause）**：旧架构在并发子任务派发后将 `running` / `toolExecuting` 状态持久化至 `agent_tasks.json` 与子会话 JSON；当进程因编译、更新或系统退出重启后，内存 Swift 异步 `Task` 已销毁，但冷启动读取时未校验跨进程有效性，导致托盘永久判定存在运行中任务并无限循环旋转；
+  - **启动层两级自愈收敛（Cross-Process Healing）**：在 `AgentTaskRegistry.loadTasks()` 与 `ChatSessionStore.load()` 增加孤儿任务扫描与自愈机制：若对应子会话最后一条助手消息已完成输出（`state == .done` 且正文非空），自动收敛为 `.completed` 并提取摘要归档；若中途打断未完结，半截消息落定为 `.aborted`，状态收敛为 `.cancelled`，启动首帧立即消除脏数据；
+  - **托盘微按钮中止与右键上下文菜单（`SubagentTaskTray.swift`）**：在 `SubagentTaskCapsule` 悬停态优雅淡出独立中止按钮（`✕`，严格对齐排队消息微按钮视觉语言），并集成右键菜单「查看详情」与「中止子任务」，用户随时可主动收敛任意后台任务；
+  - **100% 物理实底常驻防透字（`SubagentTaskTray.swift`）**：胶囊背景严格对齐 `windowBackgroundColor` + `chatNavFloatFill` 实底双层防线，中止微按钮与交互反馈绝不诱发底层正文文字穿透；
+  - **单任务精准中止接口（`AgentCoordinator.swift`）**：新增 `abortSubagent(childSessionId:)` 与 `isSubagentRunning(childSessionId:)`，支持按子会话粒度精准打断后台任务、清理挂起 Continuation 并同步结算。
+
 - **彻底根治并发任务胶囊与排队卡片在鼠标悬停时因底色替换诱发的正文透字严重干扰（`SubagentTaskTray.swift` / `AIChatStatusViews.swift`）**：
   - **悬停态透明度劣化根因消除**：彻底废除原组件在 hover 触发时直接将背景实底替换为仅含 10% 不透明度的 `Theme.Colors.iconHoverBg` 的错误逻辑；
   - **双层 100% 物理实底常驻垫底**：为并发子任务胶囊（`SubagentTaskCapsule`）、排队面板（`QueuedMessagesPanel`）及轻提示全线引入 `Color(nsColor: .windowBackgroundColor)` + `Theme.Colors.chatNavFloatFill` 物理阻断层，确保无论静止还是悬停，底层文字透光率严格为 0%；
