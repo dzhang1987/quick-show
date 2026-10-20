@@ -123,8 +123,12 @@ struct QueuedMessagesPanel: View {
             .padding(.horizontal, Theme.Spacing.lg)
             .padding(.vertical, Theme.Spacing.xs)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                    .fill(Theme.Colors.chatNavFloatFill)
+                ZStack {
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(Theme.Colors.chatNavFloatFill)
+                }
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
@@ -258,12 +262,21 @@ struct QueuedMessageCardRow: View {
         .padding(.horizontal, Theme.Spacing.lg)
         .padding(.vertical, Theme.Spacing.sm)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                .fill(Theme.Colors.chatNavFloatFill)
+            ZStack {
+                // 100% 纯实底垫底，彻底消除任何透明度造成的下层 Markdown 透视
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .fill(Theme.Colors.chatNavFloatFill)
+                if hovered {
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(Theme.Colors.iconHoverBg)
+                }
+            }
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                .strokeBorder(isSteering ? Theme.Colors.accent.opacity(0.25) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+                .strokeBorder(isSteering ? Theme.Colors.accent.opacity(0.35) : (hovered ? Theme.Colors.accent.opacity(0.3) : Theme.Colors.chatStrokeStrong), lineWidth: 0.5)
         )
         .onHover { isHovered in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {

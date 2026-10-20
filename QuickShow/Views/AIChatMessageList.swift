@@ -440,7 +440,15 @@ struct SessionMessageList: View {
                 rowHeights[id] = frame.height
             }
         }
-        if ids != virtualWindowIds { virtualWindowIds = ids }
+        // 防白屏核心安全守卫：
+        // 若当前会话存在消息，但本帧计算出的可见行集合异常为空（通常由于窗口 resize、
+        // 侧栏展开/收拢时坐标空间瞬态注销导致），绝对不可将 virtualWindowIds 抹空导致整屏白屏！
+        // 守卫策略：保持上一帧的有效可见集合；若历史集合亦为空，则预置激活兜底。
+        if !ids.isEmpty {
+            if ids != virtualWindowIds { virtualWindowIds = ids }
+        } else if virtualWindowIds.isEmpty && !messages.isEmpty {
+            seedVirtualWindowIfNeeded()
+        }
     }
 
     /// 挂载（首次 / LRU 重挂载）时恢复（唯一调用点：ScrollView.onAppear）：

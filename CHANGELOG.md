@@ -72,6 +72,11 @@
 
 ### Fixed
 
+- **彻底根治并发任务胶囊与排队卡片在鼠标悬停时因底色替换诱发的正文透字严重干扰（`SubagentTaskTray.swift` / `AIChatStatusViews.swift`）**：
+  - **悬停态透明度劣化根因消除**：彻底废除原组件在 hover 触发时直接将背景实底替换为仅含 10% 不透明度的 `Theme.Colors.iconHoverBg` 的错误逻辑；
+  - **双层 100% 物理实底常驻垫底**：为并发子任务胶囊（`SubagentTaskCapsule`）、排队面板（`QueuedMessagesPanel`）及轻提示全线引入 `Color(nsColor: .windowBackgroundColor)` + `Theme.Colors.chatNavFloatFill` 物理阻断层，确保无论静止还是悬停，底层文字透光率严格为 0%；
+  - **悬停交互高光解耦**：将 hover 高亮解耦为实底基座之上的微光叠加层与边框提亮（`accent.opacity(0.4)`），既保留灵动的视觉反馈，又彻底隔绝背景穿透。
+
 - **AI 对话窗会话侧栏向左物理抽屉展开与主窗零抖动、零重排、零闪烁架构重构（`AIWindowManager.swift` / `AIChatView.swift`）**：
   - **绝对右边缘锚定（Right-Anchored）**：彻底修复旧逻辑在非贴屏幕最右侧时“左缘不动、向右扩展”的缺陷；无论窗口处于屏幕何处，展开与收拢侧栏时窗口的 `maxX` 严格锁定不变，物理 frame 仅向左平滑延伸与向右收缩；
   - **主聊天区强定宽与高优先级保护（Anti-Compression Lock）**：在展开/收拢过渡期间，动态测量并锁定当前主列的实际物理宽度（绝不硬编码任何具体数字，纯动态自适应），施加 `.fixedSize(horizontal: isSidebarTransitioning, vertical: false)` 与 `.layoutPriority(100)`，彻底消除了 WindowServer 跨进程加宽延迟导致主聊天区被瞬间压窄、随后弹回导致的二次折行与上下抖动；

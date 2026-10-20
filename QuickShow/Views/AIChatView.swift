@@ -173,10 +173,7 @@ struct AIChatView: View {
 
             mainColumn
                 .frame(width: lockedMainWidth)
-                .fixedSize(horizontal: isSidebarTransitioning, vertical: false)
-                .layoutPriority(isSidebarTransitioning ? 100 : 0)
         }
-        .fixedSize(horizontal: isSidebarTransitioning, vertical: false)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .clipped()
         // 内容层背景：26+ 整窗真玻璃透出（内容「印」在玻璃上，系统 Spotlight 语义）；

@@ -43,8 +43,14 @@ struct SubagentTaskTray: View {
                     .padding(.horizontal, Theme.Spacing.xl)
                     .padding(.vertical, Theme.Spacing.xs)
                     .background(
-                        Capsule(style: .continuous)
-                            .fill(Theme.Colors.accent.opacity(0.12))
+                        ZStack {
+                            Capsule(style: .continuous)
+                                .fill(Color(nsColor: .windowBackgroundColor))
+                            Capsule(style: .continuous)
+                                .fill(Theme.Colors.chatNavFloatFill)
+                            Capsule(style: .continuous)
+                                .fill(Theme.Colors.accent.opacity(0.12))
+                        }
                     )
                     .overlay(
                         Capsule(style: .continuous)
@@ -123,12 +129,21 @@ private struct SubagentTaskCapsule: View {
             .padding(.horizontal, Theme.Spacing.xl)
             .padding(.vertical, Theme.Spacing.sm)
             .background(
-                Capsule(style: .continuous)
-                    .fill(hovered ? Theme.Colors.iconHoverBg : Theme.Colors.chatNavFloatFill)
+                ZStack {
+                    // 100% 实底垫底，彻底物理阻断下层正文 Markdown 文字透出
+                    Capsule(style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+                    Capsule(style: .continuous)
+                        .fill(Theme.Colors.chatNavFloatFill)
+                    if hovered {
+                        Capsule(style: .continuous)
+                            .fill(Theme.Colors.iconHoverBg)
+                    }
+                }
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(hovered ? Theme.Colors.accent.opacity(0.35) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+                    .strokeBorder(hovered ? Theme.Colors.accent.opacity(0.4) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
             )
             .contentShape(Capsule(style: .continuous))
         }
