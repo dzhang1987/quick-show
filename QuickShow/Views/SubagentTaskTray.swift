@@ -78,14 +78,7 @@ private struct SubagentTaskCapsule: View {
     @State private var hovered = false
 
     private var iconName: String {
-        switch task.subagentId {
-        case "librarian": return "globe"
-        case "coder": return "chevron.left.forwardslash.chevron.right"
-        case "oracle": return "brain.head.profile"
-        case "observer": return "eye"
-        case "concierge": return "macbook.and.iphone"
-        default: return "person.2.fill"
-        }
+        AgentRoleRegistry.shared.trayIcon(for: task.subagentId, fallback: "person.2.fill")
     }
 
     var body: some View {

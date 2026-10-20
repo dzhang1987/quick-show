@@ -46,9 +46,11 @@ extension AIChatState {
             let availableSubagents = AIAgentStore.shared.agents
                 .filter { $0.isEnabled && $0.id != agent.id }
             if !availableSubagents.isEmpty {
-                let subagentDescriptions = availableSubagents.map {
-                    let visionTag = $0.isVisualDelegate ? " [👁️ 视觉专长]" : ""
-                    return "- `\($0.id)` (\($0.name))\(visionTag)：\($0.description)"
+                let subagentDescriptions = availableSubagents.map { sub in
+                    let tools = sub.resolvedTools.map { "`\($0)`" }.joined(separator: ", ")
+                    let toolsDesc = tools.isEmpty ? "无独占工具" : "配备工具: [\(tools)]"
+                    let visionTag = sub.isVisualDelegate ? " [识图/图文专长]" : ""
+                    return "- `\(sub.id)` (\(sub.name))\(visionTag)：\(sub.description) （\(toolsDesc)）"
                 }.joined(separator: "\n")
                 let delegationGuidance = """
                 团队协作与子智能体派发指引：
@@ -56,9 +58,10 @@ extension AIChatState {
                 \(subagentDescriptions)
 
                 协作原则：
-                1. 任务派发与真并发：调用 `launch_subagents(tasks: [...])` 向一个或多个专家派发任务。单任务传入 1 项；若需求包含多个独立环节（例如既要全网检索文档又要编写代码），必须在 `tasks` 数组中同时传入多个任务，系统后台将真正并行流式执行，并一次性汇聚返回所有专家的汇报成果；
-                2. 附件自动传递：用户上传的多模态图片默认自动传递给子智能体，无需额外配置；
-                3. 专精分工：中枢负责统筹规划与最终答卷，重活脏活交由专家办理。
+                1. 联网搜索能力：你自身未挂载 `web_search` 工具，若用户需要查询最新实时行情（如股票、汇率、天气）、新闻资讯、企业财报、公网技术文档或外部数据，必须通过 `launch_subagents` 派发给 `librarian`（资料检索专家），由其利用 `web_search` 和 `fetch_url` 联网检索后汇总；
+                2. 任务派发与真并发：调用 `launch_subagents(tasks: [...])` 向一个或多个专家派发任务。单任务传入 1 项；若需求包含多个独立环节（例如既要全网检索文档又要编写代码），必须在 `tasks` 数组中同时传入多个任务，系统后台将真正并行流式执行，并一次性汇聚返回所有专家的汇报成果；
+                3. 附件自动传递：用户上传的多模态图片默认自动传递给子智能体，无需额外配置；
+                4. 专精分工：全能助理负责统筹规划与最终答卷，重活脏活交由专家办理。
                 """
                 systemParts.append(delegationGuidance)
             }
@@ -82,7 +85,7 @@ extension AIChatState {
             // 末条用户消息若带有 Observer 视觉解析上下文，替换为图文综合描述，避免纯文本模型收到 imagePart 报错
             if idx == contextMessages.count - 1, message.role == .user, let visualContext, !visualContext.isEmpty {
                 let enriched = """
-                [👁️ 视觉感知 (Observer) 分析结果]：
+                [识图助理 (Observer) 解析结果]：
                 \(visualContext)
 
                 [用户提问]：
@@ -111,7 +114,7 @@ extension AIChatState {
 
         var result: [ChatCompletionMessage] = []
         let calls = records.map {
-            WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+            WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, thoughtSignature: $0.thoughtSignature)
         }
         result.append(ChatCompletionMessage(
             role: "assistant",

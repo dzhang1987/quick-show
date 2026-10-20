@@ -288,3 +288,54 @@ struct SidebarDivider: View {
         .frame(maxHeight: .infinity)
     }
 }
+
+// MARK: - 自适应限高滚动通用容器（替代传统 OOP 继承基类）
+
+private struct AdaptiveScrollContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+/// 统一的自适应限高滚动容器（替代传统 OOP 父类）：
+/// - 内部自动测量内容实际物理高度；
+/// - 内容高度 ≤ maxHeight 时：高度完全由内容撑开（shrink-to-fit），绝无多余留白，且不触发内部滚动；
+/// - 内容高度 > maxHeight 时：高度锁定在 maxHeight，内部优雅滚动（原生 macOS 细滚动条）；
+/// - 支持 .horizontal、.vertical 或双向 [.horizontal, .vertical] 滚动。
+struct AdaptiveScrollBox<Content: View>: View {
+    let axes: Axis.Set
+    let maxHeight: CGFloat
+    let showsIndicators: Bool
+    @ViewBuilder let content: () -> Content
+
+    @State private var measuredHeight: CGFloat = 0
+
+    init(
+        axes: Axis.Set = .vertical,
+        maxHeight: CGFloat,
+        showsIndicators: Bool = true,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.axes = axes
+        self.maxHeight = maxHeight
+        self.showsIndicators = showsIndicators
+        self.content = content
+    }
+
+    var body: some View {
+        ScrollView(axes, showsIndicators: showsIndicators) {
+            content()
+                .background(
+                    GeometryReader { geo in
+                        Color.clear.preference(key: AdaptiveScrollContentHeightKey.self, value: geo.size.height)
+                    }
+                )
+        }
+        .frame(height: measuredHeight > 0 ? min(measuredHeight, maxHeight) : nil)
+        .frame(maxHeight: maxHeight)
+        .onPreferenceChange(AdaptiveScrollContentHeightKey.self) { h in
+            if h > 0 { measuredHeight = h }
+        }
+    }
+}

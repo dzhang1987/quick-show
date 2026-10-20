@@ -39,34 +39,58 @@ struct ChatMessageRow: View, Equatable {
     @State private var copied = false
 
     var body: some View {
-        // 消息内容 + 下方紧凑操作行（紧贴正文底部 3pt；用户消息整体右对齐）
-        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: Theme.Spacing.xs) {
-            HStack(alignment: .top, spacing: 0) {
-                if message.role == .user { Spacer(minLength: Theme.Spacing.panel) }
-                content
-                // 2026-10 重设计：助手侧尾部 Spacer 已移除——正文/代码块右缘
-                // 与用户气泡、输入坞统一到同一条右基准线（阅读列右缘，±0）
-            }
-            if showsActionRow {
-                ChatMessageActionRow(
-                    message: message,
-                    canRegenerate: canRegenerate,
-                    canEditLastRound: canEditLastRound,
-                    copied: copied,
-                    rowHovered: rowHovered,
-                    onCopy: copyContent,
-                    onRegenerate: onRegenerate,
-                    onBeginEdit: onBeginEdit,
-                    onWithdraw: onWithdraw
-                )
+        let _ = qsDebugLog("ChatMessageRow body: id=\(message.id.uuidString.prefix(8)) role=\(message.role) state=\(message.state) showsActionRow=\(showsActionRow) canRegenerate=\(canRegenerate) contentLen=\(message.content.count)")
+        Group {
+            switch message.role {
+            case .user:
+                VStack(alignment: .trailing, spacing: Theme.Spacing.xs) {
+                    HStack(alignment: .top, spacing: 0) {
+                        Spacer(minLength: Theme.Spacing.panel)
+                        if isEditing {
+                            MessageEditBubble(
+                                message: message,
+                                onCommit: { text, images in
+                                    onEditResend(text, images)
+                                },
+                                onCancel: onCancelEdit
+                            )
+                        } else {
+                            userBubble
+                        }
+                    }
+                    if showsActionRow {
+                        actionRow
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            case .assistant:
+                assistantContent
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .system:
+                EmptyView()
             }
         }
-        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
         .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { rowHovered = hovering }
         }
         .contextMenu { rowContextMenu }
+    }
+
+    /// 统一常驻操作行组件
+    @ViewBuilder
+    private var actionRow: some View {
+        ChatMessageActionRow(
+            message: message,
+            canRegenerate: canRegenerate,
+            canEditLastRound: canEditLastRound,
+            copied: copied,
+            rowHovered: rowHovered,
+            onCopy: copyContent,
+            onRegenerate: onRegenerate,
+            onBeginEdit: onBeginEdit,
+            onWithdraw: onWithdraw
+        )
     }
 
     /// 行级右键菜单：复制整条消息（图片消息复制其文本，若有）；
@@ -116,31 +140,9 @@ struct ChatMessageRow: View, Equatable {
         pasteboard.setString(message.content, forType: .string)
         copied = true
         // 轻反馈：对勾短暂停留后复位
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 
-    @ViewBuilder
-    private var content: some View {
-        switch message.role {
-        case .user:
-            // 就地编辑态：气泡原地变为编辑器（仅最后一轮 user 消息可进入）
-            if isEditing {
-                MessageEditBubble(
-                    message: message,
-                    onCommit: { text, images in
-                        onEditResend(text, images)
-                    },
-                    onCancel: onCancelEdit
-                )
-            } else {
-                userBubble
-            }
-        case .assistant:
-            assistantContent
-        case .system:
-            EmptyView()
-        }
-    }
 
     /// 用户消息：右对齐气泡，琥珀实底（chatUserBubble：亮色暖纸 / 暗色深琥珀随玻璃微光），
     /// 无描边（实底自身即容器，描边是廉价感来源），圆角 18 对话语言；
@@ -191,20 +193,23 @@ struct ChatMessageRow: View, Equatable {
 
     @ViewBuilder
     private var assistantContent: some View {
-        // 思考折叠区（有 reasoning 时）→ 文本（无气泡铺底）→ 工具调用卡片纵向排列；
-        // 一轮助手消息可能兼有文本与工具调用，纯工具调用轮（无文本）只渲染卡片、不留空文本段；
-        // 卡片与正文同宽
         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
             if let reasoning = message.reasoning, !reasoning.isEmpty {
                 ReasoningDisclosureView(reasoning: reasoning, isLive: isLive)
             }
-            assistantTextPart
+            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                assistantTextPart
+                if showsActionRow, (message.toolCalls?.isEmpty ?? true) {
+                    actionRow
+                }
+            }
             if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                 AIToolCallCardView(toolCalls: toolCalls)
-                // 富内容卡片：工具结果携带 card 信封（如地图卡）时，紧随工具卡独立成卡渲染（与正文同宽），
-                // 未携带信封的工具调用不产生任何占位
                 ForEach(toolCalls, id: \.id) { record in
                     RichCardHostView(resultJSON: record.result ?? "")
+                }
+                if showsActionRow {
+                    actionRow
                 }
             }
         }
@@ -354,71 +359,72 @@ struct ReasoningDisclosureView: View {
                     .frame(height: Theme.Layout.dividerHeight)
                     .padding(.horizontal, Theme.Spacing.md)
 
-                HStack(alignment: .top, spacing: Theme.Spacing.md) {
-                    RoundedRectangle(cornerRadius: 1.25, style: .continuous)
-                        .fill(isLive ? Theme.Colors.accent.opacity(0.45) : Theme.Colors.contentTertiary.opacity(0.35))
-                        .frame(width: 2.5)
-                        .padding(.vertical, 2)
-
-                    ScrollViewReader { proxy in
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                                if rendered.isEmpty && isLive {
-                                    HStack(spacing: Theme.Spacing.sm) {
-                                        BlinkingCaret()
-                                        Text("思考中…")
-                                            .font(Theme.Typography.text(Theme.Typography.footnote))
-                                            .foregroundColor(Theme.Colors.contentTertiary)
-                                    }
-                                    .padding(.vertical, 2)
-                                } else {
-                                    ReasoningMarkdownView(content: rendered, useCache: !isLive)
-                                    if isLive {
-                                        BlinkingCaret()
-                                    }
+                ScrollViewReader { proxy in
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
+                            if rendered.isEmpty && isLive {
+                                HStack(spacing: Theme.Spacing.sm) {
+                                    BlinkingCaret()
+                                    Text("思考中…")
+                                        .font(Theme.Typography.text(Theme.Typography.footnote))
+                                        .foregroundColor(Theme.Colors.contentTertiary)
                                 }
-                                Color.clear
-                                    .frame(height: 1)
-                                    .id("reasoningBottomAnchor")
-                            }
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear.preference(key: ReasoningHeightPreferenceKey.self, value: geo.size.height)
-                                }
-                            )
-                        }
-                        .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
-                        .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
-                        .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
-                            if h > 0 { contentHeight = h }
-                        }
-                        .onChange(of: rendered) { _ in
-                            if isLive && expanded {
-                                DispatchQueue.main.async {
-                                    withAnimation(.easeOut(duration: 0.12)) {
-                                        proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                                    }
+                                .padding(.vertical, 2)
+                            } else {
+                                ReasoningMarkdownView(content: rendered, useCache: !isLive)
+                                if isLive {
+                                    BlinkingCaret()
                                 }
                             }
+                            Color.clear
+                                .frame(height: 1)
+                                .id("reasoningBottomAnchor")
                         }
-                        .onChange(of: expanded) { isExpanded in
-                            if isExpanded && isLive {
-                                DispatchQueue.main.async {
-                                    withAnimation(.easeOut(duration: 0.12)) {
-                                        proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                                    }
-                                }
+                        .background(
+                            GeometryReader { geo in
+                                Color.clear.preference(key: ReasoningHeightPreferenceKey.self, value: geo.size.height)
                             }
-                        }
-                        .onAppear {
-                            if isLive && expanded {
-                                DispatchQueue.main.async {
+                        )
+                    }
+                    .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
+                    .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
+                    .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
+                        if h > 0 { contentHeight = h }
+                    }
+                    .onChange(of: rendered) { _ in
+                        if isLive && expanded {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.12)) {
                                     proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
                                 }
                             }
                         }
                     }
+                    .onChange(of: expanded) { isExpanded in
+                        if isExpanded && isLive {
+                            DispatchQueue.main.async {
+                                withAnimation(.easeOut(duration: 0.12)) {
+                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                                }
+                            }
+                        }
+                    }
+                    .onAppear {
+                        if isLive && expanded {
+                            DispatchQueue.main.async {
+                                proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
+                            }
+                        }
+                    }
                 }
+                .padding(.leading, 2.5 + Theme.Spacing.md)
+                .overlay(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 1.25, style: .continuous)
+                        .fill(isLive ? Theme.Colors.accent.opacity(0.45) : Theme.Colors.contentTertiary.opacity(0.35))
+                        .frame(width: 2.5)
+                        .padding(.vertical, 2)
+                }
+                .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
                 .padding(.horizontal, Theme.Spacing.xl)
                 .padding(.vertical, Theme.Spacing.md)
                 .transition(.opacity)
@@ -712,7 +718,7 @@ struct ReasoningCodeBlockView: View {
         pasteboard.clearContents()
         pasteboard.setString(code, forType: .string)
         copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 

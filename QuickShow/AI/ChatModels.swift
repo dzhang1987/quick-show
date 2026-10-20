@@ -101,6 +101,23 @@ struct ToolCallRecord: Codable, Equatable {
     var arguments: String
     var result: String?
     var status: ToolCallStatus
+    var thoughtSignature: String?
+
+    init(
+        id: String,
+        name: String,
+        arguments: String,
+        result: String? = nil,
+        status: ToolCallStatus,
+        thoughtSignature: String? = nil
+    ) {
+        self.id = id
+        self.name = name
+        self.arguments = arguments
+        self.result = result
+        self.status = status
+        self.thoughtSignature = thoughtSignature
+    }
 }
 
 // MARK: - 消息模型

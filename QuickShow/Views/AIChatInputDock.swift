@@ -276,7 +276,12 @@ struct AIChatInputDock: View {
     }
 
     /// 坞体总高回写：去抖（<0.5pt 跳过）防微抖重渲染；首帧 fallback → 实测校准一次。
+    /// ⚠️ 关键防线（2026-10 事故定证，切勿修改）：
+    /// 传入 height 必须大于 0！窗口显隐切换（如 ⌘⌘ 呼出/隐藏）、首帧布局、视图树挂载或失焦时，
+    /// GeometryReader 可能瞬态上报 0。绝不可将 0 写入 dockTotalHeight，否则会导致
+    /// 消息列表尾部留白塌缩为 0、末条消息被输入坞遮挡且无法向上滚出。
     private func noteDockTotalHeight(_ height: CGFloat) {
+        guard height > 0 else { return }
         if abs(height - dockTotalHeight) > 0.5 {
             dockTotalHeight = height
         }
@@ -474,14 +479,52 @@ struct AIChatInputDock: View {
         let menu = NSMenu()
         menu.autoenablesItems = false // 否则 isEnabled=false 的分组标题会被自动启用机制干扰
 
-        // NSMenuItem.target 是弱引用、action 必须是 @objc 方法，closure 不能直接做 target——
-        // 用 GenerationMenuAction proxy 承接，局部数组持有：popUp 模态跟踪至菜单关闭，生命周期安全
-        var actions: [GenerationMenuAction] = []
-        /// 建一个带勾选态的可点 item（动作走 proxy）
-        func addItem(_ title: String, isOn: Bool, handler: @escaping () -> Void) {
+        // 每次弹出前清空动作协调器，构建期间所有动作 proxy 均被强引用持有，彻底杜绝 weak target 提前释放
+        GenerationMenuCoordinator.shared.reset()
+
+        /// 辅助函数：构造带前置单色 SF Symbol 矢量图标的富文本标题（通用：智能体与服务商 Logo，任何 macOS 版本绝不被系统隐藏）
+        func makeSymbolTitle(iconName: String, name: String) -> NSAttributedString {
+            let result = NSMutableAttributedString()
+            let config = NSImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+            if let img = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)?
+                .withSymbolConfiguration(config) {
+                img.isTemplate = true
+                let attachment = NSTextAttachment()
+                attachment.image = img
+                attachment.bounds = CGRect(x: 0, y: -2, width: 14, height: 14)
+                result.append(NSAttributedString(attachment: attachment))
+                result.append(NSAttributedString(string: "  "))
+            }
+            result.append(NSAttributedString(string: name))
+            return result
+        }
+
+        /// 辅助函数：构造模型标题（文字绝对左对齐，视觉图标居右显示在末尾）
+        func makeModelTitle(name: String, supportsVision: Bool) -> NSAttributedString {
+            guard supportsVision else {
+                return NSAttributedString(string: name)
+            }
+            let result = NSMutableAttributedString(string: name + "  ")
+            let config = NSImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+            if let img = NSImage(systemSymbolName: "eye", accessibilityDescription: "支持视觉")?
+                .withSymbolConfiguration(config) {
+                img.isTemplate = true
+                let attachment = NSTextAttachment()
+                attachment.image = img
+                attachment.bounds = CGRect(x: 0, y: -1.5, width: 13, height: 11)
+                result.append(NSAttributedString(attachment: attachment))
+            }
+            return result
+        }
+
+        /// 建一个带勾选态的可点 item（动作走 proxy，支持富文本）
+        func addItem(_ title: String, attributedTitle: NSAttributedString? = nil, isOn: Bool, handler: @escaping () -> Void) {
             let action = GenerationMenuAction(handler: handler)
-            actions.append(action)
+            GenerationMenuCoordinator.shared.retain(action)
             let item = NSMenuItem(title: title, action: #selector(GenerationMenuAction.invoke), keyEquivalent: "")
+            if let attributedTitle {
+                item.attributedTitle = attributedTitle
+            }
             item.target = action
             item.state = isOn ? .on : .off
             menu.addItem(item)
@@ -493,33 +536,61 @@ struct AIChatInputDock: View {
             menu.addItem(header)
         }
 
-        // 1. 「智能体团队 (Agents)」分组：切换对话角色与专长
+        // 1. 「智能体团队 (Agents)」分组：切换对话角色与专长（图标与设置面板、输入底栏 100% 统一）
         addHeader(String(localized: "智能体团队 (Agents)"))
         let agents = AIAgentStore.shared.agents.filter { $0.isEnabled }
         for agent in agents {
             let isCurrent = (agent.id == state.effectiveAgentId)
-            let tag = agent.isVisualDelegate ? " (👁️ 视觉担当)" : ""
-            addItem("\(agent.name)\(tag)", isOn: isCurrent) { [state] in
+            let attr = makeSymbolTitle(iconName: agent.iconName, name: agent.name)
+            addItem(agent.name, attributedTitle: attr, isOn: isCurrent) { [state] in
                 state.setSessionAgent(agent.id)
                 state.setSessionModel(agent.modelId)
             }
         }
         menu.addItem(.separator())
 
-        // 2. 「当前模型」分组：显示该智能体所属 Provider 的模型池
-        let provider = AIProviderStore.shared.provider(for: currentAgent.providerId)
-        let providerModels = provider?.models ?? []
-        if !providerModels.isEmpty {
-            addHeader(String(localized: "当前模型 (\(provider?.name ?? currentAgent.name))"))
-            for model in providerModels {
-                let visionTag = model.supportsVision ? " 👁️" : ""
-                addItem("\(model.name)\(visionTag)", isOn: model.id == effectiveModelId) { [state] in
-                    state.setSessionModel(model.id)
+        // 2. 「模型供应商」两级菜单分组：第一级按服务商（带前置 Logo 图标），第二级展开模型列表（视觉图标居右）
+        addHeader(String(localized: "模型"))
+        let enabledProviders = AIProviderStore.shared.providers.filter { $0.isEnabled && !$0.models.isEmpty }
+
+        // 查找当前生效模型归属的 Provider
+        let currentModelProviderId: String? = {
+            for p in enabledProviders {
+                if p.models.contains(where: { $0.id == effectiveModelId }) {
+                    return p.id
                 }
+            }
+            return currentAgent.providerId
+        }()
+
+        if !enabledProviders.isEmpty {
+            for provider in enabledProviders {
+                let providerItem = NSMenuItem(title: provider.name, action: nil, keyEquivalent: "")
+                providerItem.attributedTitle = makeSymbolTitle(iconName: provider.iconName, name: provider.name)
+                // 若当前生效模型归属于该服务商，第一级项显示原生勾选态
+                providerItem.state = (provider.id == currentModelProviderId) ? .on : .off
+
+                // 第二级子菜单：该服务商下的所有模型
+                let subMenu = NSMenu()
+                subMenu.autoenablesItems = false
+                for model in provider.models {
+                    let isCurrentModel = (model.id == effectiveModelId)
+                    let modelAttr = makeModelTitle(name: model.name, supportsVision: model.supportsVision)
+                    let modelAction = GenerationMenuAction { [state] in
+                        state.setSessionModel(model.id)
+                    }
+                    GenerationMenuCoordinator.shared.retain(modelAction)
+                    let subItem = NSMenuItem(title: model.name, action: #selector(GenerationMenuAction.invoke), keyEquivalent: "")
+                    subItem.attributedTitle = modelAttr
+                    subItem.target = modelAction
+                    subItem.state = isCurrentModel ? .on : .off
+                    subMenu.addItem(subItem)
+                }
+                providerItem.submenu = subMenu
+                menu.addItem(providerItem)
             }
             menu.addItem(.separator())
         } else if modelList.count > 1 {
-            addHeader(String(localized: "模型"))
             for model in modelList {
                 addItem(model.name, isOn: model.modelId == effectiveModelId) { [state] in
                     state.setSessionModel(model.modelId)
@@ -540,7 +611,7 @@ struct AIChatInputDock: View {
             }
         }
 
-        // 用户刚点击 chip，鼠标即在锚点处；popUp 模态跟踪期间 actions 随栈帧存活
+        // 用户刚点击 chip，鼠标即在锚点处；Coordinator 持有期间 actions 生命期绝对安全
         menu.popUp(positioning: nil, at: NSEvent.mouseLocation, in: nil)
     }
 
@@ -556,10 +627,10 @@ struct AIChatInputDock: View {
     }
 
     private var currentModelName: String {
-        let agent = currentAgent
-        let provider = AIProviderStore.shared.provider(for: agent.providerId)
-        if let match = provider?.model(for: effectiveModelId) {
-            return match.name
+        for provider in AIProviderStore.shared.providers {
+            if let match = provider.model(for: effectiveModelId) {
+                return match.name
+            }
         }
         if let matched = modelList.first(where: { $0.modelId == effectiveModelId }) {
             return matched.name
@@ -749,11 +820,26 @@ private struct ThinkingLevelBars: View {
     }
 }
 
-// MARK: - 生成菜单动作代理
+// MARK: - 生成菜单动作代理与生命周期协调器
+
+/// 生成菜单生命周期协调器：强持有当前弹出菜单中所有 item 的 target proxy，
+/// 杜绝 NSMenuItem.target (weak) 因局部栈变量提前释放而变成 nil 导致的点击丢失。
+@MainActor
+private final class GenerationMenuCoordinator: NSObject {
+    static let shared = GenerationMenuCoordinator()
+    private var activeActions: [GenerationMenuAction] = []
+
+    func retain(_ action: GenerationMenuAction) {
+        activeActions.append(action)
+    }
+
+    func reset() {
+        activeActions.removeAll()
+    }
+}
 
 /// NSMenuItem 动作代理：NSMenuItem.target 是弱引用、action 必须是 @objc 方法，
-/// closure 不能直接做 target——本类持 closure 转发。构建菜单时由局部数组持有
-///（popUp 模态跟踪至菜单关闭，期间 proxy 存活，生命周期安全）。
+/// closure 不能直接做 target——本类持 closure 转发。由 GenerationMenuCoordinator 强持有保证生命周期安全。
 private final class GenerationMenuAction: NSObject {
     let handler: () -> Void
     init(handler: @escaping () -> Void) { self.handler = handler }

@@ -135,9 +135,9 @@ final class AIChatState: ObservableObject {
     /// 多会话数据层（Wave 2 侧边栏消费其分组 / 搜索 / 增删改 API）。
     let store = ChatSessionStore.shared
 
-    /// 当前生效智能体 id（优先会话绑定，否则全局默认激活智能体）。
+    /// 当前生效智能体 id（优先会话绑定，其次新会话草稿暂存，否则全局默认激活智能体）。
     var effectiveAgentId: String {
-        store.currentSession?.agentId ?? AIAgentStore.shared.activeAgentId
+        store.currentSession?.agentId ?? draftAgentId ?? AIAgentStore.shared.activeAgentId
     }
 
     /// 当前生效智能体
@@ -145,12 +145,19 @@ final class AIChatState: ObservableObject {
         AIAgentStore.shared.agent(for: effectiveAgentId) ?? AIAgentStore.shared.activeAgent
     }
 
-    /// 绑定当前会话智能体
+    /// 绑定当前会话智能体（新会话草稿态下暂存并同步更新全局激活）
     func setSessionAgent(_ agentId: String?) {
-        guard let sessionId = currentSessionId else { return }
         let trimmed = agentId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = (trimmed?.isEmpty == false) ? trimmed : nil
-        store.setSessionAgent(id: sessionId, agentId: resolved)
+        if let sessionId = currentSessionId {
+            store.setSessionAgent(id: sessionId, agentId: resolved)
+        } else {
+            draftAgentId = resolved
+            if let resolved {
+                AIAgentStore.shared.activeAgentId = resolved
+            }
+        }
+        objectWillChange.send()
     }
 
     /// Base URL 与 API Key 均已配置（综合会话生效模型、当前 Agent、全局选中 Provider 与全局回退）。
@@ -199,6 +206,13 @@ final class AIChatState: ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     /// 上一次观察到的会话 id 集合基线：用于检测「会话被删除」并清理其运行时状态。
     var knownSessionIds: Set<UUID> = []
+
+    /// 新会话草稿态暂存绑定的智能体 ID（nil 则跟随全局激活）
+    @Published var draftAgentId: String? = nil
+    /// 新会话草稿态暂存绑定的模型 ID（nil 则跟随当前 Agent 默认）
+    @Published var draftModelId: String? = nil
+    /// 新会话草稿态暂存绑定的思考档位（nil 则跟随模型默认）
+    @Published var draftThinkingLevel: ThinkingLevel? = nil
 
     /// 按会话隔离的输入草稿（key = 会话 id，value = 未发送文本）；非 @Published，
     /// 不参与视图刷新。真源在磁盘 `AIChats/drafts.json`，此处为内存镜像。
@@ -353,9 +367,10 @@ final class AIChatState: ObservableObject {
             }
             .store(in: &cancellables)
 
-        // 会话数据/当前会话变化 → 重算压缩信息（摘要写入、切会话、清空/撤回后即时刷新）。
+        // 会话数据/当前会话变化 → 广播给观察 AIChatState 的视图实时重绘并重算压缩信息。
         Publishers.CombineLatest(store.$sessions, store.$currentSessionId)
             .sink { [weak self] _, _ in
+                self?.objectWillChange.send()
                 self?.refreshCompactionInfo()
             }
             .store(in: &cancellables)
@@ -384,14 +399,14 @@ final class AIChatState: ObservableObject {
 
     // MARK: - 会话级模型 / 思考档位（UI 契约）
 
-    /// 当前会话绑定的模型 id；nil = 跟随全局默认模型。
+    /// 当前会话绑定的模型 id；nil = 跟随全局默认模型（新会话草稿态回退至草稿暂存）。
     var currentSessionModelId: String? {
-        store.currentSession?.modelId
+        store.currentSession?.modelId ?? draftModelId
     }
 
-    /// 当前会话思考档位；nil = 跟随模型默认。
+    /// 当前会话思考档位；nil = 跟随模型默认（新会话草稿态回退至草稿暂存）。
     var currentThinkingLevel: ThinkingLevel? {
-        store.currentSession?.thinkingLevel
+        store.currentSession?.thinkingLevel ?? draftThinkingLevel
     }
 
     /// 上下文水位；nil = 暂无会话/无数据。
@@ -403,15 +418,24 @@ final class AIChatState: ObservableObject {
 
     /// 绑定当前会话模型（空串视为跟随全局默认）；只影响后续请求。
     func setSessionModel(_ modelId: String) {
-        guard let sessionId = currentSessionId else { return }
         let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
-        store.setSessionModel(id: sessionId, modelId: trimmed.isEmpty ? nil : trimmed)
+        let resolved = trimmed.isEmpty ? nil : trimmed
+        if let sessionId = currentSessionId {
+            store.setSessionModel(id: sessionId, modelId: resolved)
+        } else {
+            draftModelId = resolved
+        }
+        objectWillChange.send()
     }
 
     /// 设置当前会话思考档位（nil = 跟随模型默认）；只影响后续请求。
     func setThinkingLevel(_ level: ThinkingLevel?) {
-        guard let sessionId = currentSessionId else { return }
-        store.setThinkingLevel(id: sessionId, level: level)
+        if let sessionId = currentSessionId {
+            store.setThinkingLevel(id: sessionId, level: level)
+        } else {
+            draftThinkingLevel = level
+        }
+        objectWillChange.send()
     }
 
     /// 指定模型是否支持关闭思考（UI 据此决定是否展示「关闭」档）。
@@ -493,6 +517,9 @@ final class AIChatState: ObservableObject {
     /// 新建会话（⌘N 或侧栏按钮）：
     /// 惰性新建：不创建任何空会话对象，进入新会话草稿待命态，恢复新会话独立草稿。
     func newSession() {
+        draftAgentId = nil
+        draftModelId = nil
+        draftThinkingLevel = nil
         guard store.currentSessionId != nil else {
             // 当前已在新会话草稿态，复用当前界面并请求输入框重新聚焦
             NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
@@ -507,6 +534,9 @@ final class AIChatState: ObservableObject {
     /// 未读清除、isStreaming 派生刷新与草稿隔离由 $currentSessionId 订阅统一处理（见 init）。
     func selectSession(id: UUID) {
         guard store.session(id: id) != nil else { return }
+        draftAgentId = nil
+        draftModelId = nil
+        draftThinkingLevel = nil
         // 切走前立即落盘旧会话草稿（不等防抖），随后订阅以 switchDraft 载入新会话草稿。
         flushDraft()
         store.currentSessionId = id

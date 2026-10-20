@@ -78,7 +78,7 @@ struct CodeBlockView: View {
         pasteboard.setString(code, forType: .string)
         copied = true
         // 轻反馈：对勾短暂停留后复位
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 
@@ -97,28 +97,30 @@ struct CodeBlockText: View {
     /// 后台高亮结果；nil = 尚未完成 / 不可用 / 降级纯色。
     @State private var highlighted: AttributedString?
 
+    /// 代码行数（单行纯等宽行高约 21pt：12.5pt 字体 + 6pt lineSpacing）
+    private var lineCount: Int {
+        code.split(separator: "\n", omittingEmptySubsequences: false).count
+    }
+
+    /// 限高阈值行数（380pt / 21pt ≈ 18 行）
+    private static let maxLinesBeforeScroll = 18
+
     var body: some View {
-        // 高亮版优先、否则降级为纯色等宽文本（现状行为）。
-        // 代码块内不转 Markdown，纯等宽显示。
-        // 长行不折行：横向滚动承载超长行——折行会破坏缩进结构、复制粘贴混入换行符。
-        // 嵌套滚动安全：底层 NSScrollView 不消费垂直滚轮 delta（沿 responder chain 上传
-        // 外层垂直滚动，滚轮鼠标体验与现状一致），仅消费水平 delta（shift+滚轮/双指横滑）；
-        // 内容短于视口时贴 scroll origin（leading），与旧 frame(alignment: .leading) 等价。
-        // fixedSize(horizontal: true)：水平按固有宽度布局（ScrollView 提议无限宽，双保险防
-        // 折行）；vertical: false 服从容器高度（= 内容固有行高，无循环依赖）。
-        ScrollView(.horizontal, showsIndicators: true) {
-            Group {
-                if let highlighted {
-                    Text(highlighted)
-                } else {
-                    Text(code)
-                        .font(Theme.Typography.mono(12.5))
-                        .foregroundColor(Theme.Colors.contentPrimary)
+        Group {
+            if lineCount <= Self.maxLinesBeforeScroll {
+                // 短代码块（≤18 行）：垂直方向零滚动、纯自适应撑开（首帧同步确定固有高度，
+                // 彻底杜绝异步 preference 测高导致的父级 ChatMessageActionRow 错位与跳动）；
+                // 仅保留水平滚动以承载超长行。
+                ScrollView(.horizontal, showsIndicators: true) {
+                    textContent
                 }
+            } else {
+                // 长代码块（>18 行）：高度锁定在 380pt，双向滚动。首帧即确定为 380pt 恒定高度，零布局抖动。
+                ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                    textContent
+                }
+                .frame(height: Theme.Layout.chatBlockMaxHeight)
             }
-            .lineSpacing(6)
-            .fixedSize(horizontal: true, vertical: false)
-            .textSelection(.enabled)
         }
         .task(id: HighlightTask(code: code, language: language, darkMode: colorScheme == .dark)) {
             // 首帧保持纯色等宽（highlighted == nil）；后台计算高亮后替换。
@@ -131,6 +133,21 @@ struct CodeBlockText: View {
             guard !Task.isCancelled else { return }
             highlighted = result
         }
+    }
+
+    private var textContent: some View {
+        Group {
+            if let highlighted {
+                Text(highlighted)
+            } else {
+                Text(code)
+                    .foregroundColor(Theme.Colors.contentPrimary)
+            }
+        }
+        .font(Theme.Typography.mono(12.5))
+        .lineSpacing(6)
+        .fixedSize(horizontal: true, vertical: false)
+        .textSelection(.enabled)
     }
 
     /// 高亮 task 键：内容 / 语言 / 外观任一变化即重高亮（外观切换换主题，

@@ -53,13 +53,18 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         into result: NSMutableAttributedString,
         context: MarkdownRenderContext
     ) {
+        let startIndex = result.length
         switch block {
         case let .orderedList(items):
-            appendList(items: items, ordered: true, depth: 0, nextBlock: nextBlock, into: result)
+            appendList(items: items, ordered: true, depth: 0, hasNextListItem: false, nextBlock: nextBlock, into: result)
         case let .unorderedList(items):
-            appendList(items: items, ordered: false, depth: 0, nextBlock: nextBlock, into: result)
+            appendList(items: items, ordered: false, depth: 0, hasNextListItem: false, nextBlock: nextBlock, into: result)
         default:
             break
+        }
+        // 当整个列表块为连续文本流最后一块（nextBlock == nil）时，收敛末尾多余换行符，避免底部多出一行空白
+        if nextBlock == nil, result.length > startIndex, result.string.hasSuffix("\n") {
+            result.deleteCharacters(in: NSRange(location: result.length - 1, length: 1))
         }
     }
 
@@ -80,18 +85,20 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         items: [MarkdownListItem],
         ordered: Bool,
         depth: Int,
+        hasNextListItem: Bool,
         nextBlock: MarkdownBlock?,
         into result: NSMutableAttributedString
     ) {
         for (idx, item) in items.enumerated() {
             let isLastInCurrentList = (idx == items.count - 1)
-            let nextBlockForLastItem = isLastInCurrentList ? nextBlock : nil
+            let itemHasNextListItem = !isLastInCurrentList || hasNextListItem
+            let itemNextBlock = (isLastInCurrentList && !hasNextListItem) ? nextBlock : nil
             appendListItem(
                 item: item,
                 ordered: ordered,
                 depth: depth,
-                isLastItem: isLastInCurrentList,
-                nextBlock: nextBlockForLastItem,
+                hasNextListItem: itemHasNextListItem,
+                nextBlock: itemNextBlock,
                 into: result
             )
         }
@@ -101,7 +108,7 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         item: MarkdownListItem,
         ordered: Bool,
         depth: Int,
-        isLastItem: Bool,
+        hasNextListItem: Bool,
         nextBlock: MarkdownBlock?,
         into result: NSMutableAttributedString
     ) {
@@ -165,10 +172,8 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
             }
         }
 
-        let needsTrailingNewline = !isLastItem || nextBlock != nil || !subLists.isEmpty
-        if needsTrailingNewline {
-            itemPiece.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont, .foregroundColor: bodyColor]))
-        }
+        // 每个列表条目自身在 TextKit 中均为独立段落，末尾始终保留换行符隔离
+        itemPiece.append(NSAttributedString(string: "\n", attributes: [.font: bodyFont, .foregroundColor: bodyColor]))
 
         // 3. 悬挂缩进 + NSTextTab 精准两列对齐
         let baseIndent: CGFloat = CGFloat(depth) * 22
@@ -182,9 +187,9 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         style.tabStops = [NSTextTab(textAlignment: .left, location: hangingIndent)]
 
         if !subLists.isEmpty {
-            style.paragraphSpacing = 6
-        } else if !isLastItem {
-            style.paragraphSpacing = 10
+            style.paragraphSpacing = 8
+        } else if hasNextListItem {
+            style.paragraphSpacing = 14
         } else if let next = nextBlock {
             if case .heading = next {
                 style.paragraphSpacing = 22
@@ -201,8 +206,16 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         // 4. 递归追加子列表
         for (sIdx, sub) in subLists.enumerated() {
             let isLastSub = sIdx == subLists.count - 1
-            let nextForSub = isLastSub ? nextBlock : nil
-            appendList(items: sub.items, ordered: sub.ordered, depth: depth + 1, nextBlock: nextForSub, into: result)
+            let subHasNextListItem = !isLastSub || hasNextListItem
+            let subNextBlock = (isLastSub && !hasNextListItem) ? nextBlock : nil
+            appendList(
+                items: sub.items,
+                ordered: sub.ordered,
+                depth: depth + 1,
+                hasNextListItem: subHasNextListItem,
+                nextBlock: subNextBlock,
+                into: result
+            )
         }
     }
 }
@@ -221,7 +234,7 @@ struct MarkdownListView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 MarkdownListItemRow(item: item, ordered: ordered, depth: depth)
             }

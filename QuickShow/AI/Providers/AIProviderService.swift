@@ -17,14 +17,16 @@ final class AIProviderService {
         messages: [ChatCompletionMessage],
         agent: AIAgent,
         overrideModelId: String? = nil,
-        thinkingLevel: ThinkingLevel? = nil
+        thinkingLevel: ThinkingLevel? = nil,
+        disableTools: Bool = false
     ) -> AsyncThrowingStream<AIStreamEvent, Error> {
         let effectiveModel = overrideModelId?.isEmpty == false ? overrideModelId : agent.modelId
         let effectiveThinking = thinkingLevel ?? agent.thinkingLevel
         let options = AIChatRequestOptions(
             modelId: effectiveModel,
             thinkingLevel: effectiveThinking,
-            agentId: agent.id
+            agentId: agent.id,
+            disableTools: disableTools
         )
         return AIChatService.shared.send(messages: messages, options: options)
     }

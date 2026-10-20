@@ -29,6 +29,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        qsDebugLog("QuickShow applicationDidFinishLaunching")
         // 确保在 Dock 程序坞上完全隐藏图标，仅在状态栏与快捷浮动面板常驻
         NSApp.setActivationPolicy(.accessory)
 
@@ -103,6 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 state?.show(mode: .glance)
             }
         }
+        AIWindowManager.shared.show()
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

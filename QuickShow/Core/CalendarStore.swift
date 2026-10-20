@@ -218,7 +218,14 @@ final class CalendarStore: ObservableObject {
         upcomingMeeting = nil
     }
 
-    // MARK: - 网格静态方法
+    // MARK: - 网格静态方法与算法常量
+    /// 日历网格尺寸常量 (月视图 6 周 × 7 天 = 42 格，周视图 7 格)
+    enum GridMetrics {
+        static let monthCellCount: Int = 42
+        static let weekCellCount: Int = 7
+        static let dayCellCount: Int = 1
+    }
+
     /// 网格起始日（周一为首列，贴合中文习惯）：月视图 = 当月 1 号所在周的周一，周视图 = 锚点所在周周一
     static func gridStartDate(anchor: Date, mode: CalendarViewMode) -> Date? {
         gridDateRange(anchor: anchor, mode: mode).lowerBound
@@ -234,17 +241,17 @@ final class CalendarStore: ObservableObject {
             let weekday = cal.component(.weekday, from: firstOfMonth)   // 1 = 周日
             let offset = (weekday + 5) % 7                              // 距周一的天数
             let start = cal.date(byAdding: .day, value: -offset, to: firstOfMonth) ?? firstOfMonth
-            let end = cal.date(byAdding: .day, value: 42, to: start) ?? start
+            let end = cal.date(byAdding: .day, value: GridMetrics.monthCellCount, to: start) ?? start
             return (start, end)
         case .week:
             let weekday = cal.component(.weekday, from: anchor)
             let offset = (weekday + 5) % 7
             let start = cal.date(byAdding: .day, value: -offset, to: cal.startOfDay(for: anchor)) ?? anchor
-            let end = cal.date(byAdding: .day, value: 7, to: start) ?? start
+            let end = cal.date(byAdding: .day, value: GridMetrics.weekCellCount, to: start) ?? start
             return (start, end)
         case .day:
             let start = cal.startOfDay(for: anchor)
-            let end = cal.date(byAdding: .day, value: 1, to: start) ?? start
+            let end = cal.date(byAdding: .day, value: GridMetrics.dayCellCount, to: start) ?? start
             return (start, end)
         }
     }
@@ -254,7 +261,7 @@ final class CalendarStore: ObservableObject {
         guard mode != .day else { return [] }
         let cal = Calendar.current
         let range = gridDateRange(anchor: anchor, mode: mode)
-        let count = (mode == .month) ? 42 : 7
+        let count = (mode == .month) ? GridMetrics.monthCellCount : GridMetrics.weekCellCount
         var cells: [CalendarDayCell] = []
         for i in 0..<count {
             guard let date = cal.date(byAdding: .day, value: i, to: range.lowerBound) else { continue }

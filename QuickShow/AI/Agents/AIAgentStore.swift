@@ -90,16 +90,41 @@ final class AIAgentStore: ObservableObject {
         }
     }
 
-    // MARK: - 持久化与默认值
+    // MARK: - 结构化持久化 (agents.json 单一真源，脱离 UserDefaults)
+
+    private var agentsFileURL: URL? {
+        guard let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = appSupport.appendingPathComponent("QuickShow", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("agents.json")
+    }
 
     private func saveAgents() {
-        if let data = try? JSONEncoder().encode(agents) {
-            UserDefaults.standard.set(data, forKey: Keys.agentsData)
+        guard let url = agentsFileURL else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(agents) {
+            try? data.write(to: url, options: .atomic)
         }
     }
 
     private func loadAgents() {
-        if let data = UserDefaults.standard.data(forKey: Keys.agentsData),
+        var rawData: Data? = nil
+        var needsMigrationFromUserDefaults = false
+
+        if let fileURL = agentsFileURL,
+           FileManager.default.fileExists(atPath: fileURL.path),
+           let fileData = try? Data(contentsOf: fileURL) {
+            rawData = fileData
+        } else if let udData = UserDefaults.standard.data(forKey: Keys.agentsData) {
+            rawData = udData
+            needsMigrationFromUserDefaults = true
+        }
+
+        if let data = rawData,
            let loaded = try? JSONDecoder().decode([AIAgent].self, from: data),
            !loaded.isEmpty {
             var updated = loaded
@@ -115,6 +140,40 @@ final class AIAgentStore: ObservableObject {
                     updated[i].modelId = "qoder/efficient"
                     didMigrate = true
                 }
+                // 存量智能体易懂化重命名迁移
+                if updated[i].id == "orchestrator" && (updated[i].name == "编排中枢" || updated[i].name.isEmpty) {
+                    updated[i].name = "全能助理"
+                    didMigrate = true
+                }
+                if updated[i].id == "observer" && (updated[i].name == "视觉感知" || updated[i].name == "视觉专家" || updated[i].name.isEmpty) {
+                    updated[i].name = "识图助理"
+                    updated[i].iconName = "eye"
+                    didMigrate = true
+                }
+                if updated[i].id == "oracle" && (updated[i].name == "深度推理" || updated[i].name.isEmpty) {
+                    updated[i].name = "深度思考"
+                    didMigrate = true
+                }
+                if updated[i].id == "librarian" {
+                    if updated[i].name == "知识检索" || updated[i].name.isEmpty {
+                        updated[i].name = "资料检索"
+                        updated[i].iconName = "books.vertical"
+                        didMigrate = true
+                    }
+                    if updated[i].description.contains("快速检索与资料提炼助手") || updated[i].description.isEmpty {
+                        updated[i].description = "联网资料检索与情报专家，专属配备 web_search 公网搜索引擎与 fetch_url 网页抓取工具，擅长全网检索最新实时行情、新闻资讯、技术文档与财报，并输出高密度要点报告。"
+                        didMigrate = true
+                    }
+                    if updated[i].systemPrompt.contains("你是高效的资料研究员（Librarian）") && !updated[i].systemPrompt.contains("web_search") {
+                        updated[i].systemPrompt = """
+                        你是高效的资料研究员与联网情报专家（Librarian）。
+                        你专属配备了 `web_search`（公网搜索引擎）与 `fetch_url`（网页全文抓取）等联网工具。
+                        当需要获取最新的实时行情、新闻资讯、技术动态、百科或企业财报时，优先通过这些工具搜索公网最新信息，并迅速提炼关键数据。
+                        回答言简意赅、条理分明，用最少的废话呈现最高密度的信息，并给出可靠的数据来源或链接。
+                        """
+                        didMigrate = true
+                    }
+                }
             }
             // 自动补齐存量中缺失的官方默认智能体（如 concierge 系统管家）
             let providerId = UserDefaults.standard.string(forKey: "ai.selectedProviderId.v2") ?? "qoder"
@@ -127,8 +186,9 @@ final class AIAgentStore: ObservableObject {
                 }
             }
             self.agents = updated
-            if didMigrate {
-                saveAgents()
+            saveAgents()
+            if needsMigrationFromUserDefaults {
+                UserDefaults.standard.removeObject(forKey: Keys.agentsData)
             }
             self.activeAgentId = UserDefaults.standard.string(forKey: Keys.activeAgentId) ?? "orchestrator"
             return

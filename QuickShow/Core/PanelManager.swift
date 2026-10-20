@@ -107,82 +107,16 @@ final class PanelManager {
             appState?.toggleCheatSheet()
         }
         
-        // 全键盘盲操快捷键
+        // 全键盘盲操快捷键（由 PanelKeyCommandRegistry 策略注册表统一分发治理，消灭裸魔数与巨型 switch）
         panel.onKeyDownAction = { [weak appState] event in
             guard let appState = appState else { return false }
             appState.resetGlanceTimer()
-            let keyCode = event.keyCode
-            // 独立上下文直达键（注册表查表分发；要求无 ⌘/⌥/⇧/⌃ 修饰，避免 ⌘G 等组合键误触）
-            if let context = AppState.contextHotkeys[keyCode],
-               event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty {
-                appState.toggleContext(context)
-                return true
-            }
-            switch keyCode {
-            case 46: // M: 静音 / 取消静音
-                appState.toggleMute()
-                return true
-            case 126: // Up Arrow: 音量 +5%
-                appState.adjustVolume(by: 5)
-                return true
-            case 125: // Down Arrow: 音量 -5%
-                appState.adjustVolume(by: -5)
-                return true
-            case 0: // A: 咖啡因防休眠开关
-                appState.toggleKeepAwake()
-                return true
-            case 8: // C: 一键优化清理系统内存
-                appState.optimizeMemory()
-                return true
-            case 35: // P: 番茄钟播放 / 暂停
-                appState.togglePomodoro()
-                return true
-            case 31: // O: 打开下载目录
-                appState.openDownloadsFolder()
-                return true
-            case 7: // X: 剪贴板纯文本化
-                appState.cleanClipboard()
-                return true
-            case 37: // L: 全屏立即锁屏离座
-                appState.lockScreen()
-                return true
-            case 2: // D: 专注模式设置
-                appState.openFocusSettings()
-                return true
-            case 34: // I: 进入 AI 对话窗（不走 PanelContext 路由；要求无修饰键，避免 ⌘I 等组合误触）
-                guard event.modifierFlags.intersection([.command, .option, .shift, .control]).isEmpty else { return false }
-                AIWindowManager.shared.toggle()
-                return true
-            case 18, 19, 20: // 1/2/3: 日历 月/周/日 视图切换（仅日历视图内）
-                guard appState.currentContext == .calendar else { return false }
-                appState.setCalendarViewMode(keyCode == 18 ? .month : (keyCode == 19 ? .week : .day))
-                return true
-            // 媒体控制盲操：仅存在媒体会话时消费按键（无会话时返回 false 不拦截事件）
-            case 36: // ⏎ 回车: 播放 / 暂停切换
-                appState.mediaTogglePlayPause()
-                return appState.hasNowPlayingSession
-            case 123: // ← 左方向键: 日历视图激活时优先翻页（覆盖媒体语义），否则媒体上一首
-                if appState.currentContext == .calendar {
-                    appState.calendarPageBackward()
-                    return true
-                }
-                appState.mediaPreviousTrack()
-                return appState.hasNowPlayingSession
-            case 124: // → 右方向键: 日历视图激活时优先翻页（覆盖媒体语义），否则媒体下一首
-                if appState.currentContext == .calendar {
-                    appState.calendarPageForward()
-                    return true
-                }
-                appState.mediaNextTrack()
-                return appState.hasNowPlayingSession
-            case 43: // , 逗号: 后退 15 秒（无修饰键；⌘, 已在上游拦截为偏好设置）
-                appState.mediaSkipBackward()
-                return appState.hasNowPlayingSession
-            case 47: // . 句号: 快进 15 秒
-                appState.mediaSkipForward()
-                return appState.hasNowPlayingSession
-            default:
-                return false
+            return MainActor.assumeIsolated {
+                PanelKeyCommandRegistry.shared.handle(
+                    event: event,
+                    context: appState.currentContext,
+                    state: appState
+                )
             }
         }
         
@@ -403,7 +337,7 @@ final class PanelManager {
         // 全局键盘监听备用
         escGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let panel = self.panel, panel.isVisible else { return }
-            if event.keyCode == 53 { // ESC 键
+            if event.keyCode == KeyEquivalentCode.escape.rawValue {
                 DispatchQueue.main.async {
                     _ = EscapePolicyCenter.shared.handleEscape(scope: .glance)
                 }
@@ -413,7 +347,7 @@ final class PanelManager {
         // 本地按键监听（同步立刻响应）
         escLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self = self, let panel = self.panel, panel.isVisible else { return event }
-            if event.keyCode == 53 { // ESC 键
+            if event.keyCode == KeyEquivalentCode.escape.rawValue {
                 // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音（不落入窗口拦截）
                 if let textView = panel.firstResponder as? NSTextView, textView.hasMarkedText() {
                     return event

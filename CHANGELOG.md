@@ -6,6 +6,16 @@
 
 ### Added
 
+- **聊天区统一自适应限高滚动容器（`AdaptiveScrollBox`）与两档高度阶梯规范（`DesignTokens.swift` / `AIChatLayoutSupport.swift`）**：
+  - **两档通用高度阶梯**：在 `Theme.Layout` 确立主交付内容级（`chatBlockMaxHeight = 380`，约 20 行）与次级元信息级（`chatMetaBlockMaxHeight = 180`，约 10 行）两档设计阶梯，统一管理长内容展示；
+  - **泛型统一自适应容器**：封装 `AdaptiveScrollBox`，内置内容几何尺寸动态测量；内容低于限高时 shrink-to-fit 精准贴合零留白，超出限高时严格锁死并开启平滑内滚动。
+
+- **大模型供应商多授权方式抽象与行为策略化自治架构（`AIAuthMethod` / `BiometricImportAuthMethod` / `InteractiveBrowserAuthMethod` / `StandardAPIKeyAuthMethod` / `OAuthLoopbackServer`）**：
+  - **授权方式一等公民抽象**：将 API Key、Touch ID 本地导入、浏览器外部授权（OAuth PKCE 与 Device Flow）抽象为统一面向接口的协议族，支持单一模型供应商 1 对多聚合多套授权方案；
+  - **服务商能力统一聚合（`LLMProvider`）**：由 `LLMProvider` 统一收拢通信推理与所支持的 `supportedAuthMethods` 矩阵，彻底消除此前平行冗余的双轨制映射；
+  - **本地轻量级 OAuth 回环服务器与密码学套件（`OAuthLoopbackServer` / `OAuthCrypto`）**：原生实现支持 S256 PKCE 随机校验码生成的本地轻量 HTTP 回环监听与安全回调；
+  - **多厂商专属授权策略落地**：包含 Antigravity Google PKCE 与触控 ID 免密导入、Qoder Device Flow 与触控 ID 导入、DashScope 与 OpenAI 环境变量静默探测与存量迁移。
+
 - **多智能体并发调度与协作体系（`LaunchSubagentsTool` / `AgentCoordinator` / `AgentTaskRegistry` / `SubagentTaskTray`）**：
   - **原子调度工具收敛（`launch_subagents`）**：收敛旧版分散的 `launch_agent`、`await_agents`、`delegate_to_agent` 三工具为单一批处理并发调度工具 `launch_subagents`，支持编排中枢向多个垂类专家下发专项任务，底层真并发并行执行并一次性归并返回成果；
   - **6 大垂类智能体矩阵与最小权限隔离**：确立编排中枢（Orchestrator）、视觉感知（Observer）、代码专家（Coder）、深度推理（Oracle）、知识检索（Librarian）、系统管家（Concierge）6 大垂类智能体矩阵，实行严格的工具白名单隔离；
@@ -14,6 +24,20 @@
   - **智能 Steering 转向路由引擎（A+B 方案）**：用户在主会话中途追加输入时，支持 `@librarian` / `@coder` 显式前缀或语义自动识别分流，将指令实时穿透注入正在运行的子任务 Tool Loop，并在输入框上方呈现轻反馈通知。
 
 ### Changed
+
+- **Markdown 列表与表格排版呼吸感精修（`MarkdownListRenderer.swift` / `MarkdownTableView.swift`）**：
+  - **列表条目边界强化**：TextKit 文本流路径条目间距 10 → 14pt（原与行距 6pt 仅差 4pt，条目边界视觉上粘连难辨），带子列表的条目间距 6 → 8pt；SwiftUI Widget 路径条目间距 lg(8) → xxl(12)；
+  - **表格数据行呼吸感**：数据行垂直内边距 md(6) → xl(10)、表头 md → lg(8)，单元格文本新增 3pt 行距，长文本细节列不再顶格挤压。
+
+- **三大长内容组件统一收敛接入 `AdaptiveScrollBox`（`MarkdownCodeBlock.swift` / `AIToolCardView.swift` / `MarkdownTableView.swift`）**：
+  - **代码块（`MarkdownCodeBlock.swift`）**：接入双向自适应滚动，超长代码（如 Rust / Python / Swift 等源码）限制在约 20 行（380pt）内垂直滚动并保留横向长行不折行特性，短代码紧凑贴合，删除内部重复手写的高度测量逻辑；
+  - **工具调用结果（`AIToolCardView.swift`）**：`ToolCallResultBlock` 接入自适应容器，彻底消除短 JSON（如 `{"ok":true}`）由于盲目撑满 180pt 产生的 150pt 浅色留白，长结果在 180pt（或展开 260pt）内滚动；
+  - **数据表格（`MarkdownTableView.swift`）**：数据行接入自适应容器，短表紧凑无空隙，超长表在 380pt 内滚动并自然呈现表头常驻置顶（Sticky Header）交互。
+
+- **`AIAuthManager` 门面调度与纯数据驱动设置面板（`AIAuthManager.swift` / `AIServiceSettingsForm.swift`）**：
+  - 彻底移除 `AIAuthManager` 内部私有字典与硬编码，统一由 `LLMProviderRegistry` 暴露的 `supportedAuthMethods` 动态调度探测与鉴权；
+  - 设置界面消灭所有针对厂商类型的 hardcoded 判断，纯数据驱动自适应渲染已绑定卡片、触控 ID 导入按钮、浏览器登录按钮及 API Key 输入框；
+  - 全项目 Key 统一收归 `~/Library/Application Support/QuickShow/keys/<name>.key`（POSIX 0600 访问控制），业务配置迁移为专属 json 存储（`providers.json` / `agents.json`）。
 
 - **思考过程卡片全功能 Markdown 排版与流式跟随展示（`AIChatMessageRow.swift` / `DesignTokens.swift`）**：
   - **默认展开与自适应贴合**：思考过程默认展开（约 10 行 180pt 限高滚动区，内容少时自适应贴合不留空，超出时内滚）；落定后保持展开，可随时手动点击收起为单行摘要；
@@ -28,6 +52,45 @@
   - 偏好设置面板新增“可用工具授权”区域，支持显示各 Agent 授权工具数、一键恢复推荐及逐项开关。
 
 ### Fixed
+
+- **彻底修复落定助手消息中操作栏（复制与重新生成按钮）错误插入正文段落中间错位排版缺陷（`AIChatMessageRow.swift` / `MarkdownCodeBlock.swift`）**：
+  - **根本成因根除（First-Principles Root Cause）**：
+    1. 跨层级布局脱节：原 `ChatMessageRow` 将 `ChatMessageActionRow` 放在外层 `VStack` 作为 `HStack { content }` 的兄弟视图；由于 `ChatMessageRow` 被 `.equatable()` 包装，当内部 Markdown 块产生异步尺寸变更时，外层 `VStack` 不会重求值，导致操作行滞留在第一帧旧高度处，被后续延伸的列表内容覆盖穿越；
+    2. 代码块双阶段异步抖动：`MarkdownCodeBlock` 内部原本无差别挂载通用 `AdaptiveScrollBox`，其首帧测量高度初始化为 0，随后经 `GeometryReader` preference 回调跳变至真实高度（如 117pt → 197pt），诱发内部多次重排与外层布局解耦；
+  - **内聚化结构重构（`AIChatMessageRow.swift`）**：
+    - 按 `message.role` 原生分流：助手消息彻底消除多余外层包装，将 `actionRow` 直接下沉至 `assistantContent` 局域 `VStack` 尾部紧贴 `assistantTextPart`；在物理视图层级上建立唯一直接父子级契约，确保操作行永远严密跟随正文文尾（或工具卡片底缘），彻底杜绝中间穿越的几何可能性；
+  - **代码块首帧同步高度与零抖动优化（`MarkdownCodeBlock.swift`）**：
+    - 短代码块（≤18 行，95% 场景）：消除不必要的垂直 `ScrollView` 与异步 preference 测量，首帧采用纯水平滚动容器直接自适应撑开，物理高度首帧 100% 同步确定；
+    - 长代码块（>18 行）：首帧直接锁定在 `chatBlockMaxHeight`（380pt）开启双向滚动；彻底消除两阶段高度跃变；
+  - **输入坞上方尾部留白减半收敛（`AIChatMessageList.swift`）**：将滚到底时末条消息操作栏距离输入坞顶部的间距由原先过宽的 103pt 收敛减半至约 54pt，消除空洞感的同时确保按钮舒适露出。
+
+- **子智能体工具调用死循环与卡在【思考中...】假死问题（`AgentCoordinator.swift` / `AIProviderService.swift` / 各 Providers）**：
+  - **强制收敛总结机制（Force Synthesis）**：将子智能体最大工具调用轮数收敛至 3 轮；当达到轮次上限后，不再无休止调用工具，自动触发强制收敛生成，通过在上下文末尾注入强收敛提示并向底层 Provider 传递 `disableTools: true` 剔除所有工具声明，强迫大模型基于已有搜集到的数据直接撰写完整 Markdown 最终报告；
+  - **根除悬挂流式消息（Dangling Streaming Message）**：修复原代码在每轮工具结束后预建空助手消息占位但达到上限跳出时未处理该消息状态的严重 Bug（原逻辑导致其永久停留在 `.streaming`，UI 表现为永远旋转的【思考中...】直到 180 秒超时报错）；增加统一落定兜底，确保退出时任何状态均落地为 `.done` 或 `.failed`。
+
+- **消除主智能体（全能助理 Orchestrator）认为子智能体 Librarian 无法联网的认知幻觉（`AIAgent.swift` / `AIChatState+RequestAssembly.swift` / `LaunchSubagentsTool.swift` / `AIAgentStore.swift`）**：
+  - **透出独占工具声明**：在全能助理的子智能体派发指引中，为每个专家显式注入其配备的核心工具清单（如 `[web_search, fetch_url]`），消除大模型盲猜；
+  - **人设与 Schema 补全联网专长**：将 `librarian` 人设、Schema 及存量迁移描述明确为“联网资料检索与实时情报专家，专属配备 `web_search` 与 `fetch_url` 工具，负责全网搜索最新行情、新闻与文档”；
+  - **协同规则明确派发指引**：在 Orchestrator 提示词中明确指出：编排中枢自身虽未挂载 `web_search`，但遇到实时股票行情、汇率、天气、新闻及公网文档时，必须通过 `launch_subagents` 派发给 `librarian` 代理检索并汇总汇报。
+
+- **Google Antigravity OAuth 客户端凭据解耦与动态多级配置化（`AntigravityOAuthConfig.swift` / `AntigravityCloudCodeAdapter.swift` / `AntigravityOAuthSettingsSection.swift`）**：
+  - **彻底拔除源码明文常量**：将 Google OAuth Client ID / Secret 从静态硬编码常量重构为 `AntigravityOAuthConfig` 动态决议策略，彻底根除代码泄露与 Git 远程推送保护拦截；
+  - **多级动态配置覆盖**：支持用户自定义偏好设置（UserDefaults）、环境变量（`ANTIGRAVITY_CLIENT_ID` / `ANTIGRAVITY_CLIENT_SECRET`）、本地私有配置文件（`~/.quickshow/antigravity_oauth.json`）及底层无静态特征的安全回退；
+  - **偏好设置 UI 交互支持**：在模型服务商设置页中新增“OAuth 高级配置”区域，支持企业与开发者自主绑定自建 Google Cloud 凭据，并支持一键恢复默认。
+
+- **彻底修复 Markdown 嵌套列表在 TextKit 流式排版中换行符丢失导致子项粘连与前导圆点丢失缺陷（`MarkdownListRenderer.swift`）**：
+  - **段落隔离与独立排版**：消除原先因误判叶子节点导致子列表末尾丢失换行符 `\n` 的底层缺陷，确保每个列表条目（无论处于第几层嵌套或是否为当前子列表末尾）在 TextKit 中均保留独立的换行符与完整的 `NSParagraphStyle`；
+  - **上下文感知精准间距与尾部收敛**：引入 `hasNextListItem` 上下文链，精准识别多层嵌套列表中列表项与后续兄弟分支的连贯性，使大分支间的列表项恢复标准 10pt 留白；仅在整棵列表树的绝对末尾（且后无其他块）时收敛末尾多余换行符，彻底消除前导符被吞及缩进对齐错乱。
+
+- **优化滚动协调器几何真实驱动与命中判定扩展（`ChatScrollCoordinator.swift` / `AIChatMessageList.swift`）**：
+  - **扩大滚动命中投影**：将滚轮事件检测区域扩展覆盖输入坞等悬浮覆盖层（Overlay），彻底解决在输入框上方滑动无法滚动消息列表的问题；
+  - **几何驱动导航与解开跟随死锁**：浏览导航（刻度轨与回底按钮）显隐完全由物理几何离底距离驱动；当用户客观远离底部时自动同步解除跟随，防止后台生成新 Token 时强制拽回视口。
+
+
+- **彻底拔除 Keychain 跨应用未授权刺探与“登录钥匙串密码”弹窗骚扰（`AntigravityCloudCodeAdapter.swift` / `AIProviderStore.swift`）**：
+  - **切断未授权钥匙串访问**：运行时 100% 仅访问 QuickShow 专属 0600 凭据文件，彻底拔除对系统钥匙串（`service: "gemini"`）及外部私有目录的跨进程刺探；
+  - **根除 cdhash 变动弹窗**：解决重新编译后因代码签名哈希变化导致 macOS `securityd` 频繁强制索要系统登录密码的顽疾，实现一次指纹授权即永久静默落盘、重启绝对零打扰。
+
 
 - **彻底修复 Gemini 模型思考过程提前假闭合截断与思考卡片打字卡顿不贴底缺陷（`GeminiProvider.swift` / `AIChatMessageRow.swift`）**：
   - **思考标签高熵隔离与防假闭合识别（`GeminiProvider.ThinkingStreamParser`）**：将原先易被大模型在元分析（思考系统角色与规则）时口语复述的 `[THINK] ... [/THINK]` 升级为高区分度标记 `<<<BEGIN_THINKING>>>` 与 `<<<END_THINKING>>>`；解析状态机支持动态绑定对应闭合标签并加入行内引用保护，若闭合标签出现在反引号（如 `` `<<<END_THINKING>>>` ``、`` `[/THINK]` ``）或引号中，判定为模型在引用规则而非协议闭合，继续安全保留在思考态中，彻底根除思考内容大面积泄漏进正文区的历史顽疾；

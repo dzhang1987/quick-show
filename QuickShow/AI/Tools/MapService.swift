@@ -249,9 +249,21 @@ enum MapService {
 /// 高德 API Key 配置：文件存储（纯文本单行），每次调用时重读，便于运行期替换 key 而无需重启。
 /// 参考 WebToolsConfig 的 tavily_apikey 读取方式。
 enum AmapConfig {
-    /// 读取 `~/Library/Application Support/QuickShow/amap_apikey` 并 trim；
-    /// 文件不存在或内容为空 → nil（视为未配置，全部走 MapKit）。
+    /// 读取 `~/Library/Application Support/QuickShow/keys/amap.key` 并 trim；
+    /// 自动从旧文件 `amap_apikey` 平滑迁移；文件不存在或内容为空 → nil。
     static func apiKey() -> String? {
+        if let legacy = legacyApiKeyFileURL,
+           FileManager.default.fileExists(atPath: legacy.path),
+           let data = try? Data(contentsOf: legacy),
+           let text = String(data: data, encoding: .utf8) {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty, let target = apiKeyFileURL {
+                try? trimmed.write(to: target, atomically: true, encoding: .utf8)
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+            }
+            try? FileManager.default.removeItem(at: legacy)
+        }
+
         guard let url = apiKeyFileURL,
               FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
@@ -263,6 +275,18 @@ enum AmapConfig {
     }
 
     private static var apiKeyFileURL: URL? {
+        guard let appSupport = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let dir = appSupport
+            .appendingPathComponent("QuickShow", isDirectory: true)
+            .appendingPathComponent("keys", isDirectory: true)
+        if !FileManager.default.fileExists(atPath: dir.path) {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        return dir.appendingPathComponent("amap.key")
+    }
+
+    private static var legacyApiKeyFileURL: URL? {
         FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first?

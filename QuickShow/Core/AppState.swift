@@ -55,8 +55,8 @@ final class AppState: ObservableObject {
         return isExpanded ? .dashboard : .glance
     }
 
-    /// 组件直达键注册表：keyCode → 上下文（新组件注册一行即接入「任意状态直达」）
-    static let contextHotkeys: [UInt16: PanelContext] = [5: .calendar]   // G: 日历视图
+    /// 组件直达键注册表：语义键码 → 上下文（新组件注册一行即接入「任意状态直达」）
+    static let contextHotkeys: [KeyEquivalentCode: PanelContext] = [.g: .calendar]   // G: 日历视图
 
     // MARK: - 面板回调（PanelManager / QuickShowApp 赋值点不动）
     var onTogglePanel: ((PanelMode) -> Void)?

@@ -1,10 +1,9 @@
 // AntigravityCloudCodeAdapter: 原生 Swift 直连 Google Cloud Code PA (Antigravity 官方云端网关) SSE 通道。
 // 彻底剥离 agy CLI 本地进程 5.5 秒冷启动开销，首字上屏降至 1~2 秒，原生直通服务端 candidate.parts.thought 结构化思考流。
-// 基于系统钥匙串动态感知活跃凭据，遇到 HTTP 401 自动检测钥匙串更新并执行自愈重试。
+// 基于 Google OAuth 自动刷新机制与钥匙串协同：遇 Token 过期或 HTTP 401 自动使用 refresh_token 秒级刷新自愈。
 // 针对 SSE 流式协议进行定制优化：历史上下文严格交替归一合并，杜绝 MALFORMED_FUNCTION_CALL；独立专用会话隔离管理。
 
 import Foundation
-import Security
 import os
 
 enum AntigravityCloudCodeAdapter {
@@ -12,9 +11,37 @@ enum AntigravityCloudCodeAdapter {
     private static let logger = Logger(subsystem: "cn.chiproad.QuickShow", category: "AntigravityDirect")
     private static let endpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
 
+    // MARK: - Google OAuth 与云端网关配置
+    static let oauthTokenEndpoint = "https://oauth2.googleapis.com/token"
+    static var oauthClientId: String { AntigravityOAuthConfig.clientId }
+    static var oauthClientSecret: String { AntigravityOAuthConfig.clientSecret }
+    private static let loadCodeAssistEndpoint = "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist"
+    private static let fallbackProjectId = "aicode-consumers"
+    private static let userAgent = "antigravity/2.0.6 darwin/arm64"
+
+    private static let lock = NSLock()
     /// 内存中缓存的最新有效 Token
     private static var activeAccessToken: String?
+    /// Token 过期时间
+    private static var tokenExpiryDate: Date?
+    /// 活跃的 refresh_token
+    private static var activeRefreshToken: String?
+    /// 缓存的 Project ID
+    private static var cachedProjectId: String?
+    /// 缓存每个 toolCallId 对应的 Gemini 3 thoughtSignature（跨轮回传必需）
+    private static var callSignatures: [String: String] = [:]
 
+    static func saveSignature(callId: String, signature: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        callSignatures[callId] = signature
+    }
+
+    static func resolveCachedSignature(for callId: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return callSignatures[callId]
+    }
     /// 专用于 SSE 流式长连接的 URLSession
     private static let directSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -33,46 +60,8 @@ enum AntigravityCloudCodeAdapter {
         let expiryDate: Date?
     }
 
-    /// 从 macOS 系统钥匙串读取 Antigravity OAuth Token 包
-    static func fetchKeyringTokenBundle() -> TokenBundle? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "gemini",
-            kSecAttrAccount as String: "antigravity",
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess,
-              let data = item as? Data,
-              let rawStr = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-
-        // 格式形如: go-keyring-base64:<base64-payload>
-        let b64 = rawStr.replacingOccurrences(of: "go-keyring-base64:", with: "")
-        guard let jsonData = Data(base64Encoded: b64),
-              let json = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let tokenObj = json["token"] as? [String: Any],
-              let accessToken = tokenObj["access_token"] as? String,
-              !accessToken.isEmpty else {
-            return nil
-        }
-
-        let refreshToken = tokenObj["refresh_token"] as? String
-        var expiryDate: Date?
-        if let expiryStr = tokenObj["expiry"] as? String {
-            let formatter = ISO8601DateFormatter()
-            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            expiryDate = formatter.date(from: expiryStr) ?? ISO8601DateFormatter().date(from: expiryStr)
-        }
-
-        return TokenBundle(accessToken: accessToken, refreshToken: refreshToken, expiryDate: expiryDate)
-    }
-
     /// 从本地凭据文件读取 (~/.gemini/jetski-standalone-oauth-token)
-    static func fetchFileToken() -> String? {
+    static func fetchFileTokenBundle() -> TokenBundle? {
         let path = "\(NSHomeDirectory())/.gemini/jetski-standalone-oauth-token"
         guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -81,46 +70,223 @@ enum AntigravityCloudCodeAdapter {
               !accessToken.isEmpty else {
             return nil
         }
-        return accessToken
+        let refreshToken = tokenObj["refresh_token"] as? String
+        var expiryDate: Date?
+        if let expiryStr = tokenObj["expiry"] as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            expiryDate = formatter.date(from: expiryStr) ?? ISO8601DateFormatter().date(from: expiryStr)
+        }
+        return TokenBundle(accessToken: accessToken, refreshToken: refreshToken, expiryDate: expiryDate)
     }
 
-    /// 统一解析可用的 Access Token (内存缓存优先，钥匙串真源第一优先级，绝对杜绝陈旧静态死 Token)
-    static func resolveAccessToken(explicitKey: String?) -> String? {
-        // 0. 优先使用最近生效的内存 Token
-        if let active = activeAccessToken, !active.isEmpty {
-            return active
+    /// 从本地凭据文件读取 Access Token (~/.gemini/jetski-standalone-oauth-token)
+    static func fetchFileToken() -> String? {
+        fetchFileTokenBundle()?.accessToken
+    }
+
+    /// 同步回写本地独立凭据文件 (~/.gemini/jetski-standalone-oauth-token)，让系统内其它协同工具同步受益
+    static func updateLocalJetskiTokenFile(accessToken: String, expiresIn: Double) {
+        let path = "\(NSHomeDirectory())/.gemini/jetski-standalone-oauth-token"
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var tokenObj = json["token"] as? [String: Any] else {
+            return
+        }
+        tokenObj["access_token"] = accessToken
+        let expiryDate = Date().addingTimeInterval(expiresIn)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        tokenObj["expiry"] = formatter.string(from: expiryDate)
+        json["token"] = tokenObj
+        if let updatedData = try? JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted]) {
+            try? updatedData.write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+
+    /// 使用 refresh_token 向 Google OAuth 端点刷新最新的 access_token
+    @discardableResult
+    static func refreshAccessToken(force: Bool = false) async -> String? {
+        lock.lock()
+        // 若未强制刷新，且当前 Token 距离过期超过 60 秒，直接复用
+        if !force, let token = activeAccessToken, let expiry = tokenExpiryDate, expiry > Date().addingTimeInterval(60) {
+            lock.unlock()
+            return token
+        }
+        let existingRefreshToken = activeRefreshToken
+        lock.unlock()
+
+        // 尝试从多渠道提取可用的 refresh_token
+        var rToken: String? = existingRefreshToken
+        if rToken == nil || rToken?.isEmpty == true {
+            rToken = fetchFileTokenBundle()?.refreshToken
+        }
+        if rToken == nil || rToken?.isEmpty == true {
+            let saved = await MainActor.run { AIProviderStore.shared.accountInfo(for: "antigravity") }
+            rToken = saved?.refreshToken
         }
 
-        // 1. 优先系统钥匙串（由官方客户端/CLI 保持最新自动续期状态，真源绝对优先）
-        if let bundle = fetchKeyringTokenBundle() {
-            return bundle.accessToken
+        guard let validRefreshToken = rToken, !validRefreshToken.isEmpty else {
+            logger.warning("[AntigravityDirect] 未找到可用的 refresh_token，无法执行自动刷新")
+            return nil
         }
 
-        // 2. 尝试本地凭据文件 (~/.gemini/jetski-standalone-oauth-token)
-        if let file = fetchFileToken() {
-            return file
-        }
+        guard let url = URL(string: oauthTokenEndpoint) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        // 3. 兜底使用显式传入的 key（仅当非 AIzaSy 密钥且包含有效 OAuth 前缀时）
+        let params: [String: String] = [
+            "client_id": oauthClientId,
+            "client_secret": oauthClientSecret,
+            "grant_type": "refresh_token",
+            "refresh_token": validRefreshToken
+        ]
+        let bodyString = params.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }.joined(separator: "&")
+        request.httpBody = bodyString.data(using: .utf8)
+        request.timeoutInterval = 10
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let newAccessToken = json["access_token"] as? String, !newAccessToken.isEmpty else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                logger.error("[AntigravityDirect] OAuth Token 刷新失败，HTTP: \(status)")
+                return nil
+            }
+
+            let expiresIn = (json["expires_in"] as? Double) ?? 3600
+            let newExpiry = Date().addingTimeInterval(expiresIn - 60)
+
+            lock.lock()
+            activeAccessToken = newAccessToken
+            tokenExpiryDate = newExpiry
+            activeRefreshToken = validRefreshToken
+            lock.unlock()
+
+            logger.info("[AntigravityDirect] OAuth Token 自动刷新成功，有效时长: \(expiresIn)s")
+
+            // 安全回写本地凭据与持久化存储
+            updateLocalJetskiTokenFile(accessToken: newAccessToken, expiresIn: expiresIn)
+            await MainActor.run {
+                AIProviderStore.shared.setAPIKey(newAccessToken, for: "antigravity")
+                if var account = AIProviderStore.shared.accountInfo(for: "antigravity") {
+                    account.refreshToken = validRefreshToken
+                    AIProviderStore.shared.saveAccountInfo(account, for: "antigravity")
+                }
+            }
+
+            return newAccessToken
+        } catch {
+            logger.error("[AntigravityDirect] 刷新 OAuth Token 网络异常: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    /// 确保返回一个最新有效的 Access Token（若无有效 Token 或已过期，自动执行刷新自愈）
+    static func ensureFreshAccessToken(explicitKey: String?) async -> String? {
         let trimmed = explicitKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !trimmed.isEmpty && !trimmed.hasPrefix("AIzaSy") {
-            if trimmed.hasPrefix("ya29.") {
-                return trimmed
+            let token = trimmed.hasPrefix("Bearer ") ? String(trimmed.dropFirst(7)) : trimmed
+            lock.lock()
+            if let active = activeAccessToken, active == token, let expiry = tokenExpiryDate, expiry > Date().addingTimeInterval(60) {
+                lock.unlock()
+                return active
             }
-            if trimmed.hasPrefix("Bearer ") {
-                return String(trimmed.dropFirst(7))
+            lock.unlock()
+        }
+
+        if let bundle = fetchFileTokenBundle() {
+            lock.lock()
+            if let exp = bundle.expiryDate, exp > Date().addingTimeInterval(60) {
+                activeAccessToken = bundle.accessToken
+                tokenExpiryDate = exp
+                activeRefreshToken = bundle.refreshToken
+                lock.unlock()
+                return bundle.accessToken
             }
+            if let r = bundle.refreshToken {
+                activeRefreshToken = r
+            }
+            lock.unlock()
+        }
+
+        lock.lock()
+        if let active = activeAccessToken, let expiry = tokenExpiryDate, expiry > Date().addingTimeInterval(60) {
+            lock.unlock()
+            return active
+        }
+        lock.unlock()
+
+        // 执行秒级自动刷新
+        return await refreshAccessToken()
+    }
+
+    /// 统一同步解析 Access Token（保底回退或显式 Key）
+    static func resolveAccessToken(explicitKey: String?) -> String? {
+        lock.lock()
+        if let active = activeAccessToken, !active.isEmpty {
+            lock.unlock()
+            return active
+        }
+        lock.unlock()
+
+        let trimmed = explicitKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !trimmed.isEmpty && !trimmed.hasPrefix("AIzaSy") {
+            let token = trimmed.hasPrefix("Bearer ") ? String(trimmed.dropFirst(7)) : trimmed
+            if !token.isEmpty {
+                lock.lock()
+                activeAccessToken = token
+                lock.unlock()
+                return token
+            }
+        }
+
+        if let fileToken = fetchFileToken() {
+            lock.lock()
+            activeAccessToken = fileToken
+            lock.unlock()
+            return fileToken
         }
 
         return nil
     }
 
-    /// 解析当前 Google Cloud Project ID
-    static func resolveProjectId() -> String {
+    /// 动态解析当前 Google Cloud Project ID
+    static func resolveProjectId(token: String) async -> String {
         let env = ProcessInfo.processInfo.environment
         if let p = env["GOOGLE_CLOUD_PROJECT"], !p.isEmpty { return p }
         if let p = env["GOOGLE_CLOUD_PROJECT_ID"], !p.isEmpty { return p }
-        return "363803525110"
+
+        lock.lock()
+        if let cached = cachedProjectId, !cached.isEmpty {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        guard let url = URL(string: loadCodeAssistEndpoint) else { return fallbackProjectId }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        req.httpBody = "{}".data(using: .utf8)
+        req.timeoutInterval = 5
+
+        if let (data, response) = try? await URLSession.shared.data(for: req),
+           let http = response as? HTTPURLResponse, http.statusCode == 200,
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let proj = json["cloudaicompanionProject"] as? String, !proj.isEmpty {
+            lock.lock()
+            cachedProjectId = proj
+            lock.unlock()
+            logger.info("[AntigravityDirect] 动态解析 Cloud Code Project 成功: \(proj)")
+            return proj
+        }
+
+        return fallbackProjectId
     }
 
     // MARK: - 模型与思考强度映射
@@ -129,23 +295,18 @@ enum AntigravityCloudCodeAdapter {
     static func resolveModelId(_ id: String, effort: ThinkingLevel?) -> String {
         let clean = id.replacingOccurrences(of: "antigravity/", with: "")
         switch clean {
-        case "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash":
-            switch effort {
-            case .high: return "gemini-3.6-flash-high"
-            case .medium: return "gemini-3.6-flash-medium"
-            case .low, .off: return "gemini-3.6-flash-low"
-            case nil: return "gemini-3.6-flash-high"
-            }
-        case "gemini-3.1-pro", "gemini-2.5-pro":
-            switch effort {
-            case .low, .off: return "gemini-3.1-pro-low"
-            default: return "gemini-pro-agent" // gemini-3.1-pro-high 会报 400 INVALID_ARGUMENT，pro 模型统一映射为 gemini-pro-agent
-            }
-        case "claude-opus", "claude-opus-4-6":
+        case "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash", "gemini-3.8-flash-tiered",
+             "gemini-3.8-flash-high", "gemini-3.8-flash-medium", "gemini-3.8-flash-low":
+            return "gemini-3.8-flash-tiered"
+        case "gemini-3-flash", "gemini-3-flash-agent":
+            return "gemini-3-flash"
+        case "gemini-3.1-pro", "gemini-2.5-pro", "gemini-pro", "gemini-pro-agent":
+            return "gemini-3.8-flash-tiered"
+        case "claude-opus", "claude-opus-4-6", "claude-opus-4-6-thinking":
             return "claude-opus-4-6-thinking"
         case "claude-sonnet", "claude-sonnet-4-6":
             return "claude-sonnet-4-6"
-        case "gpt-oss-120b":
+        case "gpt-oss-120b", "gpt-oss-120b-medium":
             return "gpt-oss-120b-medium"
         default:
             return clean
@@ -153,19 +314,29 @@ enum AntigravityCloudCodeAdapter {
     }
 
     private static func shouldEnableThinking(for modelId: String, level: ThinkingLevel?) -> Bool {
-        // 只要用户未显式关闭思考（.off），所有 Antigravity 模型默认开启服务端原生深度思考链
         if level == .off { return false }
         return true
     }
 
     // MARK: - 请求构造与流式直连
 
+    /// 根据 callId 溯源对应调用的工具名称（主要用于将 toolResult 映射为 Gemini 的 functionResponse）
+    private static func resolveToolName(for callId: String, in messages: [ChatCompletionMessage]) -> String {
+        for msg in messages {
+            if let calls = msg.toolCalls, let match = calls.first(where: { $0.id == callId }) {
+                return match.function.name
+            }
+        }
+        return "launch_subagents"
+    }
+
     static func buildRequest(
         modelId: String,
         messages: [ChatCompletionMessage],
         options: AIChatRequestOptions,
         token: String,
-        projectId: String
+        projectId: String,
+        tools: [AITool] = []
     ) throws -> URLRequest {
         guard let url = URL(string: endpoint) else {
             throw AIChatError.network("无效的 Antigravity 直连端点: \(endpoint)")
@@ -179,6 +350,19 @@ enum AntigravityCloudCodeAdapter {
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.setValue("antigravity/2.0.6 darwin/arm64", forHTTPHeaderField: "User-Agent")
 
+        // 1. 提取当前启用的工具并映射为 Gemini function_declarations 结构
+        var geminiTools: [[String: Any]] = []
+        if !tools.isEmpty {
+            let declarations = tools.map { tool -> [String: Any] in
+                [
+                    "name": tool.name,
+                    "description": tool.description,
+                    "parameters": tool.parametersSchema
+                ]
+            }
+            geminiTools.append(["function_declarations": declarations])
+        }
+
         var normalizedContents: [[String: Any]] = []
         var systemParts: [[String: Any]] = []
 
@@ -190,9 +374,38 @@ enum AntigravityCloudCodeAdapter {
                 continue
             }
 
+            // 处理工具执行结果回传（role == "tool"）
+            if msg.role == "tool" {
+                let toolCallId = msg.toolCallId ?? ""
+                let contentText = msg.content?.plainText ?? ""
+                let callName = resolveToolName(for: toolCallId, in: messages)
+                var responseObj: [String: Any] = ["result": contentText]
+                if let data = contentText.data(using: .utf8),
+                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                    responseObj = json
+                }
+                let toolPart: [String: Any] = [
+                    "functionResponse": [
+                        "name": callName,
+                        "response": responseObj
+                    ]
+                ]
+                // Gemini 要求 functionResponse 归属于 user 角色
+                let role = "user"
+                if let last = normalizedContents.last, (last["role"] as? String) == role {
+                    var mergedParts = last["parts"] as? [[String: Any]] ?? []
+                    mergedParts.append(toolPart)
+                    normalizedContents[normalizedContents.count - 1]["parts"] = mergedParts
+                } else {
+                    normalizedContents.append(["role": role, "parts": [toolPart]])
+                }
+                continue
+            }
+
             let role = (msg.role == "assistant") ? "model" : "user"
             var parts: [[String: Any]] = []
 
+            // 普通正文或图片
             if let content = msg.content {
                 switch content {
                 case .text(let txt):
@@ -217,11 +430,33 @@ enum AntigravityCloudCodeAdapter {
                 }
             }
 
+            // assistant 消息如果包含工具调用：按 Gemini 规范转为 functionCall 并附带 thoughtSignature
+            if msg.role == "assistant", let toolCalls = msg.toolCalls, !toolCalls.isEmpty {
+                for call in toolCalls {
+                    var fc: [String: Any] = [
+                        "name": call.function.name,
+                        "id": call.id
+                    ]
+                    var argsObj: [String: Any] = [:]
+                    if let data = call.function.arguments.data(using: .utf8),
+                       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        argsObj = parsed
+                    }
+                    fc["args"] = argsObj
+
+                    var callPart: [String: Any] = ["functionCall": fc]
+                    let sig = call.thoughtSignature ?? resolveCachedSignature(for: call.id)
+                    if let sig, !sig.isEmpty {
+                        callPart["thoughtSignature"] = sig
+                    }
+                    parts.append(callPart)
+                }
+            }
+
             // 过滤空消息（例如截断残留或异常助手空轮次）
             guard !parts.isEmpty else { continue }
 
             // 关键合规修复：Gemini 要求 role 严格交替 (user -> model -> user -> model)。
-            // 若历史消息存在连续相同角色（例如连续两次 user 提问或空轮次被忽略后形成的同角色），直接将其 parts 合并为一个 turn，彻底消除 MALFORMED_FUNCTION_CALL 截断
             if let last = normalizedContents.last, (last["role"] as? String) == role {
                 var mergedParts = last["parts"] as? [[String: Any]] ?? []
                 mergedParts.append(contentsOf: parts)
@@ -236,9 +471,17 @@ enum AntigravityCloudCodeAdapter {
             normalizedContents.removeFirst()
         }
 
+        // 防御性规范约束：严禁输出裸 call: 格式
+        systemParts.append([
+            "text": "【重要执行规范】在不需要调用工具或未声明外部工具时，严禁输出任何裸露的 `call:...` 或伪函数格式，必须以标准自然语言直接回答。"
+        ])
+
         var requestObj: [String: Any] = ["contents": normalizedContents]
         if !systemParts.isEmpty {
             requestObj["system_instruction"] = ["parts": systemParts]
+        }
+        if !geminiTools.isEmpty {
+            requestObj["tools"] = geminiTools
         }
 
         if shouldEnableThinking(for: modelId, level: options.thinkingLevel) {
@@ -270,17 +513,24 @@ enum AntigravityCloudCodeAdapter {
             let task = Task.detached(priority: .userInitiated) {
                 do {
                     let resolvedModel = resolveModelId(model.id, effort: options.thinkingLevel)
-                    let projectId = resolveProjectId()
                     var currentToken = initialToken
+                    let projectId = await resolveProjectId(token: currentToken)
 
                     logger.info("[AntigravityDirect] 发起原生直连请求: model=\(resolvedModel), project=\(projectId)")
+
+                    let toolsToUse = await MainActor.run {
+                        if options.disableTools { return [AITool]() }
+                        let agent = AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
+                        return AIToolRegistry.shared.tools(for: agent)
+                    }
 
                     var req = try buildRequest(
                         modelId: resolvedModel,
                         messages: messages,
                         options: options,
                         token: currentToken,
-                        projectId: projectId
+                        projectId: projectId,
+                        tools: toolsToUse
                     )
 
                     var (bytes, response) = try await directSession.bytes(for: req)
@@ -288,24 +538,24 @@ enum AntigravityCloudCodeAdapter {
                         throw AIChatError.network("Antigravity 直连未收到 HTTP 响应")
                     }
 
-                    // 自愈机制：如果遇到 401 Unauthorized，尝试检测钥匙串是否已更新并重试一次
+                    // 自愈机制：如果遇到 401 Unauthorized，调用 OAuth 端点强制刷新并重试一次
                     if http.statusCode == 401 {
-                        logger.warning("[AntigravityDirect] 收到 HTTP 401，尝试检测钥匙串最新凭据...")
-                        if let freshToken = fetchKeyringTokenBundle()?.accessToken, freshToken != currentToken {
+                        logger.warning("[AntigravityDirect] 收到 HTTP 401，立即执行 Token 自动刷新自愈...")
+                        if let freshToken = await refreshAccessToken(force: true) {
                             currentToken = freshToken
-                            activeAccessToken = freshToken
                             req = try buildRequest(
                                 modelId: resolvedModel,
                                 messages: messages,
                                 options: options,
                                 token: currentToken,
-                                projectId: projectId
+                                projectId: projectId,
+                                tools: toolsToUse
                             )
                             let (retryBytes, retryResponse) = try await directSession.bytes(for: req)
                             if let retryHttp = retryResponse as? HTTPURLResponse {
                                 bytes = retryBytes
                                 http = retryHttp
-                                logger.info("[AntigravityDirect] 重试完成，HTTP 状态码: \(http.statusCode)")
+                                logger.info("[AntigravityDirect] 自愈重试完成，HTTP 状态码: \(http.statusCode)")
                             }
                         }
                     }
@@ -315,6 +565,8 @@ enum AntigravityCloudCodeAdapter {
                     }
 
                     var hasReceivedFirstChunk = false
+                    var completedCalls: [CompletedToolCall] = []
+                    var lastReportedError: String? = nil
 
                     for try await line in bytes.lines {
                         try Task.checkCancellation()
@@ -339,26 +591,65 @@ enum AntigravityCloudCodeAdapter {
                             continuation.yield(.usage(promptTokens: inputTokens))
                         }
 
-                        // Candidates 分发 (含服务端原生结构化思考流与正文流)
+                        // Candidates 分发 (含服务端原生结构化思考流、正文流与函数调用流)
                         if let candidates = resp["candidates"] as? [[String: Any]],
-                           let firstCandidate = candidates.first,
-                           let content = firstCandidate["content"] as? [String: Any],
-                           let parts = content["parts"] as? [[String: Any]] {
-                            for part in parts {
-                                let isThought = part["thought"] as? Bool ?? false
-                                if let text = part["text"] as? String, !text.isEmpty {
-                                    if !hasReceivedFirstChunk {
-                                        hasReceivedFirstChunk = true
-                                        logger.info("[AntigravityDirect] 收到首个直连数据块 (isThought: \(isThought))")
+                           let firstCandidate = candidates.first {
+                            if let finishReason = firstCandidate["finishReason"] as? String {
+                                if finishReason == "MALFORMED_FUNCTION_CALL" {
+                                    let msg = (firstCandidate["finishMessage"] as? String) ?? "云端网关拦截到格式异常的函数调用"
+                                    lastReportedError = msg
+                                    logger.error("[AntigravityDirect] 收到 finishReason: MALFORMED_FUNCTION_CALL: \(msg)")
+                                }
+                            }
+
+                            if let content = firstCandidate["content"] as? [String: Any],
+                               let parts = content["parts"] as? [[String: Any]] {
+                                for part in parts {
+                                    let isThought = part["thought"] as? Bool ?? false
+                                    let thoughtSig = (part["thoughtSignature"] as? String) ?? (part["thought_signature"] as? String)
+
+                                    // 1. 函数调用分片
+                                    if let fc = part["functionCall"] as? [String: Any],
+                                       let name = fc["name"] as? String {
+                                        let callId = (fc["id"] as? String) ?? "call_\(UUID().uuidString.prefix(8))"
+                                        var argsString = "{}"
+                                        if let args = fc["args"] as? [String: Any],
+                                           let argsData = try? JSONSerialization.data(withJSONObject: args),
+                                           let str = String(data: argsData, encoding: .utf8) {
+                                            argsString = str
+                                        }
+                                        if let sig = thoughtSig {
+                                            saveSignature(callId: callId, signature: sig)
+                                        }
+                                        if !hasReceivedFirstChunk {
+                                            hasReceivedFirstChunk = true
+                                            logger.info("[AntigravityDirect] 收到首个直连数据块 (FunctionCall: \(name))")
+                                        }
+                                        continuation.yield(.toolCallDispatched(id: callId, name: name))
+                                        completedCalls.append(CompletedToolCall(id: callId, name: name, arguments: argsString, thoughtSignature: thoughtSig))
                                     }
-                                    if isThought {
-                                        continuation.yield(.reasoning(text))
-                                    } else {
-                                        continuation.yield(.text(text))
+
+                                    // 2. 文本分片 (思考增量 vs 正文增量)
+                                    if let text = part["text"] as? String, !text.isEmpty {
+                                        if !hasReceivedFirstChunk {
+                                            hasReceivedFirstChunk = true
+                                            logger.info("[AntigravityDirect] 收到首个直连数据块 (isThought: \(isThought))")
+                                        }
+                                        if isThought {
+                                            continuation.yield(.reasoning(text))
+                                        } else {
+                                            continuation.yield(.text(text))
+                                        }
                                     }
                                 }
                             }
                         }
+                    }
+
+                    if !completedCalls.isEmpty {
+                        continuation.yield(.toolCalls(completedCalls))
+                    } else if !hasReceivedFirstChunk, let err = lastReportedError {
+                        throw AIChatError.streamError("云端网关拦截请求截断：\(err)")
                     }
 
                     logger.info("[AntigravityDirect] 直连流顺利完成")

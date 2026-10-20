@@ -39,14 +39,7 @@ struct SubagentTopNavBar: View {
             return agent.iconName
         }
         let task = taskRegistry.task(childSessionId: current.id)
-        switch task?.subagentId {
-        case "librarian": return "globe"
-        case "coder": return "chevron.left.forwardslash.chevron.right"
-        case "oracle": return "brain.head.profile"
-        case "observer": return "eye"
-        case "concierge": return "macbook.and.iphone"
-        default: return "sparkles"
-        }
+        return AgentRoleRegistry.shared.trayIcon(for: task?.subagentId ?? "", fallback: "sparkles")
     }
 
     var body: some View {

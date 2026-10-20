@@ -10,6 +10,20 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
 
     init() {}
 
+    func supportedAuthMethods(for provider: AIProvider) -> [any AIAuthMethod] {
+        [
+            DefaultAPIKeyAuthMethod(
+                providerId: provider.id,
+                displayName: "Gemini API Key",
+                detailDescription: "直接输入 Google AI Studio API Key",
+                placeholder: "AIzaSy...",
+                footerText: "密钥仅保存在本机受保护目录，绝不上云"
+            ),
+            AntigravityBiometricAuthMethod(),
+            AntigravityGooglePKCEMethod()
+        ]
+    }
+
     func stream(
         provider: AIProvider,
         model: AIModelSpec,
@@ -30,60 +44,55 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
             return streamViaAIStudio(provider: provider, model: model, messages: messages, options: options, apiKey: cleanKey)
         }
 
-        // 2. 优先尝试 Antigravity 官方云端网关原生 HTTP SSE 直连 (TTFT ~ 1.5s，剥离 agy 5.5s 本地冷启动)
-        if let accessToken = AntigravityCloudCodeAdapter.resolveAccessToken(explicitKey: cleanKey) {
-            return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
-                let task = Task {
-                    do {
-                        let directStream = AntigravityCloudCodeAdapter.stream(
-                            model: model,
-                            messages: messages,
-                            options: options,
-                            initialToken: accessToken
-                        )
-                        for try await event in directStream {
-                            try Task.checkCancellation()
-                            continuation.yield(event)
-                        }
-                        continuation.finish()
-                    } catch {
-                        Self.logger.warning("[GeminiProvider] 原生直连异常: \(error.localizedDescription)，尝试检查 agy CLI 兜底...")
-                        // 直连遇到异常时，若本机已安装 agy，无缝平滑 fallback 至 CLI 兜底
-                        if let agyPath = Self.findAgyExecutable() {
-                            Self.logger.info("[GeminiProvider] 本地找到 agy 可执行文件: \(agyPath)，执行平滑 fallback")
-                            do {
-                                let fallbackStream = self.streamViaAntigravityCLI(
-                                    agyPath: agyPath,
-                                    model: model,
-                                    messages: messages,
-                                    options: options
-                                )
-                                for try await event in fallbackStream {
-                                    try Task.checkCancellation()
-                                    continuation.yield(event)
-                                }
-                                continuation.finish()
-                                return
-                            } catch {
-                                Self.logger.error("[GeminiProvider] agy CLI 兜底失败: \(error.localizedDescription)")
-                                continuation.finish(throwing: error)
-                                return
-                            }
-                        }
-                        continuation.finish(throwing: error)
+        // 2. 优先尝试 Antigravity 官方云端网关原生 HTTP SSE 直连 (TTFT ~ 1.5s，彻底剥离 agy 5.5s 本地冷启动)
+        return AsyncThrowingStream<AIStreamEvent, Error> { continuation in
+            let task = Task {
+                do {
+                    // 确保拿到新鲜有效的 Access Token（若过期则 0.3s 内自动刷新自愈）
+                    guard let accessToken = await AntigravityCloudCodeAdapter.ensureFreshAccessToken(explicitKey: cleanKey) else {
+                        throw AIChatError.network("未能获取到有效的 Antigravity 访问凭据，请重新授权")
                     }
+
+                    let directStream = AntigravityCloudCodeAdapter.stream(
+                        model: model,
+                        messages: messages,
+                        options: options,
+                        initialToken: accessToken
+                    )
+                    for try await event in directStream {
+                        try Task.checkCancellation()
+                        continuation.yield(event)
+                    }
+                    continuation.finish()
+                } catch {
+                    Self.logger.warning("[GeminiProvider] 原生直连异常: \(error.localizedDescription)，尝试检查 agy CLI 兜底...")
+                    // 直连遇到异常时，若本机已安装 agy，无缝平滑 fallback 至 CLI 兜底
+                    if let agyPath = Self.findAgyExecutable() {
+                        Self.logger.info("[GeminiProvider] 本地找到 agy 可执行文件: \(agyPath)，执行平滑 fallback")
+                        do {
+                            let fallbackStream = self.streamViaAntigravityCLI(
+                                agyPath: agyPath,
+                                model: model,
+                                messages: messages,
+                                options: options
+                            )
+                            for try await event in fallbackStream {
+                                try Task.checkCancellation()
+                                continuation.yield(event)
+                            }
+                            continuation.finish()
+                            return
+                        } catch {
+                            Self.logger.error("[GeminiProvider] agy CLI 兜底失败: \(error.localizedDescription)")
+                            continuation.finish(throwing: error)
+                            return
+                        }
+                    }
+                    continuation.finish(throwing: error)
                 }
-                continuation.onTermination = { _ in task.cancel() }
             }
+            continuation.onTermination = { _ in task.cancel() }
         }
-
-        // 3. 兜底检查本机是否已安装 Antigravity CLI (agy)
-        if let agyPath = Self.findAgyExecutable() {
-            return streamViaAntigravityCLI(agyPath: agyPath, model: model, messages: messages, options: options)
-        }
-
-        // 4. 其它情况走标准 Google AI Studio 端点
-        return streamViaAIStudio(provider: provider, model: model, messages: messages, options: options, apiKey: cleanKey)
     }
 
     private func streamViaAIStudio(
@@ -310,14 +319,14 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
             }
         case "gemini-3.7-flash", "gemini-3.7-flash-high", "gemini-3.7-flash-medium", "gemini-3.7-flash-low":
             switch effort {
-            case .low, .off: return "gemini-3.7-flash-low"
-            case .medium: return "gemini-3.7-flash-medium"
-            case .high, nil: return "gemini-3.7-flash-high"
+            case .low, .off: return "gemini-3.8-flash-low"
+            case .medium: return "gemini-3.8-flash-medium"
+            case .high, nil: return "gemini-3.8-flash-high"
             }
         case "gemini-3.1-pro", "gemini-3.1-pro-high", "gemini-3.1-pro-low":
             switch effort {
-            case .low, .off: return "gemini-3.1-pro-low"
-            default: return "gemini-3.1-pro-high"
+            case .low, .off: return "gemini-3.8-flash-low"
+            default: return "gemini-3.8-flash-high"
             }
         case "claude-opus", "claude-opus-4-6", "claude-opus-4-6-thinking":
             return "claude-opus-4-6-thinking"
@@ -325,10 +334,8 @@ final class GeminiProvider: LLMProvider, @unchecked Sendable {
             return "claude-sonnet-4-6"
         case "gpt-oss-120b", "gpt-oss-120b-medium":
             return "gpt-oss-120b-medium"
-        case "gemini-2.5-flash":
-            return "gemini-3.7-flash-high"
-        case "gemini-2.5-pro", "gemini-pro", "gemini-pro-agent":
-            return "gemini-3.1-pro-high"
+        case "gemini-2.5-flash", "gemini-2.5-pro", "gemini-pro", "gemini-pro-agent":
+            return "gemini-3.8-flash-high"
         default:
             return clean
         }

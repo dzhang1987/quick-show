@@ -19,6 +19,28 @@ enum AIProviderType: String, Codable, CaseIterable, Identifiable {
         case .nativeBridge: return "原生专用桥接 (本地代理端点)"
         }
     }
+
+    var defaultEndpointURL: String {
+        switch self {
+        case .openAICompatible: return "https://api.openai.com/v1"
+        case .qoderNative: return "https://api3.qoder.sh"
+        case .antigravityNative: return "https://generativelanguage.googleapis.com/v1beta"
+        case .nativeBridge: return "http://127.0.0.1:8080/v1"
+        }
+    }
+
+    var endpointDescription: String {
+        switch self {
+        case .openAICompatible:
+            return "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方填 https://api.openai.com/v1；本地 Ollama/vLLM 填 http://localhost:端口/v1。"
+        case .qoderNative:
+            return "Qoder 官方地址为 https://api3.qoder.sh；若使用本地桥接代理，请填入本地 http://127.0.0.1:端口/v1。"
+        case .antigravityNative:
+            return "Gemini 官方地址为 https://generativelanguage.googleapis.com/v1beta；直连 Google AI 端点。"
+        case .nativeBridge:
+            return "本地独立代理端点根地址，程序将直连该地址并不做二次加解密。"
+        }
+    }
 }
 
 // MARK: - 服务商账号授权信息
@@ -27,7 +49,7 @@ struct ProviderAccountInfo: Codable, Equatable {
     var displayName: String
     var email: String
     var avatarURL: String?
-    var authMethod: String // "browser", "auto_detect", "manual"
+    var authMethod: AuthMethodKind
     var authorizedAt: Date
     var refreshToken: String?
 
@@ -36,7 +58,7 @@ struct ProviderAccountInfo: Codable, Equatable {
         displayName: String,
         email: String,
         avatarURL: String? = nil,
-        authMethod: String,
+        authMethod: AuthMethodKind = .apiKey,
         authorizedAt: Date,
         refreshToken: String? = nil
     ) {
@@ -47,6 +69,34 @@ struct ProviderAccountInfo: Codable, Equatable {
         self.authMethod = authMethod
         self.authorizedAt = authorizedAt
         self.refreshToken = refreshToken
+    }
+
+    /// 兼容旧版基于字符串初始化的场景
+    init(
+        userId: String? = nil,
+        displayName: String,
+        email: String,
+        avatarURL: String? = nil,
+        authMethod: String,
+        authorizedAt: Date,
+        refreshToken: String? = nil
+    ) {
+        let kind: AuthMethodKind
+        switch authMethod {
+        case "browser", "browserOAuth": kind = .browserOAuth
+        case "biometric_import", "biometricImport", "auto_detect": kind = .biometricImport
+        case "environment": kind = .environment
+        default: kind = .apiKey
+        }
+        self.init(
+            userId: userId,
+            displayName: displayName,
+            email: email,
+            avatarURL: avatarURL,
+            authMethod: kind,
+            authorizedAt: authorizedAt,
+            refreshToken: refreshToken
+        )
     }
 }
 
@@ -85,6 +135,7 @@ struct AIProvider: Identifiable, Codable, Equatable {
     var apiProtocol: AIProtocolOption // 针对 OpenAI 兼容协议的 chat / responses 子协议
     var isEnabled: Bool               // 是否启用
     var models: [AIModelSpec]         // 该提供商下的模型池
+    var iconName: String              // 服务商单色 SF Symbol 矢量图标 (强类型存储，杜绝运行时字符串猜测)
 
     init(
         id: String = UUID().uuidString,
@@ -93,7 +144,8 @@ struct AIProvider: Identifiable, Codable, Equatable {
         baseURL: String = "",
         apiProtocol: AIProtocolOption = .chat,
         isEnabled: Bool = true,
-        models: [AIModelSpec] = []
+        models: [AIModelSpec] = [],
+        iconName: String = "server.rack"
     ) {
         self.id = id
         self.name = name
@@ -102,6 +154,29 @@ struct AIProvider: Identifiable, Codable, Equatable {
         self.apiProtocol = apiProtocol
         self.isEnabled = isEnabled
         self.models = models
+        self.iconName = iconName
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.name = try container.decode(String.self, forKey: .name)
+        self.type = try container.decode(AIProviderType.self, forKey: .type)
+        self.baseURL = try container.decode(String.self, forKey: .baseURL)
+        self.apiProtocol = try container.decode(AIProtocolOption.self, forKey: .apiProtocol)
+        self.isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+        self.models = try container.decode([AIModelSpec].self, forKey: .models)
+        if let icon = try container.decodeIfPresent(String.self, forKey: .iconName) {
+            self.iconName = icon
+        } else {
+            switch self.id {
+            case "alibaba": self.iconName = "cloud"
+            case "qoder": self.iconName = "cube"
+            case "antigravity": self.iconName = "atom"
+            case "openai": self.iconName = "network"
+            default: self.iconName = "server.rack"
+            }
+        }
     }
 
     /// 根据 modelId 查找模型规格
@@ -110,7 +185,7 @@ struct AIProvider: Identifiable, Codable, Equatable {
     }
 }
 
-// MARK: - 官方主流预设模版
+// MARK: - 官方主流预设模版与查询总线
 extension AIProvider {
     /// 阿里云百炼 (DashScope) 官方预设
     static func alibabaPreset(baseURL: String? = nil) -> AIProvider {
@@ -128,7 +203,8 @@ extension AIProvider {
                 AIModelSpec(id: "qwen3.7-plus", name: "Qwen 3.7 Plus (视觉/文本)", contextWindow: 524288, supportsVision: true, supportsThinking: false),
                 AIModelSpec(id: "kimi-k3", name: "Kimi K3 (深度思考)", contextWindow: 1048576, supportsVision: false, supportsThinking: true),
                 AIModelSpec(id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", contextWindow: 1048576, supportsVision: false, supportsThinking: true)
-            ]
+            ],
+            iconName: "cloud"
         )
     }
 
@@ -146,7 +222,8 @@ extension AIProvider {
                 AIModelSpec(id: "gpt-4o-mini", name: "GPT-4o mini (快速轻量)", contextWindow: 128000, supportsVision: true, supportsThinking: false),
                 AIModelSpec(id: "o3-mini", name: "o3-mini (深度推理)", contextWindow: 200000, supportsVision: false, supportsThinking: true),
                 AIModelSpec(id: "o1", name: "o1 (全能推理)", contextWindow: 200000, supportsVision: true, supportsThinking: true)
-            ]
+            ],
+            iconName: "network"
         )
     }
 
@@ -178,7 +255,8 @@ extension AIProvider {
                 AIModelSpec(id: "qoder/dmodel", name: "DeepSeek V4 Pro (深度推理1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
                 AIModelSpec(id: "qoder/dfmodel", name: "DeepSeek Flash (极速推理1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: true),
                 AIModelSpec(id: "qoder/mmodel", name: "MiniMax M3 (海量上下文1M)", contextWindow: 1000000, supportsVision: true, supportsThinking: false)
-            ]
+            ],
+            iconName: "cube"
         )
     }
 
@@ -198,7 +276,17 @@ extension AIProvider {
                 AIModelSpec(id: "claude-opus-4-6", name: "Claude Opus 4.6 (深度思考)", contextWindow: 200000, supportsVision: true, supportsThinking: true),
                 AIModelSpec(id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (旗舰主力)", contextWindow: 200000, supportsVision: true, supportsThinking: true),
                 AIModelSpec(id: "gpt-oss-120b", name: "GPT-OSS 120B (开源大模型)", contextWindow: 131072, supportsVision: false, supportsThinking: true)
-            ]
+            ],
+            iconName: "atom"
         )
     }
+
+    /// 官方预设模型列表字典 (preset provider id -> preset models)
+    static let officialPresetModels: [String: () -> [AIModelSpec]] = [
+        "alibaba": { alibabaPreset().models },
+        "openai": { openAIPreset().models },
+        "qoder": { qoderPreset().models },
+        "antigravity": { antigravityPreset().models }
+    ]
 }
+

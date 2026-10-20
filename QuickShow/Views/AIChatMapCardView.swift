@@ -166,7 +166,7 @@ struct AIChatMapCardView: View {
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 

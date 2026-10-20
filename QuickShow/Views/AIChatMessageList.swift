@@ -25,6 +25,14 @@ struct SessionMessageList: View {
     /// 本就按会话隔离读取，高度值对全部常驻实例统一应用（非活跃会话 opacity=0 不可见）。
     let dockTotalHeight: CGFloat
 
+    /// 生效的输入坞高度：优先使用实测坞高，但以 DesignTokens 兜底值 (116pt) 为硬底线。
+    /// ⚠️ 关键防线（2026-10 事故定证，切勿修改）：
+    /// 杜绝任何由于父级传递延迟、初挂载未落定或窗口动画抖动导致的 dockTotalHeight <= 0。
+    /// 确保底部留白空间恒不小于 116pt，滚到底时末条消息底边恒悬于坞顶上方 21pt，物理上彻底杜绝被坞遮挡的可能。
+    private var effectiveDockHeight: CGFloat {
+        max(dockTotalHeight, Theme.Layout.chatDockHeightFallback)
+    }
+
     private let bottomAnchorID = "aiChat.bottom"
 
     /// 本会话首载装载态：冷启动与 LRU 重挂载时抑制入场动画，防窗口上屏竞态白屏。
@@ -33,9 +41,8 @@ struct SessionMessageList: View {
     /// 写路径单一（见 ChatScrollCoordinator）：用户输入回底/发送跳底 → true；
     /// 用户输入离底 → false。内容高度变化永不直接改写本态。
     @State private var isPinned = true
-    /// 浏览导航（刻度轨/回底钮）显隐镜像：unpinned 且离底超过
-    /// `Theme.Layout.chatNavRevealDistance` 才为 true（真源在 coordinator，本回调同步）。
-    /// 与 isPinned（跟随态）刻意解耦：上滚一点点时跟随照常暂停，但 UI 不冒出来。
+    /// 浏览导航（刻度轨/回底钮）显隐镜像：物理几何离底超过
+    /// `Theme.Layout.chatNavRevealDistance` 才为 true（真源在 coordinator 几何计算，本回调同步）。
     @State private var isNavVisible = false
     /// 真实视口顶部消息 id（由行级几何信号驱动，替代不可靠的 visibleMessageIDs）：
     /// 切走时作为恢复锚点，刻度轨「当前条」判定也据此定位。
@@ -189,20 +196,22 @@ struct SessionMessageList: View {
                     // （与坞体真实高度解耦，工具行动态变化自动跟随；2026-10 静态预算时代的
                     // 末条被压/遮挡断层由实测坞高单一真实来源根治。）
                     VStack(spacing: 0) {
-                        // 坞区让位留白：实测坞总高 + 呼吸缝，扣除外层组间距(36)
-                        // 与容差带(18)——两者分别由本子视图外/内承担，此处只补差额。
-                        // 留白随坞体生长/收缩平滑过渡（与坞内动画同时长）；pinned 时由
-                        // coordinator 的内容高度路径自动保持贴底，unpinned 不受干扰
-                        // （用户阅读位置主权最高）。
+                        // 坞区让位留白（第一性原理重构）：
+                        // 确保滚到底时，末条消息的正文与底部的常驻操作行均能完整展现在输入坞上方。
+                        // 留白高度调整为实测坞高（叠加外层 36pt 组间距与 18pt 容差带后，坞顶上方净留白约 54pt，恰好减半），
+                        // 既消除原先 100pt+ 的大面积空洞，又确保操作行永不被坞体遮挡。
                         Color.clear
-                            .frame(height: max(dockTotalHeight + Theme.Layout.chatDockTailBreathing - bottomTolerance - Theme.Spacing.chatGroupGap, 0))
-                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: effectiveDockHeight)
+                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                         // 容差带（18pt，嵌入坞区留白内部）
                         Color.clear
+                            .frame(maxWidth: .infinity)
                             .frame(height: bottomTolerance)
                         // 底部锚点：仅供 scrollToBottom 的 proxy 回退路径定位
                         // （LazyVStack 尾部锚点；AppKit 直滚为主路径）。
                         Color.clear
+                            .frame(maxWidth: .infinity)
                             .frame(height: 1)
                             .id(bottomAnchorID)
                     }
@@ -230,6 +239,9 @@ struct SessionMessageList: View {
             .onAppear {
                 seedVirtualWindowIfNeeded()
                 bindScrollCoordinator()
+                if isActive {
+                    scrollCoordinator.activeSessionId = sessionId
+                }
                 // 首帧布局完成后的下一 runloop：补消费跳底信号（空会话首建/重建窗口期
                 // 发布的瞬时信号不再丢失）→ 恢复位置（snapshot 锚点 / 贴底）→ 解除装载态。
                 // 解除装载态走显式空动画事务（历史白屏防线，勿动）。此路径仅在
@@ -238,6 +250,7 @@ struct SessionMessageList: View {
                     consumePendingJumpRequest(proxy)
                     restoreScroll(proxy)
                     withAnimation(nil) { isInitialHistoryLoad = false }
+                    scrollCoordinator.refreshNavVisibility(for: sessionId)
                 }
             }
             // 卸载：兜底保存快照 + 注销 coordinator 注册。覆盖「同 runloop 连续切换、中间会话
@@ -268,17 +281,20 @@ struct SessionMessageList: View {
             .onChange(of: isStreamingSession) { streaming in
                 if !streaming, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
-            // 活跃态切换：只保存快照，**不做任何 restoreScroll、不注销注册**。
+            // 活跃态切换：失活保存快照；激活时按当前几何位置刷新导航显隐镜像。
             // 常驻视图的 NSScrollView 偏移天然保留；激活时无条件 restoreScroll 是唯一破坏源
             // （会把用户强制拉走）。位置恢复只发生在挂载/LRU 重挂载的 onAppear。
             // pinned 会话若在隐藏期间并行生成，coordinator 的 frame 路径持续贴底。
             .onChange(of: isActive) { active in
-                if !active { saveSnapshot() }
+                if !active {
+                    saveSnapshot()
+                } else {
+                    scrollCoordinator.activeSessionId = sessionId
+                    scrollCoordinator.refreshNavVisibility(for: sessionId)
+                }
             }
-            // 浏览导航（2026-10 重设计：竖排双↓胶囊簇 → 刻度轨三件套 → Dock 放大刻度轨）：
-            // 显隐 = isNavVisible（unpinned 且离底超过 chatNavRevealDistance）且活跃，
-            // 0.15s 淡入淡出；贴底或门槛内隐藏。**显隐与 pin 解耦**：上滚一点点
-            // （门槛内）跟随照常暂停但不冒 UI；越过门槛才浮现，滚回门槛内即淡出。
+            // 浏览导航：显隐 = isNavVisible（几何离底超过 chatNavRevealDistance）且活跃，
+            // 0.15s 淡入淡出；贴底或门槛内隐藏。物理几何位置驱动，真实反映视口偏离状态。
             // 两件套各自挂 overlay（浮于滚动内容之上，真穿透后内容与坞/导航同层互不遮罩）：
             // ① 右缘刻度轨：贴窗口右内缘、垂直居中于内容区（扣坞区），每条用户消息一枚 tick，
             //   静止紧凑密排、光标接近时按余弦钟形衰减放大推开（详见 ChatTickRail）；
@@ -293,15 +309,15 @@ struct SessionMessageList: View {
                         }
                     }
                     .padding(.trailing, Theme.Layout.chatTickTrailing)
-                    .padding(.bottom, dockTotalHeight)
+                    .padding(.bottom, effectiveDockHeight)
                     .transition(.opacity)
                 }
             }
             .overlay(alignment: .bottom) {
                 if isNavVisible, isActive {
                     toBottomButton(proxy)
-                        .padding(.bottom, dockTotalHeight + Theme.Layout.chatNavDockGap)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                        .padding(.bottom, effectiveDockHeight + Theme.Layout.chatNavDockGap)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                         .chatReadingColumn(alignment: .trailing)
                         .transition(.opacity)
                 }

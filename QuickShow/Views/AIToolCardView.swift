@@ -307,8 +307,12 @@ private struct ToolCallResultBlock: View {
                                  : Theme.Colors.statusWarning)
             }
 
-            // 完整 JSON：等宽、限高可滚动
-            ScrollView(.vertical, showsIndicators: false) {
+            // 完整 JSON：等宽、限高可滚动（短内容自适应贴合，超长走次级限高 180pt 或展开 260pt）
+            AdaptiveScrollBox(
+                axes: .vertical,
+                maxHeight: showFullResult ? 260 : Theme.Layout.chatMetaBlockMaxHeight,
+                showsIndicators: false
+            ) {
                 Text(displayedResult)
                     .font(Theme.Typography.mono(11))
                     .foregroundColor(Theme.Colors.contentSecondaryStrong)
@@ -318,7 +322,6 @@ private struct ToolCallResultBlock: View {
                     .padding(.horizontal, Theme.Spacing.xl)
                     .padding(.vertical, Theme.Spacing.lg)
             }
-            .frame(maxHeight: showFullResult ? 260 : 180, alignment: .top)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                     .fill(Theme.Colors.surfaceBadge)
@@ -354,7 +357,7 @@ private struct ToolCallResultBlock: View {
         pasteboard.setString(prettyResult, forType: .string)
         copied = true
         // 轻反馈：对勾短暂停留后复位
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 

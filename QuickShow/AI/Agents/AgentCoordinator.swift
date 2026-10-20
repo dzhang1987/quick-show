@@ -91,13 +91,13 @@ final class AgentCoordinator {
         if matched == nil {
             if cleanTarget.contains("系统") || cleanTarget.contains("运维") || cleanTarget.contains("进程") || cleanTarget.contains("管家") || cleanTarget.contains("硬件") || cleanTarget.contains("mac") {
                 matched = agents.first { $0.id == "concierge" }
-            } else if cleanTarget.contains("view") || cleanTarget.contains("视觉") || cleanTarget.contains("image") || cleanTarget.contains("图") || cleanTarget.contains("图片") {
+            } else if cleanTarget.contains("view") || cleanTarget.contains("视觉") || cleanTarget.contains("image") || cleanTarget.contains("图") || cleanTarget.contains("图片") || cleanTarget.contains("识图") {
                 matched = AIAgentStore.shared.visualDelegateAgent ?? agents.first { $0.id == "observer" }
             } else if cleanTarget.contains("code") || cleanTarget.contains("代码") || cleanTarget.contains("写") || cleanTarget.contains("开发") || cleanTarget.contains("编程") || cleanTarget.contains("bug") {
                 matched = agents.first { $0.id == "coder" }
-            } else if cleanTarget.contains("search") || cleanTarget.contains("搜") || cleanTarget.contains("查") || cleanTarget.contains("文献") || cleanTarget.contains("知识") || cleanTarget.contains("情报") {
+            } else if cleanTarget.contains("search") || cleanTarget.contains("搜") || cleanTarget.contains("查") || cleanTarget.contains("文献") || cleanTarget.contains("知识") || cleanTarget.contains("情报") || cleanTarget.contains("资料") {
                 matched = agents.first { $0.id == "librarian" }
-            } else if cleanTarget.contains("reason") || cleanTarget.contains("推理") || cleanTarget.contains("深度") || cleanTarget.contains("分析") || cleanTarget.contains("架构") || cleanTarget.contains("决策") {
+            } else if cleanTarget.contains("reason") || cleanTarget.contains("推理") || cleanTarget.contains("深度") || cleanTarget.contains("分析") || cleanTarget.contains("架构") || cleanTarget.contains("决策") || cleanTarget.contains("思考") {
                 matched = agents.first { $0.id == "oracle" }
             }
         }
@@ -163,7 +163,7 @@ final class AgentCoordinator {
             var currentAssistantId = assistantID
             var accumulatedFinalText = ""
             var toolRounds = 0
-            let maxToolRounds = 6
+            let maxToolRounds = 3
 
             subagentLoop: while toolRounds < maxToolRounds {
                 if Task.isCancelled { break subagentLoop }
@@ -241,7 +241,7 @@ final class AgentCoordinator {
                     // 存在工具调用：
                     // 1. 将工具调用记录挂到当前子会话助手消息（使子会话 UI 实时呈现工具卡片）
                     let records = completedCalls.map {
-                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending)
+                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending, thoughtSignature: $0.thoughtSignature)
                     }
                     ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
                         msg.content = roundText
@@ -250,7 +250,7 @@ final class AgentCoordinator {
 
                     // 2. 将助手消息（携带 tool_calls）追加到请求上下文 wire
                     let wireCalls = completedCalls.map {
-                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments)
+                        WireToolCall(id: $0.id, name: $0.name, arguments: $0.arguments, thoughtSignature: $0.thoughtSignature)
                     }
                     requestMessages.append(ChatCompletionMessage(
                         role: "assistant",
@@ -330,13 +330,60 @@ final class AgentCoordinator {
                 }
             }
 
-            if toolRounds >= maxToolRounds && accumulatedFinalText.isEmpty {
-                accumulatedFinalText = "子智能体工具调用达到上限轮数（\(maxToolRounds) 轮），已停止继续调用。"
-                ChatSessionStore.shared.updateTaskStatus(
-                    sessionId: childId,
-                    status: .completed,
-                    summary: accumulatedFinalText
+            // 达到工具轮数上限且尚未输出最终答复：执行强制收敛总结（Force Synthesis）
+            if toolRounds >= maxToolRounds && accumulatedFinalText.isEmpty && !Task.isCancelled {
+                AgentTaskRegistry.shared.updateTaskAction(
+                    id: persistentTaskId,
+                    action: "信息检索完毕，正在撰写最终报告…",
+                    status: .running
                 )
+
+                requestMessages.append(ChatCompletionMessage(
+                    role: "user",
+                    content: "[系统提示]：工具调用轮次已达上限（\(maxToolRounds) 轮），信息收集阶段已结束。请基于上述已获取的所有工具返回结果，直接撰写完整、结构清晰、详尽的最终 Markdown 总结答卷，严禁再次发起工具调用。"
+                ))
+
+                do {
+                    let synthStream = AIProviderService.shared.send(
+                        messages: requestMessages,
+                        agent: matchedAgent,
+                        disableTools: true
+                    )
+                    var synthText = ""
+                    for try await event in synthStream {
+                        if Task.isCancelled { break }
+                        switch event {
+                        case .text(let chunk):
+                            synthText += chunk
+                            ChatSessionStore.shared.appendStreamToken(chunk, to: currentAssistantId, in: childId)
+                        case .reasoning(let reasoningChunk):
+                            ChatSessionStore.shared.appendReasoningToken(reasoningChunk, to: currentAssistantId, in: childId)
+                        case .usage, .toolCallDispatched, .toolCalls:
+                            break
+                        }
+                    }
+                    accumulatedFinalText = synthText
+                    ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .done, in: childId)
+                    ChatSessionStore.shared.updateTaskStatus(
+                        sessionId: childId,
+                        status: .completed,
+                        summary: String(synthText.prefix(120))
+                    )
+                } catch {
+                    let errMsg = error.localizedDescription
+                    ChatSessionStore.shared.updateMessageState(currentAssistantId, state: .failed(errMsg), in: childId)
+                    accumulatedFinalText = "总结报告生成失败：\(errMsg)"
+                }
+            }
+
+            // 彻底兜底：确保当前助手消息状态落定，绝不遗留悬挂 .streaming 状态
+            ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                if case .streaming = msg.state {
+                    if msg.content.isEmpty {
+                        msg.content = accumulatedFinalText.isEmpty ? "执行已完成" : accumulatedFinalText
+                    }
+                    msg.state = .done
+                }
             }
 
             // 大产物检测与本地隔离存储 (~/.quickshow/artifacts/<parentId>/<taskId>/report.md)
@@ -590,10 +637,10 @@ final class AgentCoordinator {
 
         // 3. 多任务时的语义特征度评分匹配
         let keywordsMap: [String: [String]] = [
-            "librarian": ["搜", "查", "找", "网", "股", "价", "财报", "新闻", "资讯", "行情", "市值", "google", "yahoo", "雪球"],
+            "librarian": ["搜", "查", "找", "网", "股", "价", "财报", "新闻", "资讯", "行情", "市值", "google", "yahoo", "雪球", "资料", "文献"],
             "coder": ["代码", "写", "改", "函数", "类", "bug", "修复", "重构", "swift", "python", "编译", "脚本"],
-            "oracle": ["分析", "评估", "推演", "架构", "逻辑", "估值", "模型", "对比", "优劣", "深度", "价值", "研报"],
-            "observer": ["看", "图", "图片", "视觉", "截图", "ui", "界面", "排版"],
+            "oracle": ["分析", "评估", "推演", "架构", "逻辑", "估值", "模型", "对比", "优劣", "深度", "价值", "研报", "思考"],
+            "observer": ["看", "图", "图片", "视觉", "截图", "ui", "界面", "排版", "识图"],
             "concierge": ["打开", "系统", "设置", "应用", "地图", "定位", "通知", "日历"]
         ]
 
