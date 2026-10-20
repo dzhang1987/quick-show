@@ -28,6 +28,11 @@
 
 ### Changed
 
+- **窗口与卡片全层级圆角系统全面对齐 macOS 系统浮层标准（`DesignTokens.swift` / `AIChatQuickSwitcher.swift`）**：
+  - **外框对齐控制中心标准（18pt）**：将 `Theme.Radius.panel` 由 26pt 收敛为 18pt（严格对齐 macOS 控制中心与系统浮窗的连续平滑曲率），消灭过大倒角的臃肿感；
+  - **嵌套层级同心圆角平滑递减**：速查表 `cheatSheet` 24 → 16pt，Bento 监控大卡 `card` 16 → 12pt，速查组卡 `groupCard` 12 → 10pt，内层微卡 `insetCard` 10 → 8pt，用户消息气泡 `userBubble` 18 → 14pt；
+  - **快速切换器收敛**：`AIChatQuickSwitcher` 移除硬编码 16pt 圆角与样式，接入统一 `GlassSurface` 与 `Theme.Radius.card` 令牌体系。
+
 - **子智能体硬超时熔断上限提升至 5 分钟与长连接对齐（`AgentCoordinator.swift` / `AntigravityCloudCodeAdapter.swift`）**：
   - **强类型策略常量收敛**：定义 `AgentCoordinator.defaultSubagentTimeoutSeconds = 300`（5 分钟），收敛消除分散的裸写魔法数字；
   - **网络长连接对齐**：将 `AntigravityCloudCodeAdapter` SSE 长连接资源的 `timeoutIntervalForResource` 同步由 180 秒提升至 300 秒，为长文本思考、全网深度检索与复杂多轮工具调用留足充裕缓冲。

@@ -45,31 +45,29 @@ struct AIChatQuickSwitcher: View {
             hintFooter
         }
         .frame(width: 410)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.regularMaterial)
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Theme.Colors.surfaceCard.opacity(0.35))
+        .modifier(GlassSurface(
+            shape: RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous),
+            strokeColor: Theme.Colors.chatStrokeStrong
+        ))
+        .overlay {
+            if !OSFeatures.liquidGlass {
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(Theme.Colors.rimTopOpacity * 0.4),
+                                Color.white.opacity(0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .center
+                        ),
+                        lineWidth: 0.5
+                    )
+                    .allowsHitTesting(false)
             }
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.28),
-                            Theme.Colors.cardStroke,
-                            Color.black.opacity(0.12)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ),
-                    lineWidth: 0.5
-                )
-        )
-        .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 4)
-        .shadow(color: Color.black.opacity(0.28), radius: 32, x: 0, y: 16)
+        }
+        .shadow(color: .black.opacity(Theme.Shadow.dockContactOpacity), radius: Theme.Shadow.dockContactRadius, y: Theme.Shadow.dockContactY)
+        .shadow(color: .black.opacity(Theme.Shadow.dockAmbientOpacity * 1.5), radius: Theme.Shadow.dockAmbientRadius, y: Theme.Shadow.dockAmbientY)
         .onAppear {
             initializeSelection()
             DispatchQueue.main.async {

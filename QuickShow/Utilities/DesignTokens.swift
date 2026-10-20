@@ -325,13 +325,13 @@ enum Theme {
     
     // MARK: - 圆角（连续曲率）
     enum Radius {
-        static let panel: CGFloat = 26      // 面板（PanelManager 玻璃双写 + 降级路径裁剪 的单一来源）
-        static let cheatSheet: CGFloat = 24 // CheatSheet 卡
-        static let card: CGFloat = 16       // Bento 大卡
-        static let groupCard: CGFloat = 12  // 速查组卡
-        static let insetCard: CGFloat = 10  // 内层卡（番茄钟台/日历卡）
+        static let panel: CGFloat = 18      // 面板（PanelManager 玻璃双写 + 降级路径裁剪 的单一来源，对齐 macOS 控制中心浮层标准）
+        static let cheatSheet: CGFloat = 16 // CheatSheet 卡
+        static let card: CGFloat = 12       // Bento 大卡
+        static let groupCard: CGFloat = 10  // 速查组卡
+        static let insetCard: CGFloat = 8   // 内层卡（番茄钟台/日历卡）
         static let keyCap: CGFloat = 5      // 快捷键键帽
-        static let userBubble: CGFloat = 18 // 用户消息气泡（groupCard 12 → 18，更圆的对话语言）
+        static let userBubble: CGFloat = 14 // 用户消息气泡（保持对话气泡圆润感）
         static let previewCapsule: CGFloat = 8 // 刻度轨预览胶囊（2026-10 重设计）
     }
     
