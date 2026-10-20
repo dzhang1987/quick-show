@@ -13,6 +13,8 @@ struct ChatMessageRow: View, Equatable {
     let canRegenerate: Bool
     /// 是否为会话内最后一条 user 消息且可撤回/编辑（父视图计算，含生成中禁用语义）。
     let canEditLastRound: Bool
+    /// 是否可利用已落定工具调用进行断点续跑
+    var canResumeAfterTools: Bool = false
     /// 就地编辑态（由外部统一状态驱动：ESC 优先退出就地编辑）。
     let isEditing: Bool
     let onBeginEdit: () -> Void
@@ -32,6 +34,7 @@ struct ChatMessageRow: View, Equatable {
             && lhs.isSummarized == rhs.isSummarized
             && lhs.canRegenerate == rhs.canRegenerate
             && lhs.canEditLastRound == rhs.canEditLastRound
+            && lhs.canResumeAfterTools == rhs.canResumeAfterTools
             && lhs.isEditing == rhs.isEditing
     }
 
@@ -39,7 +42,6 @@ struct ChatMessageRow: View, Equatable {
     @State private var copied = false
 
     var body: some View {
-        let _ = qsDebugLog("ChatMessageRow body: id=\(message.id.uuidString.prefix(8)) role=\(message.role) state=\(message.state) showsActionRow=\(showsActionRow) canRegenerate=\(canRegenerate) contentLen=\(message.content.count)")
         Group {
             switch message.role {
             case .user:
@@ -228,7 +230,8 @@ struct ChatMessageRow: View, Equatable {
             StreamingMessageView(content: message.content, hasReasoning: !(message.reasoning?.isEmpty ?? true))
         case .failed(let errorText):
             // 失败态保留提示卡片（状态提示，非正文排版）
-            FailedMessageView(errorText: errorText, onRetry: onRetry)
+            let retryTitle = canResumeAfterTools ? "载入最新成果并继续" : "重试"
+            FailedMessageView(errorText: errorText, retryTitle: retryTitle, onRetry: onRetry)
         case .done:
             // 落定态：完整块级 Markdown 渲染（AIChatMarkdownView）；
             // textSelection 支持按块选区复制（跨块选择与含公式段落不支持，见 MarkdownInlineText 结构限制）
@@ -868,9 +871,10 @@ struct StreamingMarkdownContentView: View {
     }
 }
 
-/// 失败消息：错误色提示 + 重试按钮（重发最后一条 user 消息）。
+/// 失败消息：错误色提示 + 重试按钮（重发最后一条 user 消息 或 断点续跑）。
 struct FailedMessageView: View {
     let errorText: String
+    var retryTitle: String = "重试"
     let onRetry: () -> Void
 
     var body: some View {
@@ -889,7 +893,7 @@ struct FailedMessageView: View {
                 HStack(spacing: Theme.Spacing.sm) {
                     Image(systemName: "arrow.clockwise")
                         .font(Theme.Typography.text(11, .semibold))
-                    Text("重试")
+                    Text(retryTitle)
                         .font(Theme.Typography.text(11, .semibold))
                 }
                 .foregroundColor(Theme.Colors.contentPrimary)

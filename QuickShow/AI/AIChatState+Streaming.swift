@@ -466,6 +466,11 @@ extension AIChatState {
         }
         guard didComplete else { return }
 
+        // 子智能体专属会话成功完成时：主动反向同步成果到主会话并就地热更新工具结果
+        if let session = store.session(id: sessionId), let parentId = session.parentSessionId {
+            AgentCoordinator.shared.handleChildSessionCompleted(childSessionId: sessionId, parentSessionId: parentId)
+        }
+
         // 后台完成未读：完成时非当前会话 → 标记未读（切回该会话即清除）。
         // 会话已被删除时不再标记（否则会在 unreadSessionIds 留下永久死项）。
         if sessionId != currentSessionId, store.session(id: sessionId) != nil {
@@ -734,6 +739,65 @@ extension AIChatState {
             ChatMessage(role: .assistant, content: "", state: .failed(text)),
             to: session.id
         )
+    }
+
+    // MARK: - 智能断点续跑 (Smart Resume)
+
+    /// 智能断点续跑：工具已全部执行完毕、仅尾部助手生成失败时，
+    /// 保留完整的工具调用与成果回传记录，直接进入下一轮模型总结生成。
+    func resumeConversationAfterTools(sessionId: UUID, failedMessageId: UUID) {
+        guard !isStreaming else { return }
+        guard hasConfiguredEndpoint else {
+            appendLocalFailure(String(localized: "尚未配置 AI 服务，请在设置中填写 Base URL 与 API Key。"))
+            return
+        }
+
+        // 1. 移除尾部失败占位
+        store.removeMessage(id: failedMessageId, in: sessionId)
+
+        // 2. 清理并新建流式上下文
+        if streamContexts[sessionId] != nil {
+            forceFlushPendingTokens(in: sessionId)
+            streamContexts[sessionId] = nil
+        }
+        let ctx = StreamContext()
+
+        // 3. 追加新的助手占位 (.sending)
+        let assistantID = UUID()
+        store.appendMessage(
+            ChatMessage(id: assistantID, role: .assistant, content: "", state: .sending),
+            to: sessionId,
+            persist: false
+        )
+
+        scrollJumpRequests[sessionId] = Date()
+        ctx.sendPathPersisted = false
+        streamContexts[sessionId] = ctx
+        streamingSessionIds.insert(sessionId)
+        syncStreamingState()
+
+        // 4. 重建包含完整已落定工具调用的请求消息线
+        let requestMessages = buildRequestMessages(for: sessionId)
+
+        // 5. 启动对话回路（直接向模型请求最终总结回答）
+        startConversationLoop(
+            sessionId: sessionId,
+            initialWire: requestMessages,
+            firstAssistantID: assistantID,
+            context: ctx
+        )
+    }
+
+    /// 判定指定会话当前失败是否可以通过已完成的工具成果进行断点续跑
+    func canResumeAfterTools(in sessionId: UUID) -> Bool {
+        let allMessages = store.messages(in: sessionId)
+        guard let lastMsg = allMessages.last, case .failed = lastMsg.state else { return false }
+        let priorMessages = allMessages.dropLast()
+        guard let priorAssistant = priorMessages.last,
+              priorAssistant.role == .assistant,
+              let toolCalls = priorAssistant.toolCalls,
+              !toolCalls.isEmpty else { return false }
+        return toolCalls.allSatisfy { $0.result != nil }
     }
 
 }

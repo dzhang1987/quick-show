@@ -698,6 +698,103 @@ final class AgentCoordinator {
 
     // MARK: - 5. 子任务结论回传与同步至主会话 (Sync to Main Agent)
 
+    /// 当子智能体独立流式会话完成（尤其是用户进入子会话修改配置并重试成功后）：
+    /// 自动沉淀成果并就地热更新主会话对应的 launch_subagents 工具结果，消除断点
+    func handleChildSessionCompleted(childSessionId: UUID, parentSessionId: UUID) {
+        guard let childSession = ChatSessionStore.shared.session(id: childSessionId) else { return }
+
+        let lastAssistant = childSession.messages.last { $0.role == .assistant && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let conclusionText = childSession.taskSummary ?? lastAssistant?.content ?? ""
+        
+        let agent = AIAgentStore.shared.agent(for: childSession.agentId ?? "")
+        let agentName = agent?.name ?? "子智能体"
+
+        // 1. 同步更新任务注册表状态
+        if let regTask = AgentTaskRegistry.shared.task(childSessionId: childSessionId) {
+            AgentTaskRegistry.shared.settleTask(
+                id: regTask.id,
+                status: .completed,
+                summary: String(conclusionText.prefix(120))
+            )
+        }
+
+        // 2. 刷新主会话中的 launch_subagents 工具调用结果
+        let patched = refreshSubagentResultsInParent(parentSessionId: parentSessionId)
+
+        // 3. 提示通知
+        if patched {
+            AIChatState.shared.showAgentSteeringNotice("已将【\(agentName)】最新成果同步回主会话")
+        }
+    }
+
+    /// 检查并就地热更新主会话中已记录的 launch_subagents 结果
+    @discardableResult
+    func refreshSubagentResultsInParent(parentSessionId: UUID) -> Bool {
+        guard let parentSession = ChatSessionStore.shared.session(id: parentSessionId) else { return false }
+        var didModifyAny = false
+
+        for msg in parentSession.messages {
+            guard msg.role == .assistant, let calls = msg.toolCalls, !calls.isEmpty else { continue }
+            var updatedCalls = calls
+            var didModifyMsg = false
+
+            for (idx, call) in calls.enumerated() {
+                guard call.name == "launch_subagents", let rawResult = call.result else { continue }
+                guard let data = rawResult.data(using: .utf8),
+                      var json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                      var resultsList = json["results"] as? [[String: Any]] else {
+                    continue
+                }
+
+                var listModified = false
+                for (rIdx, rItem) in resultsList.enumerated() {
+                    guard let sIdStr = rItem["session_id"] as? String,
+                          let sId = UUID(uuidString: sIdStr),
+                          let child = ChatSessionStore.shared.session(id: sId) else {
+                        continue
+                    }
+
+                    // 检查子会话是否已经完成或有有效产出
+                    let lastAssistant = child.messages.last { $0.role == .assistant && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    let conclusion = child.taskSummary ?? lastAssistant?.content ?? ""
+                    let isDone = child.taskStatus == .completed || (lastAssistant?.state == .done && !conclusion.isEmpty)
+
+                    if isDone {
+                        let curStatus = rItem["status"] as? String ?? ""
+                        let curOutput = rItem["output"] as? String ?? ""
+                        if curStatus != "completed" || curOutput != conclusion {
+                            resultsList[rIdx]["status"] = "completed"
+                            resultsList[rIdx]["output"] = conclusion
+                            let regTask = AgentTaskRegistry.shared.task(childSessionId: sId)
+                            if let artifacts = regTask?.artifacts, !artifacts.isEmpty {
+                                resultsList[rIdx]["artifacts"] = artifacts
+                            }
+                            listModified = true
+                        }
+                    }
+                }
+
+                if listModified {
+                    json["results"] = resultsList
+                    if let newData = try? JSONSerialization.data(withJSONObject: json, options: []),
+                       let newStr = String(data: newData, encoding: .utf8) {
+                        updatedCalls[idx].result = newStr
+                        updatedCalls[idx].status = .done
+                        didModifyMsg = true
+                    }
+                }
+            }
+
+            if didModifyMsg {
+                ChatSessionStore.shared.updateMessage(id: msg.id, in: parentSessionId, touch: true, persist: true) { targetMsg in
+                    targetMsg.toolCalls = updatedCalls
+                }
+                didModifyAny = true
+            }
+        }
+        return didModifyAny
+    }
+
     /// 将特定子 Agent 的产物与结论沉淀并同步回主会话，形成协同闭环
     func syncChildOutputToParent(childSessionId: UUID, userNote: String? = nil) {
         guard let childSession = ChatSessionStore.shared.session(id: childSessionId),

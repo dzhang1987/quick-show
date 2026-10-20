@@ -6,6 +6,11 @@
 
 ### Added
 
+- **子智能体成果反向热同步与智能断点续跑闭环（`AgentCoordinator.swift` / `AIChatState+Streaming.swift` / `AIChatState.swift` / `AIChatMessageRow.swift`）**：
+  - **成果反向热同步（`handleChildSessionCompleted` / `refreshSubagentResultsInParent`）**：子智能体专属会话成功执行结束时，主动反向同步成果与产物至主会话 `launch_subagents` 工具调用记录并更新本地任务注册表状态，就地刷新 JSON 与产物路径，并触发气泡轻提示；
+  - **智能断点续跑机制（Smart Resume / `resumeConversationAfterTools`）**：当并发工具调用已全部执行完毕、仅尾部助手生成失败时，保留全部成果与工具调用历史记录，不再将已有工作抹杀；失败消息卡片自适应呈现「载入最新成果并继续」，点击重试时直接基于已就绪的工具产物向模型发起最终总结；
+  - **重试前置热刷新**：主会话重试请求前，先行主动扫描并热刷新关联子会话的最新成果，杜绝脏数据。
+
 - **输入坞消息排队与中途插入体系完整升级（`QueuedMessagesPanel` / `AIChatState+Queue.swift` / `SettingsStore.swift` / `AIChatInputFields.swift`）**：
   - **全新一体化可折叠排队面板（`QueuedMessagesPanel`）**：彻底替换原有平铺的分散小胶囊，单条排队时直接展示完整卡片，多条排队时自动收拢为占位极简的折叠控制栏（`排队消息 (N) · 将按顺序自动处理`）；
   - **就地独立编辑与一键提权机制**：每条排队消息均独立具备 `[-> 立即插入]`（由追加一键提拔为即时插队干预）、`[✏️ 就地编辑]`（原地展开行内编辑框，保存即生效，绝不回填污染或冲掉主输入框当前草稿）、`[🗑️ 移除]` 能力；

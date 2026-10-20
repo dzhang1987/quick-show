@@ -648,11 +648,33 @@ final class AIChatState: ObservableObject {
 
     // MARK: - 重试
 
-    /// 重试最后一次请求：移除尾部失败占位，原样重发最后一条 user 消息。
+    /// 重试最后一次请求：
+    /// 1. 若尾部失败发生于已执行完毕的工具调用之后（如 launch_subagents），执行智能断点续跑，
+    ///    就地刷新最新成果向 LLM 续发总结请求，严禁将先前的工具调用与用户提问整条抹杀。
+    /// 2. 若为初始阶段或常规失败，回退重发最后一条 user 消息。
     func retryLast() {
         guard !isStreaming else { return }
         let session = store.ensureCurrentSession()
         let sessionId = session.id
+
+        // 1. 若当前会话是主会话（或派生过子任务），先热刷新一次子任务成果
+        AgentCoordinator.shared.refreshSubagentResultsInParent(parentSessionId: sessionId)
+
+        // 2. 检查是否可断点续跑（失败发生于工具完成之后的助手总结阶段）
+        let allMessages = store.messages(in: sessionId)
+        if let lastMsg = allMessages.last, case .failed = lastMsg.state {
+            let priorMessages = allMessages.dropLast()
+            if let priorAssistant = priorMessages.last,
+               priorAssistant.role == .assistant,
+               let toolCalls = priorAssistant.toolCalls,
+               !toolCalls.isEmpty,
+               toolCalls.allSatisfy({ $0.result != nil }) {
+                resumeConversationAfterTools(sessionId: sessionId, failedMessageId: lastMsg.id)
+                return
+            }
+        }
+
+        // 3. 常规失败回退重试：移除尾部失败与残留孤立 tool_calls，原样重发最后一条 user 消息
         messagesSnapshotRemoveFailed(in: sessionId)
 
         guard let lastUser = store.messages(in: sessionId).last(where: { $0.role == .user }) else {
