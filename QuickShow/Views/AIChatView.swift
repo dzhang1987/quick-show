@@ -63,6 +63,10 @@ struct AIChatView: View {
     /// 滚动内容穿入坞底由玻璃 blur 采样。值单向流入布局计算，绝不反向影响坞体布局
     /// （无反馈环）；初值 chatDockHeightFallback 首帧兜底，实测后校准；<0.5pt 去抖跳过。
     @State private var dockTotalHeight: CGFloat = Theme.Layout.chatDockHeightFallback
+    /// 实测坞高生效值：以 DesignTokens 兜底值 (116pt) 为硬底线，防止时序抖动导致 0 高度穿透。
+    private var effectiveDockHeight: CGFloat {
+        max(dockTotalHeight, Theme.Layout.chatDockHeightFallback)
+    }
     /// 剪贴板是否有可用图片（控制 ⊕ 菜单「剪贴板导入」可用态）。
     @State private var hasClipboardImage = false
     /// 会话滚动控制中枢：每会话滚动事件「来源判定」（用户输入 vs 程序化/内容变化）+
@@ -266,6 +270,19 @@ struct AIChatView: View {
             navigateUpToParentAgent()
         }
         .onAppear {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                for win in NSApp.windows where win.isVisible {
+                    if let cv = win.contentView {
+                        let sel = Selector(("_printHierarchy"))
+                        if cv.responds(to: sel) {
+                            let desc = cv.perform(sel)?.takeUnretainedValue() as? String ?? ""
+                            try? desc.write(toFile: "/tmp/qs_view_tree.log", atomically: true, encoding: .utf8)
+                            qsDebugLog("Dumped view tree to /tmp/qs_view_tree.log, length=\(desc.count)")
+                        }
+                    }
+                }
+            }
+            scrollCoordinator.activeSessionId = state.store.currentSessionId
             refreshEnvironment()
             installKeyMonitor()
             pinned = AIWindowManager.shared.isPinned
@@ -303,6 +320,7 @@ struct AIChatView: View {
         // dropFirst 跳过订阅时重放的当前值，避免首挂载误判；常驻集合已由 init 以当前会话起步。
         .onReceive(state.store.$currentSessionId.dropFirst()) { newId in
             updateResidency(for: newId)
+            scrollCoordinator.activeSessionId = newId
         }
         // 会话删除检测：清理被删会话的滚动快照与 LRU 常驻项，防死项累积。
         // 以 id 集合 + removeDuplicates 收敛触发频率（流式冲刷不改 id 集合，不重复扇出）；
@@ -414,12 +432,12 @@ struct AIChatView: View {
                     // 欢迎页/引导页），遮挡带随坞体生长动态抬高
                     if !configured && activeSessionMessagesEmpty {
                         UnconfiguredGuideView(onOpenSettings: onOpenSettings)
-                            .padding(.bottom, dockTotalHeight)
-                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                            .padding(.bottom, effectiveDockHeight)
+                            .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     } else if activeSessionMessagesEmpty {
                         WelcomeView()
-                        .padding(.bottom, dockTotalHeight)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                        .padding(.bottom, effectiveDockHeight)
+                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     }
                 }
         }
@@ -450,8 +468,8 @@ struct AIChatView: View {
                     .padding(.vertical, Theme.Spacing.md)
                     .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
                     .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
-                    .padding(.bottom, dockTotalHeight + Theme.Spacing.lg)
-                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                    .padding(.bottom, effectiveDockHeight + Theme.Spacing.lg)
+                    .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
             }
         }
@@ -473,8 +491,8 @@ struct AIChatView: View {
                 .padding(.vertical, Theme.Spacing.md)
                 .background(Capsule(style: .continuous).fill(Theme.Colors.toastFill))
                 .overlay(Capsule(style: .continuous).stroke(Theme.Colors.toastStroke, lineWidth: 0.5))
-                .padding(.bottom, dockTotalHeight + Theme.Spacing.lg)
-                .animation(.easeOut(duration: Theme.Motion.contentFade), value: dockTotalHeight)
+                .padding(.bottom, effectiveDockHeight + Theme.Spacing.lg)
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                 .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
             }
         }

@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import EventKit
+import SwiftUI
 
 // MARK: - 数据模型定义
 
@@ -136,5 +137,104 @@ struct CalendarEditDraft: Equatable {
         self.location = event.location ?? ""
         self.notes = event.notes ?? ""
         self.calendarID = event.calendar?.calendarIdentifier
+    }
+}
+
+// MARK: - 监控指标健康度等级 (面向领域驱动与 SOLID 规范)
+
+/// 系统指标健康度层级 (避免在 View 计算属性中散落硬编码阈值逻辑)
+enum MetricHealthLevel: Sendable, Equatable {
+    case normal
+    case warning
+    case critical
+
+    /// 统一状态色 (遵循 DesignTokens 规范)
+    var color: Color {
+        switch self {
+        case .normal:
+            return Theme.Colors.accent.opacity(0.95)
+        case .warning:
+            return Color.orange.opacity(0.95)
+        case .critical:
+            return Color.red.opacity(0.95)
+        }
+    }
+
+    /// 统一业务阈值常量
+    enum Threshold {
+        static let cpuCritical: Double = 85.0
+        static let cpuWarning: Double = 60.0
+
+        static let memoryCritical: Double = 90.0
+        static let memoryWarning: Double = 75.0
+
+        static let batteryLow: Int = 20
+        static let batteryStep1: Int = 15
+        static let batteryStep2: Int = 35
+        static let batteryStep3: Int = 65
+        static let batteryStep4: Int = 85
+
+        static let audioQuiet: Int = 40
+        static let audioModerate: Int = 75
+    }
+}
+
+extension SystemPerformanceInfo {
+    var cpuHealth: MetricHealthLevel {
+        if cpuUsage > MetricHealthLevel.Threshold.cpuCritical { return .critical }
+        if cpuUsage > MetricHealthLevel.Threshold.cpuWarning { return .warning }
+        return .normal
+    }
+
+    var cpuColor: Color {
+        cpuHealth.color
+    }
+
+    var memoryHealth: MetricHealthLevel {
+        if memoryUsagePercent > MetricHealthLevel.Threshold.memoryCritical { return .critical }
+        if memoryUsagePercent > MetricHealthLevel.Threshold.memoryWarning { return .warning }
+        return .normal
+    }
+
+    var ramColor: Color {
+        memoryHealth.color
+    }
+}
+
+extension BatteryInfo {
+    var iconName: String {
+        if isCharging || isOnACPower {
+            return "battery.100.bolt"
+        }
+        if percentage <= MetricHealthLevel.Threshold.batteryStep1 { return "battery.0" }
+        if percentage <= MetricHealthLevel.Threshold.batteryStep2 { return "battery.25" }
+        if percentage <= MetricHealthLevel.Threshold.batteryStep3 { return "battery.50" }
+        if percentage <= MetricHealthLevel.Threshold.batteryStep4 { return "battery.75" }
+        return "battery.100"
+    }
+
+    var statusColor: Color {
+        if isCharging || isOnACPower {
+            return Theme.Colors.statusGood
+        }
+        if percentage <= MetricHealthLevel.Threshold.batteryLow {
+            return Theme.Colors.statusWarning
+        }
+        return .primary
+    }
+}
+
+extension AudioInfo {
+    var iconName: String {
+        if isMuted {
+            return "speaker.slash.fill"
+        }
+        if isHeadphones {
+            return "headphones"
+        }
+        if volume == 0 { return "speaker.fill" }
+        if volume < MetricHealthLevel.Threshold.audioQuiet { return "speaker.wave.1.fill" }
+        if volume < MetricHealthLevel.Threshold.audioModerate { return "speaker.wave.2.fill" }
+        return "speaker.wave.3.fill"
     }
 }

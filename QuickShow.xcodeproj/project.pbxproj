@@ -66,6 +66,7 @@
 		3F030C8F6AC7AAC865530EFF /* FocusWorkCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2167D019993E6060D6D375A /* FocusWorkCard.swift */; };
 		3FC1DB5D580A579E2803DF5A /* MTMathAtomFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31B220E8199511E133A53FEA /* MTMathAtomFactory.swift */; };
 		429644B19C6C9476A5A1FF53 /* AIChatKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0661EBAA94210CA4383157 /* AIChatKeyMonitor.swift */; };
+		4368B1BFFDC6D5AAB24BCA41 /* AgentRoleProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93103A1388B29380136503A6 /* AgentRoleProfile.swift */; };
 		4388E4938BFBBF4CB643D03D /* MathViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 433A1892E197A5B47911FC16 /* MathViews.swift */; };
 		4524EBF3DECAE2AF7D8AB698 /* PomodoroPresetButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B586F0BF4F4DAF19E416773 /* PomodoroPresetButton.swift */; };
 		45F48861BD508743A0514146 /* MTFontV2.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A037EDC27F5CEB9073A4B2D /* MTFontV2.swift */; };
@@ -226,6 +227,7 @@
 		F45ECFA4963FA434C37BACDF /* NowPlayingCardRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACCD30C80C4D1CF7C8E5341A /* NowPlayingCardRow.swift */; };
 		F4BE6BFAA94DEC22AE533146 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B7BF9C965803CBAE72E3577B /* Assets.xcassets */; };
 		F7A44C62B3BA697C2B3B80CC /* RWLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7C7EC4C33CD9AD3C0270AD3 /* RWLock.swift */; };
+		F9C95B327FE5686EAA6FC2EC /* PanelKeyCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFE32A29BADF25646BC14C5 /* PanelKeyCommand.swift */; };
 		FA43C7C8EE4D4250428A5F5A /* AIAuthMethod.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0C6C3784ACB8FAC5B4F0D4B /* AIAuthMethod.swift */; };
 		FA8AB9E209F88AE07E9E7664 /* MarkdownHighlighter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5570F43DFA4FADCF1C25059 /* MarkdownHighlighter.swift */; };
 		FBD6DE159190607DB6CA536D /* MarkdownParagraphRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F872717476C949C8D8DECC3C /* MarkdownParagraphRenderer.swift */; };
@@ -357,6 +359,7 @@
 		6EEB34897E985BEA3CD3C3B0 /* AntigravityOAuthConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AntigravityOAuthConfig.swift; sourceTree = "<group>"; };
 		6EEC1734C7857CABA40F8EC4 /* MarkdownBlockRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockRegistry.swift; sourceTree = "<group>"; };
 		6F2DD99010D040E245B74EB6 /* ToolConfirmationDrawer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolConfirmationDrawer.swift; sourceTree = "<group>"; };
+		6FFE32A29BADF25646BC14C5 /* PanelKeyCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelKeyCommand.swift; sourceTree = "<group>"; };
 		701C4A6F6EA8CB5F9B11E942 /* PreviewFileTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewFileTool.swift; sourceTree = "<group>"; };
 		74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatContextRingView.swift; sourceTree = "<group>"; };
 		751F343AA24F0685B3EFBE9A /* pojoaque.min.css */ = {isa = PBXFileReference; lastKnownFileType = text.css; path = pojoaque.min.css; sourceTree = "<group>"; };
@@ -381,6 +384,7 @@
 		8D62EF6286590CCC841D39FB /* CalendarGridViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarGridViews.swift; sourceTree = "<group>"; };
 		8F29E4C4AB23A2CD575B4FD2 /* ChatModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatModels.swift; sourceTree = "<group>"; };
 		8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatService.swift; sourceTree = "<group>"; };
+		93103A1388B29380136503A6 /* AgentRoleProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentRoleProfile.swift; sourceTree = "<group>"; };
 		935E9F331F9AE538660984C0 /* ChatTickRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatTickRail.swift; sourceTree = "<group>"; };
 		946B72D1E41F51F05F018ABF /* EscapePolicyCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EscapePolicyCenter.swift; sourceTree = "<group>"; };
 		94BD4B04C800A479129E797F /* AISettingsSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AISettingsSections.swift; sourceTree = "<group>"; };
@@ -578,6 +582,7 @@
 				A717A5076D26657EA117861F /* HotKeyManager.swift */,
 				3291950B8938576996251B5D /* MediaStore.swift */,
 				3B9E47FFC6045EDC0E50BE6F /* MonitoringStore.swift */,
+				6FFE32A29BADF25646BC14C5 /* PanelKeyCommand.swift */,
 				4CB3F9819E7541B279D9C3FB /* PanelManager.swift */,
 				7E308FBA4E88417CC9AEF471 /* PomodoroStore.swift */,
 				B9D368641E2232C1D0E9B426 /* SettingsStore.swift */,
@@ -939,6 +944,7 @@
 			isa = PBXGroup;
 			children = (
 				BD9C9B9111A65CB009BE7781 /* AgentCoordinator.swift */,
+				93103A1388B29380136503A6 /* AgentRoleProfile.swift */,
 				21134A9335F219AB7305BD80 /* AgentTaskRegistry.swift */,
 				F83AB7D46B76B35F7C6C32EE /* AIAgent.swift */,
 				5F9E0DF3C8D33878C650E653 /* AIAgentStore.swift */,
@@ -1191,6 +1197,7 @@
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
 				9EC1ACFED3A4A9661527135F /* AgentCoordinator.swift in Sources */,
 				83F1D36249ECBC0185115E85 /* AgentFunctionalTests.swift in Sources */,
+				4368B1BFFDC6D5AAB24BCA41 /* AgentRoleProfile.swift in Sources */,
 				9D96224049AC887256641D8E /* AgentTaskRegistry.swift in Sources */,
 				B0403BCEFDB95A4BFCBB03F5 /* AlibabaAuthMethods.swift in Sources */,
 				55CE4CE50988B2857EC44061 /* AntigravityAuthMethods.swift in Sources */,
@@ -1296,6 +1303,7 @@
 				E2C291958D569BA34D5376A2 /* OAuthLoopbackServer.swift in Sources */,
 				CC3AB6CA4C2BBEA09EDD2AF8 /* OpenAIAuthMethods.swift in Sources */,
 				A6F2ACF18E60EAF649B66A77 /* OpenAIProvider.swift in Sources */,
+				F9C95B327FE5686EAA6FC2EC /* PanelKeyCommand.swift in Sources */,
 				7325565C24EBC2891BB84D17 /* PanelManager.swift in Sources */,
 				753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */,
 				1AB8BCEF90D921D67A654AE5 /* PerformanceCard.swift in Sources */,

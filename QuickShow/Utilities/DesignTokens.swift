@@ -1,6 +1,17 @@
 import SwiftUI
 import AppKit
 
+func qsDebugLog(_ message: String) {
+    NSLog("QS_DEBUG: %@", message)
+    if let data = (message + "\n").data(using: .utf8) {
+        if let fh = FileHandle(forWritingAtPath: "/tmp/qs_debug.log") {
+            _ = fh.seekToEndOfFile()
+            fh.write(data)
+            try? fh.close()
+        }
+    }
+}
+
 // MARK: - 明暗模式（全 App 范围）
 // NSApp.appearance 一变，所有窗口（面板玻璃/NSHostingView 语义色/设置窗口）的
 // effectiveAppearance 全部联动翻转，内容层零改动；琥珀色板的 dynamicProvider 双模式自动适配
@@ -396,10 +407,10 @@ enum Theme {
         // 实时 blur 采样。
         // （2026-10：静态 90/110 预算时代一常量双职锚定渐隐带与尾部留白，工具行高度动态
         // 超估算导致末条消息被坞体压制、渐隐带与坞体脱开断层 → 改为实测单一真实来源）
-        static let chatDockHeightFallback: CGFloat = 116
+        static let chatDockHeightFallback: CGFloat = 124
         // 尾部留白在坞顶之上的呼吸缝：滚到底时末条消息底边与坞顶的可见间距
         // （真穿透：再往上滚，消息即自然穿入玻璃坞下被 blur 采样）
-        static let chatDockTailBreathing: CGFloat = 20
+        static let chatDockTailBreathing: CGFloat = 28
         // —— 嵌入型组件通用限高两档阶梯规范（统一标准） ——
         // 1. 主交付内容级默认限高（约 20 行，覆盖：正文代码块、Markdown 表格等）：超出内部滚动、少于自适应贴合
         static let chatBlockMaxHeight: CGFloat = 380
@@ -465,6 +476,7 @@ enum Theme {
         static let contentFade: Double = 0.16    // 内容显隐（CheatSheet/toast/监控区 opacity）
         static let toastOut: Double = 0.20       // toast 淡出
         static let toastDuration: Double = 1.6   // toast 停留时长
+        static let transientFeedbackDuration: Double = 1.2 // 复制成功、临时按钮等瞬态反馈保留时长
         static let progressReset: Double = 0.08  // 一瞥进度重置动画
         static let framePollHz: Double = 60      // 窗口动画期间尺寸轮询频率
         static let toastScale: CGFloat = 0.95    // toast 入场缩放

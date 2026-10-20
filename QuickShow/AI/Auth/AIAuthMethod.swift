@@ -22,11 +22,35 @@ struct LocalDetectedAccount: Equatable, Sendable, Identifiable {
 }
 
 /// 授权方式类别
-enum AuthMethodKind: String, Sendable, CaseIterable {
-    case apiKey           // 手工输入 API Key / PAT 个人访问令牌
-    case biometricImport  // 本地已登录凭据探测 + 触控 ID (Touch ID) 免密导入
-    case browserOAuth     // 浏览器网页端外部授权 (OAuth PKCE 或 Device Flow)
-    case environment      // 系统终端环境变量自动装载
+enum AuthMethodKind: String, Codable, Sendable, CaseIterable {
+    case apiKey = "apiKey"
+    case biometricImport = "biometricImport"
+    case browserOAuth = "browserOAuth"
+    case environment = "environment"
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let raw = try container.decode(String.self)
+        switch raw {
+        case "browser", "browserOAuth":
+            self = .browserOAuth
+        case "biometric_import", "biometricImport", "auto_detect":
+            self = .biometricImport
+        case "environment":
+            self = .environment
+        default:
+            self = .apiKey
+        }
+    }
+
+    var tagDisplayName: String {
+        switch self {
+        case .browserOAuth: return "浏览器授权"
+        case .biometricImport: return "触控 ID 导入"
+        case .apiKey: return "手动凭据"
+        case .environment: return "环境变量"
+        }
+    }
 }
 
 /// 统一授权方式基础契约 (面向接口)

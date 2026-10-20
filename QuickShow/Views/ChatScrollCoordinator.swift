@@ -69,6 +69,8 @@ final class ChatScrollCoordinator {
     /// bounds 变化的来源判别真源（用户输入 vs 被动 clamp/程序化）——取代几何
     /// 方向+容差猜测。惯性（momentumPhase）事件同源持续刷新。
     private var lastUserScrollWheelAt: [UUID: Date] = [:]
+    /// 当前活跃会话 ID（由视图层在切换会话时同步）：用于精准路由滚轮穿透事件。
+    var activeSessionId: UUID?
     /// 全局滚轮监听 token：首个会话 attach 时 lazy 安装一次，随 app 生命周期常驻。
     private var scrollWheelMonitor: Any?
     /// 用户滚轮事件的关联时窗：滚轮事件与其驱动的 bounds 变化在同一事件派发
@@ -99,6 +101,9 @@ final class ChatScrollCoordinator {
 
     /// 卸载时注销并清理真源。
     func unbind(sessionId: UUID) {
+        if activeSessionId == sessionId {
+            activeSessionId = nil
+        }
         pinnedChangeHandlers[sessionId] = nil
         navVisibilityHandlers[sessionId] = nil
         pinStates[sessionId] = nil
@@ -162,46 +167,72 @@ final class ChatScrollCoordinator {
         updateNavVisibility(sessionId: sessionId, scrollView: scrollView)
     }
 
-    /// 安装全局滚轮监听（lazy 一次）：只观察不消费（返回原 event，放行给正常响应链）。
-    /// 选择 local monitor 而非会话级事件视图：滚轮事件不冒泡成可挂载手势，只有
-    /// NSApplication 级派发能看到「哪个会话被命中」；且 monitor 与事件派发共享同一条
-    /// hit-test 路径，命中判定零额外几何推算。
+    /// 安装全局滚轮监听（lazy 一次）：
+    /// 1. 若光标命中消息列表 NSScrollView 或其子视图，只记录时间戳并放行原 event；
+    /// 2. 若光标命中阅读列横向范围内的悬浮覆盖层（如底部的输入坞 AIChatInputDock、毛玻璃层、按钮）：
+    ///    - 若用户正在多行长文本输入框内滚动自身的文字，放行原 event；
+    ///    - 否则将滚轮事件直接转发给当前活跃会话的 NSScrollView (`sv.scrollWheel(with: event)`)，
+    ///      并消费此事件（返回 nil），彻底消灭输入坞上方滑动被吞、滚不动的缺陷。
     private func installScrollWheelMonitorIfNeeded() {
         guard scrollWheelMonitor == nil else { return }
         scrollWheelMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
-            self?.noteUserScrollWheel(event)
-            return event   // 只观察不消费
+            return self?.handleScrollWheelEvent(event)
         }
     }
 
-    /// 命中判定与事件派发同一条 hit-test 路径：哪个会话的 scrollView 被命中，
-    /// 滚轮就滚哪个、时间戳就记哪个——多会话并存路由自洽；命中坞/输入框/
-    /// 隐藏会话时不记录，列表同期被动 clamp 不误判。
-    /// 命中判定与事件派发：哪个会话的滚动区被命中，滚轮就记哪个——
-    /// 1. 直接命中 NSScrollView 或其子视图；
-    /// 2. 命中悬浮在 ScrollView 上方的 overlay（如底部的输入坞 AIChatInputDock、刻度轨、导航层等）：
-    ///    光标落在消息列横向宽度与纵向投影范围内，滚轮意图均诚实归属于该会话，消除在输入框上方滑动被吞的问题。
-    private func noteUserScrollWheel(_ event: NSEvent) {
+    /// 滚轮事件分发与输入坞穿透：
+    /// 第一性原理：输入坞悬浮于滚动列表之上（独立视图分支），AppKit 默认将滚轮派发给最上层 hit-test 命中视图。
+    /// 当输入框空或少于 3 行时无法自身滚动，手势会被丢弃。本方法负责将悬浮坞区域的滑动手势精准注入
+    /// 底层活跃消息列表 NSScrollView，实现真正的穿透滑动。
+    private func handleScrollWheelEvent(_ event: NSEvent) -> NSEvent? {
         guard let window = event.window, let contentView = window.contentView,
-              let hit = contentView.hitTest(event.locationInWindow) else { return }
-        for (sessionId, box) in attached {
-            guard let sv = box.view, sv.window === window, sv.superview != nil, !sv.isHidden else { continue }
-            if hit === sv || hit.isDescendant(of: sv) {
-                lastUserScrollWheelAt[sessionId] = Date()
-                continue
-            }
-            let svFrameInWindow = sv.convert(sv.bounds, to: nil)
-            let loc = event.locationInWindow
-            let chatColumnRect = CGRect(
-                x: svFrameInWindow.minX,
-                y: 0,
-                width: svFrameInWindow.width,
-                height: max(svFrameInWindow.maxY, contentView.bounds.height)
-            )
-            if chatColumnRect.contains(loc) {
-                lastUserScrollWheelAt[sessionId] = Date()
+              let hit = contentView.hitTest(event.locationInWindow) else { return event }
+
+        // 确定目标会话：优先当前活跃会话，其次回退至 hit 所属会话
+        let targetId = activeSessionId ?? attached.first(where: {
+            guard let sv = $0.value.view, sv.window === window, sv.superview != nil, !sv.isHidden else { return false }
+            return hit === sv || hit.isDescendant(of: sv)
+        })?.key
+
+        guard let sessionId = targetId,
+              let sv = attached[sessionId]?.view,
+              sv.window === window, sv.superview != nil, !sv.isHidden else {
+            return event
+        }
+
+        // 路径 1：光标直接落在消息列表 NSScrollView 或其子视图上
+        if hit === sv || hit.isDescendant(of: sv) {
+            lastUserScrollWheelAt[sessionId] = Date()
+            return event
+        }
+
+        // 路径 2：检查光标是否落在消息列横向与纵向投影区（悬浮输入坞所在范围）
+        let svFrameInWindow = sv.convert(sv.bounds, to: nil)
+        let loc = event.locationInWindow
+        let chatColumnRect = CGRect(
+            x: svFrameInWindow.minX,
+            y: 0,
+            width: svFrameInWindow.width,
+            height: max(svFrameInWindow.maxY, contentView.bounds.height)
+        )
+
+        guard chatColumnRect.contains(loc) else {
+            return event
+        }
+
+        // 路径 3：特判输入框内部滚动需求——若用户正在滚动一个多于 3 行的长输入框内容，放行
+        if let tv = (hit as? NSTextView) ?? (hit.enclosingScrollView?.documentView as? NSTextView) {
+            let contentH = tv.layoutManager?.usedRect(for: tv.textContainer ?? NSTextContainer()).height ?? tv.bounds.height
+            let visibleH = tv.enclosingScrollView?.contentView.bounds.height ?? 0
+            if contentH > visibleH + 2 {
+                return event
             }
         }
+
+        // 路径 4：输入坞区域滚轮穿透——主动将滚轮事件注入消息列表 NSScrollView，并消费原事件
+        lastUserScrollWheelAt[sessionId] = Date()
+        sv.scrollWheel(with: event)
+        return nil
     }
 
     /// 底层 NSScrollView 弱引用读取（跳底直滚 / 桥可用性判定）。
@@ -259,17 +290,17 @@ final class ChatScrollCoordinator {
     /// 浏览导航显隐判定（第一性原理几何真源）：
     /// 导航刻度与回底按钮的物理本质是「视口当前偏离底部的空间导航」，直接由离底距离决定：
     /// - 离底距离超过 `chatNavRevealDistance`（120pt）即刻浮现；贴底时自然淡出。
-    /// - 几何纠偏：若视口客观上已远离底部，且非程序化执行中，自动同步解除跟随（setPinned = false），
-    ///   既消除跟随状态死锁，又彻底防止后台输出新 token 时将正在查看历史的用户视口暴力拽回。
+    ///
+    /// ⚠️ 核心纪律（2026-10 事故定证，切勿修改）：
+    /// 显隐与 pin（跟随态）是两个完全正交的关注点！绝不可在此处按「dist > 120pt」直接解除跟随（setPinned = false）。
+    /// 原因：大模型在流式生成长文本、代码块或表格时，单次 token 增量使内容高度突增，在布局完成到程序化贴底之间
+    /// 的微小间隙，dist 会瞬间越过 120pt。若在此处强制解除跟随，会把正在生成的正常会话误判为「用户正在查看历史」，
+    /// 导致流式输出中途断跟、生成结束时的贴底收尾动画被跳过，最终让最新回答被遮挡在输入坞下方无法露出。
+    /// 跟随态的解除（unpin）只允许且必须由「用户真实的滚轮向上划动事件」（handleBoundsChanged 中的 movedUp + userDriven）触发。
     private func updateNavVisibility(sessionId: UUID, scrollView: NSScrollView) {
         let dist = distanceFromBottom(scrollView)
-        let shouldReveal = dist > Theme.Layout.chatNavRevealDistance
+        let visible = dist > Theme.Layout.chatNavRevealDistance
 
-        if shouldReveal, isPinned(sessionId), !isProgrammaticActive(sessionId: sessionId) {
-            setPinned(sessionId, false)
-        }
-
-        let visible = shouldReveal
         if navVisibleStates[sessionId] != visible {
             navVisibleStates[sessionId] = visible
             navVisibilityHandlers[sessionId]?(visible)

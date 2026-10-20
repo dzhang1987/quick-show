@@ -276,7 +276,12 @@ struct AIChatInputDock: View {
     }
 
     /// 坞体总高回写：去抖（<0.5pt 跳过）防微抖重渲染；首帧 fallback → 实测校准一次。
+    /// ⚠️ 关键防线（2026-10 事故定证，切勿修改）：
+    /// 传入 height 必须大于 0！窗口显隐切换（如 ⌘⌘ 呼出/隐藏）、首帧布局、视图树挂载或失焦时，
+    /// GeometryReader 可能瞬态上报 0。绝不可将 0 写入 dockTotalHeight，否则会导致
+    /// 消息列表尾部留白塌缩为 0、末条消息被输入坞遮挡且无法向上滚出。
     private func noteDockTotalHeight(_ height: CGFloat) {
+        guard height > 0 else { return }
         if abs(height - dockTotalHeight) > 0.5 {
             dockTotalHeight = height
         }

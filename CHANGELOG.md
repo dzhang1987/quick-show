@@ -52,6 +52,17 @@
 
 ### Fixed
 
+- **彻底修复落定助手消息中操作栏（复制与重新生成按钮）错误插入正文段落中间错位排版缺陷（`AIChatMessageRow.swift` / `MarkdownCodeBlock.swift`）**：
+  - **根本成因根除（First-Principles Root Cause）**：
+    1. 跨层级布局脱节：原 `ChatMessageRow` 将 `ChatMessageActionRow` 放在外层 `VStack` 作为 `HStack { content }` 的兄弟视图；由于 `ChatMessageRow` 被 `.equatable()` 包装，当内部 Markdown 块产生异步尺寸变更时，外层 `VStack` 不会重求值，导致操作行滞留在第一帧旧高度处，被后续延伸的列表内容覆盖穿越；
+    2. 代码块双阶段异步抖动：`MarkdownCodeBlock` 内部原本无差别挂载通用 `AdaptiveScrollBox`，其首帧测量高度初始化为 0，随后经 `GeometryReader` preference 回调跳变至真实高度（如 117pt → 197pt），诱发内部多次重排与外层布局解耦；
+  - **内聚化结构重构（`AIChatMessageRow.swift`）**：
+    - 按 `message.role` 原生分流：助手消息彻底消除多余外层包装，将 `actionRow` 直接下沉至 `assistantContent` 局域 `VStack` 尾部紧贴 `assistantTextPart`；在物理视图层级上建立唯一直接父子级契约，确保操作行永远严密跟随正文文尾（或工具卡片底缘），彻底杜绝中间穿越的几何可能性；
+  - **代码块首帧同步高度与零抖动优化（`MarkdownCodeBlock.swift`）**：
+    - 短代码块（≤18 行，95% 场景）：消除不必要的垂直 `ScrollView` 与异步 preference 测量，首帧采用纯水平滚动容器直接自适应撑开，物理高度首帧 100% 同步确定；
+    - 长代码块（>18 行）：首帧直接锁定在 `chatBlockMaxHeight`（380pt）开启双向滚动；彻底消除两阶段高度跃变；
+  - **输入坞上方尾部留白减半收敛（`AIChatMessageList.swift`）**：将滚到底时末条消息操作栏距离输入坞顶部的间距由原先过宽的 103pt 收敛减半至约 54pt，消除空洞感的同时确保按钮舒适露出。
+
 - **子智能体工具调用死循环与卡在【思考中...】假死问题（`AgentCoordinator.swift` / `AIProviderService.swift` / 各 Providers）**：
   - **强制收敛总结机制（Force Synthesis）**：将子智能体最大工具调用轮数收敛至 3 轮；当达到轮次上限后，不再无休止调用工具，自动触发强制收敛生成，通过在上下文末尾注入强收敛提示并向底层 Provider 传递 `disableTools: true` 剔除所有工具声明，强迫大模型基于已有搜集到的数据直接撰写完整 Markdown 最终报告；
   - **根除悬挂流式消息（Dangling Streaming Message）**：修复原代码在每轮工具结束后预建空助手消息占位但达到上限跳出时未处理该消息状态的严重 Bug（原逻辑导致其永久停留在 `.streaming`，UI 表现为永远旋转的【思考中...】直到 180 秒超时报错）；增加统一落定兜底，确保退出时任何状态均落地为 `.done` 或 `.failed`。

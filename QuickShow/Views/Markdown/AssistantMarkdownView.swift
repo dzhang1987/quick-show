@@ -107,16 +107,19 @@ struct AssistantMarkdownView: View, Equatable {
         let visibleCount = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
         let visibleBlocks = Array(blocks.prefix(visibleCount))
         let segments = MarkdownBlockSegmenter.segment(visibleBlocks)
+        let _ = qsDebugLog("AssistantMarkdownView: contentLen=\(content.count) blocks=\(blocks.count) visible=\(visibleCount) segments=\(segments.count)")
 
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(segments.enumerated()), id: \.offset) { index, segment in
+            ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
                 switch segment {
-                case let .textFlow(_, content, topSpacing):
+                case let .textFlow(id, content, topSpacing):
                     NativeTextFlowView(attributedString: content)
+                        .id(id)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, index == 0 ? 0 : topSpacing)
-                case let .widget(_, block, topSpacing):
+                case let .widget(id, block, topSpacing):
                     MarkdownBlockView(block: block)
+                        .id(id)
                         .padding(.top, index == 0 ? 0 : topSpacing)
                 }
             }

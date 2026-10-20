@@ -788,33 +788,19 @@ struct AIServiceSettingsForm: View {
     }
 
     private func providerURLPlaceholder(for type: AIProviderType) -> String {
-        switch type {
-        case .openAICompatible: return "https://api.openai.com/v1"
-        case .qoderNative: return "https://api3.qoder.sh"
-        case .antigravityNative: return "https://generativelanguage.googleapis.com/v1beta"
-        case .nativeBridge: return "http://127.0.0.1:8080/v1"
-        }
+        type.defaultEndpointURL
     }
 
     private func providerURLFooter(for type: AIProviderType) -> String {
-        switch type {
-        case .openAICompatible:
-            return "OpenAI 兼容端点的根地址，程序会自动用所选协议拼接请求路径。官方填 https://api.openai.com/v1；本地 Ollama/vLLM 填 http://localhost:端口/v1。"
-        case .qoderNative:
-            return "Qoder 官方地址为 https://api3.qoder.sh；若使用本地桥接代理，请填入本地 http://127.0.0.1:端口/v1。"
-        case .antigravityNative:
-            return "Gemini 官方地址为 https://generativelanguage.googleapis.com/v1beta；直连 Google AI 端点。"
-        case .nativeBridge:
-            return "本地独立代理端点根地址，程序将直连该地址并不做二次加解密。"
-        }
+        type.endpointDescription
+    }
+
+    private func formatAuthMethodTag(_ method: AuthMethodKind) -> String {
+        method.tagDisplayName
     }
 
     private func formatAuthMethodTag(_ rawMethod: String) -> String {
-        switch rawMethod {
-        case "browser": return "浏览器授权"
-        case "biometric_import", "auto_detect": return "触控 ID 导入"
-        default: return "手动凭据"
-        }
+        AuthMethodKind(rawValue: rawMethod)?.tagDisplayName ?? "手动凭据"
     }
 
 
@@ -961,9 +947,8 @@ struct AIServiceSettingsForm: View {
     private func addModelFromAvailable(providerId: String, modelId: String) {
         guard var p = providerStore.provider(for: providerId) else { return }
         guard !p.models.contains(where: { $0.id == modelId }) else { return }
-        let isVision = modelId.contains("vl") || modelId.contains("flash") || modelId.contains("4o")
-        let isThinking = modelId.contains("glm") || modelId.contains("k3") || modelId.contains("r1") || modelId.contains("o1") || modelId.contains("o3")
-        p.models.append(AIModelSpec(id: modelId, name: modelId, contextWindow: 524288, supportsVision: isVision, supportsThinking: isThinking))
+        // 从可用模型池拉取导入时赋予标准默认规格；多模态与思考链能力由用户按需在卡片中精准 toggle
+        p.models.append(AIModelSpec(id: modelId, name: modelId, contextWindow: 524288, supportsVision: false, supportsThinking: false))
         providerStore.saveProvider(p)
     }
 
@@ -1009,20 +994,13 @@ struct AIServiceSettingsForm: View {
     }
 
     private func isPresetProvider(_ provider: AIProvider) -> Bool {
-        provider.id == "qoder" || provider.id == "antigravity" || provider.id == "alibaba" || provider.id == "openai"
+        AIProvider.officialPresetModels[provider.id] != nil
     }
 
     private func resetToPresetModels(providerId: String) {
-        guard var p = providerStore.provider(for: providerId) else { return }
-        if providerId == "qoder" {
-            p.models = AIProvider.qoderPreset().models
-        } else if providerId == "antigravity" {
-            p.models = AIProvider.antigravityPreset().models
-        } else if providerId == "alibaba" {
-            p.models = AIProvider.alibabaPreset().models
-        } else if providerId == "openai" {
-            p.models = AIProvider.openAIPreset().models
-        }
+        guard var p = providerStore.provider(for: providerId),
+              let factory = AIProvider.officialPresetModels[providerId] else { return }
+        p.models = factory()
         providerStore.saveProvider(p)
     }
 

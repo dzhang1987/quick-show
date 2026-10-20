@@ -230,7 +230,7 @@ struct MermaidBlockView: View {
         pasteboard.clearContents()
         pasteboard.setString(code, forType: .string)
         copied = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 

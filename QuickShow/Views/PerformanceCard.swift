@@ -378,17 +378,10 @@ struct PerformanceCard: View {
     }
 
     private var cpuColor: Color {
-        let usage = appState.performanceInfo.cpuUsage
-        // 状态语义色保持惯例：红=警告/橙=偏高 不被主题洗掉；正常态跟随主题强调色
-        if usage > 85 { return Color.red.opacity(0.95) }
-        if usage > 60 { return Color.orange.opacity(0.95) }
-        return Theme.Colors.accent.opacity(0.95)
+        appState.performanceInfo.cpuColor
     }
     
     private var ramColor: Color {
-        let usage = appState.performanceInfo.memoryUsagePercent
-        if usage > 90 { return Color.red.opacity(0.95) }
-        if usage > 75 { return Color.orange.opacity(0.95) }
-        return Theme.Colors.accent.opacity(0.95)
+        appState.performanceInfo.ramColor
     }
 }

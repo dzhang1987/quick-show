@@ -290,40 +290,14 @@ struct StatusBarView: View {
     }
     
     private var batteryIconName: String {
-        let pct = appState.batteryInfo.percentage
-        // 接通外接电源（含满电插线维持供电）即显示闪电：bolt 语义 = 接电源
-        if appState.batteryInfo.isCharging || appState.batteryInfo.isOnACPower {
-            return "battery.100.bolt"
-        }
-        if pct <= 15 { return "battery.0" }
-        if pct <= 35 { return "battery.25" }
-        if pct <= 65 { return "battery.50" }
-        if pct <= 85 { return "battery.75" }
-        return "battery.100"
+        appState.batteryInfo.iconName
     }
     
     private var batteryColor: Color {
-        // 插线即绿（含满电插线），用户直觉：绿色 = 正在使用外接电源
-        if appState.batteryInfo.isCharging || appState.batteryInfo.isOnACPower {
-            return Theme.Colors.statusGood
-        }
-        if appState.batteryInfo.percentage <= 20 {
-            return Theme.Colors.statusWarning
-        }
-        return .primary
+        appState.batteryInfo.statusColor
     }
     
     private var audioIconName: String {
-        if appState.audioInfo.isMuted {
-            return "speaker.slash.fill"
-        }
-        if appState.audioInfo.isHeadphones {
-            return "headphones"
-        }
-        let vol = appState.audioInfo.volume
-        if vol == 0 { return "speaker.fill" }
-        if vol < 40 { return "speaker.wave.1.fill" }
-        if vol < 75 { return "speaker.wave.2.fill" }
-        return "speaker.wave.3.fill"
+        appState.audioInfo.iconName
     }
 }

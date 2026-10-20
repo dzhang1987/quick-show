@@ -88,6 +88,13 @@ struct NativeTextFlowView: NSViewRepresentable {
     final class Coordinator {
         var measuredWidth: CGFloat = -1
         var measuredHeight: CGFloat = 0
+        /// 缓存测量时对应的富文本内容快照。
+        /// ⚠️ 关键防线（2026-10 事故定证，切勿修改）：
+        /// 绝不可仅按 measuredWidth 比对复用缓存！当大模型流式输出或会话渐进分批渲染时，
+        /// 同一个 NativeTextFlowView 的富文本内容（如追加了后续列表）会大幅增长。
+        /// 若仅判断 width 相同，sizeThatFits 会错误返回旧的较矮高度（例如仅含标题时的 27pt），
+        /// 导致外层 ChatMessageActionRow 错误排在正文中间，底层真实文本溢出绘制到操作按钮下方。
+        var cachedAttrString: NSAttributedString?
     }
 
     func makeCoordinator() -> Coordinator {
@@ -136,18 +143,26 @@ struct NativeTextFlowView: NSViewRepresentable {
     func updateNSView(_ nsView: NonScrollingTextView, context: Context) {
         if nsView.setAttributedStringIfNeeded(attributedString) {
             context.coordinator.measuredWidth = -1
+            context.coordinator.cachedAttrString = nil
         }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NonScrollingTextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0, width.isFinite else { return nil }
         let coordinator = context.coordinator
-        if abs(coordinator.measuredWidth - width) < 0.5, coordinator.measuredHeight > 0 {
+        // 只有在视口宽度一致，且测量的富文本内容完全一致（引用一致或 isEqual 判定）时，方可安全复用缓存
+        if abs(coordinator.measuredWidth - width) < 0.5,
+           coordinator.measuredHeight > 0,
+           let cached = coordinator.cachedAttrString,
+           cached.isEqual(to: attributedString) {
+            qsDebugLog("sizeThatFits CACHED width=\(width) height=\(coordinator.measuredHeight) str=\(attributedString.string.prefix(20))...")
             return CGSize(width: width, height: coordinator.measuredHeight)
         }
         let height = Self.measureHeight(for: attributedString, width: width)
         coordinator.measuredWidth = width
         coordinator.measuredHeight = height
+        coordinator.cachedAttrString = attributedString
+        qsDebugLog("sizeThatFits RECOMPUTED width=\(width) height=\(height) str=\(attributedString.string.prefix(20))...")
         return CGSize(width: width, height: height)
     }
 }

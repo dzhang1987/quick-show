@@ -357,7 +357,7 @@ private struct ToolCallResultBlock: View {
         pasteboard.setString(prettyResult, forType: .string)
         copied = true
         // 轻反馈：对勾短暂停留后复位
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 
