@@ -15,6 +15,8 @@ struct UserQuestionDrawerContent: View {
     /// 单题场景即该题自定义答案（直觉正确）；多题场景视为对整组提问的整体补充，
     /// 模型按题阅读答案时每题都能读到（信息冗余优于丢失）。
     @State private var customText = ""
+    /// 题目区自然高度测量（用于自适应，消除多余空白）
+    @State private var questionsContentHeight: CGFloat = 0
 
     /// 可提交判据：任一题有选中项，或统一输入条有非空白内容。
     private var canSubmit: Bool {
@@ -40,16 +42,8 @@ struct UserQuestionDrawerContent: View {
                 }
             }
 
-            // 题目区：多题限高内部滚动（抽屉整体不顶穿窗口）
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xxxl) {
-                    ForEach(request.questions) { question in
-                        questionBlock(question)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .frame(maxHeight: AIChatDrawerMetrics.questionsMaxHeight)
+            // 题目区：自适应内容高度；超出最大高度时启用内部滚动，未超出时紧凑包裹，消除虚空
+            questionsSection
 
             freeInputBar
 
@@ -67,6 +61,40 @@ struct UserQuestionDrawerContent: View {
         .padding(.horizontal, Theme.Spacing.section)
         .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xl)
+        .onPreferenceChange(DrawerQuestionsHeightPreferenceKey.self) { height in
+            questionsContentHeight = height
+        }
+    }
+
+    // MARK: 题目区自适应排版
+
+    private var questionsContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.xxxl) {
+            ForEach(request.questions) { question in
+                questionBlock(question)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: DrawerQuestionsHeightPreferenceKey.self,
+                    value: proxy.size.height
+                )
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var questionsSection: some View {
+        if questionsContentHeight > AIChatDrawerMetrics.questionsMaxHeight {
+            ScrollView(.vertical, showsIndicators: false) {
+                questionsContent
+            }
+            .frame(height: AIChatDrawerMetrics.questionsMaxHeight)
+        } else {
+            questionsContent
+        }
     }
 
     // MARK: 单题区块
@@ -165,5 +193,14 @@ struct UserQuestionDrawerContent: View {
         ChatInteractionCenter.shared.submitQuestions(
             UserQuestionResponse(requestID: request.id, answers: answers)
         )
+    }
+}
+
+// MARK: - 内部高度测量键
+
+private struct DrawerQuestionsHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }

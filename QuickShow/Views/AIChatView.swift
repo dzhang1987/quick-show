@@ -318,11 +318,14 @@ struct AIChatView: View {
             installKeyMonitor()
             refreshEnvironment()
         }
-        // 抽屉关闭（request 由非 nil 变 nil）后把焦点还回主输入框：
-        // 提问面板的自由输入条持焦期间点提交/取消，焦点随抽屉移除悬空，须主动归还。
+        // 抽屉展开/关闭第一响应者交接：
+        // - 抽屉弹出：主输入框失焦让位，阻断键盘输入打入主输入框；
+        // - 抽屉关闭（request 由非 nil 变 nil）：焦点归还主输入框。
         .onChange(of: interaction.request == nil) { drawerGone in
             if drawerGone {
                 NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+            } else {
+                NSApp.keyWindow?.makeFirstResponder(nil)
             }
         }
         // 坞体实测高度同步给滚动协调器，以精准界定滚轮穿透的物理底区

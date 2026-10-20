@@ -35,6 +35,11 @@
 
 ### Changed
 
+- **交互抽屉模态遮挡容器与紧凑包裹体验重构（`AIChatInputDock.swift` / `ToolConfirmationDrawer.swift` / `UserQuestionDrawer.swift` / `AIChatView.swift`）**：
+  - **底座模态遮挡（`ZStack` 容器）**：危险工具确认与 AI 提问抽屉在场时以物理底座向上滑入并完全遮盖原输入坞，彻底阻止主会话键盘打字误输入，消除“双输入框”视觉割裂感；抽屉退出时向下滑入底座收起并平滑恢复主输入坞；
+  - **第一响应者顺滑交接**：抽屉弹出时主输入框主动失焦让位（`NSApp.keyWindow?.makeFirstResponder(nil)`），关闭后顺畅交接回第一响应者；
+  - **参数区与题目区自适应紧凑包裹**：权限确认抽屉默认以格式化高亮 JSON 完整自适应展示参数，消除繁琐的手动折叠开关，超出限高时开启内部无滚动条顺滑滚动；提问抽屉题目区支持高度动态测量，消除多余虚空留白。
+
 - **窗口与卡片全层级圆角系统全面对齐 macOS 系统浮层标准（`DesignTokens.swift` / `AIChatQuickSwitcher.swift`）**：
   - **外框对齐控制中心标准（18pt）**：将 `Theme.Radius.panel` 由 26pt 收敛为 18pt（严格对齐 macOS 控制中心与系统浮窗的连续平滑曲率），消灭过大倒角的臃肿感；
   - **嵌套层级同心圆角平滑递减**：速查表 `cheatSheet` 24 → 16pt，Bento 监控大卡 `card` 16 → 12pt，速查组卡 `groupCard` 12 → 10pt，内层微卡 `insetCard` 10 → 8pt，用户消息气泡 `userBubble` 18 → 14pt；

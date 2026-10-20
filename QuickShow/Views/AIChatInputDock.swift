@@ -181,27 +181,31 @@ struct AIChatInputDock: View {
                 // 生长区容器不再单独上报——生长区高度变化经总高自然捕获。
             }
 
-            // 连续玻璃体（2026-10 抽屉式交互）：抽屉（在场时）+ 输入卡共享同一个
-            // GlassSurface / accent rim / 双层阴影——抽屉是输入卡"长出"的上半部分，
-            // 衔接处零间隙、圆角恒为 Radius.groupCard，中间仅一条 0.5pt 极淡分隔线。
-            // 窗口 frame 不动：抽屉展开纯视图内布局（聊天流自动让位收缩），
-            // 规避整窗玻璃 + SwiftUI 测量链死锁。
-            VStack(spacing: 0) {
-                // 抽屉（权限确认 / AI 提问）：从输入卡上沿向上滑入；
-                // .id(request.id) 使请求切换时整树重建、面板内 @State 天然重置。
-                if let request = interaction.request {
-                    AIChatDrawerPanel(request: request)
-                        .id(request.id)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    // 衔接处极淡分隔（0.5pt，水平内收与抽屉内容边距一致）
-                    Rectangle()
-                        .fill(Theme.Colors.cardStroke)
-                        .frame(height: Theme.Layout.dividerHeight)
-                        .padding(.horizontal, Theme.Spacing.section)
+            // 抽屉式模态遮挡容器（2026-10 重构）：
+            // - 抽屉在场时完全遮挡原输入坞，阻止主会话键盘输入与误打字，消除“双输入框”割裂；
+            // - 抽屉从输入坞底座向上平滑滑入（.move(edge: .bottom) + opacity，0.25s easeOut），
+            //   形成物理上“从输入坞抽屉拉出来盖住输入坞”的连贯手感；
+            // - 退出（提交/取消/拒绝/ESC）时向下滑入底座收起，主输入卡顺滑重现并恢复第一响应者；
+            // - 抽屉自适应内容紧凑包裹，消除大面积虚空；
+            // - 共享外层 GlassSurface / 激活态 accent rim / 双层阴影连续体。
+            ZStack(alignment: .bottom) {
+                // 主输入卡：抽屉在场时隐藏并禁用点击，彻底阻止主输入
+                if interaction.request == nil {
+                    inputCardContent
                         .transition(.opacity)
                 }
 
-                inputCardContent
+                // 抽屉面板（权限确认 / AI 提问）：自底向上滑入并完全遮挡输入坞
+                if let request = interaction.request {
+                    AIChatDrawerPanel(request: request)
+                        .id(request.id)
+                        .transition(
+                            .asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .move(edge: .bottom).combined(with: .opacity)
+                            )
+                        )
+                }
             }
             // 功能层：输入坞是典型控件面（输入条/发送/附件/模型 chip），26+ 官方 Liquid Glass，
             // <26 退化为 ultraThinMaterial + 0.5pt 描边；坞悬浮于消息流之上，玻璃采样到真实

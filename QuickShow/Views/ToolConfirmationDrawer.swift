@@ -2,25 +2,22 @@ import SwiftUI
 
 // MARK: - 权限确认抽屉
 
-/// 危险工具权限确认：工具名徽章 + 参数代码块（长命令默认单行摘要、点击展开）+ 三按钮。
+/// 危险工具权限确认：工具名徽章 + 参数完整代码块（默认完整呈现、自适应换行、超长限高内部滚动）+ 三按钮。
 /// 三按钮语义：拒绝（次要）/ 执行（主要实心）/ 本会话总是允许（描边第三样式）；
 /// ESC = 拒绝（窗口层/视图层链路统一走 resolveConfirmation(.denied)）。
 struct ToolConfirmationDrawerContent: View {
     let request: ToolConfirmationRequest
 
-    /// 完整参数是否已展开（默认单行摘要）。
-    @State private var argumentsExpanded = false
-    /// 「完整参数」入口 hover 态。
-    @State private var toggleHovered = false
+    /// 完整参数区自然高度测量（用于自适应，消除多余空白）
+    @State private var argumentsContentHeight: CGFloat = 0
 
-    /// 美化后的完整参数（展开态展示）。
+    /// 美化后的完整参数（JSON 格式化换行与缩进）。
     private var prettyArguments: String { ToolJSONText.pretty(request.argumentsJSON) }
 
-    /// 是否「长命令」：多行或超长 → 默认折叠为单行摘要 + 提供展开入口；
-    /// 短参数直接完整展示，不制造无意义的折叠/展开切换。
-    private var hasMoreArguments: Bool {
-        let trimmed = request.argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.contains("\n") || trimmed.count > AIChatDrawerMetrics.argumentsShortLimit
+    /// 显示参数文本：优先完整格式化参数，兜底摘要。
+    private var displayArguments: String {
+        let trimmed = prettyArguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? request.summary : trimmed
     }
 
     /// 工具中文展示名（注册表查不到时省略，徽章已承担蛇形名展示）。
@@ -72,76 +69,65 @@ struct ToolConfirmationDrawerContent: View {
         .padding(.horizontal, Theme.Spacing.section)
         .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xl)
+        .onPreferenceChange(DrawerArgumentsHeightPreferenceKey.self) { height in
+            argumentsContentHeight = height
+        }
     }
 
-    // MARK: 参数代码块
+    // MARK: - 参数代码块（默认完整呈现、自适应换行、超长限高内部滚动）
 
-    /// 参数区：等宽小号 + 内嵌深色底（与工具卡参数区同一语言）。
-    /// 长命令折叠态单行摘要（点击整块或右上「完整参数」展开）；展开态多行可滚动、限高。
     private var argumentsBlock: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.lg) {
-                Text("参数")
-                    .font(Theme.Typography.text(Theme.Typography.mini, .semibold))
-                    .foregroundColor(Theme.Colors.contentTertiary)
-                Spacer(minLength: 0)
-                if hasMoreArguments {
-                    Button {
-                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                            argumentsExpanded.toggle()
-                        }
-                    } label: {
-                        HStack(spacing: Theme.Spacing.xs) {
-                            Text(argumentsExpanded ? String(localized: "收起") : String(localized: "完整参数"))
-                                .font(Theme.Typography.text(Theme.Typography.mini, .medium))
-                            Image(systemName: "chevron.right")
-                                .font(Theme.Typography.text(8, .semibold))
-                                .rotationEffect(.degrees(argumentsExpanded ? 90 : 0))
-                        }
-                        .foregroundColor(toggleHovered ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { hovering in
-                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { toggleHovered = hovering }
-                    }
-                    .help(argumentsExpanded ? String(localized: "收起参数") : String(localized: "展开查看完整参数"))
-                }
-            }
+            Text("参数")
+                .font(Theme.Typography.text(Theme.Typography.mini, .semibold))
+                .foregroundColor(Theme.Colors.contentTertiary)
 
-            Group {
-                if argumentsExpanded {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        Text(prettyArguments)
-                            .font(Theme.Typography.mono(Theme.Typography.footnote))
-                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                            .lineSpacing(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(maxHeight: AIChatDrawerMetrics.argumentsMaxHeight, alignment: .top)
-                } else {
-                    Text(request.summary)
-                        .font(Theme.Typography.mono(Theme.Typography.footnote))
-                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.lg)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                    .fill(Theme.Colors.surfaceBadge)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous))
-            .onTapGesture {
-                // 点击代码块本身同样切换展开（仅长命令可展开时）
-                guard hasMoreArguments else { return }
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                    argumentsExpanded.toggle()
-                }
-            }
+            argumentsSection
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.lg)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                        .fill(Theme.Colors.surfaceBadge)
+                )
         }
+    }
+
+    private var argumentsContent: some View {
+        Text(displayArguments)
+            .font(Theme.Typography.mono(Theme.Typography.footnote))
+            .foregroundColor(Theme.Colors.contentSecondaryStrong)
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .textSelection(.enabled)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: DrawerArgumentsHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            )
+    }
+
+    @ViewBuilder
+    private var argumentsSection: some View {
+        if argumentsContentHeight > AIChatDrawerMetrics.argumentsMaxHeight {
+            ScrollView(.vertical, showsIndicators: false) {
+                argumentsContent
+            }
+            .frame(height: AIChatDrawerMetrics.argumentsMaxHeight, alignment: .top)
+        } else {
+            argumentsContent
+        }
+    }
+}
+
+// MARK: - 内部高度测量键
+
+private struct DrawerArgumentsHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
