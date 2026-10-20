@@ -804,6 +804,24 @@ final class ChatSessionStore: ObservableObject {
             }
             return true
         }
+
+        // 自动纠偏自愈：修复因历史并发竞速取消缺陷被误判为「执行超时」但实际已顺利完成（有 done 状态助手回复）的子会话
+        for i in 0..<loaded.count {
+            var session = loaded[i]
+            if session.parentSessionId != nil,
+               session.taskStatus == .failed,
+               session.taskSummary?.contains("超时") == true {
+                if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
+                   lastAssistant.state == .done,
+                   !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    session.taskStatus = .completed
+                    session.taskSummary = String(lastAssistant.content.prefix(120))
+                    loaded[i] = session
+                    persist(session)
+                }
+            }
+        }
+
         sessions = loaded
 
         let stored = UserDefaults.standard.string(forKey: currentIdKey).flatMap(UUID.init(uuidString:))

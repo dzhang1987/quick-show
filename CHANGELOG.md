@@ -16,6 +16,9 @@
   - **本地轻量级 OAuth 回环服务器与密码学套件（`OAuthLoopbackServer` / `OAuthCrypto`）**：原生实现支持 S256 PKCE 随机校验码生成的本地轻量 HTTP 回环监听与安全回调；
   - **多厂商专属授权策略落地**：包含 Antigravity Google PKCE 与触控 ID 免密导入、Qoder Device Flow 与触控 ID 导入、DashScope 与 OpenAI 环境变量静默探测与存量迁移。
 
+- **并发竞速与混沌压力测试套件（`AgentFunctionalTests.swift`）**：
+  - 新增 `Suite 8` 包含 30 轮微秒级极限竞速轰击（0 误杀）、20 任务并发扇出与成果精确比对、超时熔断边界精准判定、10 任务级联中断风暴（零内存悬挂），自动化测试套件总断言数增至 97 项，保持 100% PASS。
+
 - **多智能体并发调度与协作体系（`LaunchSubagentsTool` / `AgentCoordinator` / `AgentTaskRegistry` / `SubagentTaskTray`）**：
   - **原子调度工具收敛（`launch_subagents`）**：收敛旧版分散的 `launch_agent`、`await_agents`、`delegate_to_agent` 三工具为单一批处理并发调度工具 `launch_subagents`，支持编排中枢向多个垂类专家下发专项任务，底层真并发并行执行并一次性归并返回成果；
   - **6 大垂类智能体矩阵与最小权限隔离**：确立编排中枢（Orchestrator）、视觉感知（Observer）、代码专家（Coder）、深度推理（Oracle）、知识检索（Librarian）、系统管家（Concierge）6 大垂类智能体矩阵，实行严格的工具白名单隔离；
@@ -24,6 +27,10 @@
   - **智能 Steering 转向路由引擎（A+B 方案）**：用户在主会话中途追加输入时，支持 `@librarian` / `@coder` 显式前缀或语义自动识别分流，将指令实时穿透注入正在运行的子任务 Tool Loop，并在输入框上方呈现轻反馈通知。
 
 ### Changed
+
+- **子智能体硬超时熔断上限提升至 5 分钟与长连接对齐（`AgentCoordinator.swift` / `AntigravityCloudCodeAdapter.swift`）**：
+  - **强类型策略常量收敛**：定义 `AgentCoordinator.defaultSubagentTimeoutSeconds = 300`（5 分钟），收敛消除分散的裸写魔法数字；
+  - **网络长连接对齐**：将 `AntigravityCloudCodeAdapter` SSE 长连接资源的 `timeoutIntervalForResource` 同步由 180 秒提升至 300 秒，为长文本思考、全网深度检索与复杂多轮工具调用留足充裕缓冲。
 
 - **Markdown 列表与表格排版呼吸感精修（`MarkdownListRenderer.swift` / `MarkdownTableView.swift`）**：
   - **列表条目边界强化**：TextKit 文本流路径条目间距 10 → 14pt（原与行距 6pt 仅差 4pt，条目边界视觉上粘连难辨），带子列表的条目间距 6 → 8pt；SwiftUI Widget 路径条目间距 lg(8) → xxl(12)；
@@ -52,6 +59,11 @@
   - 偏好设置面板新增“可用工具授权”区域，支持显示各 Agent 授权工具数、一键恢复推荐及逐项开关。
 
 ### Fixed
+
+- **彻底根治子智能体并发调度取消异常导致任务被误杀为超时失败的缺陷（`AgentCoordinator.swift` / `ChatSessionStore.swift`）**：
+  - **竞速取消根因消除**：在 `AgentCoordinator.awaitSingleAgent` 结构化并发 TaskGroup 中，捕获 `Task.sleep` 抛出的 `CancellationError`，杜绝 `try?` 吞咽取消异常导致正常提前完成的子任务被唤醒的超时分支强行覆写为 `.failed` 并展示橙色感叹号；
+  - **双重防御性状态守卫**：在超时落定执行分支内判断会话是否已完成（`.completed`），绝不篡改已正常落定的成果；
+  - **存量误报数据自动自愈**：在 `ChatSessionStore.load()` 中增加自动纠偏逻辑，自动识别因该缺陷被误判为超时的已完成会话，启动时一键修复为 `.completed`（恢复绿色对勾）。
 
 - **彻底修复落定助手消息中操作栏（复制与重新生成按钮）错误插入正文段落中间错位排版缺陷（`AIChatMessageRow.swift` / `MarkdownCodeBlock.swift`）**：
   - **根本成因根除（First-Principles Root Cause）**：

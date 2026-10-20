@@ -9,6 +9,9 @@ import os
 final class AgentCoordinator {
     static let shared = AgentCoordinator()
 
+    /// 子智能体任务默认硬超时熔断上限（5 分钟 = 300 秒，为长文本思考、深度检索与多轮代码生成留足充裕缓冲）
+    static let defaultSubagentTimeoutSeconds: TimeInterval = 300
+
     private let logger = Logger(subsystem: "com.dzhang.quickshow.ai", category: "agentCoordinator")
 
     /// 正在后台执行流式推理的子任务 Task
@@ -19,6 +22,9 @@ final class AgentCoordinator {
 
     /// 每个子任务专属的实时 steering 转向队列（按 childSessionId 索引）
     private var subagentSteeringQueues: [UUID: [String]] = [:]
+
+    var debugRunningTaskCount: Int { runningTasks.count }
+    var debugContinuationCount: Int { taskContinuations.values.reduce(0) { $0 + $1.count } }
 
     private init() {}
 
@@ -416,7 +422,7 @@ final class AgentCoordinator {
     // MARK: - 2. 同步等待 (Await)
 
     /// 单个任务等待逻辑（带并发超时熔断保护，MainActor 上执行）
-    private func awaitSingleAgent(taskId: UUID, timeoutSeconds: TimeInterval) async -> (UUID, SubagentTaskStatus, String) {
+    func awaitSingleAgent(taskId: UUID, timeoutSeconds: TimeInterval) async -> (UUID, SubagentTaskStatus, String) {
         if let session = ChatSessionStore.shared.session(id: taskId) {
             if session.taskStatus == .completed || session.taskStatus == .failed {
                 let lastAssistant = session.messages.last { $0.role == .assistant }
@@ -441,11 +447,24 @@ final class AgentCoordinator {
                 return (session?.taskStatus ?? .completed, text)
             }
 
-            // 分支 2：超时定时器
-            let timeoutLimit = max(timeoutSeconds, 5)
+            // 分支 2：超时定时器（最小保护阈值 50ms）
+            let timeoutLimit = max(timeoutSeconds, 0.05)
             group.addTask {
-                try? await Task.sleep(nanoseconds: UInt64(timeoutLimit * 1_000_000_000))
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(timeoutLimit * 1_000_000_000))
+                } catch {
+                    // 若被 cancelAll 取消，说明分支 1 已正常返回，安全中断退出，绝不误触超时逻辑
+                    return (.completed, "")
+                }
+                guard !Task.isCancelled else { return (.completed, "") }
                 return await MainActor.run { () -> (SubagentTaskStatus, String) in
+                    // 再次双重防御：检查会话当前状态，若已正常完成则绝不篡改
+                    if let session = ChatSessionStore.shared.session(id: taskId),
+                       session.taskStatus == .completed {
+                        let text = session.messages.last(where: { $0.role == .assistant })?.content ?? ""
+                        return (.completed, text)
+                    }
+
                     let timeoutMsg = "子智能体任务执行超时（\(Int(timeoutLimit)) 秒）"
                     if let continuations = self.taskContinuations.removeValue(forKey: taskId) {
                         for cont in continuations {
@@ -472,7 +491,7 @@ final class AgentCoordinator {
     }
 
     /// 同步挂起并发等待一个或多个子 Agent 任务全部完成，并返回汇总成果（严格支持超时熔断）
-    func awaitAgents(taskIds: [UUID], timeoutSeconds: TimeInterval = 180) async -> [UUID: (status: SubagentTaskStatus, output: String)] {
+    func awaitAgents(taskIds: [UUID], timeoutSeconds: TimeInterval = defaultSubagentTimeoutSeconds) async -> [UUID: (status: SubagentTaskStatus, output: String)] {
         var results: [UUID: (status: SubagentTaskStatus, output: String)] = [:]
         guard !taskIds.isEmpty else { return results }
 
@@ -573,7 +592,7 @@ final class AgentCoordinator {
 
     // MARK: - 内部通知机制
 
-    private func notifyTaskCompletion(taskId: UUID, result: String) {
+    func notifyTaskCompletion(taskId: UUID, result: String) {
         runningTasks.removeValue(forKey: taskId)
         guard let continuations = taskContinuations.removeValue(forKey: taskId) else { return }
         for cont in continuations {

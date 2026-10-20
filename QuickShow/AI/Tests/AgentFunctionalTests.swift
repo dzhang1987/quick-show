@@ -33,6 +33,7 @@ enum AgentFunctionalTests {
         testRequestEncodingForAgents()
         testTaskRegistryAndInputRouting()
         testAntigravityToolsAndThoughtSignature()
+        await testChaosAndConcurrencyStress()
 
         print("==================================================")
         print("📊 测试完成汇总：通过 \(passedCount) 项，失败 \(failedCount) 项")
@@ -436,5 +437,162 @@ enum AgentFunctionalTests {
                 }
             }
         }
+    }
+
+    // MARK: - 8. 并发竞速与混沌压力测试 (Chaos & Concurrency Stress Test)
+    private static func testChaosAndConcurrencyStress() async {
+        print("\n[Suite 8] 并发竞速与混沌压力测试 (Chaos & Concurrency Stress)...")
+
+        // 8.0 验证默认硬超时熔断上限常量已提升至 5 分钟 (300 秒)
+        assertTest(
+            AgentCoordinator.defaultSubagentTimeoutSeconds == 300,
+            "默认硬超时熔断上限常量必须为 300 秒 (5 分钟)"
+        )
+
+        let store = ChatSessionStore.shared
+        let coordinator = AgentCoordinator.shared
+
+        // 8.1 极限竞速轰击 (Microsecond Race Blast - 30 轮)
+        var raceSuccessCount = 0
+        let parent1 = store.createSession(title: "Race Blast Parent")
+        defer { store.deleteSession(id: parent1.id) }
+
+        for i in 1...30 {
+            let child = store.createChildSession(
+                parentId: parent1.id,
+                agentId: "coder",
+                title: "Blast Task \(i)",
+                switchToChild: false
+            )
+            let childId = child.id
+
+            Task { @MainActor in
+                // 模拟在 0.1~1.5ms 的纳秒级极短时间内瞬间完成
+                try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 0.1...1.5) * 1_000_000))
+                store.appendMessage(
+                    ChatMessage(role: .assistant, content: "Blast payload \(i)", state: .done),
+                    to: childId
+                )
+                store.updateTaskStatus(sessionId: childId, status: .completed, summary: "Completed \(i)")
+                coordinator.notifyTaskCompletion(taskId: childId, result: "Blast payload \(i)")
+            }
+
+            let result = await coordinator.awaitSingleAgent(taskId: childId, timeoutSeconds: 3)
+            if result.1 == .completed && result.2 == "Blast payload \(i)" {
+                raceSuccessCount += 1
+            }
+        }
+        assertTest(raceSuccessCount == 30, "30 轮纳秒级微竞速轰击 100% 成功且 0 误杀 (当前: \(raceSuccessCount)/30)")
+
+        // 8.2 密集并发扇出/扇入压力测试 (20 任务并发扇出与收集)
+        let parent2 = store.createSession(title: "Fan-out Stress Parent")
+        defer { store.deleteSession(id: parent2.id) }
+
+        var taskIds: [UUID] = []
+        var expectedOutputs: [UUID: String] = [:]
+        for i in 1...20 {
+            let child = store.createChildSession(
+                parentId: parent2.id,
+                agentId: "librarian",
+                title: "Fan-out Task \(i)",
+                switchToChild: false
+            )
+            taskIds.append(child.id)
+            expectedOutputs[child.id] = "Concurrent Output \(i)"
+
+            let cId = child.id
+            Task { @MainActor in
+                let delayMs = Double.random(in: 1.0...15.0)
+                try? await Task.sleep(nanoseconds: UInt64(delayMs * 1_000_000))
+                store.appendMessage(
+                    ChatMessage(role: .assistant, content: "Concurrent Output \(i)", state: .done),
+                    to: cId
+                )
+                store.updateTaskStatus(sessionId: cId, status: .completed, summary: "Done \(i)")
+                coordinator.notifyTaskCompletion(taskId: cId, result: "Concurrent Output \(i)")
+            }
+        }
+
+        let gathered = await coordinator.awaitAgents(taskIds: taskIds, timeoutSeconds: 5)
+        assertTest(gathered.count == 20, "20 任务高并发扇出收集数量严格为 20")
+
+        var allMatched = true
+        var allCompleted = true
+        for (id, res) in gathered {
+            if res.status != .completed { allCompleted = false }
+            if res.output != expectedOutputs[id] { allMatched = false }
+        }
+        assertTest(allCompleted, "20 任务高并发执行全部为 .completed 状态")
+        assertTest(allMatched, "20 任务高并发成果与各任务预设 payload 100% 精确吻合（无并发覆盖/漂移）")
+
+        // 8.3 超时熔断边界与精准判定测试 (Timeout Boundary)
+        let parent3 = store.createSession(title: "Timeout Parent")
+        defer { store.deleteSession(id: parent3.id) }
+
+        let timeoutChild = store.createChildSession(
+            parentId: parent3.id,
+            agentId: "oracle",
+            title: "Timeout Task",
+            switchToChild: false
+        )
+        let timeoutChildId = timeoutChild.id
+
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            store.appendMessage(
+                ChatMessage(role: .assistant, content: "Late response", state: .done),
+                to: timeoutChildId
+            )
+            store.updateTaskStatus(sessionId: timeoutChildId, status: .completed, summary: "Late")
+            coordinator.notifyTaskCompletion(taskId: timeoutChildId, result: "Late response")
+        }
+
+        let start = Date()
+        let timeoutRes = await coordinator.awaitSingleAgent(taskId: timeoutChildId, timeoutSeconds: 0.05)
+        let elapsed = Date().timeIntervalSince(start)
+
+        assertTest(timeoutRes.1 == .failed, "超时任务精准熔断判定为 .failed")
+        assertTest(timeoutRes.2.contains("超时"), "超时原因文本正确包含'超时'")
+        assertTest(elapsed < 0.25, "超时熔断响应迅速且时间符合设定 (耗时 \(String(format: "%.2f", elapsed))s)")
+
+        // 8.4 突发级联中止风暴 (Abort Storm)
+        let parent4 = store.createSession(title: "Abort Storm Parent")
+        defer { store.deleteSession(id: parent4.id) }
+
+        var abortTaskIds: [UUID] = []
+        for i in 1...10 {
+            let child = store.createChildSession(
+                parentId: parent4.id,
+                agentId: "concierge",
+                title: "Abort Task \(i)",
+                switchToChild: false
+            )
+            abortTaskIds.append(child.id)
+            AgentTaskRegistry.shared.registerTask(
+                id: "storm_task_\(i)_\(UUID().uuidString.prefix(6))",
+                subagentId: "concierge",
+                subagentName: "系统管家",
+                parentSessionId: parent4.id,
+                childSessionId: child.id,
+                taskDescription: "To be aborted"
+            )
+        }
+
+        Task { @MainActor in
+            _ = await coordinator.awaitAgents(taskIds: abortTaskIds, timeoutSeconds: 5)
+        }
+
+        try? await Task.sleep(nanoseconds: 5_000_000)
+        coordinator.abortSubagents(for: parent4.id)
+
+        var allAborted = true
+        for id in abortTaskIds {
+            let s = store.session(id: id)
+            if s?.taskStatus != .failed || s?.taskSummary != "用户已中止" {
+                allAborted = false
+            }
+        }
+        assertTest(allAborted, "级联中止风暴下 10 个子任务全部正确落定为 .failed 且标注'用户已中止'")
+        assertTest(coordinator.debugContinuationCount == 0, "中止后挂起 Continuation 队列彻底清零 (零内存悬挂)")
     }
 }
