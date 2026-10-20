@@ -124,11 +124,11 @@ private struct SubagentTaskCapsule: View {
             .padding(.vertical, Theme.Spacing.sm)
             .background(
                 Capsule(style: .continuous)
-                    .fill(hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
+                    .fill(hovered ? Theme.Colors.iconHoverBg : Theme.Colors.chatNavFloatFill)
             )
             .overlay(
                 Capsule(style: .continuous)
-                    .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
+                    .strokeBorder(hovered ? Theme.Colors.accent.opacity(0.35) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
             )
             .contentShape(Capsule(style: .continuous))
         }

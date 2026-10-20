@@ -166,19 +166,9 @@ struct AIChatInputDock: View {
                     // 并发子智能体任务浮动监控托盘
                     SubagentTaskTray(state: state)
 
-                    // 待注入队列（steering 转向 / follow-up 追问）：生成中 ⏎/⌥⏎ 的消息在此排队，
-                    // 点击胶囊取回编辑；队列区置于坞体顶部、随内容向上生长，宽度与坞一致。
-                    if !state.pendingQueue.isEmpty {
-                        VStack(spacing: Theme.Spacing.sm) {
-                            ForEach(state.pendingQueue) { item in
-                                QueuedInputCapsule(item: item) {
-                                    state.recallQueuedInput(id: item.id)
-                                }
-                                .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
-                            }
-                        }
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: state.pendingQueue)
-                    }
+                    // 排队消息一体化面板（插入 / 追加）：生成中 ⏎ / ⌘⏎ 的消息在此排队，
+                    // 支持立即插入提权、就地编辑与删除；置于坞体顶部、随内容向上生长。
+                    QueuedMessagesPanel(state: state)
 
                     // 待发送图片附件条：缩略图胶囊横排，可单个移除
                     if !state.imageAttachments.isEmpty {
@@ -299,6 +289,7 @@ struct AIChatInputDock: View {
                     isInputEmpty: $inputEmpty,
                     onSubmit: { submitInput() },
                     onSubmitFollowUp: { submitFollowUp() },
+                    onSubmitAlternative: { submitAlternative() },
                     onEscape: { onEscape() },
                     onInsertImages: { images in insertImages(images) },
                     onRecallFirst: { state.recallFirstQueuedInput() }
@@ -665,7 +656,7 @@ struct AIChatInputDock: View {
         }
         .buttonStyle(.plain)
         .disabled(!state.isStreaming && !canSend)
-        .help(state.isStreaming ? String(localized: "中止生成") : String(localized: "发送（⏎）· 追问（⌥⏎）"))
+        .help(state.isStreaming ? String(localized: "中止生成") : String(localized: "发送（⏎）· 生成中可排队追加或 ⌘⏎ 插入"))
     }
 
     // MARK: - 状态与动作
@@ -682,6 +673,15 @@ struct AIChatInputDock: View {
     private func submitInput() {
         let wasStreaming = state.isStreaming
         state.send()
+        if wasStreaming { clearDraft() }
+    }
+
+    /// ⌘⏎ 替代键路（ChatInputNSTextView 回调）：
+    /// - 生成中：执行与默认偏好相反的动作（追加 ⇄ 插入）；
+    /// - 非生成中：普通发送。
+    private func submitAlternative() {
+        let wasStreaming = state.isStreaming
+        state.sendAlternative()
         if wasStreaming { clearDraft() }
     }
 

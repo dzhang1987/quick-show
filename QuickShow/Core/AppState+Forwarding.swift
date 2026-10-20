@@ -145,6 +145,14 @@ extension AppState {
         }
     }
 
+    var streamingReturnAction: AIStreamingReturnAction {
+        get { settings.streamingReturnAction }
+        set {
+            settings.streamingReturnAction = newValue
+            objectWillChange.send()
+        }
+    }
+
     var appearanceMode: AppearanceMode {
         get {
             AppearanceMode(rawValue: settings.appearanceModeRaw) ?? .auto

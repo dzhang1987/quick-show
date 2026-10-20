@@ -1,88 +1,298 @@
-// 从 AIChatView.swift 机械拆分：输入坞状态与空态视图（队列胶囊 / 欢迎页 / 未配置引导）。
+// 从 AIChatView.swift 机械拆分：输入坞状态与空态视图（排队消息面板 / 欢迎页 / 未配置引导）。
 
 import AppKit
 import Combine
 import SwiftUI
 
-// MARK: - 待注入队列胶囊（steering / follow-up）
+// MARK: - 排队消息一体化面板（QueuedMessagesPanel）
 
-/// 待注入队列胶囊：类型标签（转向=↪ / 追问=↩ + 中文小字）+ 文本单行截断 + hover 露出 ✕。
-/// 点击整枚胶囊取回编辑（数据层回填输入框，胶囊随队列移除消失）；hover 提亮。
-/// ✕ 与整枚同语义（撤回该条回填输入框），始终占位、hover 才显形——opacity 渐变、
-/// 布局零跳动（同 showDockSecondaryTools 纪律）。
-/// 视觉沿用坞内微胶囊语言：实底 surfaceTrack + 0.5pt 白 rim，不新增设计令牌。
-struct QueuedInputCapsule: View {
+/// 排队消息一体化面板（参考 Antigravity 交互与 macOS 原生质感）：
+/// - 单条时：直接呈现卡片，右侧集成 [立即插入 ->]、[就地编辑 ✏️]、[移除 🗑️]；
+/// - 多条时：顶部显示「排队消息 (N)」折叠控制栏，默认折叠，可展开逐条管理；
+/// - 独立编辑态：点击 ✏️ 原地展开行内编辑框，保存/取消不污染主输入框草稿；
+/// - 防透字底衬：使用 chatNavFloatFill(0.95 实底) + chatStrokeStrong 描边，彻底阻断背后文字透视。
+struct QueuedMessagesPanel: View {
+    @ObservedObject var state: AIChatState
+
+    @State private var isExpanded: Bool = false
+    @State private var editingItemId: UUID? = nil
+    @State private var editingDraft: String = ""
+
+    private var queue: [QueuedChatInput] {
+        state.pendingQueue
+    }
+
+    var body: some View {
+        guard !queue.isEmpty else { return AnyView(EmptyView()) }
+
+        return AnyView(
+            VStack(spacing: Theme.Spacing.xs) {
+                if queue.count > 1 {
+                    headerBar
+                }
+
+                if queue.count == 1 || isExpanded {
+                    ForEach(queue) { item in
+                        QueuedMessageCardRow(
+                            item: item,
+                            isEditing: editingItemId == item.id,
+                            editingDraft: $editingDraft,
+                            onPromote: {
+                                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                    state.promoteQueuedInput(id: item.id)
+                                }
+                            },
+                            onStartEdit: {
+                                editingItemId = item.id
+                                editingDraft = item.text
+                            },
+                            onSaveEdit: {
+                                state.updateQueuedInput(id: item.id, newText: editingDraft)
+                                editingItemId = nil
+                                editingDraft = ""
+                            },
+                            onCancelEdit: {
+                                editingItemId = nil
+                                editingDraft = ""
+                            },
+                            onRemove: {
+                                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                    state.removeQueuedInput(id: item.id)
+                                }
+                            }
+                        )
+                        .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
+                    }
+                } else if let first = queue.first {
+                    // 多条折叠态：展示第一条摘要，引导点击展开全部
+                    QueuedMessageCardRow(
+                        item: first,
+                        isEditing: false,
+                        editingDraft: .constant(""),
+                        onPromote: {
+                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                state.promoteQueuedInput(id: first.id)
+                            }
+                        },
+                        onStartEdit: {
+                            isExpanded = true
+                            editingItemId = first.id
+                            editingDraft = first.text
+                        },
+                        onSaveEdit: {},
+                        onCancelEdit: {},
+                        onRemove: {
+                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                state.removeQueuedInput(id: first.id)
+                            }
+                        }
+                    )
+                }
+            }
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: queue)
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: isExpanded)
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: editingItemId)
+        )
+    }
+
+    private var headerBar: some View {
+        Button {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: "tray.full.fill")
+                    .font(Theme.Typography.text(10, .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+
+                Text(String(localized: "排队消息 (\(queue.count))"))
+                    .font(Theme.Typography.text(11, .semibold))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+
+                Text(String(localized: "· 将按顺序自动处理"))
+                    .font(Theme.Typography.text(10))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                    .font(Theme.Typography.text(10, .bold))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+            }
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.xs)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .fill(Theme.Colors.chatNavFloatFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .strokeBorder(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 单条排队消息卡片行
+
+struct QueuedMessageCardRow: View {
     let item: QueuedChatInput
-    let onRecall: () -> Void
+    let isEditing: Bool
+    @Binding var editingDraft: String
+    let onPromote: () -> Void
+    let onStartEdit: () -> Void
+    let onSaveEdit: () -> Void
+    let onCancelEdit: () -> Void
+    let onRemove: () -> Void
 
     @State private var hovered = false
 
     private var isSteering: Bool { item.kind == .steering }
 
     var body: some View {
-        Button(action: onRecall) {
-            HStack(spacing: Theme.Spacing.md) {
-                // 类型标签：转向=即时修正方向（accent 强调）；追问=轮末追加（次级色）
-                HStack(spacing: Theme.Spacing.xs) {
-                    Image(systemName: isSteering
-                          ? "arrowshape.turn.up.right.fill"
-                          : "arrowshape.turn.up.left.fill")
-                        .font(Theme.Typography.text(10, .semibold))
-                    Text(isSteering ? String(localized: "转向") : String(localized: "追问"))
-                        .font(Theme.Typography.text(10, .semibold))
+        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+            if isEditing {
+                // 原地就地编辑模式
+                HStack(spacing: Theme.Spacing.sm) {
+                    TextField(String(localized: "修改排队消息…"), text: $editingDraft, onCommit: onSaveEdit)
+                        .textFieldStyle(.plain)
+                        .font(Theme.Typography.text(11, .medium))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                        .padding(.horizontal, Theme.Spacing.sm)
+                        .padding(.vertical, Theme.Spacing.xs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                                .fill(Theme.Colors.surfaceInset)
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                                .strokeBorder(Theme.Colors.accent.opacity(0.4), lineWidth: 0.5)
+                        )
+
+                    Button(action: onSaveEdit) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(Theme.Typography.text(13))
+                            .foregroundColor(Theme.Colors.statusPositive)
+                    }
+                    .buttonStyle(.plain)
+                    .help("保存修改 (⏎)")
+
+                    Button(action: onCancelEdit) {
+                        Image(systemName: "xmark.circle")
+                            .font(Theme.Typography.text(13))
+                            .foregroundColor(Theme.Colors.contentTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("取消 (ESC)")
                 }
-                .foregroundColor(isSteering ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
+            } else {
+                // 普通卡片展示模式
+                HStack(spacing: Theme.Spacing.md) {
+                    // 状态徽标 Tag（插入 ⇄ 追加）
+                    HStack(spacing: 3) {
+                        Image(systemName: isSteering
+                              ? "arrowshape.turn.up.right.fill"
+                              : "arrowshape.turn.up.left.fill")
+                            .font(Theme.Typography.text(9, .semibold))
+                        Text(isSteering ? String(localized: "插入") : String(localized: "追加"))
+                            .font(Theme.Typography.text(10, .semibold))
+                    }
+                    .foregroundColor(isSteering ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(isSteering ? Theme.Colors.accent.opacity(0.12) : Theme.Colors.surfaceTrack)
+                    )
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(isSteering ? Theme.Colors.accent.opacity(0.25) : Theme.Colors.cardStroke, lineWidth: 0.5)
+                    )
 
-                Text(displayText)
-                    .font(Theme.Typography.text(11, .medium))
-                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                    // 消息正文摘要
+                    Text(displayText)
+                        .font(Theme.Typography.text(11, .medium))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 4)
 
-                // ✕ 撤回钮：与点击整枚同动作（撤回回填），嵌套命中无歧义；
-                // 非 hover 时禁命中，点击穿透到整枚胶囊。
-                Button(action: onRecall) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(Theme.Typography.text(12))
-                        .foregroundColor(Theme.Colors.contentTertiary)
-                        .contentShape(Rectangle())
+                    // 操作按钮组
+                    HStack(spacing: Theme.Spacing.sm) {
+                        // 若当前是追加，提供显式 [-> 立即插入] 提权按钮
+                        if !isSteering {
+                            Button(action: onPromote) {
+                                Image(systemName: "arrow.right.circle.fill")
+                                    .font(Theme.Typography.text(12, .semibold))
+                                    .foregroundColor(Theme.Colors.accent)
+                            }
+                            .buttonStyle(.plain)
+                            .help("立即插入当前任务（中途插队，在下一思考/工具轮次前注入）")
+                        }
+
+                        // ✏️ 就地编辑
+                        Button(action: onStartEdit) {
+                            Image(systemName: "pencil")
+                                .font(Theme.Typography.text(11))
+                                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        }
+                        .buttonStyle(.plain)
+                        .help("就地编辑内容")
+
+                        // 🗑️ 删除
+                        Button(action: onRemove) {
+                            Image(systemName: "trash")
+                                .font(Theme.Typography.text(11))
+                                .foregroundColor(Theme.Colors.contentTertiary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("删除该条排队消息")
+                    }
+                    .opacity(hovered ? 1.0 : 0.75)
                 }
-                .buttonStyle(.plain)
-                .opacity(hovered ? 1 : 0)
-                .allowsHitTesting(hovered)
-                .accessibilityHidden(!hovered)
-                .help("撤回该条到输入框")
             }
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.md)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .strokeBorder(Theme.Colors.chatCapsuleRim, lineWidth: 0.5)
-            )
-            .contentShape(Capsule(style: .continuous))
         }
-        .buttonStyle(.plain)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        .padding(.horizontal, Theme.Spacing.lg)
+        .padding(.vertical, Theme.Spacing.sm)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .fill(Theme.Colors.chatNavFloatFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                .strokeBorder(isSteering ? Theme.Colors.accent.opacity(0.25) : Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+        )
+        .onHover { isHovered in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                hovered = isHovered
+            }
         }
-        // 固定文案后附队列项完整文本（单行截断的补偿：多行长文经 tooltip 全量可读）
-        .help((isSteering
-              ? String(localized: "转向：本轮生成中即时注入、修正方向 · 点击取回编辑")
-              : String(localized: "追问：本轮回复完成后自动追加一轮 · 点击取回编辑"))
-              + "\n" + displayText)
+        .help(isSteering
+              ? String(localized: "插入：将在当前任务的下一次思考或工具调用前中途注入\n") + displayText
+              : String(localized: "追加：将在当前任务全部完成后作为下一轮自动发送\n") + displayText)
     }
 
-    /// 展示文本：纯图片队列项给占位文案（对齐 send 的「请查看图片。」兜底语义）。
     private var displayText: String {
         if !item.text.isEmpty { return item.text }
         if !item.images.isEmpty { return String(localized: "图片 ×\(item.images.count)") }
         return ""
+    }
+}
+
+// MARK: - 兼容微胶囊（保留类型以防老代码外部引用）
+
+struct QueuedInputCapsule: View {
+    let item: QueuedChatInput
+    let onRecall: () -> Void
+
+    var body: some View {
+        Button(action: onRecall) {
+            Text(item.text)
+        }
+        .buttonStyle(.plain)
     }
 }
 

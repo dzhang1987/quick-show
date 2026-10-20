@@ -11,11 +11,17 @@ extension AIChatState {
     /// 仅约束「当前会话」不可并发发送（同一会话上下文无法承载两轮并发）；
     /// 其他会话的进行中生成不受影响（并行生成核心语义）。
     func send() {
-        // 生成中的 ⏎：不再拦截报错，转为 steering 入当前会话队列（转向当前任务方向），
-        // 待当前回合工具批次全部跑完后、下一次 LLM 调用前注入。⏎=转向的单一收口点。
-        // 输入框/附件清空由 UI 层既有逻辑处理，此处不消费输入框。
+        // 生成中的 ⏎：根据偏好设置（追加 vs 插入）进入对应队列。
+        // 输入框/附件清空由 UI 层处理，此处不消费输入框。
         if isStreaming {
-            enqueueSteering()
+            let action = SettingsStore.currentStreamingReturnAction
+            if action == .followUp {
+                let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let images = imageAttachments
+                enqueueFollowUp(text: userInput, images: images)
+            } else {
+                enqueueSteering()
+            }
             return
         }
 
@@ -122,6 +128,25 @@ extension AIChatState {
             firstAssistantID: assistantID,
             context: ctx
         )
+    }
+
+    /// ⌘⏎ 替代发送键路：在生成中执行与默认配置相反的动作（追加 ⇄ 插入）；
+    /// 非生成中退化为普通 send()。
+    func sendAlternative() {
+        if isStreaming {
+            let action = SettingsStore.currentStreamingReturnAction
+            if action == .followUp {
+                // 默认是追加，则 ⌘⏎ 执行立即插入
+                enqueueSteering()
+            } else {
+                // 默认是插入，则 ⌘⏎ 执行追加
+                let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let images = imageAttachments
+                enqueueFollowUp(text: userInput, images: images)
+            }
+            return
+        }
+        send()
     }
 
     /// 工具调用回路：流式请求 → 执行工具 → 结果回传 → 续请求，直到产出文本或达轮数上限。

@@ -53,6 +53,28 @@ enum WorldClockCity: String, CaseIterable, Identifiable {
     var timeZone: TimeZone? { TimeZone(identifier: rawValue) }
 }
 
+// MARK: - AI 生成中回车默认行为
+enum AIStreamingReturnAction: String, CaseIterable, Identifiable {
+    case followUp = "followUp"
+    case insert = "insert"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .followUp: return String(localized: "追加为下一轮任务（推荐，当前任务完成后自动发送）")
+        case .insert: return String(localized: "立即插入当前任务（中途插队，实时干预思考与工具执行）")
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .followUp: return String(localized: "追加")
+        case .insert: return String(localized: "插入")
+        }
+    }
+}
+
 // MARK: - 用户偏好设置域
 /// 全部 @AppStorage 持久化偏好的唯一存储；门面 AppState 通过 AppState+Forwarding 转发。
 /// 带副作用的类型化 setter（triggerType/appearanceMode/themeVariant/panelScaleOption/showMenuBarIcon）
@@ -86,6 +108,20 @@ final class SettingsStore: ObservableObject {
     @AppStorage("triggerType") var triggerTypeRaw: String = TriggerType.doubleCmd.rawValue
     // AI 对话窗全局热键（独立分流；默认双击 ⌥⌥）。rawValue 存储，旧值（任意侧）继续有效。
     @AppStorage("aiTriggerTypeRaw") var aiTriggerTypeRaw: String = TriggerType.doubleOpt.rawValue
+
+    // AI 生成中敲击回车的默认行为（追加 / 插入）
+    @AppStorage("aiStreamingReturnAction") var streamingReturnActionRaw: String = AIStreamingReturnAction.followUp.rawValue
+
+    var streamingReturnAction: AIStreamingReturnAction {
+        get { AIStreamingReturnAction(rawValue: streamingReturnActionRaw) ?? .followUp }
+        set { streamingReturnActionRaw = newValue.rawValue }
+    }
+
+    /// 静态直读当前配置的生成中回车动作（无状态依赖，供多上下文共享直读）
+    static var currentStreamingReturnAction: AIStreamingReturnAction {
+        let raw = UserDefaults.standard.string(forKey: "aiStreamingReturnAction") ?? AIStreamingReturnAction.followUp.rawValue
+        return AIStreamingReturnAction(rawValue: raw) ?? .followUp
+    }
 
     // 界面尺寸与屏幕自适应
     @AppStorage("panelScaleOption") var panelScaleOptionRaw: String = PanelScaleOption.auto.rawValue

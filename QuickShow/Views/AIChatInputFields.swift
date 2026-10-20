@@ -17,6 +17,8 @@ struct ChatInputTextView: NSViewRepresentable {
     let onSubmit: () -> Void
     /// ⌥⏎ 追问：生成中入 follow-up 队列 / 非生成中退化普通发送（语义由调用方承载）。
     let onSubmitFollowUp: () -> Void
+    /// ⌘⏎ 替代动作：生成中执行与默认配置相反的动作（追加 ⇄ 插入）；非生成中普通发送。
+    var onSubmitAlternative: (() -> Void)? = nil
     let onEscape: () -> Void
     /// 粘贴/拖入图片（NSImage 数组，由调用方转附件）。
     let onInsertImages: ([NSImage]) -> Void
@@ -41,6 +43,7 @@ struct ChatInputTextView: NSViewRepresentable {
         textView.onEscape = onEscape
         textView.onInsertImages = onInsertImages
         textView.onRecallFirst = onRecallFirst
+        textView.onCommandReturn = onSubmitAlternative
         // IME 组字（marked text）不触发 textDidChange：靠该回调同步组字文本与空态，
         // 避免 placeholder 重叠，并让绑定不滞后于组字内容（防止 updateNSView 误回写）。
         textView.onContentStateChanged = { [weak coordinator = context.coordinator] in
@@ -162,6 +165,13 @@ struct ChatInputTextView: NSViewRepresentable {
                 if NSEvent.modifierFlags.contains(.shift) {
                     // ⇧⏎ 换行：忽略 field editor 语义，强制插入软换行（⌥⇧⏎ 同按 ⇧ 处理）
                     textView.insertNewlineIgnoringFieldEditor(nil)
+                } else if NSEvent.modifierFlags.contains(.command) {
+                    // ⌘⏎ 替代动作（追加 ⇄ 插入，未生成退化为普通发送）
+                    if let alt = parent.onSubmitAlternative {
+                        alt()
+                    } else {
+                        parent.onSubmit()
+                    }
                 } else if NSEvent.modifierFlags.contains(.option) {
                     // ⌥⏎ 追问（组字守卫与 ⏎ 一致，上面已先行放行输入法）
                     parent.onSubmitFollowUp()
@@ -255,6 +265,8 @@ final class ChatInputNSTextView: NSTextView {
     var onInsertImages: (([NSImage]) -> Void)?
     /// ⌘⌫ 撤回队首回调（仅输入框为空且非组字时触发；有文字时 ⌘⌫ 保留系统「删到行首」语义）。
     var onRecallFirst: (() -> Void)?
+    /// ⌘⏎ 替代发送回调
+    var onCommandReturn: (() -> Void)?
     /// 内容状态变化回调（IME 组字/取消组字时 textDidChange 不触发，需单独通知 placeholder）。
     var onContentStateChanged: (() -> Void)?
 
@@ -302,6 +314,12 @@ final class ChatInputNSTextView: NSTextView {
                 // 输入框，心智自洽；有文字时放行，保留系统 ⌘⌫「删到行首」语义，不吞正常编辑。
                 if string.isEmpty, !hasMarkedText(), let onRecallFirst {
                     onRecallFirst()
+                    return true
+                }
+            case 36:                              // ⏎
+                // ⌘⏎：非 IME 组字时消费为「替代动作」（追加 ⇄ 插入）
+                if !hasMarkedText(), let onCommandReturn {
+                    onCommandReturn()
                     return true
                 }
             default: break

@@ -156,7 +156,7 @@ struct ChatMessageRow: View, Equatable {
                 HStack(spacing: Theme.Spacing.xs) {
                     Image(systemName: "arrowshape.turn.up.right")
                         .font(Theme.Typography.text(10, .semibold))
-                    Text("已转向")
+                    Text(String(localized: "中途插入"))
                         .font(Theme.Typography.text(10, .semibold))
                 }
                 .foregroundColor(Theme.Colors.contentTertiary)

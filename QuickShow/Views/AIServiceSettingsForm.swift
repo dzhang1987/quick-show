@@ -690,6 +690,7 @@ struct AIServiceSettingsForm: View {
 
     @ViewBuilder
     private var toolsFormSection: some View {
+        AIChatInteractionSettingsSection()
         AIMermaidSettingsSection()
         AIToolsSettingsSection()
         AIWebSearchSettingsSection()

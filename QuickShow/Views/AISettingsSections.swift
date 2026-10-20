@@ -384,3 +384,30 @@ struct AIMermaidSettingsSection: View {
         }
     }
 }
+
+// MARK: - 对话与排队交互偏好设置小节
+
+struct AIChatInteractionSettingsSection: View {
+    @AppStorage("aiStreamingReturnAction") private var streamingReturnActionRaw: String = AIStreamingReturnAction.followUp.rawValue
+
+    private var actionBinding: Binding<AIStreamingReturnAction> {
+        Binding(
+            get: { AIStreamingReturnAction(rawValue: streamingReturnActionRaw) ?? .followUp },
+            set: { streamingReturnActionRaw = $0.rawValue }
+        )
+    }
+
+    var body: some View {
+        Section {
+            Picker("生成中敲击 Return 键", selection: actionBinding) {
+                ForEach(AIStreamingReturnAction.allCases) { action in
+                    Text(action.displayName).tag(action)
+                }
+            }
+        } header: {
+            Text("消息排队与插队交互")
+        } footer: {
+            Text("当 AI 正在思考、生成或子智能体执行工具时，敲击 Return 键将触发所选操作；按下 ⌘Return 即可临时执行相反操作。")
+        }
+    }
+}

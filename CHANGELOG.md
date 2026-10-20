@@ -6,6 +6,13 @@
 
 ### Added
 
+- **输入坞消息排队与中途插入体系完整升级（`QueuedMessagesPanel` / `AIChatState+Queue.swift` / `SettingsStore.swift` / `AIChatInputFields.swift`）**：
+  - **全新一体化可折叠排队面板（`QueuedMessagesPanel`）**：彻底替换原有平铺的分散小胶囊，单条排队时直接展示完整卡片，多条排队时自动收拢为占位极简的折叠控制栏（`排队消息 (N) · 将按顺序自动处理`）；
+  - **就地独立编辑与一键提权机制**：每条排队消息均独立具备 `[-> 立即插入]`（由追加一键提拔为即时插队干预）、`[✏️ 就地编辑]`（原地展开行内编辑框，保存即生效，绝不回填污染或冲掉主输入框当前草稿）、`[🗑️ 移除]` 能力；
+  - **用户偏好配置化与对称快捷键体系**：在 AI 设置面板新增「生成中敲击 Return 键」行为偏好（追加为下一轮任务 / 立即插入当前任务）；确立对称快捷键机制，`Return ⏎` 触发默认偏好，`⌘ Return ⌘⏎` 触发相反动作，`⇧ Return ⇧⏎` 保留软换行；
+  - **交互心智与词汇全面去学术化**：彻底淘汰生硬晦涩的“转向”与“追问”术语，全面重构为通俗自然的“**插入**”与“**追加**”；用户消息气泡弱标记同步更名为“中途插入”；
+  - **抗透字磨砂实底视觉治理**：将输入坞生长区内的排队面板与并发专家任务监控托盘（`SubagentTaskTray`）统一接入 `Theme.Colors.chatNavFloatFill`（95% 高不透明度磨砂实底）与 `chatStrokeStrong` 边框，彻底消除底层 Markdown 正文文字穿透重叠造成的视觉干扰。
+
 - **聊天区统一自适应限高滚动容器（`AdaptiveScrollBox`）与两档高度阶梯规范（`DesignTokens.swift` / `AIChatLayoutSupport.swift`）**：
   - **两档通用高度阶梯**：在 `Theme.Layout` 确立主交付内容级（`chatBlockMaxHeight = 380`，约 20 行）与次级元信息级（`chatMetaBlockMaxHeight = 180`，约 10 行）两档设计阶梯，统一管理长内容展示；
   - **泛型统一自适应容器**：封装 `AdaptiveScrollBox`，内置内容几何尺寸动态测量；内容低于限高时 shrink-to-fit 精准贴合零留白，超出限高时严格锁死并开启平滑内滚动。
