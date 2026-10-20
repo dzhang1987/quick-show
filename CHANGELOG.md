@@ -77,10 +77,11 @@
   - **双层 100% 物理实底常驻垫底**：为并发子任务胶囊（`SubagentTaskCapsule`）、排队面板（`QueuedMessagesPanel`）及轻提示全线引入 `Color(nsColor: .windowBackgroundColor)` + `Theme.Colors.chatNavFloatFill` 物理阻断层，确保无论静止还是悬停，底层文字透光率严格为 0%；
   - **悬停交互高光解耦**：将 hover 高亮解耦为实底基座之上的微光叠加层与边框提亮（`accent.opacity(0.4)`），既保留灵动的视觉反馈，又彻底隔绝背景穿透。
 
-- **AI 对话窗会话侧栏向左物理抽屉展开与主窗零抖动、零重排、零闪烁架构重构（`AIWindowManager.swift` / `AIChatView.swift`）**：
+- **AI 对话窗会话侧栏向左物理抽屉展开与主窗零抖动、零重排、零闪烁架构重构（`AIWindowManager.swift` / `AIChatView.swift` / `AIChatMessageList.swift`）**：
   - **绝对右边缘锚定（Right-Anchored）**：彻底修复旧逻辑在非贴屏幕最右侧时“左缘不动、向右扩展”的缺陷；无论窗口处于屏幕何处，展开与收拢侧栏时窗口的 `maxX` 严格锁定不变，物理 frame 仅向左平滑延伸与向右收缩；
-  - **主聊天区强定宽与高优先级保护（Anti-Compression Lock）**：在展开/收拢过渡期间，动态测量并锁定当前主列的实际物理宽度（绝不硬编码任何具体数字，纯动态自适应），施加 `.fixedSize(horizontal: isSidebarTransitioning, vertical: false)` 与 `.layoutPriority(100)`，彻底消除了 WindowServer 跨进程加宽延迟导致主聊天区被瞬间压窄、随后弹回导致的二次折行与上下抖动；
-  - **物理揭示（Hardware-level Reveal）与纯净动效解耦**：过渡期内侧栏保持其自身完整设计宽度，随着窗口左边缘向左物理位移而自然被揭开，避免内部二次尺寸挤压；
+  - **主聊天区强定宽与高优先级保护（Anti-Compression Lock）**：在展开/收拢过渡期间，动态测量并锁定当前主列的实际物理宽度（绝不硬编码任何具体数字，纯动态自适应），彻底消除了 WindowServer 跨进程加宽延迟导致主聊天区被瞬间压窄、随后弹回导致的二次折行与上下抖动；
+  - **虚拟化防白屏安全守卫（Ironclad Defense）**：在 `SessionMessageList.updateRowFrames` 建立状态防御壁垒——当因窗口尺寸突变、侧栏过渡导致底层 `ScrollView` 坐标空间单帧重测而异常计算出空集合时，坚决不抹空可见行集合，强制保持上一帧真实可见内容，彻底杜绝所有行突变为空白占位块诱发的白屏；
+  - **物理揭示（Hardware-level Reveal）与纯净动效解耦**：过渡期内侧栏保持其自身完整设计宽度，随着窗口左边缘向左物理位移而自然被揭开，避免内部二次尺寸挤压，并移除破坏子树坐标系的动态 `.fixedSize`；
   - **顶栏展开按钮常驻保活与防跳变闪烁**：顶栏左侧展开按钮由 `if !sidebarVisible` 条件插拔重构为常驻视图树，仅以 `opacity` 柔和渐变显隐，彻底根除了由于重新挂载导致 `chatReadingColumn` 在首帧因 `containerWidth == 0` 从 18pt 窄档跳变至 28pt 宽档的全屏闪烁；
   - **收拢动效同步淡出与无感交接**：收起动画触发瞬间，侧栏与微光分割线同步启动平滑淡出与收拢，与 AppKit 0.18s 节奏完全对齐，彻底消除完成回调时的突变切断闪烁。
 
