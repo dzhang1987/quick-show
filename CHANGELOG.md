@@ -80,7 +80,16 @@
   - 适配 Qoder 流式工具分片传输规范，引入 `ChatToolCallAccumulator` 累积分片并在完成时产出完整 `tool_calls`；
   - 偏好设置面板新增“可用工具授权”区域，支持显示各 Agent 授权工具数、一键恢复推荐及逐项开关。
 
+- **应用启动生命周期优化（`QuickShowApp.swift`）**：
+  - 移除应用初始化冷启动时无条件弹起 AI 窗口的冗余调用，保持后台托盘与一瞥模式轻量极简，仅在用户显式唤起或触发快捷键时展开。
+
 ### Fixed
+
+- **上下文压缩按会话强隔离治理与全量紧凑释放（`AIChatState+Compaction.swift` / `AIChatState.swift` / `AIChatMessageList.swift` / `MessageListDerivations.swift` / `AIChatContextRingView.swift` / `ChatScrollCoordinator.swift`）**：
+  - **多会话压缩状态强隔离（`compactingSessionIds`）**：将全局单例 `isCompacting` 升级为会话隔离的 `compactingSessionIds: Set<UUID>` 集合，彻底根除跨会话切换时的状态竞争与误判；
+  - **自洽派生与会话特征戳（`compactionStamp` / `compactionInfo(for:)`）**：按会话从 store 自洽派生压缩摘要信息，通过会话特征戳驱动局部增量重绘，杜绝跨会话数据污染；
+  - **全量紧凑释放规划**：手动与自动压缩统一采用全量压缩方案，彻底释放上下文预算；压缩边界卡自洽对齐首条未压缩消息或末尾；
+  - **虚拟化行宽几何约束加固（`ChatVirtualRow` / `AIChatMessageList.swift`）**：占位视图补齐 `maxWidth: .infinity`，避免滚动边界进出时的行宽坍塌抖动；优化列宽探测阈值，抑制高度缓存的频繁清空。
 
 - **彻底根治应用重启后孤儿子智能体（Orphan Subagent）任务永久旋转与托盘假死缺陷（`AgentTaskRegistry.swift` / `ChatSessionStore.swift` / `AgentCoordinator.swift` / `SubagentTaskTray.swift`）**：
   - **根本成因根除（First-Principles Root Cause）**：旧架构在并发子任务派发后将 `running` / `toolExecuting` 状态持久化至 `agent_tasks.json` 与子会话 JSON；当进程因编译、更新或系统退出重启后，内存 Swift 异步 `Task` 已销毁，但冷启动读取时未校验跨进程有效性，导致托盘永久判定存在运行中任务并无限循环旋转；

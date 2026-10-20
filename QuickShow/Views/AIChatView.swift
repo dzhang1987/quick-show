@@ -366,13 +366,12 @@ struct AIChatView: View {
             }
         }
         // 压缩状态（compactionInfo / isCompacting）变化 → 压缩边界卡与立即压缩入口刷新。
-        // 触发器模式与 sessionConfigStamp 相同；压缩「结束」伴随 sessions 写入（compactionInfo
-        // 落会话）必然覆盖，压缩「开始」态的即时刷新依赖 isCompacting 自身 @Published 扇出。
         .onReceive(
-            state.store.$sessions
-                .map { _ -> String in
-                    let info = state.compactionInfo
-                    return "\(info?.summarizedCount ?? -1)|\(info?.beforeMessageID ?? "")|\(state.isCompacting)"
+            state.$compactingSessionIds
+                .combineLatest(state.store.$sessions, state.store.$currentSessionId)
+                .map { _, _, currentId -> String in
+                    guard let currentId else { return "none" }
+                    return state.compactionStamp(for: currentId)
                 }
                 .removeDuplicates()
         ) { stamp in
@@ -639,6 +638,7 @@ struct AIChatView: View {
                     isActive: isActive,
                     state: state,
                     messages: state.store.messages(in: sid),
+                    compactionStamp: state.compactionStamp(for: sid),
                     onTapImage: { attachment in
                         withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                             zoomedAttachment = attachment
@@ -780,7 +780,7 @@ struct AIChatView: View {
     /// 压缩 toast 文案：成功报本次条数（非累计值，更诚实）；失败带一句原因简述。
     private func compactionToastText(_ outcome: CompactionOutcome) -> String {
         switch outcome {
-        case .succeeded(_, let count, _): return String(localized: "已压缩 \(count) 条早期对话")
+        case .succeeded(_, let count, _): return String(localized: "已压缩 \(count) 条历史对话")
         case .failed(_, let reason): return String(localized: "压缩失败：\(reason)")
         }
     }

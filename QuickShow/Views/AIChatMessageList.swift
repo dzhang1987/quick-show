@@ -17,6 +17,8 @@ struct SessionMessageList: View {
     let state: AIChatState
     /// 本会话消息（父级传入；隐藏会话无需独立订阅 store）。
     let messages: [ChatMessage]
+    /// 本会话压缩状态特征戳（包含 isCompacting/条数/摘要 hash，会话隔离零污染）。
+    let compactionStamp: String
     let onTapImage: (ChatImageAttachment) -> Void
     @Binding var scrollSnapshots: [UUID: ScrollSnapshot]
     let scrollCoordinator: ChatScrollCoordinator
@@ -112,20 +114,17 @@ struct SessionMessageList: View {
                     ForEach(MessageListDerivations.groupedMessages(cache: groupingCache, messages: messages)) { group in
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
-                                // 压缩边界卡：组内行级插入（边界无论落组间/组内都正确；再次压缩
-                                // 边界上移时数据驱动自然移位）。插在边界消息之前；边界 id 为 nil
-                                // （未指定/已不存在/转换失败）时落在首条消息前 = 会话流最顶部。
-                                // id 与边界绑定：边界变化即新视图，展开态不带入新位置（默认收起）。
+                                // 压缩边界卡：有未压缩新消息时，按位插入在首条未压缩消息之前；
+                                // id 与会话/边界绑定：边界变化即新视图，展开态不带入新位置（默认收起）。
                                 if showsCompactionCard,
-                                   (message.id == compactionBoundaryMessageId
-                                    || (compactionBoundaryMessageId == nil
-                                        && message.id == messages.first?.id)) {
+                                   let boundaryId = compactionBoundaryMessageId,
+                                   message.id == boundaryId {
                                     CompactionBoundaryCard(
-                                        isCompacting: state.isCompacting,
-                                        summarizedCount: state.compactionInfo?.summarizedCount ?? 0,
-                                        summary: state.compactionInfo?.summary ?? ""
+                                        isCompacting: isCompactingThisSession,
+                                        summarizedCount: sessionCompactionInfo?.summarizedCount ?? 0,
+                                        summary: sessionCompactionInfo?.summary ?? ""
                                     )
-                                    .id("compaction.\(compactionBoundaryMessageId?.uuidString ?? "top")")
+                                    .id("compaction.\(sessionId.uuidString).\(boundaryId.uuidString)")
                                 }
                                 ChatVirtualRow(
                                     messageId: message.id,
@@ -133,15 +132,14 @@ struct SessionMessageList: View {
                                     inWindow: virtualWindowIds.contains(message.id)
                                 ) {
                                     // 已压缩行降档：id ∈ summarizedMessageIDs 的行整行降到可读下限档
-                                    // 透明度——「模型视角已分叉」由此可扫读；原文仍是阅读资产，
-                                    // 不折叠不隐藏。opacity 不改布局，虚拟化等高占位机制不受影响；
-                                    // contentFade 渐变让压缩完成瞬间的区域弱化本身就是反馈。
-                                    let isSummarized = state.compactionInfo?.summarizedIDs.contains(message.id.uuidString) ?? false
+                                    // 透明度——严格从本会话自己的 sessionCompactionInfo 判定，杜绝跨会话污染。
+                                    let isSummarized = sessionCompactionInfo?.summarizedIDs.contains(message.id.uuidString) ?? false
                                     ChatMessageRow(
                                         message: message,
                                         isSummarized: isSummarized,
                                         canRegenerate: message.id == lastRegeneratableAssistantId,
                                         canEditLastRound: message.id == lastEditableUserMessageId,
+                                        canResumeAfterTools: message.id == messages.last?.id && state.canResumeAfterTools(in: sessionId),
                                         isEditing: state.editingMessageId == message.id,
                                         onBeginEdit: {
                                             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
@@ -185,6 +183,18 @@ struct SessionMessageList: View {
                                 .id(message.id)
                             }
                         }
+                    }
+                    // 全量压缩态边界卡：本会话全部历史消息均已压缩（或处于本会话压缩中），
+                    // 边界卡置于本会话历史消息末尾（紧邻输入坞上方、后续新对话之前）。
+                    if showsCompactionCard,
+                       compactionBoundaryMessageId == nil,
+                       !messages.isEmpty {
+                        CompactionBoundaryCard(
+                            isCompacting: isCompactingThisSession,
+                            summarizedCount: sessionCompactionInfo?.summarizedCount ?? 0,
+                            summary: sessionCompactionInfo?.summary ?? ""
+                        )
+                        .id("compaction.\(sessionId.uuidString).bottom")
                     }
                     // 尾部整体作为 LazyVStack 的单个子视图：把原先 4 个尾部子项的 4×36pt 组间距收敛为
                     // 1 个，其余 3×36 的叠加被消除。
@@ -280,6 +290,10 @@ struct SessionMessageList: View {
             // 同步、零追赶误差——本层只保留流式结束的收尾动画（无插入动画并发，安全）。
             .onChange(of: isStreamingSession) { streaming in
                 if !streaming, isActive, isPinned { scrollToBottom(proxy, animated: true) }
+            }
+            // 压缩发起/完成收尾：若处于跟随贴底状态，平滑贴底对齐末尾的压缩卡
+            .onChange(of: isCompactingThisSession) { compacting in
+                if !compacting, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
             // 活跃态切换：失活保存快照；激活时按当前几何位置刷新导航显隐镜像。
             // 常驻视图的 NSScrollView 偏移天然保留；激活时无条件 restoreScroll 是唯一破坏源
@@ -413,9 +427,11 @@ struct SessionMessageList: View {
         // 清空后 virtualWindowIds 内的行（视口 ±2 屏）仍实渲染、按新宽度回写缓存；
         // 窗口外行切换为估算占位（100pt），进入窗口时再实渲染重测。
         let probeWidth = frames.values.map(\.width).max() ?? 0
-        if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 1 {
-            rowHeights.removeAll()
-            cachedColumnWidth = probeWidth
+        if probeWidth > 200 {
+            if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 3 {
+                rowHeights.removeAll()
+                cachedColumnWidth = probeWidth
+            }
         }
         var bestID: UUID?
         var bestMinY = CGFloat.greatestFiniteMagnitude
@@ -436,7 +452,7 @@ struct SessionMessageList: View {
         ids.reserveCapacity(frames.count)
         for (id, frame) in frames where frame.maxY >= lowerBound && frame.minY <= upperBound {
             ids.insert(id)
-            if abs((rowHeights[id] ?? -1) - frame.height) > 0.5 {
+            if abs((rowHeights[id] ?? -1) - frame.height) >= 1.5 {
                 rowHeights[id] = frame.height
             }
         }
@@ -563,22 +579,34 @@ struct SessionMessageList: View {
         .help("回到底部")
     }
 
-    // MARK: - 分组 / 可重生成
+    // MARK: - 分组 / 压缩 / 可重生成
 
-    /// 是否渲染压缩边界卡：仅活跃会话（compactionInfo 是「当前会话」门面，隐藏会话树
-    /// 不渲染，防跨会话错位；切回活跃时随重求值自然出现）；有压缩记录或压缩进行中。
+    /// 本会话的上下文压缩信息（按会话隔离读取）。
+    private var sessionCompactionInfo: CompactionInfo? {
+        state.compactionInfo(for: sessionId)
+    }
+
+    /// 本会话是否正在执行压缩。
+    private var isCompactingThisSession: Bool {
+        state.isCompacting(sessionId: sessionId)
+    }
+
+    /// 是否渲染压缩边界卡：仅活跃会话（本会话信息隔离）；有压缩记录或本会话正在压缩。
     private var showsCompactionCard: Bool {
-        MessageListDerivations.showsCompactionCard(isActive: isActive,
-                                                   isCompacting: state.isCompacting,
-                                                   compactionInfo: state.compactionInfo)
+        MessageListDerivations.showsCompactionCard(
+            isActive: isActive,
+            isCompacting: isCompactingThisSession,
+            compactionInfo: sessionCompactionInfo
+        )
     }
 
     /// 压缩边界消息 id：beforeMessageID（String）转 UUID 且在本会话消息里存在时按位插入；
-    /// nil / 转换失败 / 消息已不存在 → nil（卡片落到会话流最顶部，契约语义）。
+    /// 本会话压缩进行中或全部压缩态下返回 nil（卡片统一落到全部消息末尾）。
     private var compactionBoundaryMessageId: UUID? {
         MessageListDerivations.compactionBoundaryMessageId(
             messages: messages,
-            beforeMessageID: state.compactionInfo?.beforeMessageID
+            beforeMessageID: sessionCompactionInfo?.beforeMessageID,
+            isCompacting: isCompactingThisSession
         )
     }
 
@@ -619,5 +647,6 @@ extension SessionMessageList: Equatable {
             && lhs.messages.last?.state == rhs.messages.last?.state
             && lhs.messages.last?.content.count == rhs.messages.last?.content.count
             && lhs.messages.last?.reasoning?.count == rhs.messages.last?.reasoning?.count
+            && lhs.compactionStamp == rhs.compactionStamp
     }
 }

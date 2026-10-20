@@ -72,12 +72,12 @@ extension AIChatState {
                 content: systemParts.joined(separator: "\n\n")
             ))
         }
-        // 摘要注入：紧随 systemPrompt，作为压缩后的早期上下文。
+        // 摘要注入：紧随 systemPrompt，作为压缩后的历史上下文。
         if let summary = store.session(id: sessionId)?.contextSummary?
             .trimmingCharacters(in: .whitespacesAndNewlines), !summary.isEmpty {
             result.append(ChatCompletionMessage(
                 role: ChatMessage.Role.system.rawValue,
-                content: "以下是本会话早期对话的压缩摘要：\n\(summary)"
+                content: "以下是本会话历史对话的压缩摘要：\n\(summary)"
             ))
         }
         let contextMessages = trimmedContextMessages(in: sessionId)

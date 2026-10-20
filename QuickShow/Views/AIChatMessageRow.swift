@@ -392,7 +392,10 @@ struct ReasoningDisclosureView: View {
                     .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
                     .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
                     .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
-                        if h > 0 { contentHeight = h }
+                        let clamped = min(h, Theme.Layout.reasoningMaxHeight)
+                        if clamped > 0, abs(contentHeight - clamped) >= 1.0 {
+                            contentHeight = clamped
+                        }
                     }
                     .onChange(of: rendered) { _ in
                         if isLive && expanded {
@@ -773,7 +776,7 @@ struct CompactionBoundaryCard: View {
                     HStack(spacing: Theme.Spacing.sm) {
                         Image(systemName: "arrow.counterclockwise")
                             .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                        Text(isCompacting ? String(localized: "正在压缩…") : String(localized: "已压缩早期对话（\(summarizedCount) 条）"))
+                        Text(isCompacting ? String(localized: "正在压缩…") : String(localized: "已压缩历史对话（\(summarizedCount) 条）"))
                             .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
                         if !isCompacting {
                             Image(systemName: expanded ? "chevron.up" : "chevron.down")
@@ -800,7 +803,7 @@ struct CompactionBoundaryCard: View {
                 .onHover { hovering in
                     withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
                 }
-                .help(isCompacting ? String(localized: "正在压缩早期对话…") : (expanded ? String(localized: "收起压缩摘要") : String(localized: "查看压缩摘要")))
+                .help(isCompacting ? String(localized: "正在压缩历史对话…") : (expanded ? String(localized: "收起压缩摘要") : String(localized: "查看压缩摘要")))
                 featheredDivider
             }
 

@@ -528,9 +528,13 @@ struct ChatVirtualRow<Content: View>: View {
             if inWindow {
                 content()
             } else if let height = rowHeights[messageId] {
-                Color.clear.frame(height: height)
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: height)
             } else {
-                Color.clear.frame(height: Self.estimatedHeight)
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .frame(height: Self.estimatedHeight)
             }
         }
         // 实渲染 ↔ 占位是内容等效替换：禁动画防闪烁与 CA 事务竞态（历史白屏族防线）。

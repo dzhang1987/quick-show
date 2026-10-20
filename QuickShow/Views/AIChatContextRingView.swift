@@ -244,7 +244,7 @@ private struct ContextRingDetailCard: View {
                 .font(Theme.Typography.mono(Theme.Typography.caption))
                 .foregroundColor(Theme.Colors.contentTertiary)
             if let summarizedCount, summarizedCount > 0 {
-                Text(String(localized: "已压缩 \(summarizedCount) 条早期对话"))
+                Text(String(localized: "已压缩 \(summarizedCount) 条历史对话"))
                     .font(Theme.Typography.text(Theme.Typography.caption))
                     .foregroundColor(Theme.Colors.contentTertiary)
             }
@@ -255,7 +255,7 @@ private struct ContextRingDetailCard: View {
                     .font(Theme.Typography.text(Theme.Typography.caption))
                     .foregroundColor(Theme.Colors.statusWarning)
             }
-            Text(isCompacting ? String(localized: "正在压缩早期对话…") : String(localized: "点击压缩早期对话（释放上下文）"))
+            Text(isCompacting ? String(localized: "正在压缩历史对话…") : String(localized: "点击压缩历史对话（释放上下文）"))
                 .font(Theme.Typography.text(Theme.Typography.caption))
                 .foregroundColor(Theme.Colors.idleText)
         }

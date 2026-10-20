@@ -93,10 +93,41 @@ final class AIChatState: ObservableObject {
     /// 按会话隔离的待注入队列（steering + follow-up 合并存储，元素顺序即入队顺序）。
     /// @Published 供视图/侧栏响应式刷新；对外经 pendingQueue 读取当前会话队列。
     @Published var pendingQueues: [UUID: [QueuedChatInput]] = [:]
-    /// 上下文压缩进行中（UI loading；同时用于防并发/防重复触发）。
-    @Published var isCompacting: Bool = false
-    /// 当前会话的压缩摘要信息；nil = 从未压缩过。
-    @Published var compactionInfo: CompactionInfo?
+    /// 上下文压缩进行中的会话集合（按会话隔离，防并发/防重复触发，杜绝跨会话状态污染）。
+    @Published var compactingSessionIds: Set<UUID> = []
+
+    /// 当前会话是否正在进行上下文压缩（门面属性，兼容全局调用）。
+    var isCompacting: Bool {
+        guard let id = currentSessionId else { return false }
+        return compactingSessionIds.contains(id)
+    }
+
+    /// 查询指定会话是否正在压缩。
+    func isCompacting(sessionId: UUID) -> Bool {
+        compactingSessionIds.contains(sessionId)
+    }
+
+    /// 获取指定会话的上下文压缩信息（按会话从 store 自洽派生，物理隔离零污染）。
+    func compactionInfo(for sessionId: UUID) -> CompactionInfo? {
+        guard let session = store.session(id: sessionId) else { return nil }
+        return Self.makeCompactionInfo(for: session)
+    }
+
+    /// 获取指定会话的压缩特征戳（用于 Equatable diff 与响应式感知，精确感知本会话的压缩变更）。
+    func compactionStamp(for sessionId: UUID) -> String {
+        let isCompacting = compactingSessionIds.contains(sessionId)
+        let info = compactionInfo(for: sessionId)
+        let count = info?.summarizedCount ?? 0
+        let beforeId = info?.beforeMessageID ?? "none"
+        let summaryHash = info?.summary.hashValue ?? 0
+        return "\(sessionId.uuidString)|\(isCompacting)|\(count)|\(beforeId)|\(summaryHash)"
+    }
+
+    /// 当前会话的压缩摘要信息；nil = 从未压缩过（门面属性）。
+    var compactionInfo: CompactionInfo? {
+        guard let id = currentSessionId else { return nil }
+        return compactionInfo(for: id)
+    }
     /// 最近一次压缩结果（成功/失败）；nil = 本运行周期内从未尝试过。
     /// 仅内存态不落盘——反馈语义是「本次使用期间」，跨重启无意义。
     @Published var lastCompactionOutcome: CompactionOutcome?

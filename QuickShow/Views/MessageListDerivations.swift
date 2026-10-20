@@ -82,9 +82,11 @@ enum MessageListDerivations {
     }
 
     /// 压缩边界消息 id：beforeMessageID（String）转 UUID 且在本会话消息里存在时按位插入；
-    /// nil / 转换失败 / 消息已不存在 → nil（卡片落到会话流最顶部，契约语义）。
+    /// 压缩进行中（isCompacting）或 nil / 转换失败 / 消息已不存在 → nil（表示全部消息均已纳入压缩，卡片落到全部消息末尾）。
     static func compactionBoundaryMessageId(messages: [ChatMessage],
-                                            beforeMessageID: String?) -> UUID? {
+                                            beforeMessageID: String?,
+                                            isCompacting: Bool = false) -> UUID? {
+        guard !isCompacting else { return nil }
         guard let raw = beforeMessageID,
               let uuid = UUID(uuidString: raw),
               messages.contains(where: { $0.id == uuid }) else { return nil }

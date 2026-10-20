@@ -104,7 +104,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 state?.show(mode: .glance)
             }
         }
-        AIWindowManager.shared.show()
     }
     
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {

@@ -6,26 +6,35 @@ extension AIChatState {
 
     // MARK: - 上下文自动压缩
 
-    /// 手动触发上下文压缩：isCompacting 时忽略。语义为「历史全部压缩 + 豁免最后一轮」——
-    /// 全部未压缩消息合并进单份摘要，但最后一个 user 消息起的最后一轮（含内嵌工具调用
-    /// 与结果）保持原文，保证当前对话上下文高保真，后续回复不建立在二次摘要之上。
-    /// 仅剩最后一轮无可压缩历史时给出明确反馈，不再静默。
-    func compactNow() {
-        guard !isCompacting else { return }
-        guard let sessionId = currentSessionId, let session = store.session(id: sessionId) else { return }
+    /// 手动触发上下文压缩：该会话若正在压缩则忽略。语义为「历史全部压缩」——
+    /// 将目标会话中全部未压缩消息统一合并进单份摘要，彻底收纳上下文；
+    /// 触发时派发跳底信号，确保视口底部直观展现压缩分界线。
+    /// 若全部历史均已压缩则给出明确反馈，不再静默。
+    func compactNow(sessionId: UUID? = nil) {
+        guard let targetId = sessionId ?? currentSessionId,
+              let session = store.session(id: targetId) else { return }
+        guard !compactingSessionIds.contains(targetId) else { return }
         // 生成中不压缩：避免把半截流式消息标记为已压缩，导致后续增量丢失。
-        guard !streamingSessionIds.contains(sessionId) else { return }
-        guard hasUnsummarizedMessages(in: session) else { return }
-        startCompaction(sessionId: sessionId, manual: true, session: session)
+        guard !streamingSessionIds.contains(targetId) else { return }
+        guard hasUnsummarizedMessages(in: session) else {
+            lastCompactionOutcome = .failed(
+                sessionId: targetId,
+                reason: String(localized: "当前历史均已压缩")
+            )
+            return
+        }
+        scrollJumpRequests[targetId] = Date()
+        startCompaction(sessionId: targetId, manual: true, session: session)
     }
 
     /// 流结束后异步检查水位：达阈值则发起自动压缩（不阻塞输入）。
     func maybeAutoCompact(sessionId: UUID) {
-        guard !isCompacting else { return }
+        guard !compactingSessionIds.contains(sessionId) else { return }
         guard !streamingSessionIds.contains(sessionId) else { return }
         guard let session = store.session(id: sessionId) else { return }
         guard let wm = watermark(for: session),
               wm.ratio >= compactionTriggerRatio else { return }
+        guard hasUnsummarizedMessages(in: session) else { return }
         startCompaction(sessionId: sessionId, manual: false, session: session)
     }
 
@@ -51,72 +60,41 @@ extension AIChatState {
 
 
     /// 计算压缩范围：
-    /// - 手动：历史全部压缩 + 豁免最后一轮——以最后一个 user 消息为轮起点（其后的
-    ///   assistant 消息含内嵌工具调用与结果归入同轮），最后一轮保持原文，其余全部
-    ///   未压缩消息进摘要。一次性输入成本 = 全部历史 token（与 Claude Code /compact
-    ///   同款），输出恒 ≤ compactionMaxTokens。
-    /// - 自动：从最旧未压缩消息起、由旧到新选，直到「剩余未压缩消息（含已有摘要）
-    ///   估算 token ≤ window × 40%」；至少 compactionMinMessages 条，防碎片化。
+    /// 全量压缩——将当前会话中全部未压缩消息全部纳入本次压缩计划（手动与自动保持一致，
+    /// 彻底释放上下文，旧摘要与本批消息统一合并为单份紧凑摘要）。
     private func compactionPlan(for session: ChatSession, manual: Bool) -> CompactionPlan {
         let summarized = Set(session.summarizedMessageIDs ?? [])
         let uncompressed = session.messages.filter { !summarized.contains($0.id.uuidString) }
         guard !uncompressed.isEmpty else { return CompactionPlan(messageIDs: [], messages: []) }
 
-        if manual {
-            // 豁免最后一轮：最后一个 user 消息（含）至末尾保持原文，轮边界与
-            // trimmedContextMessages 的分轮规则一致（user 开轮、assistant 归入同轮）。
-            // 退化场景（无 user 消息）则全部可压。
-            if let lastRoundStart = uncompressed.lastIndex(where: { $0.role == .user }) {
-                let selected = Array(uncompressed[uncompressed.startIndex..<lastRoundStart])
-                return CompactionPlan(messageIDs: selected.map { $0.id.uuidString }, messages: selected)
-            }
-            return CompactionPlan(
-                messageIDs: uncompressed.map { $0.id.uuidString },
-                messages: uncompressed
-            )
-        }
-
-        var remaining = uncompressed
-        let effectiveModelId = session.modelId ?? service.selectedModel
-        let window = AIModelAdapter.contextWindow(for: effectiveModelId)
-        let budget = Int(Double(window) * compactionTargetRatio)
-        let summaryTokens = (session.contextSummary?.count ?? 0) / charsPerToken
-
-        // 从旧到新搬入 selected，直到剩余（含摘要）落入目标水位。
-        var selected: [ChatMessage] = []
-        while !remaining.isEmpty {
-            let remainingTokens = summaryTokens + remaining.reduce(0) { $0 + $1.content.count } / charsPerToken
-            if remainingTokens <= budget { break }
-            selected.append(remaining.removeFirst())
-        }
-
-        guard selected.count >= compactionMinMessages else {
-            return CompactionPlan(messageIDs: [], messages: [])
-        }
         return CompactionPlan(
-            messageIDs: selected.map { $0.id.uuidString },
-            messages: selected
+            messageIDs: uncompressed.map { $0.id.uuidString },
+            messages: uncompressed
         )
     }
 
-    /// 发起压缩任务：置 isCompacting 防并发/重复触发，任务结束后复位。
+    /// 发起压缩任务：按会话置 compactingSessionIds 防并发/重复触发，任务结束后复位。
     private func startCompaction(sessionId: UUID, manual: Bool, session: ChatSession) {
         let plan = compactionPlan(for: session, manual: manual)
         guard !plan.messageIDs.isEmpty else {
-            // 手动触发但无可压缩历史（仅剩最后一轮且其余均已压缩）：给出明确反馈而非静默；
+            // 手动触发但无可压缩历史（全部已压缩）：给出明确反馈而非静默；
             // 自动路径由水位把关，无需反馈。
             if manual {
                 lastCompactionOutcome = .failed(
                     sessionId: sessionId,
-                    reason: String(localized: "早期对话均已压缩（最近一轮保持原文）")
+                    reason: String(localized: "当前历史均已压缩")
                 )
             }
             return
         }
-        isCompacting = true
+        compactingSessionIds.insert(sessionId)
         Task { [weak self] in
             guard let self else { return }
-            defer { self.isCompacting = false }
+            defer {
+                DispatchQueue.main.async {
+                    self.compactingSessionIds.remove(sessionId)
+                }
+            }
             await self.runCompaction(sessionId: sessionId, plan: plan)
         }
     }
@@ -218,26 +196,13 @@ extension AIChatState {
         ]
     }
 
-    /// 重算当前会话的压缩信息并刷新 @Published。
+    /// 广播当前状态变化以触发观察者重算压缩信息。
     func refreshCompactionInfo() {
-        guard let session = store.currentSession,
-              let info = Self.makeCompactionInfo(for: session) else {
-            if compactionInfo != nil { compactionInfo = nil }
-            return
-        }
-        // 手工比较关键字段，避免无意义重复扇出。
-        if let existing = compactionInfo,
-           existing.beforeMessageID == info.beforeMessageID,
-           existing.summarizedCount == info.summarizedCount,
-           existing.summary == info.summary,
-           existing.summarizedIDs == info.summarizedIDs {
-            return
-        }
-        compactionInfo = info
+        objectWillChange.send()
     }
 
     /// 由会话派生压缩信息：摘要为空则 nil；beforeMessageID 取首条未压缩消息。
-    private static func makeCompactionInfo(for session: ChatSession) -> CompactionInfo? {
+    static func makeCompactionInfo(for session: ChatSession) -> CompactionInfo? {
         guard let summary = session.contextSummary?.trimmingCharacters(in: .whitespacesAndNewlines),
               !summary.isEmpty else {
             return nil
