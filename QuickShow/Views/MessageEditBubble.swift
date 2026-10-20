@@ -76,7 +76,11 @@ struct MessageEditBubble: View {
         .padding(.vertical, Theme.Spacing.xl)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
-                .fill(Theme.Colors.chatUserBubble)
+                .fill(Theme.Colors.userBubbleFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
+                        .strokeBorder(Theme.Colors.userBubbleStroke, lineWidth: 0.5)
+                )
         )
         .frame(maxWidth: .infinity, alignment: .trailing)
     }

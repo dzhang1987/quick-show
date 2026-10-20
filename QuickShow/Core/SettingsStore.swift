@@ -127,6 +127,8 @@ final class SettingsStore: ObservableObject {
     @AppStorage("panelScaleOption") var panelScaleOptionRaw: String = PanelScaleOption.auto.rawValue
     // 外观主题变体（默认黑曜石 / 琥珀暖色）
     @AppStorage("themeVariant") var themeVariantRaw: String = ThemeVariant.standard.rawValue
+    // 代码高亮主题（Atom One / Tokyo Night / GitHub / Nord）
+    @AppStorage("codeHighlightTheme") var codeHighlightThemeRaw: String = CodeHighlightTheme.atomOne.rawValue
     // 明暗模式（自动 / 浅色 / 深色，全 App 范围）
     @AppStorage("appearanceMode") var appearanceModeRaw: String = AppearanceMode.dark.rawValue
 

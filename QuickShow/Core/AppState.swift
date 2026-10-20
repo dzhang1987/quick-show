@@ -93,6 +93,7 @@ final class AppState: ObservableObject {
         self.calendar = calendarStore
 
         Theme.variant = themeVariant   // 首帧即用持久化主题
+        MarkdownHighlighter.currentTheme = codeHighlightTheme // 首帧即用持久化代码高亮主题
 
         // 保序（对齐原 init）：Now Playing 桥接 → CoreAudio 属性监听
         mediaStore.configure(facade: self)

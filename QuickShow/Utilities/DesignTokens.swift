@@ -51,23 +51,26 @@ enum ThemeVariant: String, CaseIterable, Identifiable {
     
     var displayName: String {
         switch self {
-        case .standard: return String(localized: "默认（黑曜石）")
-        case .amber: return String(localized: "琥珀暖色")
+        case .standard: return String(localized: "默认（黑曜石 · 极光蓝）")
+        case .amber: return String(localized: "琥珀暖色（香槟金）")
         }
     }
 }
 
 // MARK: - 主题色板（变体间可变的颜色通道；未入板的令牌 = 全主题固定值）
 struct ThemePalette {
-    let accent: Color               // 主强调色（CPU正常态/上传/蓝牙/pinned/链接/清理按钮）
-    let actionButtonFill: Color     // 实心操作钮底色（亮暗双模式自适应：琥珀暖金/科技青）
+    let accent: Color               // 主强调色（CPU正常态/上传/蓝牙/pinned/链接/清理按钮/交互高亮）
+    let actionButtonFill: Color     // 实心操作钮底色（亮暗双模式自适应：极光蓝/琥珀暖金）
     let actionButtonForeground: Color // 实心操作钮前景色（亮暗双模式自适应：确保对比度达标）
+    let userBubbleFill: Color       // 用户气泡底色（微透流光自适应：黑曜极光蓝 / 琥珀香槟金）
+    let userBubbleStroke: Color     // 用户气泡受光边（0.5pt 精细微光描边，与主题色同源）
+    let userBubbleForeground: Color // 用户气泡前景色（保证双模式高对比）
     let clockGradientTop: Color     // 主时钟渐变顶
     let clockGradientBottom: Color  // 主时钟渐变底
     let secondsGradientTop: Color   // 秒数渐变顶
     let secondsGradientBottom: Color// 秒数渐变底
     
-    // 亮暗双模式自适应构造（解析跟随视图 effectiveAppearance，与玻璃明暗同步）
+    // 亮暗双模式自适应构造（RGB 三元组）
     private static func adaptive(dark: (Double, Double, Double), light: (Double, Double, Double)) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -76,23 +79,37 @@ struct ThemePalette {
         })
     }
     
-    /// 默认主题：现状值原样（中性黑白渐变 + 系统青强调；实心钮暗色亮青配黑标、亮色深青蓝配白标）
+    // 亮暗双模式自适应构造（RGBA 四元组，支持微透流光底板）
+    private static func adaptiveRGBA(dark: (Double, Double, Double, Double), light: (Double, Double, Double, Double)) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let c = isDark ? dark : light
+            return NSColor(srgbRed: c.0, green: c.1, blue: c.2, alpha: c.3)
+        })
+    }
+    
+    /// 默认主题（黑曜石 · 钛空极光蓝）：冷峻深邃的钛空极光蓝主强调，通透流光微透气泡，中性冷钛时钟
     static let standard = ThemePalette(
-        accent: Color.cyan,
-        actionButtonFill: adaptive(dark: (0.15, 0.78, 0.88), light: (0.03, 0.52, 0.65)),
-        actionButtonForeground: adaptive(dark: (0.05, 0.05, 0.05), light: (1.0, 1.0, 1.0)),
+        accent: adaptive(dark: (0.32, 0.62, 0.98), light: (0.10, 0.45, 0.88)),
+        actionButtonFill: adaptive(dark: (0.28, 0.58, 0.98), light: (0.08, 0.42, 0.86)),
+        actionButtonForeground: adaptive(dark: (1.0, 1.0, 1.0), light: (1.0, 1.0, 1.0)),
+        userBubbleFill: adaptiveRGBA(dark: (0.12, 0.22, 0.38, 0.88), light: (0.92, 0.95, 0.99, 0.95)),
+        userBubbleStroke: adaptiveRGBA(dark: (0.35, 0.65, 1.0, 0.35), light: (0.10, 0.45, 0.88, 0.25)),
+        userBubbleForeground: Color.primary,
         clockGradientTop: Color.primary,
-        clockGradientBottom: Color.primary.opacity(0.9),
+        clockGradientBottom: Color.primary.opacity(0.92),
         secondsGradientTop: Color.primary.opacity(0.85),
         secondsGradientBottom: Color.primary.opacity(0.65)
     )
     
-    /// 琥珀暖色：暖金琥珀调（暗色取明亮金 #F5B942 系配高对比深褐黑标；
-    /// 亮色实心操作钮取暖金琥珀橙 #BF5700 配纯白标，对比度 4.8:1，告别发暗泥褐）
+    /// 琥珀暖色（香槟暖金）：提亮暗阶的高光香槟金，复古温润仪表质感，暖金微透气泡
     static let amber = ThemePalette(
-        accent: adaptive(dark: (0.96, 0.73, 0.26), light: (0.71, 0.33, 0.04)),
+        accent: adaptive(dark: (0.98, 0.74, 0.26), light: (0.76, 0.38, 0.04)),
         actionButtonFill: adaptive(dark: (0.96, 0.73, 0.26), light: (0.75, 0.35, 0.02)),
         actionButtonForeground: adaptive(dark: (0.10, 0.07, 0.02), light: (1.0, 1.0, 1.0)),
+        userBubbleFill: adaptiveRGBA(dark: (0.28, 0.21, 0.11, 0.90), light: (0.97, 0.94, 0.88, 0.95)),
+        userBubbleStroke: adaptiveRGBA(dark: (0.98, 0.74, 0.26, 0.35), light: (0.76, 0.38, 0.04, 0.25)),
+        userBubbleForeground: Color.primary,
         clockGradientTop: adaptive(dark: (0.99, 0.90, 0.71), light: (0.55, 0.32, 0.05)),
         clockGradientBottom: adaptive(dark: (0.94, 0.66, 0.24), light: (0.76, 0.45, 0.06)),
         secondsGradientTop: adaptive(dark: (0.99, 0.90, 0.71), light: (0.55, 0.32, 0.05)).opacity(0.85),
@@ -180,6 +197,9 @@ enum Theme {
         static var accent: Color { Theme.palette.accent }
         static var actionButtonFill: Color { Theme.palette.actionButtonFill }
         static var actionButtonForeground: Color { Theme.palette.actionButtonForeground }
+        static var userBubbleFill: Color { Theme.palette.userBubbleFill }
+        static var userBubbleStroke: Color { Theme.palette.userBubbleStroke }
+        static var userBubbleForeground: Color { Theme.palette.userBubbleForeground }
         static var clockGradientTop: Color { Theme.palette.clockGradientTop }
         static var clockGradientBottom: Color { Theme.palette.clockGradientBottom }
         static var secondsGradientTop: Color { Theme.palette.secondsGradientTop }
@@ -207,9 +227,9 @@ enum Theme {
         static let chatTableRowAlternate = Color.primary.opacity(0.035)
 
         // —— 2026-10 视觉质感专项（浮岛化/控件语言/气泡）——
-        /// 用户消息气泡实底：琥珀语言（亮色低饱和烧琥珀暖纸 #F6EEDF 系 / 暗色深琥珀 #362C14 系，
-        /// 暗色留 8% 透明随玻璃微光）；与主题变体正交——用户气泡恒为琥珀，不随黑曜石/琥珀切换。
-        static let chatUserBubble = aiAdaptive(dark: (0.216, 0.173, 0.098, 0.92), light: (0.965, 0.933, 0.875, 1.0))
+        /// 用户消息气泡实底：微透流光自适应（随当前主题色流动：黑曜石钛空极光蓝 / 琥珀暖金；
+        /// 兼顾毛玻璃微透折射与 0.5pt 精细微光受光 rim，向前兼容通道）
+        static var chatUserBubble: Color { Theme.palette.userBubbleFill }
         /// 输入坞微胶囊 0.5pt 白 rim（⊕/剪贴板/模型 chip 的受光边：浅色白 40% / 深色白 20%）
         static let chatCapsuleRim = aiAdaptive(dark: (1, 1, 1, 0.20), light: (1, 1, 1, 0.40))
         /// 发送钮禁用态底：浅灰实底，与输入卡底保持 ≥1.2:1 对比（杜绝旧版 1.04:1 隐形事故）

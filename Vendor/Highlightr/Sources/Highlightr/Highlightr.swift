@@ -98,6 +98,19 @@ open class Highlightr
     }
     
     /**
+     Set the theme using a direct CSS string.
+     
+     - parameter css: CSS string to parse.
+     - returns: true on success
+     */
+    @discardableResult
+    open func setTheme(css: String) -> Bool
+    {
+        theme = Theme(themeString: css)
+        return true
+    }
+    
+    /**
      Takes a String and returns a NSAttributedString with the given language highlighted.
      
      - parameter code:           Code to highlight.

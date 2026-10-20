@@ -44,7 +44,13 @@ struct MarkdownBlockquoteView: View {
         .padding(.leading, Theme.Spacing.xl + 3)
         .overlay(alignment: .leading) {
             RoundedRectangle(cornerRadius: 1.5, style: .continuous)
-                .fill(Theme.Colors.accent.opacity(0.55))
+                .fill(
+                    LinearGradient(
+                        colors: [Theme.Colors.accent.opacity(0.80), Theme.Colors.accent.opacity(0.50)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
                 .frame(width: 3)
         }
         .padding(.horizontal, Theme.Spacing.xl)

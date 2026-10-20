@@ -177,6 +177,17 @@ extension AppState {
         }
     }
 
+    var codeHighlightTheme: CodeHighlightTheme {
+        get {
+            CodeHighlightTheme(rawValue: settings.codeHighlightThemeRaw) ?? .atomOne
+        }
+        set {
+            settings.codeHighlightThemeRaw = newValue.rawValue
+            MarkdownHighlighter.currentTheme = newValue
+            objectWillChange.send()
+        }
+    }
+
     var panelScaleOption: PanelScaleOption {
         get {
             PanelScaleOption(rawValue: settings.panelScaleOptionRaw) ?? .auto

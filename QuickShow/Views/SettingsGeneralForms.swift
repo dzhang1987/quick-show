@@ -75,6 +75,15 @@ struct GeneralSettingsForm: View {
                         Text(variant.displayName).tag(variant)
                     }
                 }
+
+                Picker("代码高亮主题", selection: Binding(
+                    get: { appState.codeHighlightTheme },
+                    set: { appState.codeHighlightTheme = $0 }
+                )) {
+                    ForEach(CodeHighlightTheme.allCases) { theme in
+                        Text(theme.displayName).tag(theme)
+                    }
+                }
                 
                 Picker("明暗模式", selection: Binding(
                     get: { appState.appearanceMode },
@@ -87,7 +96,7 @@ struct GeneralSettingsForm: View {
             } header: {
                 Text("外观")
             } footer: {
-                Text("「琥珀暖色」将主角时钟与高亮点缀切换为暖金琥珀调；明暗模式作用于整个 App（面板/玻璃/设置窗口），「自动」跟随系统外观。")
+                Text("「默认（黑曜石 · 极光蓝）」采用冷峻沉稳的钛空极光蓝作为主色，搭配通透微透气泡；「琥珀暖色（香槟金）」呈现经典复古仪表的温润暖金；代码高亮主题可自选均衡现代的 Atom One、暗夜霓虹 Tokyo Night 或极客经典的 GitHub 与 Nord。")
             }
             
             Section {

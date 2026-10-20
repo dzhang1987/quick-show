@@ -146,8 +146,8 @@ struct ChatMessageRow: View, Equatable {
     }
 
 
-    /// 用户消息：右对齐气泡，琥珀实底（chatUserBubble：亮色暖纸 / 暗色深琥珀随玻璃微光），
-    /// 无描边（实底自身即容器，描边是廉价感来源），圆角 18 对话语言；
+    /// 用户消息：右对齐气泡，微透流光自适应底板（Theme.Colors.userBubbleFill），
+    /// 辅以与主题色同源的 0.5pt 精细微光受光 rim（Theme.Colors.userBubbleStroke），圆角 18 对话语言；
     /// 图片缩略图排在文本上方（点击放大），行距与 AI 正文同节奏（13pt + 6 ≈ 1.7 倍行高）。
     /// 文本启用选区复制（textSelection），与助手 Markdown 选区行为对齐。
     /// steering 注入的消息在气泡上方带「已转向」弱标记：纯图文无底色（比「已中止」标签更轻），
@@ -170,7 +170,7 @@ struct ChatMessageRow: View, Equatable {
                 if !message.content.isEmpty {
                     Text(message.content)
                         .font(Theme.Typography.text(13))
-                        .foregroundColor(Theme.Colors.contentPrimary)
+                        .foregroundColor(Theme.Colors.userBubbleForeground)
                         .lineSpacing(6)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
@@ -180,7 +180,11 @@ struct ChatMessageRow: View, Equatable {
             .padding(.vertical, Theme.Spacing.xl)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
-                    .fill(Theme.Colors.chatUserBubble)
+                    .fill(Theme.Colors.userBubbleFill)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
+                            .strokeBorder(Theme.Colors.userBubbleStroke, lineWidth: 0.5)
+                    )
             )
         }
     }

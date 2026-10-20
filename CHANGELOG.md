@@ -6,6 +6,11 @@
 
 ### Added
 
+- **代码高亮多主题系统与实时响应架构（`CodeHighlightTheme` / `MarkdownHighlighter.swift` / `MarkdownCodeBlock.swift` / `SettingsGeneralForms.swift`）**：
+  - **4 套现代高亮主题开闭原则抽象**：定义面向协议的 `CodeHighlightTheme` 策略枚举，内置精调 CSS：Atom One（色彩均衡丰富，推荐）、Tokyo Night（暗夜霓虹柔彩）、GitHub（经典中性极客）、Nord（北欧极简冷蓝）；
+  - **偏好设置与持久化**：在「偏好设置 - 外观」新增代码高亮主题选择器，统一由 `SettingsStore` 持久化管理；
+  - **视图层响应式直连与实时热刷新**：代码块子视图 `CodeBlockText` 接入 `@AppStorage` 原生状态直连，将主题纳入高亮 Task 状态指纹，用户在偏好设置切换高亮主题时，屏幕所有代码块毫秒级实时平滑变色。
+
 - **子智能体成果反向热同步与智能断点续跑闭环（`AgentCoordinator.swift` / `AIChatState+Streaming.swift` / `AIChatState.swift` / `AIChatMessageRow.swift`）**：
   - **成果反向热同步（`handleChildSessionCompleted` / `refreshSubagentResultsInParent`）**：子智能体专属会话成功执行结束时，主动反向同步成果与产物至主会话 `launch_subagents` 工具调用记录并更新本地任务注册表状态，就地刷新 JSON 与产物路径，并触发气泡轻提示；
   - **智能断点续跑机制（Smart Resume / `resumeConversationAfterTools`）**：当并发工具调用已全部执行完毕、仅尾部助手生成失败时，保留全部成果与工具调用历史记录，不再将已有工作抹杀；失败消息卡片自适应呈现「载入最新成果并继续」，点击重试时直接基于已就绪的工具产物向模型发起最终总结；
@@ -39,6 +44,12 @@
   - **智能 Steering 转向路由引擎（A+B 方案）**：用户在主会话中途追加输入时，支持 `@librarian` / `@coder` 显式前缀或语义自动识别分流，将指令实时穿透注入正在运行的子任务 Tool Loop，并在输入框上方呈现轻反馈通知。
 
 ### Changed
+
+- **主题色板与 Primary Color 视觉体系全面重构（`DesignTokens.swift` / `AIChatMessageRow.swift` / `MessageEditBubble.swift` / `MarkdownBlockquoteRenderer.swift`）**：
+  - **默认「黑曜石」主题升级为钛空极光蓝（Titanium Ice Blue）**：强调色 `accent` 与操作色彻底告别原始突兀的系统青色（`Color.cyan`），重构为经过专业色彩校准的钛空极光蓝（暗色高明度 `#529EFF` / 亮色深极光 `#1A73E0`），在暗黑磨砂玻璃上极富现代科技质感，双模式均稳超 WCAG 对比度基准；
+  - **「琥珀暖色」主题升级为香槟暖金（Champagne Amber）**：大幅提亮暗色阶，剔除原先发黑混浊的泥黄浊感，精调为如高精仪表盘般温润发光的香槟暖金（`#FABC42`）；
+  - **用户消息气泡主题色流光微透（方案 A 落地）**：彻底解绑原有硬编码的暗泥黄底色，用户消息气泡底板（`userBubbleFill`）与 0.5pt 精细受光 rim（`userBubbleStroke`）自适应跟随当前主题色流动（黑曜石下为钛空深蓝夜光微透，琥珀下为温暖暗金微透），找回用户消息主视觉锚点与 Primary Color 品牌秩序；
+  - **Markdown 引用块视觉提升**：左侧单调细线升级为带有垂直微光渐变的圆角指示条，主色调跟随当前主题，饱满温润。
 
 - **交互抽屉模态遮挡容器与紧凑包裹体验重构（`AIChatInputDock.swift` / `ToolConfirmationDrawer.swift` / `UserQuestionDrawer.swift` / `AIChatView.swift`）**：
   - **底座模态遮挡（`ZStack` 容器）**：危险工具确认与 AI 提问抽屉在场时以物理底座向上滑入并完全遮盖原输入坞，彻底阻止主会话键盘打字误输入，消除“双输入框”视觉割裂感；抽屉退出时向下滑入底座收起并平滑恢复主输入坞；

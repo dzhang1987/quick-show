@@ -94,6 +94,13 @@ struct CodeBlockText: View {
     let language: String?
 
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("codeHighlightTheme") private var codeHighlightThemeRaw: String = CodeHighlightTheme.atomOne.rawValue
+
+    /// 当前激活的高亮主题（直接由 AppStorage 响应式订阅，设置变更时即时重绘刷新）
+    private var currentTheme: CodeHighlightTheme {
+        CodeHighlightTheme(rawValue: codeHighlightThemeRaw) ?? .atomOne
+    }
+
     /// 后台高亮结果；nil = 尚未完成 / 不可用 / 降级纯色。
     @State private var highlighted: AttributedString?
 
@@ -122,13 +129,15 @@ struct CodeBlockText: View {
                 .frame(height: Theme.Layout.chatBlockMaxHeight)
             }
         }
-        .task(id: HighlightTask(code: code, language: language, darkMode: colorScheme == .dark)) {
+        .task(id: HighlightTask(code: code, language: language, darkMode: colorScheme == .dark, theme: currentTheme)) {
             // 首帧保持纯色等宽（highlighted == nil）；后台计算高亮后替换。
             highlighted = nil
             let code = self.code
             let language = self.language
+            let isDark = colorScheme == .dark
+            let targetTheme = self.currentTheme
             let result = await Task.detached(priority: .utility) {
-                MarkdownHighlighter.highlightSwiftUI(code, language: language, darkMode: colorScheme == .dark)
+                MarkdownHighlighter.highlightSwiftUI(code, language: language, darkMode: isDark, theme: targetTheme)
             }.value
             guard !Task.isCancelled else { return }
             highlighted = result
@@ -150,11 +159,12 @@ struct CodeBlockText: View {
         .textSelection(.enabled)
     }
 
-    /// 高亮 task 键：内容 / 语言 / 外观任一变化即重高亮（外观切换换主题，
+    /// 高亮 task 键：内容 / 语言 / 外观 / 高亮主题任一变化即重高亮（外观/主题切换即时刷新，
     /// 流式期间 code 增长重算）。
     private struct HighlightTask: Equatable {
         let code: String
         let language: String?
         let darkMode: Bool
+        let theme: CodeHighlightTheme
     }
 }
