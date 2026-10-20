@@ -65,6 +65,11 @@
 
 ### Fixed
 
+- **快速会话切换器滚轮误滚动底层会话窗口与全局穿透几何模型重构（`ChatScrollCoordinator.swift` / `AIChatView.swift`）**：
+  - **根本性几何收敛**：移除原实现中将阅读列高度偷懒扩大为全窗口高度（`height: contentView.bounds.height`）的粗暴模型，彻底将输入坞滚轮穿透的判定矩形收敛至输入坞底部的真实物理几何区域（`y: 0 ..< dockEffectiveHeight`）；
+  - **实测高度动态同频**：在 `AIChatView` 挂载及高度变化时，将输入坞实测高度 `dockTotalHeight` 实时单向同步给 `scrollCoordinator.dockHeight`；
+  - **零特化与响应链归权**：彻底消除对特定弹窗的黑名单打补丁逻辑，快速切换面板等中上部悬浮层（y 远在输入坞物理区域之外）天然放行，滚轮事件由其内部 `ScrollView` 原生平滑响应，底层消息列表不再被意外劫持。
+
 - **彻底根治子智能体并发调度取消异常导致任务被误杀为超时失败的缺陷（`AgentCoordinator.swift` / `ChatSessionStore.swift`）**：
   - **竞速取消根因消除**：在 `AgentCoordinator.awaitSingleAgent` 结构化并发 TaskGroup 中，捕获 `Task.sleep` 抛出的 `CancellationError`，杜绝 `try?` 吞咽取消异常导致正常提前完成的子任务被唤醒的超时分支强行覆写为 `.failed` 并展示橙色感叹号；
   - **双重防御性状态守卫**：在超时落定执行分支内判断会话是否已完成（`.completed`），绝不篡改已正常落定的成果；

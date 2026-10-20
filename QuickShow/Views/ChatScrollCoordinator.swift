@@ -71,6 +71,8 @@ final class ChatScrollCoordinator {
     private var lastUserScrollWheelAt: [UUID: Date] = [:]
     /// 当前活跃会话 ID（由视图层在切换会话时同步）：用于精准路由滚轮穿透事件。
     var activeSessionId: UUID?
+    /// 输入坞实测总高度（由视图层 AIChatView 动态回写；用于精确界定悬浮输入坞在窗口底部的真实物理几何范围）。
+    var dockHeight: CGFloat = Theme.Layout.chatDockHeightFallback
     /// 全局滚轮监听 token：首个会话 attach 时 lazy 安装一次，随 app 生命周期常驻。
     private var scrollWheelMonitor: Any?
     /// 用户滚轮事件的关联时窗：滚轮事件与其驱动的 bounds 变化在同一事件派发
@@ -206,27 +208,32 @@ final class ChatScrollCoordinator {
             return event
         }
 
-        // 路径 2：检查光标是否落在消息列横向与纵向投影区（悬浮输入坞所在范围）
+        // 路径 2：精确界定悬浮输入坞在窗口坐标系中的物理几何矩形（阅读列横向 × 底部真实坞高）
+        // 原实现错误将 height 扩大为全窗口高度（contentView.bounds.height），导致居中悬浮的快速切换面板被误判为输入坞；
+        // 第一性原理：穿透范围只能严格限制在输入坞真实的物理底区（y: 0 ..< dockHeight），超出该区域的一律放行原生事件。
         let svFrameInWindow = sv.convert(sv.bounds, to: nil)
         let loc = event.locationInWindow
-        let chatColumnRect = CGRect(
+        let dockEffectiveHeight = max(dockHeight, Theme.Layout.chatDockHeightFallback)
+        let dockRect = CGRect(
             x: svFrameInWindow.minX,
             y: 0,
             width: svFrameInWindow.width,
-            height: max(svFrameInWindow.maxY, contentView.bounds.height)
+            height: dockEffectiveHeight
         )
 
-        guard chatColumnRect.contains(loc) else {
+        guard dockRect.contains(loc) else {
             return event
         }
 
-        // 路径 3：特判输入框内部滚动需求——若用户正在滚动一个多于 3 行的长输入框内容，放行
+        // 路径 3：特判输入框内部滚动需求——若用户正在滚动一个多于 3 行的长输入框内容，放行；命中非消息列表的独立滚动视图亦放行
         if let tv = (hit as? NSTextView) ?? (hit.enclosingScrollView?.documentView as? NSTextView) {
             let contentH = tv.layoutManager?.usedRect(for: tv.textContainer ?? NSTextContainer()).height ?? tv.bounds.height
             let visibleH = tv.enclosingScrollView?.contentView.bounds.height ?? 0
             if contentH > visibleH + 2 {
                 return event
             }
+        } else if let enclosing = (hit as? NSScrollView) ?? hit.enclosingScrollView, enclosing !== sv {
+            return event
         }
 
         // 路径 4：输入坞区域滚轮穿透——主动将滚轮事件注入消息列表 NSScrollView，并消费原事件

@@ -283,6 +283,7 @@ struct AIChatView: View {
                 }
             }
             scrollCoordinator.activeSessionId = state.store.currentSessionId
+            scrollCoordinator.dockHeight = dockTotalHeight
             refreshEnvironment()
             installKeyMonitor()
             pinned = AIWindowManager.shared.isPinned
@@ -315,6 +316,10 @@ struct AIChatView: View {
             if drawerGone {
                 NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
             }
+        }
+        // 坞体实测高度同步给滚动协调器，以精准界定滚轮穿透的物理底区
+        .onChange(of: dockTotalHeight) { newHeight in
+            scrollCoordinator.dockHeight = newHeight
         }
         // 会话切换检测（根级恒挂载）：把新会话置入 LRU 常驻集合头部，超限淘汰尾部（视图卸载）。
         // dropFirst 跳过订阅时重放的当前值，避免首挂载误判；常驻集合已由 init 以当前会话起步。
