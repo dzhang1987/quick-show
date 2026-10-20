@@ -251,6 +251,9 @@ final class AIWindowManager {
     /// 面板当前是否为 key 窗口（供流式完成通知判断）。
     var isPanelKey: Bool { panel?.isKeyWindow ?? false }
 
+    /// 当前面板内容宽度（供视图层在侧栏过渡期间计算主列锁定宽度）。
+    var contentWidth: CGFloat { panel?.frame.width ?? 0 }
+
     private init() {}
 
     // MARK: - 显隐
@@ -405,23 +408,30 @@ final class AIWindowManager {
     }
 
     /// 侧栏显隐联动（由 AIChatView ⌘B / 折叠按钮调用）：
-    /// 写偏好持久化；窗口可见时**保锚点缩放**——不再居中重排，
-    /// 保持当前左上角（若贴右缘则保右缘），宽度 ±sidebarWidth，clamp 到屏幕内。
-    func setSidebarVisible(_ visible: Bool, sidebarWidth: CGFloat? = nil) {
+    /// 写偏好持久化；窗口可见时以右边缘为绝对锚点向左展开/收缩，确保右侧主窗纹丝不动。
+    func setSidebarVisible(_ visible: Bool, sidebarWidth: CGFloat? = nil, completion: (() -> Void)? = nil) {
         UserDefaults.standard.set(visible, forKey: Self.sidebarVisibleKey)
-        guard let panel, panel.isVisible else { return }
+        guard let panel, panel.isVisible else {
+            completion?()
+            return
+        }
         let screen = panel.screen ?? ScreenHelper.activeScreen
         let visibleFrame = screen.visibleFrame
         let width = (sidebarWidth ?? AIChatLayout.currentSidebarWidth) + AIChatLayout.dividerInteractiveWidth
         let delta = width * (visible ? 1 : -1)
 
         var frame = panel.frame
-        let wasRightAnchored = abs(frame.maxX - visibleFrame.maxX) <= 20
         let oldMaxX = frame.maxX
         frame.size.width += delta
-        if wasRightAnchored {
-            // 贴右缘：保持右缘不动，向左扩展/收缩
-            frame.origin.x = oldMaxX - frame.size.width
+        // 永远保持右缘绝对锚定不动，向左展开/收缩
+        frame.origin.x = oldMaxX - frame.size.width
+
+        // 若向左超出屏幕左界，安全 clamp 到屏幕可视区
+        if frame.origin.x < visibleFrame.minX {
+            frame.origin.x = visibleFrame.minX
+            if frame.size.width > visibleFrame.width {
+                frame.size.width = visibleFrame.width
+            }
         }
         frame = clampedFrame(frame, on: screen)
 
@@ -430,6 +440,9 @@ final class AIWindowManager {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             ctx.allowsImplicitAnimation = true
             panel.animator().setFrame(frame, display: true)
+        } completionHandler: { [weak self] in
+            self?.scheduleFrameSave()
+            completion?()
         }
     }
 

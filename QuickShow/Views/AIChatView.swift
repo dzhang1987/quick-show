@@ -76,6 +76,12 @@ struct AIChatView: View {
     @State private var sidebarVisible = false
     /// 会话窄栏宽度（支持拖拽调节并在 UserDefaults 中持久化）。
     @State private var sidebarWidth: CGFloat = AIChatLayout.currentSidebarWidth
+    /// 侧栏展开/收起过渡动画中锁定主列的物理宽度，确保向左物理展开期间主窗文本绝对零重排、零抖动。
+    @State private var lockedMainWidth: CGFloat?
+    /// 是否正处于侧栏显隐物理过渡动画中。
+    @State private var isSidebarTransitioning = false
+    /// 侧栏过渡世代令牌（防超时防乱序）。
+    @State private var sidebarTransitionToken = 0
     /// 顶栏展开侧栏按钮 hover 态。
     @State private var sidebarToggleHovered = false
     /// 会话视图树 LRU 常驻集合（0 = 最近使用）。切换会话只改 opacity，视图常驻零重建：
@@ -144,7 +150,7 @@ struct AIChatView: View {
             )
             .opacity(sidebarVisible ? 1 : 0)
             .allowsHitTesting(sidebarVisible)
-            .frame(width: sidebarVisible ? sidebarWidth : 0, alignment: .leading)
+            .frame(width: (isSidebarTransitioning || sidebarVisible) ? sidebarWidth : 0, alignment: .leading)
             .clipped()
 
             // 竖向可交互微光分割线（随侧栏同参数收拢/展开，支持拖拽调节宽度及双击复位）
@@ -162,12 +168,17 @@ struct AIChatView: View {
             )
             .opacity(sidebarVisible ? 1 : 0)
             .allowsHitTesting(sidebarVisible)
-            .frame(width: sidebarVisible ? AIChatLayout.dividerInteractiveWidth : 0)
+            .frame(width: (isSidebarTransitioning || sidebarVisible) ? AIChatLayout.dividerInteractiveWidth : 0)
             .clipped()
 
             mainColumn
+                .frame(width: lockedMainWidth)
+                .fixedSize(horizontal: isSidebarTransitioning, vertical: false)
+                .layoutPriority(isSidebarTransitioning ? 100 : 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .fixedSize(horizontal: isSidebarTransitioning, vertical: false)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .clipped()
         // 内容层背景：26+ 整窗真玻璃透出（内容「印」在玻璃上，系统 Spotlight 语义）；
         // <26 降级铺 ultraThinMaterial。两窗共用 LiquidPanelBackground。
         .liquidPanelBackground()
@@ -545,10 +556,13 @@ struct AIChatView: View {
                     )
                     .frame(maxWidth: .infinity)
                     .padding(.trailing, Theme.Layout.iconButtonSize + Theme.Spacing.xxl)
-                } else if !sidebarVisible {
+                } else {
                     HStack {
                         sidebarToggleButton
                             .chatReadingColumn(alignment: .leading)
+                            .opacity(sidebarVisible ? 0 : 1)
+                            .allowsHitTesting(!sidebarVisible)
+                            .animation(.easeInOut(duration: Theme.Motion.windowResize), value: sidebarVisible)
                         Spacer()
                     }
                 }
@@ -784,14 +798,54 @@ struct AIChatView: View {
     }
 
     private func setSidebarVisible(_ visible: Bool) {
-        guard visible != sidebarVisible else { return }
-        // 曲线/时长与窗口侧 animator().setFrame 严格一致（AIWindowManager.setSidebarVisible
-        // 的 easeInEaseOut + windowResize；SwiftUI 侧同名曲线为 easeInOut）：
-        // 内容宽度与窗口 frame 同速变化，窗与内容一体伸缩
-        withAnimation(.easeInOut(duration: Theme.Motion.windowResize)) {
-            sidebarVisible = visible
+        guard visible != sidebarVisible, !isSidebarTransitioning else { return }
+        isSidebarTransitioning = true
+        sidebarTransitionToken += 1
+        let currentToken = sidebarTransitionToken
+
+        let totalSidebarWidth = sidebarWidth + AIChatLayout.dividerInteractiveWidth
+        let currentWindowWidth = AIWindowManager.shared.contentWidth
+
+        if visible {
+            // 向左展开：
+            // 展开前主列占据当前窗口全部宽度，动态锁定当前实际物理宽度（绝不硬编码任何尺寸）
+            let mainW = currentWindowWidth > 0 ? currentWindowWidth : (AIChatLayout.currentSidebarWidth * 3)
+            lockedMainWidth = mainW
+
+            // 侧栏与分割线平滑展开淡入（与 AppKit 0.18s windowResize 同步）
+            withAnimation(.easeInOut(duration: Theme.Motion.windowResize)) {
+                sidebarVisible = true
+            }
+
+            AIWindowManager.shared.setSidebarVisible(true, sidebarWidth: sidebarWidth) {
+                guard currentToken == sidebarTransitionToken else { return }
+                lockedMainWidth = nil
+                isSidebarTransitioning = false
+            }
+        } else {
+            // 向右收起：
+            // 收起前主列实际宽度 = 当前窗口物理宽度 - 侧栏总宽（动态保持当前宽度不变）
+            let mainW = max(currentWindowWidth - totalSidebarWidth, 400)
+            lockedMainWidth = mainW
+
+            // 侧栏与分割线平滑收拢淡出（与 AppKit 0.18s windowResize 同步）
+            withAnimation(.easeInOut(duration: Theme.Motion.windowResize)) {
+                sidebarVisible = false
+            }
+
+            AIWindowManager.shared.setSidebarVisible(false, sidebarWidth: sidebarWidth) {
+                guard currentToken == sidebarTransitionToken else { return }
+                lockedMainWidth = nil
+                isSidebarTransitioning = false
+            }
         }
-        AIWindowManager.shared.setSidebarVisible(visible, sidebarWidth: sidebarWidth)
+
+        // 0.3s 超时安全兜底（防止窗口在极速失焦等极端情况下未收到 completion 回调）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            guard currentToken == sidebarTransitionToken, isSidebarTransitioning else { return }
+            lockedMainWidth = nil
+            isSidebarTransitioning = false
+        }
     }
 
     // MARK: - 快捷键监听（⌘N/⌘B/⌘F/⌘P/⌘[] + 重命名/放大/快速切换态 ESC 先行消费）
