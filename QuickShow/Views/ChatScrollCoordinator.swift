@@ -517,7 +517,7 @@ struct ChatScrollBridgeView: NSViewRepresentable {
 @MainActor
 struct ChatVirtualRow<Content: View>: View {
     let messageId: UUID
-    @Binding var rowHeights: [UUID: CGFloat]
+    let cachedHeight: CGFloat?
     let inWindow: Bool
     @ViewBuilder let content: () -> Content
 
@@ -527,7 +527,7 @@ struct ChatVirtualRow<Content: View>: View {
         Group {
             if inWindow {
                 content()
-            } else if let height = rowHeights[messageId] {
+            } else if let height = cachedHeight {
                 Color.clear
                     .frame(maxWidth: .infinity)
                     .frame(height: height)

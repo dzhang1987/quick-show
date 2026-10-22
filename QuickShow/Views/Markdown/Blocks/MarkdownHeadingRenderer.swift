@@ -13,9 +13,9 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
 
     func capabilities(for block: MarkdownBlock) -> BlockCapabilities {
         guard case let .heading(_, inlines) = block else { return .interactiveWidget }
-        // H1 ~ H6 纯排版标题在无复杂内联（图片、公式、注音）时可无缝并入连续 TextKit 文本流；
+        // H1 ~ H6 纯排版标题在无复杂内联（图片、注音）时可无缝并入连续 TextKit 文本流；
         // H1 通过 FlowLayoutManager 绘制底部分割线，保持与正文连贯框选复制。
-        if !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby {
+        if !inlines.containsImage && !inlines.containsRuby {
             return .textFlowCompatible
         }
         return .interactiveWidget

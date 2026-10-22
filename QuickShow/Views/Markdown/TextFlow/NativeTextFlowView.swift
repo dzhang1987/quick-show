@@ -253,15 +253,22 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
         return false
     }
 
+    private var currentAttributedString: NSAttributedString?
+
     @discardableResult
     func setAttributedStringIfNeeded(_ newAttr: NSAttributedString) -> Bool {
         guard let ts = textStorage else { return false }
-        if !ts.isEqual(to: newAttr) {
-            ts.setAttributedString(newAttr)
-            needsDisplay = true
-            return true
+        // ⚠️ 关键防线：严禁使用 `ts.isEqual(to: newAttr)`！
+        // NSTextStorage 继承自可变属性字符串类簇，设置后会附加 TextKit 内部排版属性，
+        // 与纯 NSAttributedString 比对永远返回 false，从而导致每次 updateNSView 都触发
+        // setAttributedString + 缓存清空，引发布局死循环与 100% CPU 占用卡顿。
+        if let current = currentAttributedString, current === newAttr || current.isEqual(to: newAttr) {
+            return false
         }
-        return false
+        currentAttributedString = newAttr
+        ts.setAttributedString(newAttr)
+        needsDisplay = true
+        return true
     }
 }
 
@@ -362,15 +369,13 @@ struct NativeTextFlowView: NSViewRepresentable {
         if abs(coordinator.measuredWidth - width) < 0.5,
            coordinator.measuredHeight > 0,
            let cached = coordinator.cachedAttrString,
-           cached.isEqual(to: attributedString) {
-            qsDebugLog("sizeThatFits CACHED width=\(width) height=\(coordinator.measuredHeight) str=\(attributedString.string.prefix(20))...")
+           (cached === attributedString || cached.isEqual(to: attributedString)) {
             return CGSize(width: width, height: coordinator.measuredHeight)
         }
         let height = Self.measureHeight(for: attributedString, width: width)
         coordinator.measuredWidth = width
         coordinator.measuredHeight = height
         coordinator.cachedAttrString = attributedString
-        qsDebugLog("sizeThatFits RECOMPUTED width=\(width) height=\(height) str=\(attributedString.string.prefix(20))...")
         return CGSize(width: width, height: height)
     }
 }

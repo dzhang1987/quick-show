@@ -125,6 +125,15 @@
 
 ### Fixed
 
+- **彻底根治 Markdown 有序列表丢号断号及含公式长会话上滚内存暴增与彩虹圈卡死（`NativeTextFlowView.swift` / `MarkdownInlineNS.swift` / `MathViews.swift` / `MarkdownBlockSegmenter.swift` / `AssistantMarkdownView.swift` / `MarkdownListRenderer.swift` / `ChatScrollCoordinator.swift` / `AIChatMessageList.swift`）**：
+  - **废除破坏性列表分片逻辑（List Splitting 退役）**：彻底移除此前在遇到行内公式或非文本兼容元素时切断父级 `MarkdownListItem` 容器的列表分片逻辑；消除原本剥离段落将序号标记丢弃导致 1. 直接跳到 4. 的断号丢号缺陷，将段落、列表、标题等块级渲染器的合流能力放宽，行内公式（如 `$\rightarrow$`）100% 原生并入 TextKit 连续文本流；
+  - **行内公式首帧同步光栅化与 TextKit 深度合流**：行内数学公式直接走 `MathRasterizer.rasterize` 同步生成位图 Attachment，零异步回填、零两段式重绘，彻底旁路复杂的嵌套层级；
+  - **实现具备值语义判等的公式 Attachment（`InlineMathTextAttachment`）**：彻底定位 AppKit 原生 `NSTextAttachment` 继承自 `NSObject` 未重写 `isEqual:` 导致包含公式的两个不可变 `NSAttributedString` 比对恒为 `false` 的系统级陷阱；自定义 `InlineMathTextAttachment: NSTextAttachment` 并重写 `isEqual:` 与 `hash`（精确比对 `latex`、`pointSize`、`isDisplay` 与 `bounds`），确保属性字符串跨实例判等能够准确返回 `true`；
+  - **AppKit 动态颜色命名与享元缓存（`adaptiveLabel` / `highlightBackground` / `accentColor`）**：彻底消除此前使用未命名动态颜色（`NSColor(name: nil)`）跨实例比较恒为 `false` 导致的不可变属性字符串判等击穿隐患，赋予具名标识并建立静态单例缓存；
+  - **分段切分器结果享元缓存（`MarkdownBlockSegmenter.segment`）**：为落定消息的分段切分器引入 LRU 缓存，同一条历史消息直接复用完全相同的 `[MarkdownDisplaySegment]` 实例与富文本对象指针（`===` 恒真），彻底消除每帧重复解析构建富文本的 CPU 与内存开销；
+  - **`NativeTextFlowView` 指针短路与布局死循环阻断**：在 `setAttributedStringIfNeeded` 与 `sizeThatFits` 增加 `current === newAttr` 指针短路与 `cached.isEqual(to: attributedString)` 判定，阻断 `setAttributedString` 向 TextKit 广播更新通知引发的 `NSHostingView.layout()` 无限死循环；彻底根除上滚时主线程 CPU 满载、内存暴增 1.7GB 及鼠标转彩虹球假死；
+  - **`ChatVirtualRow` 单行解耦隔离与视口行高确定性防抖**：废除 `ChatVirtualRow` 持有 `@Binding var rowHeights` 全局字典导致的整树级联重估，改为纯值传递每行自己的 `cachedHeight: CGFloat?`，未变动的行在其他行高度刷新时直接跳过；将滚动行高失效检测从“子行动态最大宽度抽样”重构成“确定性视口物理宽度（`viewportSize.width`）”，根除滚动时误触发 `rowHeights.removeAll()` 导致的布局抖动。
+
 - **偏好设置「工具与扩展」小节数据加载与空白缺陷根除（`AISettingsSections.swift`）**：
   - 定位并根除此前在 `AIToolsSettingsSection`、`AIFileWhitelistSettingsSection`、`AIEnvVarsSettingsSection` 以及 `AIWebSearchSettingsSection` 中依赖 `Section` 的 `.onAppear` 加载数据导致在 macOS AppKit 原生 Form 下无法触发、工具列表等初值恒为空白（表象为打不开）的缺陷；
   - 重构为在视图 `init()` 阶段直接同步使用 `State(initialValue:)` 完成初始化装载，确保点击切换子标签页时首帧秒开且内容 100% 完整展示。

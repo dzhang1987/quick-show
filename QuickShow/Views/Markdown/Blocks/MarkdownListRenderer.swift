@@ -29,7 +29,7 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         return item.blocks.allSatisfy { block in
             switch block {
             case let .paragraph(inlines):
-                return !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby
+                return !inlines.containsImage && !inlines.containsRuby
             case let .orderedList(subItems), let .unorderedList(subItems):
                 return subItems.allSatisfy { isListItemTextFlowCompatible($0) }
             default:
@@ -236,7 +236,7 @@ struct MarkdownListView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xxl) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
             ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                 MarkdownListItemRow(item: item, ordered: ordered, depth: depth)
             }

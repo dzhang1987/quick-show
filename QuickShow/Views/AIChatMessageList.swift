@@ -165,7 +165,7 @@ struct SessionMessageList: View {
                                 }
                                 ChatVirtualRow(
                                     messageId: message.id,
-                                    rowHeights: $rowHeights,
+                                    cachedHeight: rowHeights[message.id],
                                     inWindow: virtualWindowIds.contains(message.id)
                                 ) {
                                     // 已压缩行降档：id ∈ summarizedMessageIDs 的行整行降到可读下限档
@@ -281,7 +281,7 @@ struct SessionMessageList: View {
             // 行级几何 → 真实视口顶部消息：每帧全量上报已实现行 frame，算出与视口相交且
             // minY 最靠上（最贴近视口顶）的行；仅在结果变化时写状态（去抖，避免每帧 setState）。
             .onPreferenceChange(MessageRowFramePreference.self) { frames in
-                updateRowFrames(frames, viewportHeight: viewport.size.height)
+                updateRowFrames(frames, viewportSize: viewport.size)
             }
             .onAppear {
                 seedVirtualWindowIfNeeded()
@@ -458,16 +458,15 @@ struct SessionMessageList: View {
     /// - 虚拟化：视口 ±N 屏内的行进窗口（实渲染集合，变化时写 state 触发行切换）；
     ///   窗口内行（= 实渲染行）高度回写缓存（变化 >0.5pt 才写，去抖）——占位行的
     ///   frame.height 即缓存值本身，天然无变化。
-    private func updateRowFrames(_ frames: [UUID: CGRect], viewportHeight: CGFloat) {
+    private func updateRowFrames(_ frames: [UUID: CGRect], viewportSize: CGSize) {
+        let viewportHeight = viewportSize.height
         guard viewportHeight > 0, !frames.isEmpty else { return }
-        // 列宽变化即整体失效行高缓存：使用确定性的最大行宽（避免 Dictionary.values.first 无序随机抽样抖动）。
-        // 清空后 virtualWindowIds 内的行（视口 ±2 屏）仍实渲染、按新宽度回写缓存；
-        // 窗口外行切换为估算占位（100pt），进入窗口时再实渲染重测。
-        let probeWidth = frames.values.map(\.width).max() ?? 0
-        if probeWidth > 200 {
-            if cachedColumnWidth == nil || abs((cachedColumnWidth ?? probeWidth) - probeWidth) > 3 {
+        // 视口真实物理宽度变化时，才失效行高缓存；绝对不可使用子行抽样宽度（避免滚动时不同元素宽度差异导致误清空行高）
+        let currentWidth = viewportSize.width
+        if currentWidth > 200 {
+            if cachedColumnWidth == nil || abs((cachedColumnWidth ?? currentWidth) - currentWidth) > 3 {
                 rowHeights.removeAll()
-                cachedColumnWidth = probeWidth
+                cachedColumnWidth = currentWidth
             }
         }
         var bestID: UUID?

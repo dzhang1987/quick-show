@@ -38,14 +38,30 @@ enum MarkdownInlineNS {
         NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
+    // MARK: - 动态颜色享元缓存（消除 NSAttributedString 比对击穿）
+    // ⚠️ 关键防线：AppKit 下未命名动态颜色（NSColor(name: nil)）跨实例比对 isEqual 恒返回 false，
+    // 会导致富文本在 SwiftUI 视图树与 TextKit 中每次 isEqual 比对均判定为不相等，引发布局死循环。
+    // 必须赋予具名标识（NSColor.Name）并使用享元字典复用实例，确保 isEqual 正常运作。
+    private static var adaptiveColorCache: [Int: NSColor] = [:]
+    private static let colorCacheLock = NSLock()
+
     /// 动态适配外观的文本前景色（带透明度）：解决 NSColor.labelColor.withAlphaComponent 在 AppKit 下固化为固定 sRGB 丢失外观感知的问题
     static func adaptiveLabel(opacity: CGFloat) -> NSColor {
-        NSColor(name: nil) { appearance in
+        let key = Int((opacity * 1000).rounded())
+        colorCacheLock.lock()
+        defer { colorCacheLock.unlock() }
+        if let existing = adaptiveColorCache[key] {
+            return existing
+        }
+        let colorName = NSColor.Name("quickshow.adaptiveLabel.\(key)")
+        let color = NSColor(name: colorName) { appearance in
             let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             return isDark
                 ? NSColor.white.withAlphaComponent(opacity)
                 : NSColor.black.withAlphaComponent(opacity)
         }
+        adaptiveColorCache[key] = color
+        return color
     }
 
     /// 行内代码底色：chatInlineCodeFill = Color.primary.opacity(0.10) 的 NSColor 近似。
@@ -59,17 +75,25 @@ enum MarkdownInlineNS {
     }
 
     /// 高亮（`<mark>`）底色：半透明强调色（与 SwiftUI 路径同 accent 色系，0.15 降噪）。
-    private static var highlightBackground: NSColor {
-        NSColor(name: nil) { appearance in
+    private static let _highlightBackground: NSColor = {
+        let colorName = NSColor.Name("quickshow.markdown.highlightBackground")
+        return NSColor(name: colorName) { appearance in
             MathRasterizer.resolvedColor(Theme.Colors.accent, appearance: appearance).withAlphaComponent(0.15)
         }
+    }()
+    private static var highlightBackground: NSColor {
+        _highlightBackground
     }
 
     /// accent 的 NSColor 近似：优先取当前主题 accent 解析值，失败退回系统 linkColor。
-    static var accentColor: NSColor {
-        NSColor(name: nil) { appearance in
+    private static let _accentColor: NSColor = {
+        let colorName = NSColor.Name("quickshow.markdown.accentColor")
+        return NSColor(name: colorName) { appearance in
             MathRasterizer.resolvedColor(Theme.Colors.accent, appearance: appearance)
         }
+    }()
+    static var accentColor: NSColor {
+        _accentColor
     }
 
     static func renderNS(
@@ -294,14 +318,10 @@ enum MarkdownInlineNS {
                 result.append(piece)
 
             case let .math(latex):
-                switch MathRasterizer.lookup(latex: latex, pointSize: baseSize, color: baseColor, isDisplay: false) {
-                case let .hit(raster):
-                    result.append(NSAttributedString(attachment: InlineMathAttachment.make(from: raster)))
-                case .failed:
+                if let raster = MathRasterizer.rasterize(latex: latex, pointSize: baseSize, color: baseColor, isDisplay: false) {
+                    result.append(NSAttributedString(attachment: InlineMathAttachment.make(from: raster, latex: latex, pointSize: baseSize, isDisplay: false)))
+                } else {
                     appendMathFallback(into: result, latex: latex, color: baseColor)
-                case .miss:
-                    appendMathFallback(into: result, latex: latex, color: baseColor)
-                    pending.append(PendingInlineMath(latex: latex, pointSize: baseSize, color: baseColor))
                 }
             }
         }

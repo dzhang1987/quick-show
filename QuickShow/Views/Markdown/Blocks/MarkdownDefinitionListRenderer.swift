@@ -14,9 +14,9 @@ final class MarkdownDefinitionListRenderer: MarkdownBlockRenderer {
     func capabilities(for block: MarkdownBlock) -> BlockCapabilities {
         guard case let .definitionList(items) = block else { return .interactiveWidget }
         let allSimple = items.allSatisfy { item in
-            !item.term.containsImage && !item.term.containsMath && !item.term.containsRuby &&
+            !item.term.containsImage && !item.term.containsRuby &&
             item.definitions.allSatisfy { def in
-                !def.containsImage && !def.containsMath && !def.containsRuby
+                !def.containsImage && !def.containsRuby
             }
         }
         return allSimple ? .textFlowCompatible : .interactiveWidget

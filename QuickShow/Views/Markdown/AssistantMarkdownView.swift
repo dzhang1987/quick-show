@@ -106,7 +106,8 @@ struct AssistantMarkdownView: View, Equatable {
         let seededInitial = Self.initialBlockCount(viewportHeight: viewportHeight, total: blocks.count)
         let visibleCount = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
         let visibleBlocks = Array(blocks.prefix(visibleCount))
-        let segments = MarkdownBlockSegmenter.segment(visibleBlocks)
+        let cacheKey = useCache && visibleCount == blocks.count ? content : nil
+        let segments = MarkdownBlockSegmenter.segment(visibleBlocks, cacheKey: cacheKey)
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in

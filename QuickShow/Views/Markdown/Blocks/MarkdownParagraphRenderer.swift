@@ -13,7 +13,7 @@ final class MarkdownParagraphRenderer: MarkdownBlockRenderer {
 
     func capabilities(for block: MarkdownBlock) -> BlockCapabilities {
         guard case let .paragraph(inlines) = block else { return .interactiveWidget }
-        if !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby {
+        if !inlines.containsImage && !inlines.containsRuby {
             return .textFlowCompatible
         }
         return .interactiveWidget

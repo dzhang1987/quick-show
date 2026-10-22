@@ -2,22 +2,63 @@
 import SwiftUI
 import AppKit
 
-// MARK: - 行内公式 Attachment
+// MARK: - 行内公式 Attachment（具备值语义判等防线）
 
-/// NSTextAttachment 构造：图片 + bounds（基线对齐）。
-/// ⚠ 仅接受**已光栅化结果**——主线程绝不在此触发同步 render（缓存命中才可同步装 attachment）。
-enum InlineMathAttachment {
-    static func make(from raster: MathRasterizer.Rasterized) -> NSTextAttachment {
-        let attachment = NSTextAttachment()
-        attachment.image = raster.image
+/// 继承自 NSTextAttachment，重写 isEqual 和 hash。
+/// ⚠️ 关键防线：AppKit 原生 NSTextAttachment 没有重写 isEqual（仅指针比对），
+/// 导致包含公式 attachment 的两个不可变 NSAttributedString 跨实例 isEqual 比对恒返回 false，
+/// 从而在 SwiftUI 重新求值与 TextKit 测量中每次均判定为内容变动，引发布局重绘风暴与内存暴涨。
+final class InlineMathTextAttachment: NSTextAttachment {
+    let latex: String
+    let pointSize: CGFloat
+    let isDisplay: Bool
+
+    init(raster: MathRasterizer.Rasterized, latex: String, pointSize: CGFloat, isDisplay: Bool) {
+        self.latex = latex
+        self.pointSize = pointSize
+        self.isDisplay = isDisplay
+        super.init(data: nil, ofType: nil)
+        self.image = raster.image
         // y = -descent：把图片整体下压 descent 深度，使公式基线与整行文本基线重合
-        attachment.bounds = CGRect(
+        self.bounds = CGRect(
             x: 0,
             y: -raster.descent,
             width: raster.size.width,
             height: raster.size.height
         )
-        return attachment
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func isEqual(_ object: Any?) -> Bool {
+        guard let other = object as? InlineMathTextAttachment else { return false }
+        return latex == other.latex &&
+               abs(pointSize - other.pointSize) < 0.1 &&
+               isDisplay == other.isDisplay &&
+               bounds.equalTo(other.bounds)
+    }
+
+    override var hash: Int {
+        var hasher = Hasher()
+        hasher.combine(latex)
+        hasher.combine(Int((pointSize * 10).rounded()))
+        hasher.combine(isDisplay)
+        return hasher.finalize()
+    }
+}
+
+/// NSTextAttachment 构造：图片 + bounds（基线对齐）。
+/// ⚠ 仅接受**已光栅化结果**——主线程绝不在此触发同步 render（缓存命中才可同步装 attachment）。
+enum InlineMathAttachment {
+    static func make(
+        from raster: MathRasterizer.Rasterized,
+        latex: String = "",
+        pointSize: CGFloat = 13,
+        isDisplay: Bool = false
+    ) -> NSTextAttachment {
+        InlineMathTextAttachment(raster: raster, latex: latex, pointSize: pointSize, isDisplay: isDisplay)
     }
 }
 
@@ -80,6 +121,7 @@ struct MathParagraphView: NSViewRepresentable {
         /// 本段是否已「测量稳定」（无待回填公式：命中缓存或已知失败）：只有稳定测量才写入全局缓存，
         /// 避免用「占位文本高度」污染持久缓存。
         var measurementStable = true
+        var lastRenderedAttributed: NSAttributedString?
     }
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -138,7 +180,11 @@ struct MathParagraphView: NSViewRepresentable {
         // 本视图已实现 sizeThatFits，SwiftUI 布局尺寸完全由 sizeThatFits 驱动；
         // 在 updateNSView（布局遍历内）调用 invalidateIntrinsicContentSize 会冒泡标记
         // 父级 NSHostingView 的约束/布局 dirty，导致 AppKit 陷入 300 次布局死循环。
-        if !field.attributedStringValue.isEqual(to: renderResult.attributed) {
+        // ⚠️ 关键防线：field.attributedStringValue 取出的属性字符串若含有 attachment，
+        // 跨实例比对 isEqual 恒返回 false，导致每次均清空缓存并引发布局死循环。
+        // 改用 coordinator.lastRenderedAttributed 比对。
+        if coordinator.lastRenderedAttributed == nil || coordinator.lastRenderedAttributed!.string != renderResult.attributed.string {
+            coordinator.lastRenderedAttributed = renderResult.attributed
             field.attributedStringValue = renderResult.attributed
             field.needsDisplay = true
             // 内容/外观变化使旧测量失效：清缓存，下次 sizeThatFits 重新测量。
@@ -164,11 +210,10 @@ struct MathParagraphView: NSViewRepresentable {
                 baseSize: size
             )
             // ⚠ 无任何 opacity/动画过渡，且不调用 invalidateIntrinsicContentSize（防约束震荡）。
-            if let currentField = coordinator.field,
-               !currentField.attributedStringValue.isEqual(to: rebuilt.attributed) {
+            if let currentField = coordinator.field {
+                coordinator.lastRenderedAttributed = rebuilt.attributed
                 currentField.attributedStringValue = rebuilt.attributed
                 currentField.needsDisplay = true
-                // 位图回填改变内容尺寸：清测量缓存，下次 sizeThatFits 重新测量高度。
                 coordinator.measuredWidth = -1
             }
             // 回填后本段所有公式均已缓存/已知失败 → 后续测量为稳定测量，可写入全局高度缓存。
