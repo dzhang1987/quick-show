@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **AI 服务偏好设置全面卡片化重构与认知链路打通（`AIServiceSettingsForm.swift`）**：
+  - **四大正交维度导航重构（`AIServiceSubTab`）**：彻底打破此前层级倒挂、将界面交互与图表渲染误塞进工具页的问题，系统性解耦为「算力与模型」、「角色与人设」、「工具与权限」、「对话与交互」四大独立标签页；
+  - **置顶当前会话模型与连接状态卡片（`activeSessionOverviewCard`）**：顶部常驻展示当前主助手身份、运行模式徽标（单 Agent / 多 Agent 协作）、绑定的服务商与模型名称，以及凭据就绪状态指示灯；内置快捷下拉切换菜单，修改后秒级同步激活智能体底座，彻底消除“配了服务商却不知道怎么让它生效”的断裂感；
+  - **主流服务商快速通道与连接连通性即时测试**：在算力页置顶提供阿里云百炼、OpenAI 官方、Antigravity (Gemini)、Qoder 国际版等厂商快捷药丸胶囊，点击一键载入预设与推荐模型池；凭据管理区域新增「测试连接」操作，点击即时校验 API 密钥有效性并反馈可用模型数；
+  - **模型卡片直通设为默认**：在各模型卡片右侧新增「设为默认」快捷操作，点击直接将该模型绑定为当前会话默认模型；
+  - **极简单 Agent 优先与高级团队模式折叠收敛**：角色人设页默认呈现干净纯粹的单 Agent 助手档案（名称、图标预设组、简介、系统设定 Prompt、思考强度、服务商与模型绑定），消除子专家干扰；多 Agent 团队协作收纳为可选高级开关，仅在显式开启时长平滑展开团队成员矩阵与工具授权明细；
+  - **工具与权限纯净化及散弹式重复消除**：移除此前在单 Agent 页面重复出现的冗余工具挂载代码（`SingleAgentToolsSection`），统一收敛至工具与权限页，系统工具、Shell 命令行高危红色警示、本地文件访问沙盒白名单各司其职；
+  - **对话交互与渲染偏好独立归拢**：将消息排队行为（生成中 Return 键偏好）、Mermaid 图表外观/主题、代码块语法高亮主题选择器与全局快捷键速查说明移入独立的「对话与交互」页。
+
 ### Added
 
 - **AIChat 单 Agent 模式与多 Agent 协作双模式体系及单 Agent 专属工具挂载卡片（`AIChatExecutionMode` / `AIToolRegistry.swift` / `AIToolExecutor.swift` / `AIChatState+RequestAssembly.swift` / `AIServiceSettingsForm.swift` / `AIChatInputDock.swift` / `SettingsStore.swift`）**：

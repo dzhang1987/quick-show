@@ -1,6 +1,7 @@
-// AIServiceSettingsForm: AI 服务设置中心，支持多服务商管理、多智能体团队编排与工具扩展配置。
+// AIServiceSettingsForm: AI 服务设置中心，支持算力模型管理、角色人设编排、工具权限管控与交互偏好配置。
 
 import SwiftUI
+import AppKit
 
 // MARK: - AI 接口协议选项
 enum AIProtocolOption: String, Codable, CaseIterable, Identifiable {
@@ -17,13 +18,31 @@ enum AIProtocolOption: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - 设置子页面枚举
+// MARK: - 设置子页面枚举（四大正交维度）
 enum AIServiceSubTab: String, CaseIterable, Identifiable {
-    case providers = "服务商"
-    case agents = "智能体设置"
-    case tools = "工具与扩展"
+    case providers = "算力与模型"
+    case agents = "角色与人设"
+    case tools = "工具与权限"
+    case interaction = "对话与交互"
 
     var id: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .providers: return "cpu"
+        case .agents: return "person.crop.circle"
+        case .tools: return "wrench.and.screwdriver"
+        case .interaction: return "bubble.left.and.bubble.right"
+        }
+    }
+}
+
+// MARK: - 连接测试状态枚举
+enum ConnectionTestStatus: Equatable {
+    case idle
+    case testing
+    case success(String)
+    case failed(String)
 }
 
 // MARK: - AI 服务设置主表单
@@ -40,6 +59,9 @@ struct AIServiceSettingsForm: View {
     @State private var isFetchingModels: Bool = false
     @State private var fetchError: String?
 
+    // 连接测试状态（按 providerId 隔离）
+    @State private var testStatus: [String: ConnectionTestStatus] = [:]
+
     // 候选模型池搜索过滤
     @State private var availableModels: [String] = []
     @State private var modelFilter: String = ""
@@ -50,16 +72,21 @@ struct AIServiceSettingsForm: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部子页面导航 (隐藏多余 Label，保留纯粹分段切换)
+            // 顶部常驻：当前会话模型与连接状态概览卡片（一眼看清当前用的是什么）
+            activeSessionOverviewCard
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 8)
+
+            // 子页面分段导航
             Picker("", selection: $selectedSubTab) {
                 ForEach(AIServiceSubTab.allCases) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Label(tab.rawValue, systemImage: tab.iconName).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
             .labelsHidden()
             .padding(.horizontal, 16)
-            .padding(.top, 10)
             .padding(.bottom, 6)
 
             Form {
@@ -70,19 +97,135 @@ struct AIServiceSettingsForm: View {
                     agentsFormSection
                 case .tools:
                     toolsFormSection
+                case .interaction:
+                    interactionFormSection
                 }
             }
         }
     }
 
-    // MARK: ================== 1. 服务商管理 ==================
+    // MARK: ================== 0. 顶部会话概览卡片 ==================
+
+    private var activeSessionOverviewCard: some View {
+        let agent = currentAgent
+        let boundProvider = providerStore.provider(for: agent?.providerId ?? "")
+        let boundModel = providerStore.modelSpec(providerId: agent?.providerId ?? "", modelId: agent?.modelId ?? "")
+        let hasKey = !(providerStore.apiKey(for: boundProvider?.id ?? "") ?? "").isEmpty
+        let isSingleMode = appState.settings.executionMode == .single
+
+        return HStack(spacing: 12) {
+            // 角色图标与模式
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                Image(systemName: agent?.iconName ?? "sparkles")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color.accentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(agent?.name ?? "未指定助手")
+                        .font(.system(size: Theme.Typography.body, weight: .semibold))
+                    Text(isSingleMode ? "单 Agent 极简" : "多 Agent 协作")
+                        .font(.system(size: Theme.Typography.micro, weight: .medium))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(isSingleMode ? Color.teal.opacity(0.15) : Color.purple.opacity(0.15))
+                        .foregroundColor(isSingleMode ? Color.teal : Color.purple)
+                        .cornerRadius(4)
+                }
+
+                HStack(spacing: 6) {
+                    Text(boundProvider?.name ?? "未选择服务商")
+                        .font(.system(size: Theme.Typography.footnote))
+                        .foregroundColor(.secondary)
+                    Text("·")
+                        .font(.system(size: Theme.Typography.footnote))
+                        .foregroundColor(.secondary)
+                    Text(boundModel?.name ?? agent?.modelId ?? "无可用模型")
+                        .font(.system(size: Theme.Typography.footnote, weight: .medium, design: .monospaced))
+                        .foregroundColor(.primary)
+                }
+            }
+
+            Spacer()
+
+            // 凭据状态徽章与快捷切换
+            VStack(alignment: .trailing, spacing: 4) {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(hasKey ? Theme.Colors.statusGood : Theme.Colors.statusWarning)
+                        .frame(width: 7, height: 7)
+                    Text(hasKey ? "凭据已就绪" : "未配置 API Key")
+                        .font(.system(size: Theme.Typography.footnote, weight: .medium))
+                        .foregroundColor(hasKey ? Theme.Colors.statusGood : Theme.Colors.statusWarning)
+                }
+
+                // 快捷直达下拉切换
+                Menu {
+                    ForEach(providerStore.providers.filter { $0.isEnabled }) { p in
+                        Menu(p.name) {
+                            ForEach(p.models) { m in
+                                Button {
+                                    makeModelDefault(providerId: p.id, modelId: m.id)
+                                } label: {
+                                    if agent?.providerId == p.id && agent?.modelId == m.id {
+                                        Label(m.name, systemImage: "checkmark")
+                                    } else {
+                                        Text(m.name)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Text("切换当前模型 ▾")
+                        .font(.system(size: Theme.Typography.micro))
+                }
+                .menuStyle(.borderlessButton)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(0.03))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+
+    // MARK: ================== 1. 算力与模型 ==================
 
     @ViewBuilder
     private var providersFormSection: some View {
-        // 服务商选择与预设添加
+        // 预设厂商快捷切换胶囊（帮助用户 1 秒找到阿里云、OpenAI 等）
+        Section {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("主流服务商快速通道")
+                    .font(.system(size: Theme.Typography.footnote, weight: .medium))
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 8) {
+                    quickPresetPill(title: "阿里云百炼", id: "alibaba", preset: AIProvider.alibabaPreset())
+                    quickPresetPill(title: "OpenAI 官方", id: "openai", preset: AIProvider.openAIPreset())
+                    quickPresetPill(title: "Antigravity (Gemini)", id: "antigravity", preset: AIProvider.antigravityPreset())
+                    quickPresetPill(title: "Qoder 国际版", id: "qoder", preset: AIProvider.qoderPreset())
+                }
+            }
+            .padding(.vertical, 2)
+        } header: {
+            Text("快速配置")
+        }
+
+        // 服务商选择与管理
         Section {
             HStack(spacing: 12) {
-                Picker("选择服务商", selection: $providerStore.selectedProviderId) {
+                Picker("当前编辑服务商", selection: $providerStore.selectedProviderId) {
                     ForEach(providerStore.providers) { p in
                         HStack {
                             Text(p.name)
@@ -112,17 +255,18 @@ struct AIServiceSettingsForm: View {
                         addCustomProvider()
                     }
                 } label: {
-                    Label("添加服务商", systemImage: "plus")
+                    Label("添加", systemImage: "plus")
                         .font(.system(size: Theme.Typography.body))
                 }
             }
         } header: {
             Text("服务商列表")
         } footer: {
-            Text("管理用于对话的 AI 模型服务商与连接配置。")
+            Text("管理用于向大模型发起调用的服务商端点、鉴权信息与模型能力规格。")
         }
 
         if let provider = currentProvider {
+            // 基本参数与端点
             Section {
                 TextField("显示名称", text: providerNameBinding(for: provider.id))
                     .textFieldStyle(.roundedBorder)
@@ -151,20 +295,17 @@ struct AIServiceSettingsForm: View {
                     }
                 }
 
+                TextField("端点 Base URL", text: providerBaseURLBinding(for: provider.id), prompt: Text(providerURLPlaceholder(for: provider.type)))
+                    .textFieldStyle(.roundedBorder)
+
                 Toggle("启用此服务商", isOn: providerEnabledBinding(for: provider.id))
             } header: {
-                Text("基本配置")
-            }
-
-            Section {
-                TextField("Base URL", text: providerBaseURLBinding(for: provider.id), prompt: Text(providerURLPlaceholder(for: provider.type)))
-                    .textFieldStyle(.roundedBorder)
-            } header: {
-                Text("端点地址 (Base URL)")
+                Text("基本配置与端点")
             } footer: {
                 Text(providerURLFooter(for: provider.type))
             }
 
+            // 凭据与认证中心
             Section {
                 let storedKey = providerStore.apiKey(for: provider.id) ?? ""
                 let accountInfo = providerStore.accountInfo(for: provider.id)
@@ -177,18 +318,36 @@ struct AIServiceSettingsForm: View {
                 let apiKeyMethods = methods.compactMap { $0 as? StandardAPIKeyAuthMethod }
                 let primaryAPIKeyMethod = apiKeyMethods.first
 
-                // 1. 已认证授权状态卡片展示
+                // 1. 已认证凭据展示
                 if !storedKey.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(spacing: 8) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(Theme.Colors.statusGood)
-                            Text("已完成认证授权")
+                            Text("已配置连接凭据 (••••\(String(storedKey.suffix(4))))")
                                 .font(.system(size: Theme.Typography.body, weight: .semibold))
+
                             Spacer()
-                            Button("退出登录 / 清除") {
+
+                            // 测试连接按钮
+                            Button {
+                                testConnection(for: provider)
+                            } label: {
+                                if testStatus[provider.id] == .testing {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Label("测试连接", systemImage: "bolt.badge.checkmark")
+                                        .font(.system(size: Theme.Typography.footnote))
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(testStatus[provider.id] == .testing)
+
+                            Button("清除") {
                                 authManager.logout(for: provider.id)
                                 apiKeyInput = ""
+                                testStatus[provider.id] = nil
                             }
                             .font(.system(size: Theme.Typography.footnote))
                             .foregroundColor(Theme.Colors.statusWarning)
@@ -214,13 +373,37 @@ struct AIServiceSettingsForm: View {
                                     .cornerRadius(4)
                             }
                         }
+
+                        // 测试状态提示
+                        if let status = testStatus[provider.id] {
+                            switch status {
+                            case .success(let msg):
+                                HStack(spacing: 6) {
+                                    Image(systemName: "checkmark.circle")
+                                        .foregroundColor(Theme.Colors.statusGood)
+                                    Text(msg)
+                                        .font(.system(size: Theme.Typography.footnote))
+                                        .foregroundColor(Theme.Colors.statusGood)
+                                }
+                            case .failed(let err):
+                                HStack(spacing: 6) {
+                                    Image(systemName: "exclamationmark.triangle")
+                                        .foregroundColor(Theme.Colors.statusWarning)
+                                    Text("连接测试失败：\(err)")
+                                        .font(.system(size: Theme.Typography.footnote))
+                                        .foregroundColor(Theme.Colors.statusWarning)
+                                }
+                            default:
+                                EmptyView()
+                            }
+                        }
                     }
                     .padding(.vertical, 4)
 
                     Divider().padding(.vertical, 2)
                 }
 
-                // 2. 外部交互/免密导入方式 (浏览器登录 / 触控 ID 导入)
+                // 2. 外部免密与导入方式 (浏览器登录 / 触控 ID 导入)
                 if !browserMethods.isEmpty || (!biometricMethods.isEmpty && detected != nil) {
                     VStack(alignment: .leading, spacing: 10) {
                         if case .authorizing(let msg) = authState {
@@ -229,7 +412,6 @@ struct AIServiceSettingsForm: View {
                                     .controlSize(.small)
                                 Text(msg)
                                     .font(.system(size: Theme.Typography.body))
-                                    .foregroundColor(.primary)
                                 Spacer()
                                 Button("取消") {
                                     authManager.cancelAuth(for: provider.id)
@@ -274,48 +456,31 @@ struct AIServiceSettingsForm: View {
                     }
                 }
 
-                // 3. 手工录入 API Key / 凭据 (纯策略化驱动)
+                // 3. 手工录入 API Key
                 if let keyMethod = primaryAPIKeyMethod {
                     VStack(alignment: .leading, spacing: 6) {
-                        if !storedKey.isEmpty {
-                            HStack {
-                                Text("已保存凭据 ····\(String(storedKey.suffix(4)))")
-                                    .font(.system(size: Theme.Typography.footnote))
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                                Button("清除") {
-                                    providerStore.clearAPIKey(for: provider.id)
-                                    providerStore.clearAccountInfo(for: provider.id)
-                                    apiKeyInput = ""
-                                }
-                                .font(.system(size: Theme.Typography.footnote))
-                            }
-                            SecureField("输入新的密钥以替换", text: $apiKeyInput)
+                        HStack(spacing: 8) {
+                            SecureField(storedKey.isEmpty ? keyMethod.placeholder : "输入新的 API Key 以替换现有凭据", text: $apiKeyInput)
                                 .textFieldStyle(.roundedBorder)
-                        } else {
-                            SecureField(keyMethod.placeholder, text: $apiKeyInput)
-                                .textFieldStyle(.roundedBorder)
-                        }
 
-                        let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if !trimmedKey.isEmpty {
-                            HStack {
-                                Spacer()
-                                Button("保存手动密钥") {
-                                    providerStore.setAPIKey(trimmedKey, for: provider.id)
-                                    let acc = ProviderAccountInfo(
-                                        displayName: "手动凭据",
-                                        email: "",
-                                        avatarURL: nil,
-                                        authMethod: "manual",
-                                        authorizedAt: Date(),
-                                        refreshToken: nil
-                                    )
-                                    providerStore.saveAccountInfo(acc, for: provider.id)
-                                    apiKeyInput = ""
-                                }
-                                .font(.system(size: Theme.Typography.body, weight: .medium))
+                            let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            Button("保存凭据") {
+                                providerStore.setAPIKey(trimmedKey, for: provider.id)
+                                let acc = ProviderAccountInfo(
+                                    displayName: "手动凭据",
+                                    email: "",
+                                    avatarURL: nil,
+                                    authMethod: "manual",
+                                    authorizedAt: Date(),
+                                    refreshToken: nil
+                                )
+                                providerStore.saveAccountInfo(acc, for: provider.id)
+                                apiKeyInput = ""
+                                testConnection(for: provider)
                             }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.regular)
+                            .disabled(trimmedKey.isEmpty)
                         }
                     }
                 }
@@ -326,11 +491,11 @@ struct AIServiceSettingsForm: View {
                 if let keyMethod = methods.compactMap({ $0 as? StandardAPIKeyAuthMethod }).first {
                     Text(keyMethod.footerText)
                 } else {
-                    Text("连接凭据仅保存在本机受保护目录，绝不上云。")
+                    Text("连接凭据安全保存在本机受保护目录，绝不上云。")
                 }
             }
 
-            // Antigravity 专属：OAuth 高级配置
+            // Antigravity 专属 OAuth 折叠小节
             if provider.id == "antigravity" {
                 AntigravityOAuthSettingsSection()
             }
@@ -338,9 +503,8 @@ struct AIServiceSettingsForm: View {
             // 模型能力池
             Section {
                 VStack(alignment: .leading, spacing: 10) {
-                    // 顶部操作栏
                     HStack(alignment: .center, spacing: 8) {
-                        Text("共 \(provider.models.count) 个模型")
+                        Text("可用模型 (\(provider.models.count) 个)")
                             .font(.system(size: Theme.Typography.footnote, weight: .medium))
                             .foregroundColor(.secondary)
 
@@ -354,7 +518,6 @@ struct AIServiceSettingsForm: View {
                                     .font(.system(size: Theme.Typography.footnote))
                             }
                             .buttonStyle(.borderless)
-                            .help("恢复为该服务商官方最新推荐的模型规格与能力列表")
                         }
 
                         Button {
@@ -373,7 +536,7 @@ struct AIServiceSettingsForm: View {
                                 if isFetchingModels {
                                     ProgressView().controlSize(.small)
                                 } else {
-                                    Label("拉取模型", systemImage: "arrow.down.circle")
+                                    Label("拉取模型池", systemImage: "arrow.down.circle")
                                         .font(.system(size: Theme.Typography.footnote))
                                 }
                             }
@@ -387,7 +550,7 @@ struct AIServiceSettingsForm: View {
                     if provider.models.isEmpty {
                         HStack {
                             Spacer()
-                            Text("尚未配置模型，点击上方「添加模型」或「恢复官方推荐」")
+                            Text("尚未配置模型，点击右上角「恢复官方推荐」或「添加模型」")
                                 .font(.system(size: Theme.Typography.footnote))
                                 .foregroundColor(.secondary)
                                 .padding(.vertical, 16)
@@ -396,7 +559,6 @@ struct AIServiceSettingsForm: View {
                         .background(Color.primary.opacity(0.02))
                         .cornerRadius(8)
                     } else {
-                        // 紧凑卡片列表
                         VStack(spacing: 6) {
                             ForEach(Array(provider.models.enumerated()), id: \.element.id) { index, model in
                                 modelRowView(provider: provider, model: model, index: index, count: provider.models.count)
@@ -412,7 +574,7 @@ struct AIServiceSettingsForm: View {
 
                     if !availableModels.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            TextField("在拉取的候选中搜索...", text: $modelFilter)
+                            TextField("在拉取的候选中搜索并快速添加...", text: $modelFilter)
                                 .textFieldStyle(.roundedBorder)
 
                             ScrollView(.vertical) {
@@ -451,7 +613,7 @@ struct AIServiceSettingsForm: View {
             } header: {
                 Text("模型能力池")
             } footer: {
-                Text("开启「视觉」后模型可直接理解图片；未开启时，发送图片将由视觉助手协助分析。")
+                Text("在此维护各模型的上下文规格、视觉与思考支持；点击模型卡片右侧的「设为默认」可直接设为当前对话主模型。")
             }
 
             if providerStore.providers.count > 1 {
@@ -464,42 +626,65 @@ struct AIServiceSettingsForm: View {
         }
     }
 
-    // MARK: ================== 2. 智能体管理 ==================
+    private func quickPresetPill(title: String, id: String, preset: AIProvider) -> some View {
+        let isSelected = providerStore.selectedProviderId == id
+        return Button {
+            if !providerStore.providers.contains(where: { $0.id == id }) {
+                providerStore.saveProvider(preset)
+            }
+            providerStore.selectedProviderId = id
+        } label: {
+            Text(title)
+                .font(.system(size: Theme.Typography.footnote, weight: isSelected ? .semibold : .regular))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(isSelected ? Color.accentColor.opacity(0.18) : Color.primary.opacity(0.04))
+                .foregroundColor(isSelected ? Color.accentColor : Color.primary)
+                .cornerRadius(6)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(isSelected ? Color.accentColor.opacity(0.4) : Color.clear, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: ================== 2. 角色与人设 ==================
 
     @ViewBuilder
     private var agentsFormSection: some View {
+        // 单 Agent 核心人设（极简优先）
+        singleAgentFormContent
+
+        // 高级多 Agent 协作团队（折叠收敛）
         Section {
-            Picker("", selection: executionModeBinding) {
-                Text("单 Agent 模式").tag(AIChatExecutionMode.single)
-                Text("多 Agent 协作").tag(AIChatExecutionMode.multi)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            Toggle("启用多 Agent 专家团队协作（主控/代码/识图/检索）", isOn: Binding(
+                get: { appState.settings.executionMode == .multi },
+                set: { appState.settings.executionMode = $0 ? .multi : .single }
+            ))
         } header: {
-            Text("运行模式")
+            Text("高级运行模式")
         } footer: {
             Text(appState.settings.executionMode == .single
-                 ? "单 Agent 模式（默认）：直接挂载全套可用工具自主直接调用，响应轻快利落，适合日常绝大多数任务。"
-                 : "多 Agent 协作模式：通过主控全能助理调度资料检索、代码专家、系统管家等子智能体并发协作，适合复杂长流程工程。")
+                 ? "当前为「单 Agent 模式」（默认）：直接调度绑定的模型与可用工具，响应轻快利落，零团队开销。日常绝大多数任务推荐此模式。"
+                 : "当前为「多 Agent 协作模式」：由全能助理根据任务类型将工作调度给代码专家、资料检索、系统管家等子智能体并发协作。适合长流程复杂任务。")
         }
 
-        if appState.settings.executionMode == .single {
-            singleAgentFormContent
-        } else {
+        if appState.settings.executionMode == .multi {
             multiAgentFormContent
         }
     }
 
-    // MARK: - 单 Agent 专属自适应表单
+    // MARK: - 单 Agent 专属极简表单
     @ViewBuilder
     private var singleAgentFormContent: some View {
         if let agent = currentAgent {
             Section {
-                TextField("智能体名称", text: agentNameBinding(for: agent.id))
+                TextField("助手显示名称", text: agentNameBinding(for: agent.id))
                     .textFieldStyle(.roundedBorder)
 
                 HStack(spacing: 8) {
-                    Text("图标:")
+                    Text("助手图标:")
                         .font(.system(size: Theme.Typography.body))
                     Image(systemName: agent.iconName)
                         .font(.system(size: 16, weight: .bold))
@@ -508,7 +693,7 @@ struct AIServiceSettingsForm: View {
                         .cornerRadius(6)
 
                     // 预置常用图标按钮组
-                    ForEach(["sparkles", "eye", "curlybraces", "brain.head.profile", "books.vertical", "macbook.and.iphone"], id: \.self) { sym in
+                    ForEach(["sparkles", "brain.head.profile", "eye", "curlybraces", "books.vertical", "macbook.and.iphone"], id: \.self) { sym in
                         Button {
                             var copy = agent
                             copy.iconName = sym
@@ -526,14 +711,14 @@ struct AIServiceSettingsForm: View {
                         .frame(maxWidth: 140)
                 }
 
-                TextField("职责描述", text: agentDescBinding(for: agent.id))
+                TextField("助手职责简介", text: agentDescBinding(for: agent.id))
                     .textFieldStyle(.roundedBorder)
             } header: {
-                Text("角色人设")
+                Text("助手档案")
             }
 
             Section {
-                Picker("绑定服务商", selection: agentProviderBinding(for: agent.id)) {
+                Picker("绑定算力服务商", selection: agentProviderBinding(for: agent.id)) {
                     ForEach(providerStore.providers.filter { $0.isEnabled }) { p in
                         Text(p.name).tag(p.id)
                     }
@@ -542,9 +727,9 @@ struct AIServiceSettingsForm: View {
                 let boundProvider = providerStore.provider(for: agent.providerId)
                 let models = boundProvider?.models ?? []
 
-                Picker("绑定模型", selection: agentModelBinding(for: agent.id)) {
+                Picker("绑定主模型", selection: agentModelBinding(for: agent.id)) {
                     if models.isEmpty {
-                        Text("无可用模型（请先在服务商中配置）").tag("")
+                        Text("无可用模型（请在「算力与模型」中配置）").tag("")
                     } else {
                         ForEach(models) { m in
                             HStack {
@@ -570,35 +755,43 @@ struct AIServiceSettingsForm: View {
             } header: {
                 Text("模型路由绑定")
             } footer: {
-                Text("为单 Agent 智能体指定后端算力提供商与模型规格。")
+                Text("为当前助手指定算力提供商与默认执行模型。")
             }
 
-            SingleAgentToolsSection()
-
             Section {
-                TextField("定制人设提示词，留空则使用全局默认", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
+                TextField("定制人设提示词，留空则使用内置全局通用设定", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(4...8)
+
+                HStack {
+                    Spacer()
+                    Button("恢复官方推荐人设") {
+                        var copy = agent
+                        copy.systemPrompt = "你是一个集成于 macOS 原生环境的高效、智能 AI 助手，善用系统工具为用户解决问题。"
+                        agentStore.saveAgent(copy)
+                    }
+                    .font(.system(size: Theme.Typography.footnote))
+                }
             } header: {
-                Text("系统设定 (System Prompt)")
+                Text("系统人设设定 (System Prompt)")
             } footer: {
-                Text("定义单 Agent 智能体的核心行为准则与人设特征。")
+                Text("定义 AI 助手的思考风格、语调特征与专业倾向。")
             }
         }
     }
 
-    // MARK: - 多 Agent 团队矩阵表单
+    // MARK: - 多 Agent 团队矩阵表单（仅在启用多 Agent 时展开）
     @ViewBuilder
     private var multiAgentFormContent: some View {
         Section {
             HStack(spacing: 12) {
-                Picker("选择智能体", selection: $agentStore.activeAgentId) {
+                Picker("选择要配置的专家", selection: $agentStore.activeAgentId) {
                     ForEach(agentStore.agents) { a in
                         HStack {
                             Image(systemName: a.iconName)
                             Text(a.name)
                             if a.isVisualDelegate {
-                                Text("[识图]").foregroundColor(.secondary)
+                                Text("[识图担当]").foregroundColor(.cyan)
                             }
                         }
                         .tag(a.id)
@@ -610,18 +803,18 @@ struct AIServiceSettingsForm: View {
                         addNewAgent()
                     }
                     Divider()
-                    Button("重置为官方默认团队 (全能助理、识图助理、代码专家、深度思考、资料检索、系统管家)") {
+                    Button("重置为官方默认团队 (全能、识图、代码、深度思考、检索、管家)") {
                         agentStore.resetToDefaults()
                     }
                 } label: {
-                    Label("智能体操作", systemImage: "ellipsis.circle")
+                    Label("团队操作", systemImage: "ellipsis.circle")
                         .font(.system(size: Theme.Typography.body))
                 }
             }
         } header: {
-            Text("当前激活智能体")
+            Text("多智能体团队成员")
         } footer: {
-            Text("智能体可在输入底栏点击胶囊随时切换，支持为不同任务配置专属人设、服务商、模型与思考强度。")
+            Text("团队成员可在聊天输入框点击切换胶囊随时切换，亦可在长流程中由全能助理按需自动唤醒。")
         }
 
         if let agent = currentAgent {
@@ -629,44 +822,17 @@ struct AIServiceSettingsForm: View {
                 TextField("智能体名称", text: agentNameBinding(for: agent.id))
                     .textFieldStyle(.roundedBorder)
 
-                HStack(spacing: 8) {
-                    Text("图标:")
-                        .font(.system(size: Theme.Typography.body))
-                    Image(systemName: agent.iconName)
-                        .font(.system(size: 16, weight: .bold))
-                        .frame(width: 28, height: 28)
-                        .background(Color.secondary.opacity(0.15))
-                        .cornerRadius(6)
-
-                    // 预置常用图标按钮组
-                    ForEach(["sparkles", "eye", "curlybraces", "brain.head.profile", "books.vertical", "macbook.and.iphone"], id: \.self) { sym in
-                        Button {
-                            var copy = agent
-                            copy.iconName = sym
-                            agentStore.saveAgent(copy)
-                        } label: {
-                            Image(systemName: sym)
-                                .font(.system(size: 12))
-                                .padding(4)
-                        }
-                        .buttonStyle(.borderless)
-                    }
-
-                    TextField("SF Symbol 名", text: agentIconBinding(for: agent.id))
-                        .textFieldStyle(.roundedBorder)
-                        .frame(maxWidth: 140)
-                }
-
                 TextField("职责描述", text: agentDescBinding(for: agent.id))
                     .textFieldStyle(.roundedBorder)
 
                 Toggle("启用此智能体", isOn: agentEnabledBinding(for: agent.id))
+                Toggle("设为全局视觉分析担当 (Visual Observer)", isOn: agentVisualDelegateBinding(for: agent.id))
             } header: {
-                Text("角色档案")
+                Text("专家角色档案")
             }
 
             Section {
-                Picker("绑定服务商", selection: agentProviderBinding(for: agent.id)) {
+                Picker("专属服务商", selection: agentProviderBinding(for: agent.id)) {
                     ForEach(providerStore.providers.filter { $0.isEnabled }) { p in
                         Text(p.name).tag(p.id)
                     }
@@ -675,22 +841,9 @@ struct AIServiceSettingsForm: View {
                 let boundProvider = providerStore.provider(for: agent.providerId)
                 let models = boundProvider?.models ?? []
 
-                Picker("绑定模型", selection: agentModelBinding(for: agent.id)) {
-                    if models.isEmpty {
-                        Text("无可用模型（请先在服务商中配置）").tag("")
-                    } else {
-                        ForEach(models) { m in
-                            HStack {
-                                Text(m.name)
-                                if m.supportsVision {
-                                    Text("[视觉]").foregroundColor(.cyan)
-                                }
-                                if m.supportsThinking {
-                                    Text("[思考]").foregroundColor(.indigo)
-                                }
-                            }
-                            .tag(m.id)
-                        }
+                Picker("专属模型", selection: agentModelBinding(for: agent.id)) {
+                    ForEach(models) { m in
+                        Text(m.name).tag(m.id)
                     }
                 }
 
@@ -701,59 +854,24 @@ struct AIServiceSettingsForm: View {
                     Text("高 (High)").tag(ThinkingLevel?.some(.high))
                 }
             } header: {
-                Text("模型路由绑定")
-            } footer: {
-                Text("为该智能体指定后端算力提供商与模型规格。")
-            }
-
-            Section {
-                Toggle("作为图片分析助手 (Visual Observer)", isOn: agentVisualDelegateBinding(for: agent.id))
-
-                let boundModel = providerStore.modelSpec(providerId: agent.providerId, modelId: agent.modelId)
-                if boundModel?.supportsVision == false {
-                    HStack(spacing: 6) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(Theme.Colors.statusWarning)
-                        Text("提示：当前绑定的模型未开启视觉支持，请选择具备多模态能力并勾选了「视觉」的模型。")
-                            .font(.system(size: Theme.Typography.footnote))
-                            .foregroundColor(Theme.Colors.statusWarning)
-                    }
-                }
-            } header: {
-                Text("图片辅助分析")
-            } footer: {
-                Text("当主对话模型不支持解析图片时，由该助手协助分析图像内容并将结果带回主会话。")
+                Text("模型绑定")
             }
 
             Section {
                 let resolved = agent.resolvedTools
                 HStack {
-                    Text("当前授权工具数")
+                    Text("授权工具 (\(resolved.count) / \(AIToolRegistry.shared.allTools().count))")
+                        .font(.system(size: Theme.Typography.body))
                     Spacer()
-                    Text("\(resolved.count) 项")
-                        .font(.system(size: Theme.Typography.footnote, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Button("恢复为角色推荐工具") {
+                    Button("恢复角色推荐工具") {
                         var copy = agent
                         copy.enabledTools = AIAgent.defaultToolNames(for: agent.id)
                         agentStore.saveAgent(copy)
                     }
                     .font(.system(size: Theme.Typography.footnote))
-
-                    Spacer()
-
-                    Button("授权全部已启用工具") {
-                        var copy = agent
-                        copy.enabledTools = AIToolRegistry.shared.enabledTools().map(\.name)
-                        agentStore.saveAgent(copy)
-                    }
-                    .font(.system(size: Theme.Typography.footnote))
                 }
 
-                DisclosureGroup("展开工具授权明细 (\(resolved.count) / \(AIToolRegistry.shared.allTools().count))") {
+                DisclosureGroup("展开工具白名单明细") {
                     ForEach(AIToolRegistry.shared.allTools(), id: \.name) { tool in
                         let isGranted = resolved.contains(tool.name)
                         Toggle(isOn: Binding(
@@ -779,28 +897,23 @@ struct AIServiceSettingsForm: View {
                                     .foregroundColor(.secondary)
                             }
                         }
-                        .padding(.vertical, 1)
                     }
                 }
             } header: {
-                Text("可用工具授权")
-            } footer: {
-                Text("配置该智能体可调用的工具与系统能力。")
+                Text("专家工具授权")
             }
 
             Section {
-                TextField("定制人设提示词，留空则使用全局默认", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
+                TextField("定制专家专属提示词", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(4...8)
             } header: {
-                Text("系统设定 (System Prompt)")
-            } footer: {
-                Text("定义该智能体的行为准则与角色设定。")
+                Text("专家专属提示词 (System Prompt)")
             }
 
             if agentStore.agents.count > 1 {
                 Section {
-                    Button("删除此智能体", role: .destructive) {
+                    Button("删除此专家角色", role: .destructive) {
                         agentStore.deleteAgent(id: agent.id)
                     }
                 }
@@ -808,27 +921,276 @@ struct AIServiceSettingsForm: View {
         }
     }
 
-    // MARK: ================== 3. 工具与扩展 ==================
+    // MARK: ================== 3. 工具与权限 ==================
 
     @ViewBuilder
     private var toolsFormSection: some View {
-        AIChatInteractionSettingsSection()
-        AIMermaidSettingsSection()
+        // 内置系统工具开关（按类别展示）
         AIToolsSettingsSection()
-        AIWebSearchSettingsSection()
-        AIFileWhitelistSettingsSection()
-        AIEnvVarsSettingsSection()
 
+        // 文件读写沙盒白名单
+        AIFileWhitelistSettingsSection()
+
+        // 外部联网搜索扩展（Tavily 等）
+        AIWebSearchSettingsSection()
+
+        // 环境变量扩展
+        AIEnvVarsSettingsSection()
+    }
+
+    // MARK: ================== 4. 对话与交互 ==================
+
+    @ViewBuilder
+    private var interactionFormSection: some View {
+        // 消息发送与排队行为
+        AIChatInteractionSettingsSection()
+
+        // Mermaid 图表渲染偏好
+        AIMermaidSettingsSection()
+
+        // 代码块高亮偏好
         Section {
-            HStack {
-                Text("打开 AI 对话窗")
-                Spacer()
-                KeyBadge(key: String(localized: "双击 ⌥ / I"))
+            Picker("代码高亮主题", selection: Binding(
+                get: { appState.codeHighlightTheme },
+                set: { appState.codeHighlightTheme = $0 }
+            )) {
+                ForEach(CodeHighlightTheme.allCases) { theme in
+                    Text(theme.displayName).tag(theme)
+                }
             }
         } header: {
-            Text("使用说明")
+            Text("代码渲染")
         } footer: {
-            Text("全局双击 ⌥⌥ 随时唤出 / 关闭 AI 对话窗；在输入底栏点击智能体胶囊可一键切换当前角色。")
+            Text("设置 AI 回复中代码块的语法高亮主题配色。")
+        }
+
+        // 唤醒快捷键速查提示
+        Section {
+            HStack {
+                Text("双击唤醒 AI 对话窗口")
+                Spacer()
+                KeyBadge(key: String(localized: "⌥ ⌥"))
+            }
+            HStack {
+                Text("在主信息面板中打开 AI")
+                Spacer()
+                KeyBadge(key: "I")
+            }
+        } header: {
+            Text("快捷键提示")
+        } footer: {
+            Text("可在左侧「快捷键设置」中自定义全局双击唤醒修饰键。")
+        }
+    }
+
+    // MARK: ================== 5. 模型卡片与操作 ==================
+
+    private func modelRowView(provider: AIProvider, model: AIModelSpec, index: Int, count: Int) -> some View {
+        let isEditing = (editingModelId == model.id)
+        let isHovered = (hoveredModelId == model.id)
+        let isDefault = (currentAgent?.providerId == provider.id && currentAgent?.modelId == model.id)
+
+        return VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                // 1. 左侧名称、标识与默认标签
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(model.name)
+                            .font(.system(size: Theme.Typography.body, weight: .medium))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+
+                        if isDefault {
+                            Text("当前默认")
+                                .font(.system(size: 10, weight: .semibold))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1.5)
+                                .background(Color.accentColor.opacity(0.18))
+                                .foregroundColor(Color.accentColor)
+                                .cornerRadius(4)
+                        }
+                    }
+
+                    Text(model.id)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+                .layoutPriority(0)
+
+                Spacer(minLength: 8)
+
+                // 2. 中间能力胶囊
+                HStack(spacing: 6) {
+                    Text(formatTokens(model.contextWindow))
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(Color.primary.opacity(0.06))
+                        .cornerRadius(5)
+                        .fixedSize()
+                        .help("上下文窗口: \(model.contextWindow) tokens")
+
+                    Button {
+                        toggleModelVision(providerId: provider.id, modelId: model.id)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: model.supportsVision ? "eye.fill" : "eye.slash")
+                                .font(.system(size: 10))
+                            Text("视觉")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(model.supportsVision ? Color.teal.opacity(0.16) : Color.primary.opacity(0.05))
+                        .foregroundColor(model.supportsVision ? Color.teal : Color.secondary.opacity(0.55))
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.supportsVision ? "支持视觉分析图片 (点击关闭)" : "仅文本 (点击开启视觉)")
+
+                    Button {
+                        toggleModelThinking(providerId: provider.id, modelId: model.id)
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "brain.head.profile")
+                                .font(.system(size: 10))
+                            Text("思考")
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(model.supportsThinking ? Color.purple.opacity(0.16) : Color.primary.opacity(0.05))
+                        .foregroundColor(model.supportsThinking ? Color.purple : Color.secondary.opacity(0.55))
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .help(model.supportsThinking ? "支持深度思考输出 (点击关闭)" : "不输出思考 (点击开启)")
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
+
+                // 3. 右侧操作按钮组
+                HStack(spacing: 2) {
+                    if !isDefault {
+                        Button {
+                            makeModelDefault(providerId: provider.id, modelId: model.id)
+                        } label: {
+                            Text("设为默认")
+                                .font(.system(size: 11))
+                                .foregroundColor(Color.accentColor)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Color.accentColor.opacity(0.08))
+                                .cornerRadius(5)
+                        }
+                        .buttonStyle(.plain)
+                        .help("将此模型设为当前助手默认模型")
+                    }
+
+                    // 编辑参数展开
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            editingModelId = (editingModelId == model.id ? nil : model.id)
+                        }
+                    } label: {
+                        Image(systemName: isEditing ? "xmark.circle.fill" : "slider.horizontal.3")
+                            .font(.system(size: 11))
+                            .frame(width: 20, height: 20)
+                            .foregroundColor(isEditing ? Color.accentColor : Color.secondary)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help(isEditing ? "关闭编辑" : "展开编辑参数")
+
+                    // 删除
+                    Button {
+                        removeModel(providerId: provider.id, modelId: model.id)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10))
+                            .frame(width: 20, height: 20)
+                            .foregroundColor(Color.secondary.opacity(0.55))
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("删除此模型")
+                }
+                .fixedSize(horizontal: true, vertical: false)
+                .layoutPriority(1)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isEditing ? Color.accentColor.opacity(0.06) : (isHovered ? Color.primary.opacity(0.04) : Color.primary.opacity(0.02)))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isEditing ? Color.accentColor.opacity(0.3) : (isDefault ? Color.accentColor.opacity(0.25) : Color.primary.opacity(0.06)), lineWidth: isDefault ? 1 : 0.5)
+            )
+            .onHover { h in
+                withAnimation(.easeOut(duration: 0.15)) {
+                    hoveredModelId = h ? model.id : nil
+                }
+            }
+
+            // 行内精细编辑抽屉
+            if isEditing {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("显示名称")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("显示名", text: modelNameBinding(providerId: provider.id, modelId: model.id))
+                                .textFieldStyle(.roundedBorder)
+                        }
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("模型标识 (Model ID)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    }
+
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("上下文长度 (Tokens)")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                            TextField("上下文", text: modelContextBinding(providerId: provider.id, modelId: model.id))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 180)
+                        }
+
+                        Spacer()
+
+                        Button("完成编辑") {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                editingModelId = nil
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .padding(.top, 16)
+                    }
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(Color.primary.opacity(0.02))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+            }
         }
     }
 
@@ -846,6 +1208,28 @@ struct AIServiceSettingsForm: View {
         let kw = modelFilter.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard !kw.isEmpty else { return availableModels }
         return availableModels.filter { $0.lowercased().contains(kw) }
+    }
+
+    private func makeModelDefault(providerId: String, modelId: String) {
+        if let agent = currentAgent {
+            var copy = agent
+            copy.providerId = providerId
+            copy.modelId = modelId
+            agentStore.saveAgent(copy)
+        }
+        providerStore.selectedProviderId = providerId
+    }
+
+    private func testConnection(for provider: AIProvider) {
+        testStatus[provider.id] = .testing
+        Task { @MainActor in
+            do {
+                let models = try await AIChatService.shared.fetchModels(for: provider)
+                testStatus[provider.id] = .success("连接测试成功，已检测到 \(models.count) 个可用模型")
+            } catch {
+                testStatus[provider.id] = .failed(error.localizedDescription)
+            }
+        }
     }
 
     private func addPresetProvider(_ preset: AIProvider) {
@@ -877,8 +1261,8 @@ struct AIServiceSettingsForm: View {
             id: "agent-\(UUID().uuidString.prefix(4).lowercased())",
             name: "新智能体",
             iconName: "sparkles",
-            description: "自定义职责描述",
-            systemPrompt: "你是一个专业的 AI 助手。",
+            description: "自定义专家职责",
+            systemPrompt: "你是一个专业的 AI 专家助手。",
             providerId: providerStore.selectedProviderId,
             modelId: currentProvider?.models.first?.id ?? "glm-5.3",
             thinkingLevel: nil,
@@ -901,7 +1285,7 @@ struct AIServiceSettingsForm: View {
                     set.insert(id)
                 }
                 if availableModels.isEmpty {
-                    fetchError = "接口未返回任何模型。"
+                    fetchError = "接口未返回任何可用模型。"
                 }
             } catch {
                 fetchError = error.localizedDescription
@@ -925,7 +1309,6 @@ struct AIServiceSettingsForm: View {
     private func formatAuthMethodTag(_ rawMethod: String) -> String {
         AuthMethodKind(rawValue: rawMethod)?.tagDisplayName ?? "手动凭据"
     }
-
 
     // MARK: - Provider Bindings
 
@@ -1032,32 +1415,18 @@ struct AIServiceSettingsForm: View {
         )
     }
 
-    private func modelVisionBinding(providerId: String, modelId: String) -> Binding<Bool> {
-        Binding(
-            get: {
-                providerStore.provider(for: providerId)?.models.first(where: { $0.id == modelId })?.supportsVision ?? false
-            },
-            set: { isVision in
-                guard var p = providerStore.provider(for: providerId),
-                      let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
-                p.models[idx].supportsVision = isVision
-                providerStore.saveProvider(p)
-            }
-        )
+    private func toggleModelVision(providerId: String, modelId: String) {
+        guard var p = providerStore.provider(for: providerId),
+              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
+        p.models[idx].supportsVision.toggle()
+        providerStore.saveProvider(p)
     }
 
-    private func modelThinkingBinding(providerId: String, modelId: String) -> Binding<Bool> {
-        Binding(
-            get: {
-                providerStore.provider(for: providerId)?.models.first(where: { $0.id == modelId })?.supportsThinking ?? false
-            },
-            set: { isThinking in
-                guard var p = providerStore.provider(for: providerId),
-                      let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
-                p.models[idx].supportsThinking = isThinking
-                providerStore.saveProvider(p)
-            }
-        )
+    private func toggleModelThinking(providerId: String, modelId: String) {
+        guard var p = providerStore.provider(for: providerId),
+              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
+        p.models[idx].supportsThinking.toggle()
+        providerStore.saveProvider(p)
     }
 
     private func addNewModel(providerId: String) {
@@ -1070,7 +1439,6 @@ struct AIServiceSettingsForm: View {
     private func addModelFromAvailable(providerId: String, modelId: String) {
         guard var p = providerStore.provider(for: providerId) else { return }
         guard !p.models.contains(where: { $0.id == modelId }) else { return }
-        // 从可用模型池拉取导入时赋予标准默认规格；多模态与思考链能力由用户按需在卡片中精准 toggle
         p.models.append(AIModelSpec(id: modelId, name: modelId, contextWindow: 524288, supportsVision: false, supportsThinking: false))
         providerStore.saveProvider(p)
     }
@@ -1078,29 +1446,6 @@ struct AIServiceSettingsForm: View {
     private func removeModel(providerId: String, modelId: String) {
         guard var p = providerStore.provider(for: providerId) else { return }
         p.models.removeAll(where: { $0.id == modelId })
-        providerStore.saveProvider(p)
-    }
-
-    private func moveModel(providerId: String, modelId: String, direction: Int) {
-        guard var p = providerStore.provider(for: providerId),
-              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
-        let targetIdx = idx + direction
-        guard targetIdx >= 0, targetIdx < p.models.count else { return }
-        p.models.swapAt(idx, targetIdx)
-        providerStore.saveProvider(p)
-    }
-
-    private func toggleModelVision(providerId: String, modelId: String) {
-        guard var p = providerStore.provider(for: providerId),
-              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
-        p.models[idx].supportsVision.toggle()
-        providerStore.saveProvider(p)
-    }
-
-    private func toggleModelThinking(providerId: String, modelId: String) {
-        guard var p = providerStore.provider(for: providerId),
-              let idx = p.models.firstIndex(where: { $0.id == modelId }) else { return }
-        p.models[idx].supportsThinking.toggle()
         providerStore.saveProvider(p)
     }
 
@@ -1127,259 +1472,7 @@ struct AIServiceSettingsForm: View {
         providerStore.saveProvider(p)
     }
 
-    @ViewBuilder
-    private func modelRowView(provider: AIProvider, model: AIModelSpec, index: Int, count: Int) -> some View {
-        let isEditing = (editingModelId == model.id)
-        let isHovered = (hoveredModelId == model.id)
-
-        VStack(spacing: 0) {
-            // 主卡片行 (紧凑高质感条目)
-            HStack(spacing: 10) {
-                // 1. 左侧名称与标识 (允许弹性收缩与尾部截断)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.name)
-                        .font(.system(size: Theme.Typography.body, weight: .medium))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-
-                    Text(model.id)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                .layoutPriority(0)
-
-                Spacer(minLength: 8)
-
-                // 2. 中间能力胶囊 (锁定单行与固定尺寸，最高排版优先级，绝不折行)
-                HStack(spacing: 6) {
-                    // 上下文胶囊
-                    Text(formatTokens(model.contextWindow))
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.primary.opacity(0.06))
-                        .cornerRadius(5)
-                        .fixedSize()
-                        .help("上下文窗口: \(model.contextWindow) tokens")
-
-                    // 视觉开关胶囊 (恒定 2 字，绝不折行)
-                    Button {
-                        toggleModelVision(providerId: provider.id, modelId: model.id)
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: model.supportsVision ? "eye.fill" : "eye.slash")
-                                .font(.system(size: 10))
-                            Text("视觉")
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            model.supportsVision
-                                ? Color.teal.opacity(0.16)
-                                : Color.primary.opacity(0.05)
-                        )
-                        .foregroundColor(
-                            model.supportsVision
-                                ? Color.teal
-                                : Color.secondary.opacity(0.55)
-                        )
-                        .cornerRadius(5)
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .help(model.supportsVision ? "支持视觉看图 (点击关闭)" : "仅纯文本，发图将委派 Observer 看图 (点击开启)")
-
-                    // 思考开关胶囊 (恒定 2 字，绝不折行)
-                    Button {
-                        toggleModelThinking(providerId: provider.id, modelId: model.id)
-                    } label: {
-                        HStack(spacing: 3) {
-                            Image(systemName: "brain.head.profile")
-                                .font(.system(size: 10))
-                            Text("思考")
-                                .font(.system(size: 11, weight: .medium))
-                                .lineLimit(1)
-                        }
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(
-                            model.supportsThinking
-                                ? Color.purple.opacity(0.16)
-                                : Color.primary.opacity(0.05)
-                        )
-                        .foregroundColor(
-                            model.supportsThinking
-                                ? Color.purple
-                                : Color.secondary.opacity(0.55)
-                        )
-                        .cornerRadius(5)
-                    }
-                    .buttonStyle(.plain)
-                    .fixedSize()
-                    .help(model.supportsThinking ? "支持深度思考链 (点击关闭)" : "不输出思考过程 (点击开启)")
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(1)
-
-                // 3. 右侧操作按钮组 (锁定单行，尺寸收敛)
-                HStack(spacing: 2) {
-                    // 上移
-                    Button {
-                        moveModel(providerId: provider.id, modelId: model.id, direction: -1)
-                    } label: {
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(index > 0 ? Color.secondary : Color.secondary.opacity(0.2))
-                    .disabled(index == 0)
-                    .help("上移")
-
-                    // 下移
-                    Button {
-                        moveModel(providerId: provider.id, modelId: model.id, direction: 1)
-                    } label: {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(width: 20, height: 20)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(index < count - 1 ? Color.secondary : Color.secondary.opacity(0.2))
-                    .disabled(index == count - 1)
-                    .help("下移")
-
-                    // 编辑参数展开
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            if editingModelId == model.id {
-                                editingModelId = nil
-                            } else {
-                                editingModelId = model.id
-                            }
-                        }
-                    } label: {
-                        Image(systemName: isEditing ? "xmark.circle.fill" : "slider.horizontal.3")
-                            .font(.system(size: 11))
-                            .frame(width: 20, height: 20)
-                            .foregroundColor(isEditing ? Color.accentColor : Color.secondary)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help(isEditing ? "关闭编辑" : "展开精细调整")
-
-                    // 删除
-                    Button {
-                        removeModel(providerId: provider.id, modelId: model.id)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 10))
-                            .frame(width: 20, height: 20)
-                            .foregroundColor(Color.secondary.opacity(0.55))
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("删除此模型")
-                }
-                .fixedSize(horizontal: true, vertical: false)
-                .layoutPriority(1)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isEditing ? Color.accentColor.opacity(0.06) : (isHovered ? Color.primary.opacity(0.04) : Color.primary.opacity(0.02)))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isEditing ? Color.accentColor.opacity(0.3) : Color.primary.opacity(0.06), lineWidth: 0.5)
-            )
-            .onHover { h in
-                withAnimation(.easeOut(duration: 0.15)) {
-                    hoveredModelId = h ? model.id : nil
-                }
-            }
-
-            // 行内精细编辑抽屉（展开态）
-            if isEditing {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("显示名称")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                            TextField("显示名", text: modelNameBinding(providerId: provider.id, modelId: model.id))
-                                .textFieldStyle(.roundedBorder)
-                        }
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("模型标识 (Model ID)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                            TextField("模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
-                                .textFieldStyle(.roundedBorder)
-                        }
-                    }
-
-                    HStack(spacing: 12) {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("上下文长度 (Tokens)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-                            TextField("上下文", text: modelContextBinding(providerId: provider.id, modelId: model.id))
-                                .textFieldStyle(.roundedBorder)
-                                .frame(maxWidth: 180)
-                        }
-
-                        Spacer()
-
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                editingModelId = nil
-                            }
-                        } label: {
-                            Text("完成编辑")
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                        .padding(.top, 16)
-                    }
-                }
-                .labelsHidden()
-                .padding(10)
-                .background(
-                    RoundedRectangle(cornerRadius: 7)
-                        .fill(Color.primary.opacity(0.02))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
-                )
-                .padding(.horizontal, 4)
-                .padding(.top, 4)
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-    }
-
     // MARK: - Agent Bindings
-
-    private var executionModeBinding: Binding<AIChatExecutionMode> {
-        Binding(
-            get: { appState.settings.executionMode },
-            set: { appState.settings.executionMode = $0 }
-        )
-    }
 
     private func agentNameBinding(for agentId: String) -> Binding<String> {
         Binding(
@@ -1487,160 +1580,3 @@ struct AIServiceSettingsForm: View {
         )
     }
 }
-
-// MARK: - 单 Agent 专属工具挂载小节
-struct SingleAgentToolsSection: View {
-    @State private var enabledNames: Set<String>
-    private let availableGroups: [(category: ToolCategory, tools: [AITool])]
-    private let allAvailableTools: [AITool]
-
-    init() {
-        let registry = AIToolRegistry.shared
-        let multiAgentInternalTools: Set<String> = ["launch_subagents", "send_message"]
-        let allTools = registry.allTools().filter { !multiAgentInternalTools.contains($0.name) }
-        self.allAvailableTools = allTools
-
-        let rawGroups = registry.toolsGroupedByCategory()
-        self.availableGroups = rawGroups.compactMap { group in
-            let filtered = group.tools.filter { !multiAgentInternalTools.contains($0.name) }
-            return filtered.isEmpty ? nil : (group.category, filtered)
-        }
-
-        let active = registry.enabledTools().map(\.name)
-        _enabledNames = State(initialValue: Set(active))
-    }
-
-    private var enabledCount: Int {
-        allAvailableTools.filter { enabledNames.contains($0.name) }.count
-    }
-
-    var body: some View {
-        Section {
-            HStack {
-                Text("已挂载工具")
-                Spacer()
-                Text("\(enabledCount) / \(allAvailableTools.count) 项")
-                    .font(.system(size: Theme.Typography.footnote, design: .monospaced))
-                    .foregroundColor(.secondary)
-            }
-
-            HStack(spacing: 12) {
-                Button("全部挂载") {
-                    mountAll()
-                }
-                .font(.system(size: Theme.Typography.footnote))
-
-                Button("取消全部") {
-                    unmountAll()
-                }
-                .font(.system(size: Theme.Typography.footnote))
-
-                Spacer()
-
-                Button("恢复推荐默认") {
-                    resetToDefault()
-                }
-                .font(.system(size: Theme.Typography.footnote))
-            }
-
-            ForEach(availableGroups, id: \.category) { group in
-                Text(group.category.label)
-                    .font(.system(size: Theme.Typography.footnote, weight: .semibold))
-                    .foregroundColor(.secondary)
-                    .padding(.top, 6)
-
-                ForEach(group.tools, id: \.name) { tool in
-                    toolRow(tool)
-                }
-            }
-        } header: {
-            Text("挂载工具")
-        } footer: {
-            Text("单 Agent 模式下拥有在此勾选的全部工具；大模型在对话中根据需要自主直接调用。涉及修改系统状态的敏感工具在执行前会向您发起二次确认。")
-        }
-    }
-
-    private func toolRow(_ tool: AITool) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Toggle(isOn: enabledBinding(for: tool.name)) {
-                HStack(spacing: 6) {
-                    Text(tool.displayName)
-                        .font(.system(size: Theme.Typography.body))
-                    if tool.isDangerous {
-                        dangerousBadge
-                    }
-                    Spacer(minLength: 4)
-                    Text(tool.name)
-                        .font(.system(size: Theme.Typography.footnote, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Text(tool.description)
-                .font(.system(size: Theme.Typography.footnote))
-                .foregroundColor(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            if tool.name == "run_shell" {
-                Text("允许 AI 执行任意 shell 命令，有安全风险")
-                    .font(.system(size: Theme.Typography.footnote))
-                    .foregroundColor(Theme.Colors.statusWarning)
-            }
-        }
-        .padding(.vertical, 2)
-    }
-
-    private var dangerousBadge: some View {
-        Text("危险")
-            .font(.system(size: Theme.Typography.micro, weight: .semibold))
-            .foregroundColor(Theme.Colors.statusWarning)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                    .fill(Theme.Colors.statusWarning.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                    .stroke(Theme.Colors.statusWarning.opacity(0.28), lineWidth: 0.5)
-            )
-    }
-
-    private func enabledBinding(for name: String) -> Binding<Bool> {
-        Binding(
-            get: { enabledNames.contains(name) },
-            set: { newValue in
-                if newValue {
-                    enabledNames.insert(name)
-                } else {
-                    enabledNames.remove(name)
-                }
-                persist()
-            }
-        )
-    }
-
-    private func mountAll() {
-        for t in allAvailableTools {
-            enabledNames.insert(t.name)
-        }
-        persist()
-    }
-
-    private func unmountAll() {
-        enabledNames.removeAll()
-        persist()
-    }
-
-    private func resetToDefault() {
-        let defaultDisabled: Set<String> = ["run_shell"]
-        enabledNames = Set(allAvailableTools.map(\.name).filter { !defaultDisabled.contains($0) })
-        persist()
-    }
-
-    private func persist() {
-        let registry = AIToolRegistry.shared
-        let ordered = registry.allTools().map(\.name).filter { enabledNames.contains($0) }
-        UserDefaults.standard.set(ordered, forKey: AIToolRegistry.enabledToolsKey)
-    }
-}
-
