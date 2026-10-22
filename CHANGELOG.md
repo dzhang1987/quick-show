@@ -6,6 +6,12 @@
 
 ### Added
 
+- **主 Agent 顶栏会话标题与身份指示系统（`AIChatView.swift`）**：
+  - **多维度上下文锚点统一**：消除此前主 Agent 顶栏中部的空白断层，在顶部拖动条（`windowTopBar`）核心区域居中呈现当前绑定的智能体身份（图标 + 名称）及当前会话主题（`session.title`），侧边栏收起时也能秒级把握当前会话上下文；
+  - **拖拽穿透与原生手感保障（`allowsHitTesting(false)`）**：顶栏标题以语义化轻量文本居中展示，完全穿透鼠标事件，拖拽标题区域即可平滑移动整个无边框窗口，零损耗保留全宽度的窗口拖拽热区；
+  - **阅读列对称避让布局**：接入统一的 `chatReadingColumn(alignment: .center)`，左侧对齐侧边栏切换按钮，右侧引入与图钉按钮（`pinButton`）等宽的透明占位，使标题在两端功能按键之间严格保持几何居中；配置两侧最小安全间距与单行自动截断省略（`truncationMode(.tail)`），极端窄窗或超长标题下绝不挤压或遮盖两侧功能键；
+  - **响应式状态直连**：引入对 `AIAgentStore.shared` 的响应式观察，无论是用户在偏好中切换激活智能体，还是 LLM 在后台完成首条消息语义摘要更新标题，顶栏标题均毫秒级自动热刷新。
+
 - **代码高亮多主题系统与实时响应架构（`CodeHighlightTheme` / `MarkdownHighlighter.swift` / `MarkdownCodeBlock.swift` / `SettingsGeneralForms.swift`）**：
   - **4 套现代高亮主题开闭原则抽象**：定义面向协议的 `CodeHighlightTheme` 策略枚举，内置精调 CSS：Atom One（色彩均衡丰富，推荐）、Tokyo Night（暗夜霓虹柔彩）、GitHub（经典中性极客）、Nord（北欧极简冷蓝）；
   - **偏好设置与持久化**：在「偏好设置 - 外观」新增代码高亮主题选择器，统一由 `SettingsStore` 持久化管理；

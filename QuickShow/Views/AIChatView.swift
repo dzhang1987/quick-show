@@ -33,6 +33,8 @@ struct AIChatView: View {
     @ObservedObject var state: AIChatState
     /// 输入坞抽屉交互中心：观察 request 驱动抽屉展开/收起（权限确认 / AI 提问）。
     @ObservedObject private var interaction = ChatInteractionCenter.shared
+    /// 智能体仓库：观察当前激活智能体或角色变更以实时刷新顶栏身份。
+    @ObservedObject private var agentStore = AIAgentStore.shared
     var onOpenSettings: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -556,14 +558,23 @@ struct AIChatView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.trailing, Theme.Layout.iconButtonSize + Theme.Spacing.xxl)
                 } else {
-                    HStack {
+                    HStack(spacing: 0) {
                         sidebarToggleButton
-                            .chatReadingColumn(alignment: .leading)
                             .opacity(sidebarVisible ? 0 : 1)
                             .allowsHitTesting(!sidebarVisible)
                             .animation(.easeInOut(duration: Theme.Motion.windowResize), value: sidebarVisible)
-                        Spacer()
+
+                        Spacer(minLength: Theme.Spacing.md)
+
+                        mainSessionTitleView
+
+                        Spacer(minLength: Theme.Spacing.md)
+
+                        // 对称占位（对齐 pinButton 的尺寸），保证 mainSessionTitleView 在左右按钮间严格居中
+                        Color.clear
+                            .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
                     }
+                    .chatReadingColumn(alignment: .center)
                 }
             }
             .overlay(alignment: .trailing) {
@@ -575,6 +586,41 @@ struct AIChatView: View {
         // 纯透明热区：不铺 glass/底色/描边——顶栏只承担拖动与图钉命中功能，
         // 根部内容材质一铺到窗口圆角，恢复重构前的一体观感（告别独立「帽子」横带）。
         // WindowDragHandle 命中区完整保留，拖动/吸附功能不受影响。
+    }
+
+    // MARK: - 主 Agent 会话标题（居中展示：Agent 身份 + 会话主题，拖拽完全穿透）
+
+    private var mainSessionTitleView: some View {
+        let currentSession = state.store.currentSession
+        let agentId = currentSession?.agentId ?? agentStore.activeAgentId
+        let agent = agentStore.agent(for: agentId) ?? agentStore.activeAgent
+        let sessionTitle = currentSession?.title ?? String(localized: "新会话")
+
+        return HStack(spacing: Theme.Spacing.chip) {
+            Image(systemName: agent.iconName)
+                .font(Theme.Typography.text(10, .medium))
+                .foregroundColor(Theme.Colors.accent)
+                .layoutPriority(1)
+
+            Text(agent.name)
+                .font(Theme.Typography.text(11, .medium))
+                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                .lineLimit(1)
+                .layoutPriority(1)
+
+            Text("·")
+                .font(Theme.Typography.text(10, .regular))
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .layoutPriority(1)
+
+            Text(sessionTitle)
+                .font(Theme.Typography.text(11, .semibold))
+                .foregroundColor(Theme.Colors.contentPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .layoutPriority(0)
+        }
+        .allowsHitTesting(false)
     }
 
     /// 侧栏展开按钮（仅在侧栏收起时显示在主区顶栏左侧，与图钉对称并对齐阅读列左缘）
