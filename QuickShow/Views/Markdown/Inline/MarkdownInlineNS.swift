@@ -64,13 +64,36 @@ enum MarkdownInlineNS {
         return color
     }
 
-    /// 行内代码底色：chatInlineCodeFill = Color.primary.opacity(0.10) 的 NSColor 近似。
-    private static var codeBackground: NSColor {
-        adaptiveLabel(opacity: 0.10)
+    /// 行内代码底色：自适应通透中性柔底（方案 A：暗色 12% 白 / 亮色 5.5% 黑）
+    private static let _codeBackground: NSColor = {
+        let colorName = NSColor.Name("quickshow.markdown.codeBackground")
+        return NSColor(name: colorName) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor.white.withAlphaComponent(0.12)
+                : NSColor.black.withAlphaComponent(0.055)
+        }
+    }()
+    static var codeBackground: NSColor {
+        _codeBackground
+    }
+
+    /// 行内代码 0.5pt 微描边颜色（方案 A：暗色 14% 白 / 亮色 9% 黑）
+    private static let _codeStroke: NSColor = {
+        let colorName = NSColor.Name("quickshow.markdown.codeStroke")
+        return NSColor(name: colorName) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return isDark
+                ? NSColor.white.withAlphaComponent(0.14)
+                : NSColor.black.withAlphaComponent(0.09)
+        }
+    }()
+    static var codeStroke: NSColor {
+        _codeStroke
     }
 
     /// 键盘按键（`<kbd>`）底色：比行内代码深半档以突显键帽感。
-    private static var kbdBackground: NSColor {
+    static var kbdBackground: NSColor {
         adaptiveLabel(opacity: 0.14)
     }
 
@@ -140,20 +163,22 @@ enum MarkdownInlineNS {
                 let piece = NSAttributedString(
                     string: value,
                     attributes: [
-                        .font: monoFont(size: 12.5, weight: .medium),
+                        .font: monoFont(size: max(baseSize - 0.5, 9), weight: .medium),
                         .foregroundColor: NSColor.labelColor,
                         .backgroundColor: codeBackground,
+                        .flowInlineCode: true,
                     ]
                 )
                 result.append(piece)
 
             case let .kbd(value):
                 let piece = NSAttributedString(
-                    string: "\u{2009}\(value)\u{2009}",
+                    string: value,
                     attributes: [
                         .font: monoFont(size: max(baseSize - 1, 9), weight: .semibold),
                         .foregroundColor: NSColor.labelColor,
                         .backgroundColor: kbdBackground,
+                        .flowKbd: true,
                     ]
                 )
                 result.append(piece)

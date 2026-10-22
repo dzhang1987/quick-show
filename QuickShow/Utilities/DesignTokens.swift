@@ -236,9 +236,10 @@ enum Theme {
         static let chatSendDisabledFill = aiAdaptive(dark: (1, 1, 1, 0.18), light: (0, 0, 0, 0.14))
 
         // —— 2026-10 AI 窗视觉重设计（刻度轨导航 / 行内代码提亮 / 浮层深底）——
-        /// 行内代码 chip 底色：比面板亮一档（primary 0.10，旧值 surfaceTrack 0.06 在玻璃上近乎隐形）；
-        /// AttributedString 渲染管线不支持背景框描边，对比度由底色 + 主文字色承担
-        static let chatInlineCodeFill = Color.primary.opacity(0.10)
+        /// 行内代码 chip 底色：自适应通透中性柔底（方案 A：暗色 12% 白 / 亮色 5.5% 黑）
+        static let chatInlineCodeFill = aiAdaptive(dark: (1, 1, 1, 0.12), light: (0, 0, 0, 0.055))
+        /// 行内代码 0.5pt 微描边颜色（方案 A：暗色 14% 白 / 亮色 9% 黑）
+        static let chatInlineCodeStroke = aiAdaptive(dark: (1, 1, 1, 0.14), light: (0, 0, 0, 0.09))
         // 刻度轨明暗梯度（与大小放大共用同一条余弦权重曲线，大小与明暗同步流动）：
         // 静止 = rest；光标正下方 = bright；远端 = dim（比静止更暗——放大态下全轨变暗、
         // 波峰提亮，梯度可辨）；当前条恒 accent、明暗与大小共用余弦权重同步流动
@@ -353,6 +354,7 @@ enum Theme {
         static let keyCap: CGFloat = 5      // 快捷键键帽
         static let userBubble: CGFloat = 14 // 用户消息气泡（保持对话气泡圆润感）
         static let previewCapsule: CGFloat = 8 // 刻度轨预览胶囊（2026-10 重设计）
+        static let inlineCode: CGFloat = 3.5 // 行内代码/微徽章圆角（方案 A 胶囊质感）
     }
     
     // MARK: - 布局尺寸（面板尺寸档位的单一来源；ScreenHelper.metrics 引用此处，逻辑不搬）

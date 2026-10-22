@@ -10,6 +10,10 @@ extension NSAttributedString.Key {
     static let flowHeading1 = NSAttributedString.Key("quickshow.flow.heading1")
     /// 标记该区间为水平分割线（Horizontal Rule），驱动 LayoutManager 绘制水平居中细线
     static let flowHorizontalRule = NSAttributedString.Key("quickshow.flow.horizontalRule")
+    /// 标记该区间为行内代码（Inline Code），驱动 LayoutManager 绘制圆角背景与精致微描边
+    static let flowInlineCode = NSAttributedString.Key("quickshow.flow.inlineCode")
+    /// 标记该区间为键盘按键（`<kbd>`），驱动 LayoutManager 绘制微键帽
+    static let flowKbd = NSAttributedString.Key("quickshow.flow.kbd")
 }
 
 // MARK: - 连续文本流排版与背景装饰管理器
@@ -50,6 +54,86 @@ final class FlowLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
             return true
         }
         return false
+    }
+
+    // MARK: - 自定义行内代码与键帽圆角背景绘制（接管 TextKit 底层 fillBackgroundRectArray）
+
+    override func fillBackgroundRectArray(
+        _ rectArray: UnsafePointer<NSRect>,
+        count rectCount: Int,
+        forCharacterRange charRange: NSRange,
+        color: NSColor
+    ) {
+        guard let storage = textStorage,
+              storage.length > 0,
+              charRange.location < storage.length else {
+            super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: color)
+            return
+        }
+
+        let isCode = storage.attribute(.flowInlineCode, at: charRange.location, effectiveRange: nil) != nil
+        let isKbd = storage.attribute(.flowKbd, at: charRange.location, effectiveRange: nil) != nil
+
+        guard isCode || isKbd else {
+            super.fillBackgroundRectArray(rectArray, count: rectCount, forCharacterRange: charRange, color: color)
+            return
+        }
+
+        let fillColor = isKbd ? MarkdownInlineNS.kbdBackground : MarkdownInlineNS.codeBackground
+        let strokeColor = MarkdownInlineNS.codeStroke
+        let radius = isKbd ? Theme.Radius.keyCap : Theme.Radius.inlineCode
+        let font = (storage.attribute(.font, at: charRange.location, effectiveRange: nil) as? NSFont)
+            ?? MarkdownInlineNS.monoFont(size: 12.5, weight: .medium)
+        let capHeight = font.capHeight
+        let badgeHeight: CGFloat = isKbd ? 17.0 : 16.5
+        let hPadding: CGFloat = 3.0
+        let container = textContainers.first ?? NSTextContainer()
+
+        for i in 0..<rectCount {
+            let rect = rectArray[i]
+            guard rect.width > 0 && rect.height > 0 else { continue }
+
+            // 1. 精准基线与上下对称：基于字形 nominal location 锚定基线，以字心大写中线为几何中心均分
+            let midX = rect.midX
+            let midY = rect.midY
+            let glyphIndex = self.glyphIndex(for: NSPoint(x: midX, y: midY), in: container)
+            let loc = self.location(forGlyphAt: glyphIndex)
+            let baselineOffset = loc.y > 0 ? loc.y : (font.ascender + 1.0)
+            let baselineY = rect.origin.y + baselineOffset
+            let textCenterY = baselineY - (capHeight * 0.5)
+            let badgeY = (textCenterY - (badgeHeight / 2.0)).rounded()
+
+            // 2. 纯几何外扩水平呼吸空间（不再向字符流硬塞空白符，杜绝误换行与空块）
+            var drawX = rect.origin.x
+            var drawWidth = rect.width
+
+            if rectCount == 1 {
+                drawX -= hPadding
+                drawWidth += (hPadding * 2)
+            } else {
+                if i == 0 {
+                    drawX -= hPadding
+                    drawWidth += hPadding
+                } else if i == rectCount - 1 {
+                    drawWidth += hPadding
+                }
+            }
+
+            let drawRect = NSRect(
+                x: max(drawX, 0),
+                y: badgeY,
+                width: max(drawWidth, 4),
+                height: badgeHeight
+            )
+
+            let path = NSBezierPath(roundedRect: drawRect, xRadius: radius, yRadius: radius)
+            fillColor.setFill()
+            path.fill()
+
+            path.lineWidth = 0.5
+            strokeColor.setStroke()
+            path.stroke()
+        }
     }
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
@@ -234,6 +318,27 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
     override func viewDidChangeEffectiveAppearance() {
         super.viewDidChangeEffectiveAppearance()
         needsDisplay = true
+    }
+
+    // MARK: - 剪贴板防污染（清洗排版专用装饰符与段内软换行）
+    override func writeSelection(to pboard: NSPasteboard, types: [NSPasteboard.PasteboardType]) -> Bool {
+        let success = super.writeSelection(to: pboard, types: types)
+        guard success, types.contains(.string), let str = pboard.string(forType: .string) else {
+            return success
+        }
+        var clean = str
+        // 清洗 Thin Space (\u{2009})，杜绝粘入终端或编辑器引发语法错误
+        if clean.contains("\u{2009}") {
+            clean = clean.replacingOccurrences(of: "\u{2009}", with: "")
+        }
+        // 段内软换行归一回真实换行
+        if clean.contains("\u{2028}") {
+            clean = clean.replacingOccurrences(of: "\u{2028}", with: "\n")
+        }
+        if clean != str {
+            pboard.setString(clean, forType: .string)
+        }
+        return success
     }
 
     // 垂直滚轮手势平滑穿透：让外层聊天窗口的 NSScrollView 自然滚动
