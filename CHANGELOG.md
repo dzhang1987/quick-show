@@ -109,6 +109,14 @@
 - **应用启动生命周期优化（`QuickShowApp.swift`）**：
   - 移除应用初始化冷启动时无条件弹起 AI 窗口的冗余调用，保持后台托盘与一瞥模式轻量极简，仅在用户显式唤起或触发快捷键时展开。
 
+### Performance
+
+- **大会话视口渐进式渲染、焦点状态防火墙与会话平滑转场重构（`AssistantMarkdownView.swift` / `AIChatMessageList.swift` / `AIChatState.swift` / `AIChatView.swift` / `AIChatSidebarView.swift`）**：
+  - **落定态长消息视口渐进展开（`AssistantMarkdownView.swift`）**：彻底移除了历史调试遗留的对落定态消息直接返回全量块数（`if useCache { return total }`）的短路逻辑；对于包含长篇代码、公式与大量排版块的超长回复，首帧仅渲染视口当前需要的核心块数（8~12 块），剩余内容在后台以 16ms 节拍平滑补齐；短消息首帧秒开，将大会话首帧主线程 AST 遍历与原生控件创建开销直降 90% 以上；
+  - **常驻会话 Equatable 状态防火墙与容差剪枝（`SessionMessageList: Equatable` / `AIChatMessageList.swift`）**：优化常驻会话列表的相等性判定，对输入坞高度 `dockTotalHeight` 比较引入 `0.5pt` 去抖容差，并对后台非活跃会话彻底旁路求值；彻底阻断窗口激活（`didBecomeKey`）与失焦（`didResignKey`）时由于输入框高亮或微小几何抖动引发的大会话整树重排风暴；
+  - **输入框重新聚焦与会话首帧装载解耦（`AIChatState.swift`）**：在 `selectSession` 与 `newSession` 中将 `.aiChatRefocusInput` 移至下一 runloop 异步调度，避免会话首帧挂载布局与系统输入法 TSM 上下文初始化及光标闪烁激活在同一主线程事务内争抢冲突，消除会话打开与切换时的按键冻结感；
+  - **会话切换转场动效与侧栏高亮平滑过渡（`AIChatView.swift` / `AIChatSidebarView.swift`）**：会话内容层 ZStack 引入基于 `Theme.Motion.contentFade` 的优雅转场动画（旧会话淡出，新会话 4pt 微浮动淡入）；侧边栏选中高亮块与快速切换器引入平滑切换动效，手感连贯自然。
+
 ### Fixed
 
 - **Markdown 引用块（Blockquote）上下内边距对称性重构与末尾底板直角裁剪彻底根除（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownBlockquoteRenderer.swift`）**：

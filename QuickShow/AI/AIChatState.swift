@@ -552,13 +552,17 @@ final class AIChatState: ObservableObject {
         draftModelId = nil
         draftThinkingLevel = nil
         guard store.currentSessionId != nil else {
-            // 当前已在新会话草稿态，复用当前界面并请求输入框重新聚焦
-            NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+            // 当前已在新会话草稿态，复用当前界面并在下一 runloop 请求输入框重新聚焦
+            DispatchQueue.main.async {
+                NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+            }
             return
         }
         flushDraft()
         store.currentSessionId = nil
-        NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        }
     }
 
     /// 切换当前会话（不打断任何会话的进行中生成——并行生成核心语义）。
@@ -571,6 +575,10 @@ final class AIChatState: ObservableObject {
         // 切走前立即落盘旧会话草稿（不等防抖），随后订阅以 switchDraft 载入新会话草稿。
         flushDraft()
         store.currentSessionId = id
+        // 关键解耦：延后至下一 runloop 调度输入框聚焦，避免在同个事务内与首帧布局争夺响应者链和输入法 TSM
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
+        }
     }
 
     // MARK: - 会话草稿（输入框按会话持久化）

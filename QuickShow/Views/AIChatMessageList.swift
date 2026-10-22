@@ -638,15 +638,23 @@ extension SessionMessageList: Equatable {
     /// 配合父级 .equatable()：父级 body 重求值时未变的常驻会话跳过整棵子树，
     /// 聚焦/失焦/pin 等非消息变化不再冲刷 12 棵会话的 ForEach + 虚拟化。
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.sessionId == rhs.sessionId
-            && lhs.isActive == rhs.isActive
-            && lhs.dockTotalHeight == rhs.dockTotalHeight
-            && lhs.messages.count == rhs.messages.count
-            && lhs.messages.first?.id == rhs.messages.first?.id
-            && lhs.messages.last?.id == rhs.messages.last?.id
-            && lhs.messages.last?.state == rhs.messages.last?.state
-            && lhs.messages.last?.content.count == rhs.messages.last?.content.count
-            && lhs.messages.last?.reasoning?.count == rhs.messages.last?.reasoning?.count
-            && lhs.compactionStamp == rhs.compactionStamp
+        guard lhs.sessionId == rhs.sessionId,
+              lhs.isActive == rhs.isActive,
+              lhs.messages.count == rhs.messages.count,
+              lhs.messages.first?.id == rhs.messages.first?.id,
+              lhs.messages.last?.id == rhs.messages.last?.id,
+              lhs.messages.last?.state == rhs.messages.last?.state,
+              lhs.messages.last?.content.count == rhs.messages.last?.content.count,
+              lhs.messages.last?.reasoning?.count == rhs.messages.last?.reasoning?.count,
+              lhs.compactionStamp == rhs.compactionStamp
+        else {
+            return false
+        }
+        // 关键性能防线：非活跃常驻会话对坞体高度不敏感，无需重算；
+        // 活跃会话仅在坞高变化超过 0.5pt 阈值时触发重排，消除失焦/聚焦及窗口激活时的浮点微抖引发的整树重绘风暴。
+        if lhs.isActive {
+            return abs(lhs.dockTotalHeight - rhs.dockTotalHeight) < 0.5
+        }
+        return true
     }
 }

@@ -146,7 +146,11 @@ struct AIChatView: View {
                 streamingSessionIds: state.streamingSessionIds,
                 unreadSessionIds: state.unreadSessionIds,
                 onAbortStreaming: { id in state.abortStreaming(sessionId: id) },
-                onSelect: { id in state.selectSession(id: id) },
+                onSelect: { id in
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                        state.selectSession(id: id)
+                    }
+                },
                 onNewSession: { newSession() },
                 onToggleSidebar: { toggleSidebar() }
             )
@@ -218,7 +222,9 @@ struct AIChatView: View {
                         streamingSessionIds: state.streamingSessionIds,
                         unreadSessionIds: state.unreadSessionIds,
                         onSelectSession: { id in
-                            state.selectSession(id: id)
+                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                                state.selectSession(id: id)
+                            }
                         },
                         onDismiss: {
                             closeQuickSwitcher()
@@ -337,7 +343,9 @@ struct AIChatView: View {
         // 会话切换检测（根级恒挂载）：把新会话置入 LRU 常驻集合头部，超限淘汰尾部（视图卸载）。
         // dropFirst 跳过订阅时重放的当前值，避免首挂载误判；常驻集合已由 init 以当前会话起步。
         .onReceive(state.store.$currentSessionId.dropFirst()) { newId in
-            updateResidency(for: newId)
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                updateResidency(for: newId)
+            }
             scrollCoordinator.activeSessionId = newId
         }
         // 会话删除检测：清理被删会话的滚动快照与 LRU 常驻项，防死项累积。
@@ -696,6 +704,8 @@ struct AIChatView: View {
                 )
                 .equatable()
                 .opacity(isActive ? 1 : 0)
+                .offset(y: isActive ? 0 : 4)
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: isActive)
                 .allowsHitTesting(isActive)
             }
         }

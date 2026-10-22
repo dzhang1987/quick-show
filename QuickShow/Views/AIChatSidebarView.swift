@@ -490,6 +490,7 @@ private struct SessionRowView: View {
             RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                 // 背景色块专属选中态；hover 不再铺背景（文字提亮 + ⋯ 渐显已足够表达）
                 .fill(isSelected ? Theme.Colors.accent.opacity(0.14) : Color.clear)
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: isSelected)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
@@ -623,6 +624,7 @@ private struct ChildSessionRowView: View {
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                 .fill(isSelected ? Theme.Colors.accent.opacity(0.12) : Color.clear)
+                .animation(.easeOut(duration: Theme.Motion.contentFade), value: isSelected)
         )
         .contentShape(Rectangle())
         .onTapGesture(perform: onSelect)
