@@ -10,19 +10,19 @@ import AppKit
 /// - widget: 代码块（带复制按钮与横滚）、表格、公式、图片段落等保留为独立 SwiftUI 组件。
 enum MarkdownDisplaySegment: Identifiable, Equatable {
     case textFlow(id: String, content: NSAttributedString, topSpacing: CGFloat)
-    case widget(id: String, block: MarkdownBlock, topSpacing: CGFloat)
+    case widget(id: String, block: MarkdownBlock, topSpacing: CGFloat, leadingIndent: CGFloat = 0)
 
     var id: String {
         switch self {
         case let .textFlow(id, _, _): return id
-        case let .widget(id, _, _): return id
+        case let .widget(id, _, _, _): return id
         }
     }
 
     var topSpacing: CGFloat {
         switch self {
         case let .textFlow(_, _, spacing): return spacing
-        case let .widget(_, _, spacing): return spacing
+        case let .widget(_, _, spacing, _): return spacing
         }
     }
 
@@ -30,8 +30,8 @@ enum MarkdownDisplaySegment: Identifiable, Equatable {
         switch (lhs, rhs) {
         case let (.textFlow(id1, content1, s1), .textFlow(id2, content2, s2)):
             return id1 == id2 && s1 == s2 && content1.isEqual(to: content2)
-        case let (.widget(id1, b1, s1), .widget(id2, b2, s2)):
-            return id1 == id2 && s1 == s2 && b1 == b2
+        case let (.widget(id1, b1, s1, i1), .widget(id2, b2, s2, i2)):
+            return id1 == id2 && s1 == s2 && i1 == i2 && b1 == b2
         default:
             return false
         }

@@ -12,10 +12,10 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
     }
 
     func capabilities(for block: MarkdownBlock) -> BlockCapabilities {
-        guard case let .heading(level, inlines) = block else { return .interactiveWidget }
-        // H2 ~ H6 纯排版标题在无复杂内联（图片、公式、注音）时可无缝并入连续 TextKit 文本流；
-        // H1 带有质感底部分割线 Rectangle，作为独立 widget 渲染以保质感。
-        if level >= 2 && !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby {
+        guard case let .heading(_, inlines) = block else { return .interactiveWidget }
+        // H1 ~ H6 纯排版标题在无复杂内联（图片、公式、注音）时可无缝并入连续 TextKit 文本流；
+        // H1 通过 FlowLayoutManager 绘制底部分割线，保持与正文连贯框选复制。
+        if !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby {
             return .textFlowCompatible
         }
         return .interactiveWidget
@@ -45,6 +45,7 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
         guard case let .heading(level, inlines) = block else { return }
         let (size, weight): (CGFloat, NSFont.Weight) = {
             switch level {
+            case 1: return (18, .bold)
             case 2: return (16, .semibold)
             case 3: return (14, .semibold)
             case 4: return (13, .semibold)
@@ -62,14 +63,18 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
         )
         let headingPiece = NSMutableAttributedString(attributedString: render.attributed)
 
+        if level == 1 {
+            headingPiece.addAttribute(.flowHeading1, value: true, range: NSRange(location: 0, length: headingPiece.length))
+        }
+
         let hasNext = nextBlock != nil
         if hasNext {
             headingPiece.append(NSAttributedString(string: "\n", attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
         }
 
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 2
-        style.paragraphSpacing = hasNext ? 8 : 0
+        style.lineSpacing = level == 1 ? 4 : 2
+        style.paragraphSpacing = hasNext ? (level == 1 ? 14 : 8) : 0
         headingPiece.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: headingPiece.length))
 
         result.append(headingPiece)

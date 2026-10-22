@@ -49,12 +49,12 @@ final class MarkdownParagraphRenderer: MarkdownBlockRenderer {
         }
 
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 6
+        style.lineSpacing = 5
         if let next = nextBlock {
             if case .heading = next {
-                style.paragraphSpacing = 20
+                style.paragraphSpacing = 18
             } else {
-                style.paragraphSpacing = 14
+                style.paragraphSpacing = 12
             }
         } else {
             style.paragraphSpacing = 0

@@ -1,6 +1,133 @@
 import SwiftUI
 import AppKit
 
+// MARK: - TextKit 原生连续流自定义属性
+
+extension NSAttributedString.Key {
+    /// 标记该区间为引用块（Blockquote），驱动 LayoutManager 绘制左侧装饰细条与衬底
+    static let flowBlockquote = NSAttributedString.Key("quickshow.flow.blockquote")
+    /// 标记该区间为 H1 标题，驱动 LayoutManager 在末尾绘制底部分割线
+    static let flowHeading1 = NSAttributedString.Key("quickshow.flow.heading1")
+    /// 标记该区间为水平分割线（Horizontal Rule），驱动 LayoutManager 绘制水平居中细线
+    static let flowHorizontalRule = NSAttributedString.Key("quickshow.flow.horizontalRule")
+}
+
+// MARK: - 连续文本流排版与背景装饰管理器
+
+/// 负责在 TextKit 排版底层绘制引用块竖条、H1 分隔线与水平分割线，
+/// 从而使富文本能够在单个 NSTextView / TextStorage 内部保持连贯，支持跨块连贯拖拽选区与复制。
+final class FlowLayoutManager: NSLayoutManager {
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        guard let storage = textStorage, storage.length > 0 else { return }
+
+        let charRange = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let validCharRange = NSIntersectionRange(charRange, NSRange(location: 0, length: storage.length))
+        guard validCharRange.length > 0 else { return }
+
+        // 1. 绘制引用块（Blockquote）：背景底色与左侧装饰竖线
+        drawBlockquotes(in: validCharRange, origin: origin)
+
+        // 2. 绘制 H1 标题底部分割线
+        drawHeading1Dividers(in: validCharRange, origin: origin)
+
+        // 3. 绘制水平分割线（Horizontal Rule）
+        drawHorizontalRules(in: validCharRange, origin: origin)
+    }
+
+    private func drawBlockquotes(in charRange: NSRange, origin: NSPoint) {
+        guard let storage = textStorage, let container = textContainers.first else { return }
+
+        storage.enumerateAttribute(.flowBlockquote, in: charRange, options: []) { value, range, _ in
+            guard value != nil else { return }
+            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
+
+            var blockRect = NSRect.null
+            self.enumerateLineFragments(forGlyphRange: glyphRange) { rect, _, _, _, _ in
+                blockRect = blockRect.isNull ? rect : blockRect.union(rect)
+            }
+            guard !blockRect.isNull, blockRect.width > 0, blockRect.height > 0 else { return }
+
+            let drawX = origin.x + blockRect.minX
+            let drawY = origin.y + blockRect.minY
+            let containerWidth = max(container.size.width, blockRect.width)
+
+            // 背景衬底（圆角微底板，对应 Theme.Colors.surfaceBadge）
+            let bgRect = NSRect(
+                x: drawX,
+                y: drawY - 2,
+                width: containerWidth,
+                height: blockRect.height + 4
+            )
+            let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 6, yRadius: 6)
+            MarkdownInlineNS.adaptiveLabel(opacity: 0.04).setFill()
+            bgPath.fill()
+
+            // 左侧质感竖线（圆角细条，3pt 宽，在首行与后续行 18pt 缩进留白内对齐居左）
+            let barRect = NSRect(
+                x: drawX + 4,
+                y: drawY + 2,
+                width: 3,
+                height: max(blockRect.height, 4)
+            )
+            let barPath = NSBezierPath(roundedRect: barRect, xRadius: 1.5, yRadius: 1.5)
+            MarkdownInlineNS.accentColor.setFill()
+            barPath.fill()
+        }
+    }
+
+    private func drawHeading1Dividers(in charRange: NSRange, origin: NSPoint) {
+        guard let storage = textStorage, let container = textContainers.first else { return }
+
+        storage.enumerateAttribute(.flowHeading1, in: charRange, options: []) { value, range, _ in
+            guard value != nil else { return }
+            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
+
+            let lastGlyph = glyphRange.location + glyphRange.length - 1
+            var effectiveRange = NSRange(location: NSNotFound, length: 0)
+            let lastLineRect = self.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: &effectiveRange)
+            guard !lastLineRect.isEmpty else { return }
+
+            let lineY = origin.y + lastLineRect.maxY - 1
+            let dividerRect = NSRect(
+                x: origin.x,
+                y: lineY,
+                width: container.size.width,
+                height: 0.5
+            )
+            MarkdownInlineNS.adaptiveLabel(opacity: 0.09).setFill()
+            NSBezierPath(rect: dividerRect).fill()
+        }
+    }
+
+    private func drawHorizontalRules(in charRange: NSRange, origin: NSPoint) {
+        guard let storage = textStorage, let container = textContainers.first else { return }
+
+        storage.enumerateAttribute(.flowHorizontalRule, in: charRange, options: []) { value, range, _ in
+            guard value != nil else { return }
+            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
+
+            var effectiveRange = NSRange(location: NSNotFound, length: 0)
+            let lineRect = self.lineFragmentRect(forGlyphAt: glyphRange.location, effectiveRange: &effectiveRange)
+            guard !lineRect.isEmpty else { return }
+
+            let lineY = origin.y + lineRect.midY
+            let dividerRect = NSRect(
+                x: origin.x,
+                y: lineY,
+                width: container.size.width,
+                height: 0.5
+            )
+            MarkdownInlineNS.adaptiveLabel(opacity: 0.09).setFill()
+            NSBezierPath(rect: dividerRect).fill()
+        }
+    }
+}
+
 // MARK: - AppKit 原生无拦截轻量文本视图（TextKit 宿主）
 
 final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
@@ -8,7 +135,7 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
         let textContainer = NSTextContainer(containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
         textContainer.widthTracksTextView = true
         textContainer.lineFragmentPadding = 0
-        let layoutManager = NSLayoutManager()
+        let layoutManager = FlowLayoutManager()
         layoutManager.addTextContainer(textContainer)
         let textStorage = NSTextStorage()
         textStorage.addLayoutManager(layoutManager)
@@ -108,7 +235,7 @@ struct NativeTextFlowView: NSViewRepresentable {
     private static let measureStorage = NSTextStorage()
     @MainActor
     private static let measureLayoutManager: NSLayoutManager = {
-        let lm = NSLayoutManager()
+        let lm = FlowLayoutManager()
         measureStorage.addLayoutManager(lm)
         return lm
     }()

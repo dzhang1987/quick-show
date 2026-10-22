@@ -6,6 +6,15 @@
 
 ### Added
 
+- **AI Chat 会话窗口文字类块 TextKit 深度合流与列表流式拆分体系（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownBlockSegmenter.swift` / `MarkdownBlockquoteRenderer.swift` / `MarkdownHeadingRenderer.swift` / `MarkdownHorizontalRuleRenderer.swift` / `MarkdownDefinitionListRenderer.swift` / `MarkdownListRenderer.swift`）**：
+  - **嵌套代码块列表流式细粒度拆解（List Splitting / `splitList`）**：彻底破除此前列表遇到局部嵌套代码块时把整个列表所有条目“全或无一刀切降级”导致的连坐阻断死局；将列表拆解为【纯文本列表片段】+【缩进独立代码卡片】+【后续纯文本列表片段】，代码块前后的全部步骤与子步骤文字完整合流进单一 TextKit 文本流，支持从上文标题一路连贯拖选滑过全部引导文字；
+  - **TextKit 底层排版装饰架构（`FlowLayoutManager`）**：子类化 `NSLayoutManager` 并重写 `drawBackground(forGlyphRange:at:)`，在单个 `NSTextView` / `NSTextStorage` 连续文本流底层原生自绘引用块左侧质感竖条（Accent 色圆角细条）与微弱卡片底板、H1 标题底部分割线与水平居中分割线，从根本上解决此前因微观视觉装饰将文本强行切碎为孤立 SwiftUI 视图导致选区阻断的问题；
+  - **引用块（Blockquote）制表位几何对齐与呼吸感重构**：解决此前引文内部嵌套有序列表时因未平移 `tabStops` 导致列表序号与文本被迫折行的排版缺陷，同步增加 `style.tabStops.location += 18` 与 `tailIndent = -18` 对称边距；首段增加段前间距，底层自绘卡片圆角提亮至 6pt，细竖条垂直留白与左右呼吸感完美重归原生质感，并支持连贯划词与复制；
+  - **H1 标题与水平分割线（HR）合流**：解除此前 H1 标题被迫降级为独立 Widget 的限制，H1 携带 18pt bold 与原生底线装饰无缝并入连续流；水平分割线通过排版锚点嵌入 TextKit 流，不再将前后文本截断为两个孤立视图；
+  - **定义列表与多段落列表项放宽**：定义列表（术语加粗 + 释义缩进两列对齐）全量并入原生文本流；放宽列表项内仅限单一简单段落的限制，只要段落兼容即可全部合流；
+  - **行高与项间距黄金比例调优（`lineSpacing` / `paragraphSpacing`）**：将列表条目之间的间距（`paragraphSpacing`）从原本过大的 14pt 缩减至紧凑舒适的 3.5pt（子列表缩减至 3pt），引文内说明语到列表间距收紧至 4pt，消除步骤条目之间由于空隙过大导致的稀疏空旷感；多行折行间距 `lineSpacing` 微调至 5pt（经典 1.5 倍精修标准），段落间距收敛至 12pt，文字呼吸感与版面凝聚力显著提升；
+  - **代码块交互岛屿自治保留**：遵循用户第一意图，代码块（`CodeBlockView`，语言标签、右上角一键复制按钮、双向/水平滚动条）与表格继续作为独立组件岛屿，支持被提取时自动携带对应列表层级的 `leadingIndent` 保持缩进几何对齐，在兼顾极致交互效率的同时赋予其余全部文字内容连贯的选区拖拽体验。
+
 - **主 Agent 顶栏会话标题与身份指示系统（`AIChatView.swift`）**：
   - **多维度上下文锚点统一**：消除此前主 Agent 顶栏中部的空白断层，在顶部拖动条（`windowTopBar`）核心区域居中呈现当前绑定的智能体身份（图标 + 名称）及当前会话主题（`session.title`），侧边栏收起时也能秒级把握当前会话上下文；
   - **拖拽穿透与原生手感保障（`allowsHitTesting(false)`）**：顶栏标题以语义化轻量文本居中展示，完全穿透鼠标事件，拖拽标题区域即可平滑移动整个无边框窗口，零损耗保留全宽度的窗口拖拽热区；

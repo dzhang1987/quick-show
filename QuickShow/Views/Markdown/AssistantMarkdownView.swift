@@ -117,9 +117,10 @@ struct AssistantMarkdownView: View, Equatable {
                         .id(id)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.top, index == 0 ? 0 : topSpacing)
-                case let .widget(id, block, topSpacing):
+                case let .widget(id, block, topSpacing, leadingIndent):
                     MarkdownBlockView(block: block)
                         .id(id)
+                        .padding(.leading, leadingIndent)
                         .padding(.top, index == 0 ? 0 : topSpacing)
                 }
             }

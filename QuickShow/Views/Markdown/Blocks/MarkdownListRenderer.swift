@@ -26,12 +26,10 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
     }
 
     private func isListItemTextFlowCompatible(_ item: MarkdownListItem) -> Bool {
-        var paragraphCount = 0
         return item.blocks.allSatisfy { block in
             switch block {
             case let .paragraph(inlines):
-                paragraphCount += 1
-                return paragraphCount <= 1 && !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby
+                return !inlines.containsImage && !inlines.containsMath && !inlines.containsRuby
             case let .orderedList(subItems), let .unorderedList(subItems):
                 return subItems.allSatisfy { isListItemTextFlowCompatible($0) }
             default:
@@ -125,7 +123,11 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
             prefixFont = MarkdownInlineNS.font(size: 12.5, weight: .medium)
             prefixColor = state ? MarkdownInlineNS.accentColor : NSColor.tertiaryLabelColor
         } else if ordered {
-            prefixText = "\(item.number ?? 1).\t"
+            if let num = item.number {
+                prefixText = "\(num).\t"
+            } else {
+                prefixText = "\t"
+            }
             prefixFont = MarkdownInlineNS.monoFont(size: 12)
             prefixColor = NSColor.secondaryLabelColor
         } else {
@@ -181,20 +183,20 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         let hangingIndent: CGFloat = baseIndent + hangingOffset
 
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 6
+        style.lineSpacing = 5
         style.firstLineHeadIndent = baseIndent
         style.headIndent = hangingIndent
         style.tabStops = [NSTextTab(textAlignment: .left, location: hangingIndent)]
 
         if !subLists.isEmpty {
-            style.paragraphSpacing = 8
+            style.paragraphSpacing = 3
         } else if hasNextListItem {
-            style.paragraphSpacing = 14
+            style.paragraphSpacing = 3.5
         } else if let next = nextBlock {
             if case .heading = next {
-                style.paragraphSpacing = 22
-            } else {
                 style.paragraphSpacing = 16
+            } else {
+                style.paragraphSpacing = 10
             }
         } else {
             style.paragraphSpacing = 0
