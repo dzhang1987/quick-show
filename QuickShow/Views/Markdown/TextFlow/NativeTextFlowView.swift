@@ -16,7 +16,41 @@ extension NSAttributedString.Key {
 
 /// 负责在 TextKit 排版底层绘制引用块竖条、H1 分隔线与水平分割线，
 /// 从而使富文本能够在单个 NSTextView / TextStorage 内部保持连贯，支持跨块连贯拖拽选区与复制。
-final class FlowLayoutManager: NSLayoutManager {
+final class FlowLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
+
+    override init() {
+        super.init()
+        self.delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        self.delegate = self
+    }
+
+    // MARK: - NSLayoutManagerDelegate（解决首块处于容器顶部的段前间距折叠）
+
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+        lineFragmentUsedRect: UnsafeMutablePointer<NSRect>,
+        baselineOffset: UnsafeMutablePointer<CGFloat>,
+        in textContainer: NSTextContainer,
+        forGlyphRange glyphRange: NSRange
+    ) -> Bool {
+        guard let storage = textStorage else { return false }
+        let charIndex = characterIndexForGlyph(at: glyphRange.location)
+        guard charIndex < storage.length else { return false }
+        let isQuote = storage.attribute(.flowBlockquote, at: charIndex, effectiveRange: nil) != nil
+        // 当引用块处于文本容器绝对顶端（y == 0，即全文第一块且上方无正文），TextKit 默认会折叠首行 paragraphSpacingBefore。
+        // 此处主动平移首行 8pt，确保容器顶部的引用块同样拥有 8pt 呼吸空间，与普通情形保持绝对一致。
+        if isQuote && lineFragmentRect.pointee.origin.y == 0 {
+            lineFragmentRect.pointee.origin.y += 8
+            lineFragmentUsedRect.pointee.origin.y += 8
+            return true
+        }
+        return false
+    }
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
@@ -38,39 +72,67 @@ final class FlowLayoutManager: NSLayoutManager {
 
     private func drawBlockquotes(in charRange: NSRange, origin: NSPoint) {
         guard let storage = textStorage, let container = textContainers.first else { return }
+        let fullLength = storage.length
+        let entireRange = NSRange(location: 0, length: fullLength)
 
-        storage.enumerateAttribute(.flowBlockquote, in: charRange, options: []) { value, range, _ in
+        var handledRanges = Set<NSRange>()
+
+        storage.enumerateAttribute(.flowBlockquote, in: charRange, options: []) { value, subRange, _ in
             guard value != nil else { return }
-            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+
+            // 扩展到该 blockquote 在整篇文档中的完整有效区间，避免局部脏区重绘导致底板与竖条被切断
+            var effectiveRange = NSRange(location: NSNotFound, length: 0)
+            _ = storage.attribute(.flowBlockquote, at: subRange.location, longestEffectiveRange: &effectiveRange, in: entireRange)
+            guard effectiveRange.location != NSNotFound, effectiveRange.length > 0 else { return }
+
+            // 同一个重绘周期内去重，避免重复绘制
+            guard handledRanges.insert(effectiveRange).inserted else { return }
+
+            let glyphRange = self.glyphRange(forCharacterRange: effectiveRange, actualCharacterRange: nil)
             guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
 
-            var blockRect = NSRect.null
-            self.enumerateLineFragments(forGlyphRange: glyphRange) { rect, _, _, _, _ in
-                blockRect = blockRect.isNull ? rect : blockRect.union(rect)
-            }
-            guard !blockRect.isNull, blockRect.width > 0, blockRect.height > 0 else { return }
+            var firstLineTop: CGFloat?
+            var lastLineBottom: CGFloat = 0
+            var maxLineWidth: CGFloat = 0
 
-            let drawX = origin.x + blockRect.minX
-            let drawY = origin.y + blockRect.minY
-            let containerWidth = max(container.size.width, blockRect.width)
+            self.enumerateLineFragments(forGlyphRange: glyphRange) { rect, usedRect, _, _, _ in
+                if firstLineTop == nil {
+                    // 首行真实字形墨水顶边（完全不受外部空白污染）
+                    firstLineTop = usedRect.minY
+                }
+                // 末行真实字形墨水底边（完全绕过任何段后 paragraphSpacing 污染）
+                lastLineBottom = max(lastLineBottom, usedRect.maxY)
+                maxLineWidth = max(maxLineWidth, rect.width)
+            }
+            guard let firstTop = firstLineTop, lastLineBottom > firstTop else { return }
+
+            // 统一垂直内边距：上下严格对称 8pt
+            let padV: CGFloat = 8
+            let textTop = origin.y + firstTop
+            let textBottom = origin.y + lastLineBottom
+            let cardTop = textTop - padV
+            let cardBottom = textBottom + padV
+            let cardHeight = cardBottom - cardTop
+            let cardWidth = max(container.size.width, maxLineWidth)
 
             // 背景衬底（圆角微底板，对应 Theme.Colors.surfaceBadge）
             let bgRect = NSRect(
-                x: drawX,
-                y: drawY - 2,
-                width: containerWidth,
-                height: blockRect.height + 4
+                x: origin.x,
+                y: cardTop,
+                width: cardWidth,
+                height: cardHeight
             )
             let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 6, yRadius: 6)
             MarkdownInlineNS.adaptiveLabel(opacity: 0.04).setFill()
             bgPath.fill()
 
-            // 左侧质感竖线（圆角细条，3pt 宽，在首行与后续行 18pt 缩进留白内对齐居左）
+            // 左侧 Accent 质感竖线：严格内嵌于 bgRect，上下留出 4pt 安全呼吸感（杜绝任何冒头与贴底）
+            let barInsetV: CGFloat = 4
             let barRect = NSRect(
-                x: drawX + 4,
-                y: drawY + 2,
+                x: origin.x + 4,
+                y: cardTop + barInsetV,
                 width: 3,
-                height: max(blockRect.height, 4)
+                height: max(cardHeight - barInsetV * 2, 4)
             )
             let barPath = NSBezierPath(roundedRect: barRect, xRadius: 1.5, yRadius: 1.5)
             MarkdownInlineNS.accentColor.setFill()
@@ -254,7 +316,26 @@ struct NativeTextFlowView: NSViewRepresentable {
         measureContainer.containerSize = NSSize(width: width, height: CGFloat.greatestFiniteMagnitude)
         measureLayoutManager.ensureLayout(for: measureContainer)
         let used = measureLayoutManager.usedRect(for: measureContainer)
-        return ceil(used.height)
+        var totalHeight = ceil(used.height)
+
+        // 关键防线：若富文本末尾属于引用块，卡片底板在文字墨水底边之下额外延伸了 8pt 的对称内边距。
+        // TextKit 的 usedRect 仅测量字形墨水边界，在末尾无换行符时绝不会预留底板向下扩展的空间。
+        // 此处必须为末尾卡片底板留足实际视图物理高度（8pt 底部内边距 + 2pt 安全微距），
+        // 彻底杜绝卡片底板与其 6pt 底角圆角被父级视图 Frame 边界直角腰斩。
+        if attr.length > 0 {
+            var hasTrailingQuote = false
+            for idx in stride(from: attr.length - 1, through: max(0, attr.length - 10), by: -1) {
+                if attr.attribute(.flowBlockquote, at: idx, effectiveRange: nil) != nil {
+                    hasTrailingQuote = true
+                    break
+                }
+            }
+            if hasTrailingQuote {
+                totalHeight += 10
+            }
+        }
+
+        return totalHeight
     }
 
     func makeNSView(context: Context) -> NonScrollingTextView {

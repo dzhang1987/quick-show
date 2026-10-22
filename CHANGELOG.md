@@ -111,6 +111,12 @@
 
 ### Fixed
 
+- **Markdown 引用块（Blockquote）上下内边距对称性重构与末尾底板直角裁剪彻底根除（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownBlockquoteRenderer.swift`）**：
+  - **真实文字墨水边界解耦（`usedRect` 彻底旁路外部段后间距污染）**：重构 `FlowLayoutManager.drawBlockquotes`，遍历行碎片时使用 `usedRect.minY` 与 `usedRect.maxY` 提取字形排版顶底基线，废除此前直接按 `lineFragmentRect` 尺寸延展导致的段外边距污染底板问题；
+  - **上下内边距绝对对称与装饰竖条安全内嵌**：统一设置 `padV = 8pt` 垂直内边距，文字到卡片顶边与底边严格恒等为 8pt；左侧 Accent 质感竖条垂直内缩 4pt（`cardTop + 4` 至 `cardBottom - 4`），牢牢锁在浅灰底板之内，彻底消除上下冒头与贴底现象；
+  - **末尾引用块视图物理高度补齐与直角裁剪根除**：定位并解决 TextKit 对末尾无换行符段落自动折叠 `paragraphSpacing` 导致 `sizeThatFits` 测量高度刚好切在文字底边、将底板下半部分（含 6pt 底角圆角）截断为平头直角的系统裁剪缺陷；在 `measureHeight` 测量中主动识别末尾引用块并补偿物理高度（8pt 底部内边距 + 2pt 安全微距），使底部圆角与对称内边距 100% 完整平滑呈现；
+  - **属性区间全局提升与顶端折叠补偿**：接入 `longestEffectiveRange` 防止局部鼠标拖拽选区重绘将底板截成碎片；接入 `NSLayoutManagerDelegate` 在引用块处于全文绝对顶端时补偿首行下沉 8pt。
+
 - **上下文压缩按会话强隔离治理与全量紧凑释放（`AIChatState+Compaction.swift` / `AIChatState.swift` / `AIChatMessageList.swift` / `MessageListDerivations.swift` / `AIChatContextRingView.swift` / `ChatScrollCoordinator.swift`）**：
   - **多会话压缩状态强隔离（`compactingSessionIds`）**：将全局单例 `isCompacting` 升级为会话隔离的 `compactingSessionIds: Set<UUID>` 集合，彻底根除跨会话切换时的状态竞争与误判；
   - **自洽派生与会话特征戳（`compactionStamp` / `compactionInfo(for:)`）**：按会话从 store 自洽派生压缩摘要信息，通过会话特征戳驱动局部增量重绘，杜绝跨会话数据污染；

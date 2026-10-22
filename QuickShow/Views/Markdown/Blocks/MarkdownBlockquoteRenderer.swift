@@ -70,9 +70,9 @@ final class MarkdownBlockquoteRenderer: MarkdownBlockRenderer {
                 }
             }
 
-            // 引文内首段增加 6pt 顶部呼吸内边距
+            // 引文内首段增加 8pt 顶部呼吸内边距空间，与卡片底板向上扩展的 8pt 形成对称呼吸
             if idx == 0 {
-                style.paragraphSpacingBefore += 6
+                style.paragraphSpacingBefore += 8
             }
 
             // 引文内部非末尾段落的段间距紧致收敛（如“正确测试方式：”与后续列表之间收紧至 4pt，彻底消除空洞）
@@ -80,7 +80,8 @@ final class MarkdownBlockquoteRenderer: MarkdownBlockRenderer {
             if !isLastRange {
                 style.paragraphSpacing = min(style.paragraphSpacing, 4)
             } else {
-                style.paragraphSpacing = nextBlock != nil ? 14 : 0
+                // 末尾段后留出 8pt 底板内边距空间；若后续还有下一个块，追加 14pt 块间外边距
+                style.paragraphSpacing = 8 + (nextBlock != nil ? 14 : 0)
             }
 
             result.addAttribute(.paragraphStyle, value: style, range: range)
