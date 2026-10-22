@@ -6,6 +6,12 @@
 
 ### Added
 
+- **AIChat 单 Agent 模式与多 Agent 协作双模式体系及单 Agent 专属工具挂载卡片（`AIChatExecutionMode` / `AIToolRegistry.swift` / `AIToolExecutor.swift` / `AIChatState+RequestAssembly.swift` / `AIServiceSettingsForm.swift` / `AIChatInputDock.swift` / `SettingsStore.swift`）**：
+  - **单 Agent / 多 Agent 双运行模式架构**：引入 `AIChatExecutionMode` 运行模式枚举（`single` 默认单 Agent / `multi` 多 Agent 协作），持久化至 `SettingsStore`；单 Agent 模式面向绝大多数日常用户，直接挂载用户启用的全套功能工具自主调用；多 Agent 模式保持原有 6 大专家矩阵与白名单最小权限隔离不变；
+  - **单 Agent 提示词净化与工具直连策略**：在单 Agent 模式下屏蔽多智能体团队派发指引（`launch_subagents`），对全能助理提示词进行纯净化处理，注入全套工具自主调用指引，消除模型向子专家派发的幻觉；`AIToolExecutor` 增加单 Agent 模式下的协同调度工具拦截保护；
+  - **单 Agent 专属平铺工具挂载卡片**：智能体设置在单 Agent 模式下联动自适应，直接平铺展示「挂载工具」卡片，支持 `[全部挂载]`、`[取消全部]`、`[恢复推荐默认]` 一键控制，并按分类清晰罗列各工具开关、展示名、危险徽标与功能说明，用户可直观按需取消特定工具；
+  - **双入口无缝控制与极简排版**：设置面板重构运行模式分段选择器（去除重复标签与过长文案，消除文本截断），聊天输入坞底栏模型弹出菜单置顶提供「运行模式」快捷切换项（带原生勾选态，即改即生效）；单 Agent 模式下并发专家任务托盘与子会话导航自适应隐匿，回归极简专注。
+
 - **AI Chat 会话窗口文字类块 TextKit 深度合流与列表流式拆分体系（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownBlockSegmenter.swift` / `MarkdownBlockquoteRenderer.swift` / `MarkdownHeadingRenderer.swift` / `MarkdownHorizontalRuleRenderer.swift` / `MarkdownDefinitionListRenderer.swift` / `MarkdownListRenderer.swift`）**：
   - **嵌套代码块列表流式细粒度拆解（List Splitting / `splitList`）**：彻底破除此前列表遇到局部嵌套代码块时把整个列表所有条目“全或无一刀切降级”导致的连坐阻断死局；将列表拆解为【纯文本列表片段】+【缩进独立代码卡片】+【后续纯文本列表片段】，代码块前后的全部步骤与子步骤文字完整合流进单一 TextKit 文本流，支持从上文标题一路连贯拖选滑过全部引导文字；
   - **TextKit 底层排版装饰架构（`FlowLayoutManager`）**：子类化 `NSLayoutManager` 并重写 `drawBackground(forGlyphRange:at:)`，在单个 `NSTextView` / `NSTextStorage` 连续文本流底层原生自绘引用块左侧质感竖条（Accent 色圆角细条）与微弱卡片底板、H1 标题底部分割线与水平居中分割线，从根本上解决此前因微观视觉装饰将文本强行切碎为孤立 SwiftUI 视图导致选区阻断的问题；
@@ -118,6 +124,10 @@
   - **会话切换转场动效与侧栏高亮平滑过渡（`AIChatView.swift` / `AIChatSidebarView.swift`）**：会话内容层 ZStack 引入基于 `Theme.Motion.contentFade` 的优雅转场动画（旧会话淡出，新会话 4pt 微浮动淡入）；侧边栏选中高亮块与快速切换器引入平滑切换动效，手感连贯自然。
 
 ### Fixed
+
+- **偏好设置「工具与扩展」小节数据加载与空白缺陷根除（`AISettingsSections.swift`）**：
+  - 定位并根除此前在 `AIToolsSettingsSection`、`AIFileWhitelistSettingsSection`、`AIEnvVarsSettingsSection` 以及 `AIWebSearchSettingsSection` 中依赖 `Section` 的 `.onAppear` 加载数据导致在 macOS AppKit 原生 Form 下无法触发、工具列表等初值恒为空白（表象为打不开）的缺陷；
+  - 重构为在视图 `init()` 阶段直接同步使用 `State(initialValue:)` 完成初始化装载，确保点击切换子标签页时首帧秒开且内容 100% 完整展示。
 
 - **彻底根治大会话打开与切换白屏、幽灵重影及滚动微抖（`AIChatView.swift` / `AIChatMessageList.swift`）**：
   - **常驻渲染集合确定性物理防线（`effectiveResidentSessionIds`）**：彻底破除此前会话消息容器遍历依赖 Combine 异步通知更新 `residentSessionIds` 的时序空档漏洞；引入确定性计算属性 `effectiveResidentSessionIds`，在首帧求值时无条件将当前选中的会话保送至集合首位，物理彻底杜绝因异步时延导致全部子视图判定为非活跃、`opacity` 全为 0 的纯白屏缺陷；

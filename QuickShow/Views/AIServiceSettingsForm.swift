@@ -20,7 +20,7 @@ enum AIProtocolOption: String, Codable, CaseIterable, Identifiable {
 // MARK: - 设置子页面枚举
 enum AIServiceSubTab: String, CaseIterable, Identifiable {
     case providers = "服务商"
-    case agents = "智能体团队"
+    case agents = "智能体设置"
     case tools = "工具与扩展"
 
     var id: String { rawValue }
@@ -468,6 +468,128 @@ struct AIServiceSettingsForm: View {
 
     @ViewBuilder
     private var agentsFormSection: some View {
+        Section {
+            Picker("", selection: executionModeBinding) {
+                Text("单 Agent 模式").tag(AIChatExecutionMode.single)
+                Text("多 Agent 协作").tag(AIChatExecutionMode.multi)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        } header: {
+            Text("运行模式")
+        } footer: {
+            Text(appState.settings.executionMode == .single
+                 ? "单 Agent 模式（默认）：直接挂载全套可用工具自主直接调用，响应轻快利落，适合日常绝大多数任务。"
+                 : "多 Agent 协作模式：通过主控全能助理调度资料检索、代码专家、系统管家等子智能体并发协作，适合复杂长流程工程。")
+        }
+
+        if appState.settings.executionMode == .single {
+            singleAgentFormContent
+        } else {
+            multiAgentFormContent
+        }
+    }
+
+    // MARK: - 单 Agent 专属自适应表单
+    @ViewBuilder
+    private var singleAgentFormContent: some View {
+        if let agent = currentAgent {
+            Section {
+                TextField("智能体名称", text: agentNameBinding(for: agent.id))
+                    .textFieldStyle(.roundedBorder)
+
+                HStack(spacing: 8) {
+                    Text("图标:")
+                        .font(.system(size: Theme.Typography.body))
+                    Image(systemName: agent.iconName)
+                        .font(.system(size: 16, weight: .bold))
+                        .frame(width: 28, height: 28)
+                        .background(Color.secondary.opacity(0.15))
+                        .cornerRadius(6)
+
+                    // 预置常用图标按钮组
+                    ForEach(["sparkles", "eye", "curlybraces", "brain.head.profile", "books.vertical", "macbook.and.iphone"], id: \.self) { sym in
+                        Button {
+                            var copy = agent
+                            copy.iconName = sym
+                            agentStore.saveAgent(copy)
+                        } label: {
+                            Image(systemName: sym)
+                                .font(.system(size: 12))
+                                .padding(4)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+
+                    TextField("SF Symbol 名", text: agentIconBinding(for: agent.id))
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 140)
+                }
+
+                TextField("职责描述", text: agentDescBinding(for: agent.id))
+                    .textFieldStyle(.roundedBorder)
+            } header: {
+                Text("角色人设")
+            }
+
+            Section {
+                Picker("绑定服务商", selection: agentProviderBinding(for: agent.id)) {
+                    ForEach(providerStore.providers.filter { $0.isEnabled }) { p in
+                        Text(p.name).tag(p.id)
+                    }
+                }
+
+                let boundProvider = providerStore.provider(for: agent.providerId)
+                let models = boundProvider?.models ?? []
+
+                Picker("绑定模型", selection: agentModelBinding(for: agent.id)) {
+                    if models.isEmpty {
+                        Text("无可用模型（请先在服务商中配置）").tag("")
+                    } else {
+                        ForEach(models) { m in
+                            HStack {
+                                Text(m.name)
+                                if m.supportsVision {
+                                    Text("[视觉]").foregroundColor(.cyan)
+                                }
+                                if m.supportsThinking {
+                                    Text("[思考]").foregroundColor(.indigo)
+                                }
+                            }
+                            .tag(m.id)
+                        }
+                    }
+                }
+
+                Picker("默认思考强度", selection: agentThinkingBinding(for: agent.id)) {
+                    Text("无 (None)").tag(ThinkingLevel?.none)
+                    Text("低 (Low)").tag(ThinkingLevel?.some(.low))
+                    Text("中 (Medium)").tag(ThinkingLevel?.some(.medium))
+                    Text("高 (High)").tag(ThinkingLevel?.some(.high))
+                }
+            } header: {
+                Text("模型路由绑定")
+            } footer: {
+                Text("为单 Agent 智能体指定后端算力提供商与模型规格。")
+            }
+
+            SingleAgentToolsSection()
+
+            Section {
+                TextField("定制人设提示词，留空则使用全局默认", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(4...8)
+            } header: {
+                Text("系统设定 (System Prompt)")
+            } footer: {
+                Text("定义单 Agent 智能体的核心行为准则与人设特征。")
+            }
+        }
+    }
+
+    // MARK: - 多 Agent 团队矩阵表单
+    @ViewBuilder
+    private var multiAgentFormContent: some View {
         Section {
             HStack(spacing: 12) {
                 Picker("选择智能体", selection: $agentStore.activeAgentId) {
@@ -1252,6 +1374,13 @@ struct AIServiceSettingsForm: View {
 
     // MARK: - Agent Bindings
 
+    private var executionModeBinding: Binding<AIChatExecutionMode> {
+        Binding(
+            get: { appState.settings.executionMode },
+            set: { appState.settings.executionMode = $0 }
+        )
+    }
+
     private func agentNameBinding(for agentId: String) -> Binding<String> {
         Binding(
             get: { agentStore.agent(for: agentId)?.name ?? "" },
@@ -1356,6 +1485,162 @@ struct AIServiceSettingsForm: View {
                 agentStore.saveAgent(a)
             }
         )
+    }
+}
+
+// MARK: - 单 Agent 专属工具挂载小节
+struct SingleAgentToolsSection: View {
+    @State private var enabledNames: Set<String>
+    private let availableGroups: [(category: ToolCategory, tools: [AITool])]
+    private let allAvailableTools: [AITool]
+
+    init() {
+        let registry = AIToolRegistry.shared
+        let multiAgentInternalTools: Set<String> = ["launch_subagents", "send_message"]
+        let allTools = registry.allTools().filter { !multiAgentInternalTools.contains($0.name) }
+        self.allAvailableTools = allTools
+
+        let rawGroups = registry.toolsGroupedByCategory()
+        self.availableGroups = rawGroups.compactMap { group in
+            let filtered = group.tools.filter { !multiAgentInternalTools.contains($0.name) }
+            return filtered.isEmpty ? nil : (group.category, filtered)
+        }
+
+        let active = registry.enabledTools().map(\.name)
+        _enabledNames = State(initialValue: Set(active))
+    }
+
+    private var enabledCount: Int {
+        allAvailableTools.filter { enabledNames.contains($0.name) }.count
+    }
+
+    var body: some View {
+        Section {
+            HStack {
+                Text("已挂载工具")
+                Spacer()
+                Text("\(enabledCount) / \(allAvailableTools.count) 项")
+                    .font(.system(size: Theme.Typography.footnote, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+
+            HStack(spacing: 12) {
+                Button("全部挂载") {
+                    mountAll()
+                }
+                .font(.system(size: Theme.Typography.footnote))
+
+                Button("取消全部") {
+                    unmountAll()
+                }
+                .font(.system(size: Theme.Typography.footnote))
+
+                Spacer()
+
+                Button("恢复推荐默认") {
+                    resetToDefault()
+                }
+                .font(.system(size: Theme.Typography.footnote))
+            }
+
+            ForEach(availableGroups, id: \.category) { group in
+                Text(group.category.label)
+                    .font(.system(size: Theme.Typography.footnote, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .padding(.top, 6)
+
+                ForEach(group.tools, id: \.name) { tool in
+                    toolRow(tool)
+                }
+            }
+        } header: {
+            Text("挂载工具")
+        } footer: {
+            Text("单 Agent 模式下拥有在此勾选的全部工具；大模型在对话中根据需要自主直接调用。涉及修改系统状态的敏感工具在执行前会向您发起二次确认。")
+        }
+    }
+
+    private func toolRow(_ tool: AITool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: enabledBinding(for: tool.name)) {
+                HStack(spacing: 6) {
+                    Text(tool.displayName)
+                        .font(.system(size: Theme.Typography.body))
+                    if tool.isDangerous {
+                        dangerousBadge
+                    }
+                    Spacer(minLength: 4)
+                    Text(tool.name)
+                        .font(.system(size: Theme.Typography.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Text(tool.description)
+                .font(.system(size: Theme.Typography.footnote))
+                .foregroundColor(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if tool.name == "run_shell" {
+                Text("允许 AI 执行任意 shell 命令，有安全风险")
+                    .font(.system(size: Theme.Typography.footnote))
+                    .foregroundColor(Theme.Colors.statusWarning)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var dangerousBadge: some View {
+        Text("危险")
+            .font(.system(size: Theme.Typography.micro, weight: .semibold))
+            .foregroundColor(Theme.Colors.statusWarning)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.statusWarning.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .stroke(Theme.Colors.statusWarning.opacity(0.28), lineWidth: 0.5)
+            )
+    }
+
+    private func enabledBinding(for name: String) -> Binding<Bool> {
+        Binding(
+            get: { enabledNames.contains(name) },
+            set: { newValue in
+                if newValue {
+                    enabledNames.insert(name)
+                } else {
+                    enabledNames.remove(name)
+                }
+                persist()
+            }
+        )
+    }
+
+    private func mountAll() {
+        for t in allAvailableTools {
+            enabledNames.insert(t.name)
+        }
+        persist()
+    }
+
+    private func unmountAll() {
+        enabledNames.removeAll()
+        persist()
+    }
+
+    private func resetToDefault() {
+        let defaultDisabled: Set<String> = ["run_shell"]
+        enabledNames = Set(allAvailableTools.map(\.name).filter { !defaultDisabled.contains($0) })
+        persist()
+    }
+
+    private func persist() {
+        let registry = AIToolRegistry.shared
+        let ordered = registry.allTools().map(\.name).filter { enabledNames.contains($0) }
+        UserDefaults.standard.set(ordered, forKey: AIToolRegistry.enabledToolsKey)
     }
 }
 

@@ -18,6 +18,8 @@ extension Notification.Name {
     static let aiChatQuickSwitcherSelect = Notification.Name("aiChat.quickSwitcherSelect")
     /// Quick Switcher 快捷删除高亮会话（⌃D / ⌘⌫）
     static let aiChatQuickSwitcherDelete = Notification.Name("aiChat.quickSwitcherDelete")
+    /// AI 运行模式变更通知（单 Agent / 多 Agent 协作模式切换时广播）
+    static let aiExecutionModeDidChange = Notification.Name("aiChat.executionModeDidChange")
 }
 
 // MARK: - 单条消息

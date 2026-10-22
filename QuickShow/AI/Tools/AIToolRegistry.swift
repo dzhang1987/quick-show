@@ -195,9 +195,17 @@ final class AIToolRegistry {
         return tools.filter { enabled.contains($0.name) }
     }
 
-    /// 获取特定 Agent 实际可用的工具集合（Agent 授权白名单与全局启用工具的交集）
-    func tools(for agent: AIAgent?) -> [AITool] {
+    /// 获取特定 Agent 实际可用的工具集合
+    /// - Parameter agent: 当前执行的 Agent
+    /// - Parameter mode: 运行模式（单 Agent 模式直接具备所有已启用的全套工具；多 Agent 模式按白名单裁剪；默认读取当前偏好）
+    func tools(for agent: AIAgent?, mode: AIChatExecutionMode = SettingsStore.currentExecutionMode) -> [AITool] {
         let global = enabledTools()
+        if mode == .single {
+            // 单 Agent 模式：具备所有工具调用能力（排除多智能体协同内部专用调度工具），用户在设置中取消某些工具后自动生效
+            let multiAgentInternalTools: Set<String> = ["launch_subagents", "send_message"]
+            return global.filter { !multiAgentInternalTools.contains($0.name) }
+        }
+
         guard let agent = agent else { return global }
         let allowed = Set(agent.resolvedTools)
         // 若角色的白名单为空，默认返回全局全部已启用工具

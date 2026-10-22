@@ -111,23 +111,32 @@ enum AgentFunctionalTests {
         assertTest(!allTools.contains { $0.name == "await_agents" }, "已废弃的 await_agents 不应存在于注册表中")
         assertTest(!allTools.contains { $0.name == "delegate_to_agent" }, "已废弃的 delegate_to_agent 不应存在于注册表中")
 
-        // 验证针对 Orchestrator 的过滤
+        // 验证多 Agent 模式针对 Orchestrator 的白名单过滤
         let orch = AIAgent.defaultAgents().first { $0.id == "orchestrator" }!
-        let orchTools = registry.tools(for: orch)
+        let orchTools = registry.tools(for: orch, mode: .multi)
         let orchToolNames = Set(orchTools.map(\.name))
         assertTest(orchToolNames == Set(["launch_subagents", "ask_user", "get_quickshow_state"]), "Orchestrator 过滤后只保留独占工具（刚好 3 个）")
 
-        // 验证针对 Coder 的过滤
+        // 验证多 Agent 模式针对 Coder 的白名单过滤
         let coder = AIAgent.defaultAgents().first { $0.id == "coder" }!
-        let coderTools = registry.tools(for: coder)
+        let coderTools = registry.tools(for: coder, mode: .multi)
         let coderToolNames = Set(coderTools.map(\.name))
         assertTest(!coderToolNames.contains("launch_subagents"), "Coder 不得被授予 launch_subagents")
         assertTest(!coderToolNames.contains("web_search"), "Coder 不得被授予 web_search")
         assertTest(coderToolNames.contains("read_file"), "Coder 必须持有 read_file")
         assertTest(coderToolNames.contains("write_file"), "Coder 必须持有 write_file")
 
+        // 验证单 Agent 模式下直接挂载全套可用工具（排除 launch_subagents 与 send_message）
+        let singleTools = registry.tools(for: orch, mode: .single)
+        let singleToolNames = Set(singleTools.map(\.name))
+        assertTest(!singleToolNames.contains("launch_subagents"), "单 Agent 模式下排除 launch_subagents")
+        assertTest(!singleToolNames.contains("send_message"), "单 Agent 模式下排除 send_message")
+        assertTest(singleToolNames.contains("web_search"), "单 Agent 模式下直挂 web_search")
+        assertTest(singleToolNames.contains("read_file"), "单 Agent 模式下直挂 read_file")
+        assertTest(singleToolNames.contains("get_system_status"), "单 Agent 模式下直挂 get_system_status")
+
         // 验证 nil 回退为全局工具
-        let globalTools = registry.tools(for: nil)
+        let globalTools = registry.tools(for: nil, mode: .multi)
         assertTest(globalTools.count == registry.enabledTools().count, "传入 nil 时应安全回退为全局启用的工具全集")
     }
 
@@ -229,14 +238,15 @@ enum AgentFunctionalTests {
             ChatCompletionMessage(role: "user", content: "测试请求")
         ]
 
-        // 1. 针对 Orchestrator 编码
+        // 1. 多 Agent 模式下针对 Orchestrator 编码（白名单裁剪）
         let orchBodyData = try? AIChatService.shared.encodeRequestBody(
             proto: .chatCompletions,
             model: "glm-5.3",
             messages: sampleMessages,
             stream: true,
             includeTools: true,
-            agent: orch
+            agent: orch,
+            mode: .multi
         )
         assertTest(orchBodyData != nil, "Orchestrator 请求体编码成功")
         if let data = orchBodyData, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -246,14 +256,15 @@ enum AgentFunctionalTests {
             assertTest(!toolNames.contains("read_file"), "Orchestrator 发包中绝无 read_file")
         }
 
-        // 2. 针对 Coder 编码
+        // 2. 多 Agent 模式下针对 Coder 编码（白名单裁剪）
         let coderBodyData = try? AIChatService.shared.encodeRequestBody(
             proto: .chatCompletions,
             model: "glm-5.3",
             messages: sampleMessages,
             stream: true,
             includeTools: true,
-            agent: coder
+            agent: coder,
+            mode: .multi
         )
         assertTest(coderBodyData != nil, "Coder 请求体编码成功")
         if let data = coderBodyData, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -262,6 +273,27 @@ enum AgentFunctionalTests {
             assertTest(!toolNames.contains("launch_subagents"), "Coder 发包中绝无 launch_subagents")
             assertTest(toolNames.contains("read_file"), "Coder 发包中包含 read_file")
             assertTest(toolNames.contains("write_file"), "Coder 发包中包含 write_file")
+        }
+
+        // 3. 单 Agent 模式下编码（全套直挂，排除 launch_subagents 与 send_message）
+        let singleBodyData = try? AIChatService.shared.encodeRequestBody(
+            proto: .chatCompletions,
+            model: "glm-5.3",
+            messages: sampleMessages,
+            stream: true,
+            includeTools: true,
+            agent: orch,
+            mode: .single
+        )
+        assertTest(singleBodyData != nil, "单 Agent 模式请求体编码成功")
+        if let data = singleBodyData, let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let tools = json["tools"] as? [[String: Any]] ?? []
+            let toolNames = Set(tools.compactMap { ($0["function"] as? [String: Any])?["name"] as? String })
+            assertTest(!toolNames.contains("launch_subagents"), "单 Agent 模式发包中排除 launch_subagents")
+            assertTest(!toolNames.contains("send_message"), "单 Agent 模式发包中排除 send_message")
+            assertTest(toolNames.contains("read_file"), "单 Agent 模式发包中直挂 read_file")
+            assertTest(toolNames.contains("web_search"), "单 Agent 模式发包中直挂 web_search")
+            assertTest(toolNames.contains("get_system_status"), "单 Agent 模式发包中直挂 get_system_status")
         }
     }
 
@@ -358,7 +390,7 @@ enum AgentFunctionalTests {
         print("\n[Suite 7] Antigravity 直连 Gemini Function Calling 与 ThoughtSignature 规格测试...")
 
         let orch = AIAgent.defaultAgents().first { $0.id == "orchestrator" }!
-        let orchTools = AIToolRegistry.shared.tools(for: orch)
+        let orchTools = AIToolRegistry.shared.tools(for: orch, mode: .multi)
 
         // 1. 验证 Tools 声明装配
         let userMsg = ChatCompletionMessage(role: "user", content: "满帮最新的股价")

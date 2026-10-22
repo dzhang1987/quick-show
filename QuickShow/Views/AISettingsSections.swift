@@ -16,11 +16,19 @@ import AppKit
 /// 分组纯为渲染层重组，不碰持久化：落盘仍是蛇形名数组，与协议层零耦合。
 struct AIToolsSettingsSection: View {
     /// 全部已注册工具（注册表顺序，含默认关闭的 run_shell；persistEnabled 落盘顺序的真源）。
-    @State private var tools: [AITool] = []
+    @State private var tools: [AITool]
     /// 分组视图数据（固定组序，组内注册序）。
-    @State private var groups: [(category: ToolCategory, tools: [AITool])] = []
+    @State private var groups: [(category: ToolCategory, tools: [AITool])]
     /// 当前启用的工具名集合（编辑态真源，任何变更即刻写盘）。
-    @State private var enabledNames: Set<String> = []
+    @State private var enabledNames: Set<String>
+
+    init() {
+        let registry = AIToolRegistry.shared
+        _tools = State(initialValue: registry.allTools())
+        _groups = State(initialValue: registry.toolsGroupedByCategory())
+        let active = registry.enabledTools().map(\.name)
+        _enabledNames = State(initialValue: Set(active))
+    }
 
     var body: some View {
         Section {
@@ -37,7 +45,7 @@ struct AIToolsSettingsSection: View {
         } header: {
             Text("工具")
         } footer: {
-            Text("关闭后 AI 将无法调用对应工具；涉及修改系统状态的敏感工具在执行前会弹窗确认。")
+            Text("单 Agent 模式下拥有在此启用的全部工具；多 Agent 模式下各专家按授权白名单使用对应工具。关闭后 AI 将无法调用对应工具；涉及修改系统状态的敏感工具在执行前会弹窗确认。")
         }
         .onAppear { loadToolsIfNeeded() }
     }
@@ -127,7 +135,11 @@ struct AIFileWhitelistSettingsSection: View {
     /// UserDefaults 键（与 BuiltInTools 中的白名单键保持一致）。
     private let whitelistKey = "ai.tools.fileWhitelist"
 
-    @State private var paths: [String] = []
+    @State private var paths: [String]
+
+    init() {
+        _paths = State(initialValue: UserDefaults.standard.stringArray(forKey: "ai.tools.fileWhitelist") ?? [])
+    }
 
     var body: some View {
         Section {
@@ -210,7 +222,12 @@ struct AIEnvVarsSettingsSection: View {
         var value: String
     }
 
-    @State private var entries: [EnvEntry] = []
+    @State private var entries: [EnvEntry]
+
+    init() {
+        let stored = UserDefaults.standard.dictionary(forKey: "ai.envVars") as? [String: String] ?? [:]
+        _entries = State(initialValue: stored.keys.sorted().map { EnvEntry(key: $0, value: stored[$0] ?? "") })
+    }
 
     var body: some View {
         Section {
@@ -282,9 +299,13 @@ struct AIEnvVarsSettingsSection: View {
 ///（Keychain 优先，环境变量 QUICKSHOW_TAVILY_API_KEY 兜底；setTavilyAPIKey 传空串 = 删除条目）。
 struct AIWebSearchSettingsSection: View {
     /// 已存 Key（仅用于掩码展示，不二次持久化）。
-    @State private var storedKey: String = ""
+    @State private var storedKey: String
     /// 新输入的 Key（仅内存态，保存成功后清空）。
     @State private var keyInput: String = ""
+
+    init() {
+        _storedKey = State(initialValue: WebToolsConfig.tavilyAPIKey ?? "")
+    }
 
     var body: some View {
         Section {

@@ -18,6 +18,8 @@ struct AIChatInputDock: View {
     @ObservedObject private var interaction = ChatInteractionCenter.shared
     /// 多智能体任务注册表：观察并发子任务生命周期与动态活动脉搏，驱动托盘即时升降与高度重算。
     @ObservedObject private var taskRegistry = AgentTaskRegistry.shared
+    /// AI 运行模式持久化观察（单 Agent 默认 / 多 Agent 协作），变更时驱动坞体组件与菜单即时刷新
+    @AppStorage("aiChatExecutionMode") private var executionModeRaw: String = AIChatExecutionMode.single.rawValue
     /// 坞体实测总高（单向写回父级：供消息列表尾部留白 / 空态 overlay / toast 位置消费；
     /// 值单向流出、绝不反向影响坞体布局，无反馈环）。
     @Binding var dockTotalHeight: CGFloat
@@ -150,6 +152,7 @@ struct AIChatInputDock: View {
     }
 
     private var hasActiveSubagentTasks: Bool {
+        guard SettingsStore.currentExecutionMode == .multi else { return false }
         let current = state.store.currentSession
         let rootId = current?.parentSessionId ?? current?.id
         let isChild = current?.parentSessionId != nil
@@ -465,7 +468,7 @@ struct AIChatInputDock: View {
         }
         .buttonStyle(.plain)
         .fixedSize()
-        .help("切换智能体团队、模型与思考强度")
+        .help(SettingsStore.currentExecutionMode == .single ? "切换角色人设、模型与思考强度（当前：单 Agent 模式）" : "切换智能体团队、模型与思考强度（当前：多 Agent 协作模式）")
     }
 
     /// 点击 chip 弹出生成菜单：每次点击构建（智能体/模型列表/选中态天然最新），
@@ -531,8 +534,25 @@ struct AIChatInputDock: View {
             menu.addItem(header)
         }
 
-        // 1. 「智能体团队 (Agents)」分组：切换对话角色与专长（图标与设置面板、输入底栏 100% 统一）
-        addHeader(String(localized: "智能体团队 (Agents)"))
+        // 0. 「运行模式」分组：单 Agent 模式（默认） / 多 Agent 协作模式
+        addHeader(String(localized: "运行模式"))
+        let currentMode = SettingsStore.currentExecutionMode
+        for mode in AIChatExecutionMode.allCases {
+            let isCurrent = (mode == currentMode)
+            let icon = (mode == .single) ? "person.fill" : "person.3.fill"
+            let attr = makeSymbolTitle(iconName: icon, name: mode.displayName)
+            addItem(mode.displayName, attributedTitle: attr, isOn: isCurrent) {
+                UserDefaults.standard.set(mode.rawValue, forKey: "aiChatExecutionMode")
+                NotificationCenter.default.post(name: .aiExecutionModeDidChange, object: nil)
+            }
+        }
+        menu.addItem(.separator())
+
+        // 1. 「智能体角色」分组：切换对话角色与专长（图标与设置面板、输入底栏 100% 统一）
+        let agentHeaderTitle = (currentMode == .single)
+            ? String(localized: "角色人设")
+            : String(localized: "智能体团队 (Agents)")
+        addHeader(agentHeaderTitle)
         let agents = AIAgentStore.shared.agents.filter { $0.isEnabled }
         for agent in agents {
             let isCurrent = (agent.id == state.effectiveAgentId)

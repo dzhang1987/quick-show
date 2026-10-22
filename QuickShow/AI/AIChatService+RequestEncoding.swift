@@ -28,10 +28,11 @@ extension AIChatService {
         stream: Bool,
         includeTools: Bool,
         agent: AIAgent? = nil,
+        mode: AIChatExecutionMode = SettingsStore.currentExecutionMode,
         thinkingFields: [String: Any] = [:],
         maxTokens: Int? = nil
     ) throws -> Data {
-        let toolsToUse = AIToolRegistry.shared.tools(for: agent)
+        let toolsToUse = AIToolRegistry.shared.tools(for: agent, mode: mode)
         let chatTools = (includeTools && !toolsToUse.isEmpty) ? chatToolDefinitions(from: toolsToUse) : nil
         let responsesTools = (includeTools && !toolsToUse.isEmpty) ? responsesToolDefinitions(from: toolsToUse) : nil
 

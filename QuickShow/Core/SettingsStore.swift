@@ -75,6 +75,28 @@ enum AIStreamingReturnAction: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - AI 运行模式（单 Agent / 多 Agent 协作）
+enum AIChatExecutionMode: String, CaseIterable, Identifiable {
+    case single = "single"
+    case multi = "multi"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .single: return String(localized: "单 Agent 模式（默认，直挂全套工具）")
+        case .multi: return String(localized: "多 Agent 协作模式（专家团队并发调度）")
+        }
+    }
+
+    var shortName: String {
+        switch self {
+        case .single: return String(localized: "单 Agent")
+        case .multi: return String(localized: "多 Agent")
+        }
+    }
+}
+
 // MARK: - 用户偏好设置域
 /// 全部 @AppStorage 持久化偏好的唯一存储；门面 AppState 通过 AppState+Forwarding 转发。
 /// 带副作用的类型化 setter（triggerType/appearanceMode/themeVariant/panelScaleOption/showMenuBarIcon）
@@ -121,6 +143,20 @@ final class SettingsStore: ObservableObject {
     static var currentStreamingReturnAction: AIStreamingReturnAction {
         let raw = UserDefaults.standard.string(forKey: "aiStreamingReturnAction") ?? AIStreamingReturnAction.followUp.rawValue
         return AIStreamingReturnAction(rawValue: raw) ?? .followUp
+    }
+
+    // AI 运行模式（单 Agent 默认 / 多 Agent 协作）
+    @AppStorage("aiChatExecutionMode") var executionModeRaw: String = AIChatExecutionMode.single.rawValue
+
+    var executionMode: AIChatExecutionMode {
+        get { AIChatExecutionMode(rawValue: executionModeRaw) ?? .single }
+        set { executionModeRaw = newValue.rawValue }
+    }
+
+    /// 静态直读当前配置的 AI 执行模式（单 Agent / 多 Agent，无状态依赖）
+    static var currentExecutionMode: AIChatExecutionMode {
+        let raw = UserDefaults.standard.string(forKey: "aiChatExecutionMode") ?? AIChatExecutionMode.single.rawValue
+        return AIChatExecutionMode(rawValue: raw) ?? .single
     }
 
     // 界面尺寸与屏幕自适应

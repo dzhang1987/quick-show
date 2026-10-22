@@ -153,6 +153,14 @@ extension AppState {
         }
     }
 
+    var executionMode: AIChatExecutionMode {
+        get { settings.executionMode }
+        set {
+            settings.executionMode = newValue
+            objectWillChange.send()
+        }
+    }
+
     var appearanceMode: AppearanceMode {
         get {
             AppearanceMode(rawValue: settings.appearanceModeRaw) ?? .auto

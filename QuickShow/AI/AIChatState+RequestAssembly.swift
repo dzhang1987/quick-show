@@ -30,7 +30,19 @@ extension AIChatState {
         let session = store.session(id: sessionId)
         let agentId = session?.agentId ?? effectiveAgentId
         let agent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
-        let agentPrompt = agent.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mode = SettingsStore.currentExecutionMode
+        var agentPrompt = agent.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if mode == .single {
+            // 单 Agent 模式下，针对 Orchestrator 过滤掉关于 launch_subagents 的调度指引，避免产生派发幻觉
+            if agent.id == "orchestrator" {
+                agentPrompt = """
+                你是一个专业博学的 AI 全能助理，崇尚从第一性原理分析问题。
+                说话做事直接了当，实事求是。遇到不清楚的边界主动调用 `ask_user` 确认。
+                """
+            }
+        }
+
         if !agentPrompt.isEmpty {
             systemParts.append(agentPrompt)
         } else {
@@ -40,30 +52,42 @@ extension AIChatState {
             }
         }
 
-        let subagentsEnabled = AIToolRegistry.shared.tools(for: agent)
-            .contains { $0.name == "launch_subagents" }
-        if subagentsEnabled {
-            let availableSubagents = AIAgentStore.shared.agents
-                .filter { $0.isEnabled && $0.id != agent.id }
-            if !availableSubagents.isEmpty {
-                let subagentDescriptions = availableSubagents.map { sub in
-                    let tools = sub.resolvedTools.map { "`\($0)`" }.joined(separator: ", ")
-                    let toolsDesc = tools.isEmpty ? "无独占工具" : "配备工具: [\(tools)]"
-                    let visionTag = sub.isVisualDelegate ? " [识图/图文专长]" : ""
-                    return "- `\(sub.id)` (\(sub.name))\(visionTag)：\(sub.description) （\(toolsDesc)）"
-                }.joined(separator: "\n")
-                let delegationGuidance = """
-                团队协作与子智能体派发指引：
-                你拥有强大的多智能体团队协作能力，可通过 `launch_subagents` 向以下专业垂类子智能体派发任务：
-                \(subagentDescriptions)
+        if mode == .multi {
+            let subagentsEnabled = AIToolRegistry.shared.tools(for: agent, mode: .multi)
+                .contains { $0.name == "launch_subagents" }
+            if subagentsEnabled {
+                let availableSubagents = AIAgentStore.shared.agents
+                    .filter { $0.isEnabled && $0.id != agent.id }
+                if !availableSubagents.isEmpty {
+                    let subagentDescriptions = availableSubagents.map { sub in
+                        let tools = sub.resolvedTools.map { "`\($0)`" }.joined(separator: ", ")
+                        let toolsDesc = tools.isEmpty ? "无独占工具" : "配备工具: [\(tools)]"
+                        let visionTag = sub.isVisualDelegate ? " [识图/图文专长]" : ""
+                        return "- `\(sub.id)` (\(sub.name))\(visionTag)：\(sub.description) （\(toolsDesc)）"
+                    }.joined(separator: "\n")
+                    let delegationGuidance = """
+                    团队协作与子智能体派发指引：
+                    你拥有强大的多智能体团队协作能力，可通过 `launch_subagents` 向以下专业垂类子智能体派发任务：
+                    \(subagentDescriptions)
 
-                协作原则：
-                1. 联网搜索能力：你自身未挂载 `web_search` 工具，若用户需要查询最新实时行情（如股票、汇率、天气）、新闻资讯、企业财报、公网技术文档或外部数据，必须通过 `launch_subagents` 派发给 `librarian`（资料检索专家），由其利用 `web_search` 和 `fetch_url` 联网检索后汇总；
-                2. 任务派发与真并发：调用 `launch_subagents(tasks: [...])` 向一个或多个专家派发任务。单任务传入 1 项；若需求包含多个独立环节（例如既要全网检索文档又要编写代码），必须在 `tasks` 数组中同时传入多个任务，系统后台将真正并行流式执行，并一次性汇聚返回所有专家的汇报成果；
-                3. 附件自动传递：用户上传的多模态图片默认自动传递给子智能体，无需额外配置；
-                4. 专精分工：全能助理负责统筹规划与最终答卷，重活脏活交由专家办理。
+                    协作原则：
+                    1. 联网搜索能力：你自身未挂载 `web_search` 工具，若用户需要查询最新实时行情（如股票、汇率、天气）、新闻资讯、企业财报、公网技术文档或外部数据，必须通过 `launch_subagents` 派发给 `librarian`（资料检索专家），由其利用 `web_search` 和 `fetch_url` 联网检索后汇总；
+                    2. 任务派发与真并发：调用 `launch_subagents(tasks: [...])` 向一个或多个专家派发任务。单任务传入 1 项；若需求包含多个独立环节（例如既要全网检索文档又要编写代码），必须在 `tasks` 数组中同时传入多个任务，系统后台将真正并行流式执行，并一次性汇聚返回所有专家的汇报成果；
+                    3. 附件自动传递：用户上传的多模态图片默认自动传递给子智能体，无需额外配置；
+                    4. 专精分工：全能助理负责统筹规划与最终答卷，重活脏活交由专家办理。
+                    """
+                    systemParts.append(delegationGuidance)
+                }
+            }
+        } else {
+            // 单 Agent 模式：自主全能工具调用引导
+            let singleTools = AIToolRegistry.shared.tools(for: agent, mode: .single)
+            if !singleTools.isEmpty {
+                let toolsGuidance = """
+                工具调用指引：
+                你当前处于单 Agent 模式，已直接具备全套工具调用能力。当用户提问涉及联网信息查询（股票行情、汇率、天气、新闻、公网技术文档等）、读写与预览文件、系统状态检测、运行应用控制或地图通勤时，请直接自主调用对应工具解决问题，无需派发给他人。遇到不清楚或边界模糊的诉求，主动调用 `ask_user` 向用户确认。
                 """
-                systemParts.append(delegationGuidance)
+                systemParts.append(toolsGuidance)
             }
         }
         if !systemParts.isEmpty {

@@ -38,6 +38,13 @@ final class AIToolExecutor {
         guard let tool = registry.tool(named: call.name) else {
             return makeFailure(call, message: "工具不存在：\(call.name)")
         }
+        // 单 Agent 模式隔离：不应被调用的多智能体协同内部调度工具直接拦截
+        if SettingsStore.currentExecutionMode == .single {
+            let multiAgentInternalTools: Set<String> = ["launch_subagents", "send_message"]
+            if multiAgentInternalTools.contains(call.name) {
+                return makeFailure(call, message: "单 Agent 模式下未启用多智能体协同调度工具：\(call.name)")
+            }
+        }
         // 启用校验：存在但被禁用同样失败
         guard registry.enabledTools().contains(where: { $0.name == call.name }) else {
             return makeFailure(call, message: "工具已被禁用：\(call.name)")
