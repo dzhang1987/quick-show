@@ -119,6 +119,13 @@
 
 ### Fixed
 
+- **彻底根治大会话打开与切换白屏、幽灵重影及滚动微抖（`AIChatView.swift` / `AIChatMessageList.swift`）**：
+  - **常驻渲染集合确定性物理防线（`effectiveResidentSessionIds`）**：彻底破除此前会话消息容器遍历依赖 Combine 异步通知更新 `residentSessionIds` 的时序空档漏洞；引入确定性计算属性 `effectiveResidentSessionIds`，在首帧求值时无条件将当前选中的会话保送至集合首位，物理彻底杜绝因异步时延导致全部子视图判定为非活跃、`opacity` 全为 0 的纯白屏缺陷；
+  - **交互同步更新与 Combine 全量响应**：拔除 `.dropFirst()`，并在侧边栏点击、快速切换器（⌘P）与快捷键（⌘[/⌘]）等所有会话切换入口处同步更新常驻队列；
+  - **首帧虚拟化可见窗口预置种子（`SessionMessageList.init`）**：在单会话消息列表构造器内，根据滚动快照锚点或最新消息即时预置 `initialWindow`，使首帧直接实渲染真实消息行，终结首帧 `virtualWindowIds` 为空导致全行均为 `Color.clear` 占位的空白闪烁；
+  - **历史消息虚拟化入场动画隔离**：严格限制消息行 2pt 淡入入场动画仅对“非首载且最新到达的尾条消息”生效，历史消息与虚拟化滚动切入恒定为 `.identity`，彻底消除滚屏时的微晃动并根除被 AppKit CA 事务卡在近零透明度的隐患；
+  - **会话切换幽灵残影彻底消除**：移除多会话容器多余的垂直位移与慢速 cross-fade，顶栏标题绑定 `.id(currentSessionId)`，杜绝切换过程中两会话文字与标题半透明交叠重影。
+
 - **Markdown 引用块（Blockquote）上下内边距对称性重构与末尾底板直角裁剪彻底根除（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownBlockquoteRenderer.swift`）**：
   - **真实文字墨水边界解耦（`usedRect` 彻底旁路外部段后间距污染）**：重构 `FlowLayoutManager.drawBlockquotes`，遍历行碎片时使用 `usedRect.minY` 与 `usedRect.maxY` 提取字形排版顶底基线，废除此前直接按 `lineFragmentRect` 尺寸延展导致的段外边距污染底板问题；
   - **上下内边距绝对对称与装饰竖条安全内嵌**：统一设置 `padV = 8pt` 垂直内边距，文字到卡片顶边与底边严格恒等为 8pt；左侧 Accent 质感竖条垂直内缩 4pt（`cardTop + 4` 至 `cardBottom - 4`），牢牢锁在浅灰底板之内，彻底消除上下冒头与贴底现象；

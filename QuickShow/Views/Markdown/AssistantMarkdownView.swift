@@ -89,8 +89,7 @@ struct AssistantMarkdownView: View, Equatable {
     }
 
     private func effectiveVisibleCount(seededInitial: Int, total: Int) -> Int {
-        // 总块数在初始视口预算内（如短消息），直接首帧全量呈现；长消息首帧仅渲染视口所需块，下一帧起异步平滑补齐
-        if total <= seededInitial { return total }
+        if useCache { return total }
         let base = visibleBlockCount < 0 ? seededInitial : visibleBlockCount
         return min(base, total)
     }
@@ -108,7 +107,6 @@ struct AssistantMarkdownView: View, Equatable {
         let visibleCount = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
         let visibleBlocks = Array(blocks.prefix(visibleCount))
         let segments = MarkdownBlockSegmenter.segment(visibleBlocks)
-        let _ = qsDebugLog("AssistantMarkdownView: contentLen=\(content.count) blocks=\(blocks.count) visible=\(visibleCount) segments=\(segments.count)")
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in

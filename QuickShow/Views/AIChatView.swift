@@ -90,6 +90,23 @@ struct AIChatView: View {
     /// 滚动位置/贴底跟随/流式状态随视图树天然保留，位置记忆不再依赖 scrollTo 时序。
     /// 超上限 K 时淘汰尾部会话（其视图卸载，重挂载时用 scrollSnapshots 兜底恢复）。
     @State private var residentSessionIds: [UUID] = []
+    /// 确保当前选中会话 100% 存在于常驻渲染集合中（第一性原理物理防线）：
+    /// 无论 Combine 订阅延迟、首帧时序差或事件竞争，只要 currentSessionId 有效，
+    /// 首帧求值时绝对将其置于集合头部，物理彻底杜绝所有子视图 opacity=0 引发的白屏。
+    private var effectiveResidentSessionIds: [UUID] {
+        guard let current = state.store.currentSessionId else {
+            return residentSessionIds
+        }
+        if residentSessionIds.contains(current) {
+            return residentSessionIds
+        }
+        var list = residentSessionIds
+        list.insert(current, at: 0)
+        if list.count > residentSessionLimit {
+            list.removeLast(list.count - residentSessionLimit)
+        }
+        return list
+    }
     /// LRU 常驻上限：12。用户会话数通常在 10 以内，提高上限使绝大多数会话全程常驻，
     /// 切换回到纯 opacity 切换、零整树重建（消除重挂载卡顿与锚点恢复需求）。
     /// 内存代价见报告：每常驻会话 = 其视图树 + 已实现化的 NSTextField 池（消息行），
@@ -147,9 +164,8 @@ struct AIChatView: View {
                 unreadSessionIds: state.unreadSessionIds,
                 onAbortStreaming: { id in state.abortStreaming(sessionId: id) },
                 onSelect: { id in
-                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                        state.selectSession(id: id)
-                    }
+                    updateResidency(for: id)
+                    state.selectSession(id: id)
                 },
                 onNewSession: { newSession() },
                 onToggleSidebar: { toggleSidebar() }
@@ -222,9 +238,8 @@ struct AIChatView: View {
                         streamingSessionIds: state.streamingSessionIds,
                         unreadSessionIds: state.unreadSessionIds,
                         onSelectSession: { id in
-                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                                state.selectSession(id: id)
-                            }
+                            updateResidency(for: id)
+                            state.selectSession(id: id)
                         },
                         onDismiss: {
                             closeQuickSwitcher()
@@ -341,11 +356,9 @@ struct AIChatView: View {
             scrollCoordinator.dockHeight = newHeight
         }
         // 会话切换检测（根级恒挂载）：把新会话置入 LRU 常驻集合头部，超限淘汰尾部（视图卸载）。
-        // dropFirst 跳过订阅时重放的当前值，避免首挂载误判；常驻集合已由 init 以当前会话起步。
-        .onReceive(state.store.$currentSessionId.dropFirst()) { newId in
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                updateResidency(for: newId)
-            }
+        // 移除 dropFirst 确保所有生命周期与会话变更（包含初始恢复与切回）100% 同步更新常驻状态。
+        .onReceive(state.store.$currentSessionId) { newId in
+            updateResidency(for: newId)
             scrollCoordinator.activeSessionId = newId
         }
         // 会话删除检测：清理被删会话的滚动快照与 LRU 常驻项，防死项累积。
@@ -575,6 +588,7 @@ struct AIChatView: View {
                         Spacer(minLength: Theme.Spacing.md)
 
                         mainSessionTitleView
+                            .id(state.store.currentSessionId)
 
                         Spacer(minLength: Theme.Spacing.md)
 
@@ -685,7 +699,7 @@ struct AIChatView: View {
         // LRU 顺序由 residentSessionIds 维护；隐藏会话仍随 store 失效重求值，但 .equatable()
         // 行会跳过未变内容，开销与原单会话同量级。
         ZStack(alignment: .top) {
-            ForEach(residentSessionIds, id: \.self) { sid in
+            ForEach(effectiveResidentSessionIds, id: \.self) { sid in
                 let isActive = sid == state.store.currentSessionId
                 SessionMessageList(
                     sessionId: sid,
@@ -704,8 +718,6 @@ struct AIChatView: View {
                 )
                 .equatable()
                 .opacity(isActive ? 1 : 0)
-                .offset(y: isActive ? 0 : 4)
-                .animation(.easeOut(duration: Theme.Motion.contentFade), value: isActive)
                 .allowsHitTesting(isActive)
             }
         }
@@ -921,8 +933,14 @@ struct AIChatView: View {
             NotificationCenter.default.post(name: .aiChatQuickSwitcherDelete, object: nil)
         }
         keyMonitor.onToggleQuickSwitcher = { toggleQuickSwitcher() }
-        keyMonitor.onPreviousSession = { state.store.switchToPreviousSession() }
-        keyMonitor.onNextSession = { state.store.switchToNextSession() }
+        keyMonitor.onPreviousSession = {
+            state.store.switchToPreviousSession()
+            updateResidency(for: state.store.currentSessionId)
+        }
+        keyMonitor.onNextSession = {
+            state.store.switchToNextSession()
+            updateResidency(for: state.store.currentSessionId)
+        }
         keyMonitor.onNewSession = { newSession() }
         keyMonitor.onToggleSidebar = { toggleSidebar() }
         // ⌘F：侧栏收起时唤出居中全局搜索；侧栏展开时聚焦侧栏搜索框

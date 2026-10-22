@@ -75,6 +75,43 @@ struct SessionMessageList: View {
     /// 虚拟化窗口（实渲染行集合）：视口 ±2 屏内的行实渲染，窗口外等高占位。
     /// 由行级几何信号每帧维护；切换高度恒等（占位 = 缓存 = 实测）。
     @State private var virtualWindowIds: Set<UUID> = []
+
+    init(
+        sessionId: UUID,
+        isActive: Bool,
+        state: AIChatState,
+        messages: [ChatMessage],
+        compactionStamp: String,
+        onTapImage: @escaping (ChatImageAttachment) -> Void,
+        scrollSnapshots: Binding<[UUID: ScrollSnapshot]>,
+        scrollCoordinator: ChatScrollCoordinator,
+        dockTotalHeight: CGFloat
+    ) {
+        self.sessionId = sessionId
+        self.isActive = isActive
+        self.state = state
+        self.messages = messages
+        self.compactionStamp = compactionStamp
+        self.onTapImage = onTapImage
+        self._scrollSnapshots = scrollSnapshots
+        self.scrollCoordinator = scrollCoordinator
+        self.dockTotalHeight = dockTotalHeight
+
+        // 预置虚拟化窗口种子：首帧实渲染可见行，杜绝首帧全行占位白屏
+        let initialWindow: Set<UUID>
+        let snapshot = scrollSnapshots.wrappedValue[sessionId]
+        let pinned = snapshot?.isPinned ?? true
+        if !pinned,
+           let anchor = snapshot?.topVisibleMessageID,
+           let idx = messages.firstIndex(where: { $0.id == anchor }) {
+            let lo = max(0, idx - 7)
+            let hi = min(messages.count, idx + 8)
+            initialWindow = Set(messages[lo..<hi].map(\.id))
+        } else {
+            initialWindow = Set(messages.suffix(15).map(\.id))
+        }
+        self._virtualWindowIds = State(initialValue: initialWindow)
+    }
     /// 虚拟化窗口半径（屏数）：视口上方 2 屏 + 下方 2 屏——滚动惯性预热带。
     private let virtualWindowScreens: CGFloat = 2
     /// 底部容差区高度（pt）：与 ChatScrollCoordinator.bottomTolerance 同源——容差哨兵
@@ -165,9 +202,9 @@ struct SessionMessageList: View {
                                     .equatable()
                                     .opacity(isSummarized ? Theme.Colors.summarizedRowOpacity : 1)
                                     .animation(.easeOut(duration: Theme.Motion.contentFade), value: isSummarized)
-                                    .transition(isInitialHistoryLoad
-                                        ? .identity
-                                        : .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset)))
+                                    .transition((!isInitialHistoryLoad && message.id == messages.last?.id)
+                                        ? .opacity.combined(with: .offset(y: Theme.Motion.messageArriveOffset))
+                                        : .identity)
                                 }
                                 // 行级几何信号：挂在外层（实渲染/占位统一上报本行 frame）——
                                 // 供父级算出真实「视口首个可见消息」+ 虚拟化窗口判定 + 行高回写。
