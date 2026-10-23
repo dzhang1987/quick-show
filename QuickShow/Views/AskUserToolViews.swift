@@ -53,13 +53,17 @@ enum AskUserToolPayload {
         return summaries
     }
 
-    /// 解析结果：{"ok":true,"answers":[{question,selected:[...],custom}]}
+    /// 解析结果：{"ok":true,"answers":[{question,selected:[...],custom}]} 或带 data 信封
     /// ok == false（用户取消）或结构不合规返回 nil（调用方分别走「用户取消」/ 通用块）。
     static func parseAnswers(_ raw: String) -> [QuestionAnswerEntry]? {
         guard let data = raw.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              (object["ok"] as? Bool) == true,
-              let rawAnswers = object["answers"] as? [[String: Any]] else {
+              (object["ok"] as? Bool) == true else {
+            return nil
+        }
+        let rawAnswers = (object["answers"] as? [[String: Any]])
+            ?? ((object["data"] as? [String: Any])?["answers"] as? [[String: Any]])
+        guard let rawAnswers else {
             return nil
         }
         return rawAnswers.map { raw in
@@ -104,10 +108,10 @@ struct AskUserQuestionsBlock: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, Theme.Spacing.xl)
-            .padding(.vertical, Theme.Spacing.lg)
+            .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+            .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                     .fill(Theme.Colors.surfaceBadge)
             )
         }
@@ -118,6 +122,8 @@ struct AskUserQuestionsBlock: View {
 struct AskUserAnswersBlock: View {
     let result: String
     let status: ToolCallStatus
+
+    @State private var hovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -135,61 +141,86 @@ struct AskUserAnswersBlock: View {
                 }
                 .foregroundColor(Theme.Colors.contentTertiary)
             } else if let answers = AskUserToolPayload.parseAnswers(result) {
-                VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                    ForEach(Array(answers.enumerated()), id: \.offset) { _, entry in
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                            Text(entry.question)
-                                .font(Theme.Typography.text(11))
-                                .foregroundColor(Theme.Colors.contentTertiary)
-                                .lineLimit(2)
-                                .truncationMode(.tail)
-                            if !entry.selected.isEmpty {
-                                HStack(alignment: .top, spacing: Theme.Spacing.xs) {
-                                    Image(systemName: "checkmark")
-                                        .font(Theme.Typography.text(9, .bold))
-                                        .foregroundColor(Theme.Colors.accent)
-                                        .padding(.top, 1)
-                                    Text(entry.selected.joined(separator: "、"))
-                                        .font(Theme.Typography.text(11, .medium))
+                VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
+                    HStack(spacing: Theme.Spacing.lg) {
+                        Spacer(minLength: 0)
+                        CodeCopyButton(textToCopy: { ToolJSONText.pretty(result) }, isHovered: hovered)
+                    }
+                    .frame(minHeight: 14)
+
+                    VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+                        ForEach(Array(answers.enumerated()), id: \.offset) { _, entry in
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                Text(entry.question)
+                                    .font(Theme.Typography.text(11))
+                                    .foregroundColor(Theme.Colors.contentTertiary)
+                                    .lineLimit(2)
+                                    .truncationMode(.tail)
+                                if !entry.selected.isEmpty {
+                                    HStack(alignment: .top, spacing: Theme.Spacing.xs) {
+                                        Image(systemName: "checkmark")
+                                            .font(Theme.Typography.text(9, .bold))
+                                            .foregroundColor(Theme.Colors.accent)
+                                            .padding(.top, 1)
+                                        Text(entry.selected.joined(separator: "、"))
+                                            .font(Theme.Typography.text(11, .medium))
+                                            .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                                if !entry.custom.isEmpty {
+                                    Text(String(localized: "补充：\(entry.custom)"))
+                                        .font(Theme.Typography.text(11))
                                         .foregroundColor(Theme.Colors.contentSecondaryStrong)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
-                            }
-                            if !entry.custom.isEmpty {
-                                Text(String(localized: "补充：\(entry.custom)"))
-                                    .font(Theme.Typography.text(11))
-                                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                            if entry.selected.isEmpty && entry.custom.isEmpty {
-                                Text("（未作答）")
-                                    .font(Theme.Typography.text(11))
-                                    .foregroundColor(Theme.Colors.contentTertiary)
+                                if entry.selected.isEmpty && entry.custom.isEmpty {
+                                    Text("（未作答）")
+                                        .font(Theme.Typography.text(11))
+                                        .foregroundColor(Theme.Colors.contentTertiary)
+                                }
                             }
                         }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.vertical, Theme.Spacing.lg)
+                .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+                .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
                 .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                         .fill(Theme.Colors.surfaceBadge)
                 )
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+                }
             } else {
                 // ok == true 但 answers 结构异常：回退原文（等宽小号，不丢信息）
-                Text(ToolJSONText.pretty(result))
-                    .font(Theme.Typography.mono(11))
-                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Spacing.xl)
-                    .padding(.vertical, Theme.Spacing.lg)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                            .fill(Theme.Colors.surfaceBadge)
-                    )
+                VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
+                    HStack(spacing: Theme.Spacing.lg) {
+                        Text("json")
+                            .font(Theme.Typography.mono(10, .semibold))
+                            .foregroundColor(Theme.Colors.contentTertiary)
+                        Spacer(minLength: 0)
+                        CodeCopyButton(textToCopy: { ToolJSONText.pretty(result) }, isHovered: hovered)
+                    }
+                    .frame(minHeight: 14)
+
+                    Text(ToolJSONText.pretty(result))
+                        .font(Theme.Typography.mono(11))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+                .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(Theme.Colors.surfaceBadge)
+                )
+                .onHover { hovering in
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+                }
             }
         }
     }

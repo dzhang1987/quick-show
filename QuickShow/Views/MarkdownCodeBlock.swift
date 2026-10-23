@@ -3,6 +3,49 @@ import SwiftUI
 
 // 从 MarkdownBlocks.swift 拆出：Markdown 围栏代码块渲染器（含高亮内容子视图）。
 
+// MARK: - 通用代码复制按钮
+
+/// 代码块 / 结果框内嵌的轻反馈复制按钮：hover 时浮现，点击后变为带强调色的对勾轻反馈，1.2s 后复位。
+struct CodeCopyButton: View {
+    let textToCopy: () -> String
+    var isHovered: Bool = true
+
+    @State private var copied = false
+
+    var body: some View {
+        Button(action: performCopy) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: copied ? "checkmark" : "square.on.square")
+                    .font(Theme.Typography.text(9.5, .medium))
+                Text(copied ? String(localized: "已复制") : String(localized: "复制"))
+                    .font(Theme.Typography.text(9.5, .medium))
+            }
+            .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.surfaceButton)
+            )
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .opacity((isHovered || copied) ? 1 : 0)
+        .allowsHitTesting(isHovered || copied)
+        .accessibilityHidden(!isHovered && !copied)
+    }
+
+    private func performCopy() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(textToCopy(), forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) {
+            copied = false
+        }
+    }
+}
+
 // MARK: - 代码块
 
 /// 围栏代码块：语言标签 + 等宽内容；hover 右上角渐显复制钮（成功变对勾轻反馈）。
@@ -13,7 +56,6 @@ struct CodeBlockView: View {
     let code: String
 
     @State private var hovered = false
-    @State private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
@@ -26,28 +68,7 @@ struct CodeBlockView: View {
                 Spacer(minLength: 0)
                 // 布局稳定化：按钮常驻布局（header 行高度恒定），hover 仅切换透明度，
                 // 不触发布局变化。
-                // 显隐由 hovered 单独驱动；copied 仅是复制成功的瞬时内容反馈
-                // （鼠标离开时按钮随 hovered 隐去，不会残留悬空的第二按钮）。
-                Button(action: copyCode) {
-                    HStack(spacing: Theme.Spacing.xs) {
-                        Image(systemName: copied ? "checkmark" : "square.on.square")
-                            .font(Theme.Typography.text(9.5, .medium))
-                        Text(copied ? String(localized: "已复制") : String(localized: "复制"))
-                            .font(Theme.Typography.text(9.5, .medium))
-                    }
-                    .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                    .padding(.horizontal, Theme.Spacing.md)
-                    .padding(.vertical, Theme.Spacing.xxs)
-                    .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                            .fill(Theme.Colors.surfaceButton)
-                    )
-                }
-                .buttonStyle(.plain)
-                .fixedSize()
-                .opacity(hovered ? 1 : 0)
-                .allowsHitTesting(hovered)
-                .accessibilityHidden(!hovered)
+                CodeCopyButton(textToCopy: { code }, isHovered: hovered)
             }
             .frame(minHeight: 14)
 
@@ -70,15 +91,6 @@ struct CodeBlockView: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
-    }
-
-    private func copyCode() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(code, forType: .string)
-        copied = true
-        // 轻反馈：对勾短暂停留后复位
-        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 

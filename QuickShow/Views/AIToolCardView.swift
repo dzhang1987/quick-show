@@ -220,10 +220,10 @@ private struct ToolCallRow: View {
                     .lineSpacing(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Spacing.xl)
-                    .padding(.vertical, Theme.Spacing.lg)
+                    .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+                    .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
                     .background(
-                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                        RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                             .fill(Theme.Colors.surfaceBadge)
                     )
             }
@@ -249,7 +249,6 @@ private struct ToolCallResultBlock: View {
     let truncateLimit: Int
 
     @State private var hovered = false
-    @State private var copied = false
 
     /// 美化后的完整结果文本。
     private var prettyResult: String { ToolJSONText.pretty(result) }
@@ -265,33 +264,9 @@ private struct ToolCallResultBlock: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            HStack(spacing: Theme.Spacing.lg) {
-                Text("结果")
-                    .font(Theme.Typography.text(10, .semibold))
-                    .foregroundColor(Theme.Colors.contentTertiary)
-                Spacer(minLength: 0)
-                // hover 渐显复制钮（与 CodeBlockView 同一语言）
-                if hovered || copied {
-                    Button(action: copyResult) {
-                        HStack(spacing: Theme.Spacing.xs) {
-                            Image(systemName: copied ? "checkmark" : "square.on.square")
-                                .font(Theme.Typography.text(9.5, .medium))
-                            Text(copied ? String(localized: "已复制") : String(localized: "复制"))
-                                .font(Theme.Typography.text(9.5, .medium))
-                        }
-                        .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                        .padding(.horizontal, Theme.Spacing.md)
-                        .padding(.vertical, Theme.Spacing.xxs)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                                .fill(Theme.Colors.surfaceButton)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .transition(.opacity)
-                }
-            }
-            .frame(minHeight: 14)
+            Text("结果")
+                .font(Theme.Typography.text(10, .semibold))
+                .foregroundColor(Theme.Colors.contentTertiary)
 
             // 失败 / 拒绝：先给一行可读摘要（从 {"ok":false,"error":...} 提取）
             if showsErrorSummary, let error = ToolJSONText.errorMessage(from: result) {
@@ -307,23 +282,35 @@ private struct ToolCallResultBlock: View {
                                  : Theme.Colors.statusWarning)
             }
 
-            // 完整 JSON：等宽、限高可滚动（短内容自适应贴合，超长走次级限高 180pt 或展开 260pt）
-            AdaptiveScrollBox(
-                axes: .vertical,
-                maxHeight: showFullResult ? 260 : Theme.Layout.chatMetaBlockMaxHeight,
-                showsIndicators: false
-            ) {
-                Text(displayedResult)
-                    .font(Theme.Typography.mono(11))
-                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, Theme.Spacing.xl)
-                    .padding(.vertical, Theme.Spacing.lg)
+            // 完整 JSON：等宽、限高可滚动（结构与普通代码块一致：Header 行 + Content 垂直流）
+            VStack(alignment: .leading, spacing: Theme.Layout.chatCodeBlockHeaderGap) {
+                HStack(spacing: Theme.Spacing.lg) {
+                    Text("json")
+                        .font(Theme.Typography.mono(10, .semibold))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                    Spacer(minLength: 0)
+                    CodeCopyButton(textToCopy: { prettyResult }, isHovered: hovered)
+                }
+                .frame(minHeight: 14)
+
+                AdaptiveScrollBox(
+                    axes: .vertical,
+                    maxHeight: showFullResult ? 260 : Theme.Layout.chatMetaBlockMaxHeight,
+                    showsIndicators: false
+                ) {
+                    Text(displayedResult)
+                        .font(Theme.Typography.mono(11))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .lineSpacing(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+            .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                     .fill(Theme.Colors.surfaceBadge)
             )
             .onHover { hovering in
@@ -349,15 +336,6 @@ private struct ToolCallResultBlock: View {
     /// 是否展示错误摘要行（仅失败 / 已拒绝两态）。
     private var showsErrorSummary: Bool {
         status == .failed || status == .denied
-    }
-
-    private func copyResult() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(prettyResult, forType: .string)
-        copied = true
-        // 轻反馈：对勾短暂停留后复位
-        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 }
 

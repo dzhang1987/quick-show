@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **AI 工具调用结果与提问卡片复制按钮交互及布局对齐重构（`AIToolCardView.swift` / `AskUserToolViews.swift` / `MarkdownCodeBlock.swift`）**：
+  - **复制按钮 Hover 断层修复**：修复工具卡片中 `.onHover` 仅作用于局部滚动框导致鼠标上移点击按钮瞬间按钮消失的问题，将状态监听与响应区域提升至整个卡片外层并保证平滑连贯；
+  - **Header-Content 像素级排版对齐**：彻底移除此前工具调用结果卡片右上角悬浮顶格贴边的 `overlay` 实现，重构为与 Markdown 普通代码块完全一致的内部 Header 行（左侧 `json` 语言标签，右侧复制按钮，距顶 12pt、距右 14pt，下方预留 8pt 内容呼吸间距），卡片内边距与圆角（`insetCard`）严格与普通代码块保持 100% 像素级对齐；
+  - **`ask_user` 标准信封解包与复制补全**：修复 `AskUserToolPayload.parseAnswers` 针对后端 `{"data": {"answers": [...]}}` 统一信封格式的解析缺失，恢复结构化问答卡片的优雅排版；并在问答卡片（及回退 JSON 块）右上角补全规范的复制按钮；
+  - **通用轻反馈复制组件抽象（`CodeCopyButton`）**：抽象独立且可复用的 `CodeCopyButton` 组件，统一管理系统剪贴板写入与 `transientFeedbackDuration`（1.2s）对勾轻反馈，消除多处散弹式重复实现。
+
 ### Added
 
 - **服务商可选自定义 HTTP 请求头体系（`HTTPHeaderEntry` / `HTTPHeaderPreset` / `AIProvider.swift` / `AIServiceSettingsForm.swift`）**：
