@@ -134,13 +134,18 @@ extension AIChatService {
         return items
     }
 
-    /// 从错误 body 中提取 `error.message`，失败则回退为原始文本前缀。
-    func extractErrorMessage(from body: String) -> String {
+    /// 从错误 body 中提取 `error.message` 或 `message`，失败则回退为原始文本前缀。
+    nonisolated func extractErrorMessage(from body: String) -> String {
         if let data = body.data(using: .utf8),
-           let envelope = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data),
-           let message = envelope.error?.message?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !message.isEmpty {
-            return message
+           let envelope = try? JSONDecoder().decode(APIErrorEnvelope.self, from: data) {
+            if let message = envelope.error?.message?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !message.isEmpty {
+                return message
+            }
+            if let message = envelope.message?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !message.isEmpty {
+                return message
+            }
         }
         return String(body.trimmingCharacters(in: .whitespacesAndNewlines).prefix(300))
     }

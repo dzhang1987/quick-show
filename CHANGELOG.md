@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- **服务商可选自定义 HTTP 请求头体系（`HTTPHeaderEntry` / `HTTPHeaderPreset` / `AIProvider.swift` / `AIServiceSettingsForm.swift`）**：
+  - **强类型配置模型与平滑兼容**：在服务商模型中引入 `HTTPHeaderEntry` 与 `HTTPHeaderPreset` 模型，`AIProvider` 增加 `customHeaders: [HTTPHeaderEntry]` 字段，通过 `decodeIfPresent` 平滑向前兼容已有持久化配置；
+  - **设置表单交互与内置模板**：在 AI 服务商编辑表单新增「HTTP 请求头配置（可选）」分区，提供常用内置头下拉选择（`User-Agent: OpenCode`、`User-Agent: Cline`、`Claude Code`、`Codex CLI`、`HTTP-Referer`、`X-Title` 等）与自定义键值添加、编辑及删除能力；
+  - **统一网络层 Header 注入与兼容兜底**：统一通过 `URLRequest.applyCustomHeaders(from:)` 扩展在流式对话、模型拉取及后台补全中注入头部，未显式指定 `User-Agent` 时默认携带生态兼容标识（`opencode/1.1.28 QuickShow/1.0`），彻底消除各类 API 网关（如 AgentRouter、NewAPI）的白名单 401 拦截。
+
+### Fixed
+
+- **OpenAI 兼容端点流式错误响应解析与透明度增强（`OpenAIProvider.swift` / `AIChatService+RequestEncoding.swift` / `AIChatWireModels.swift`）**：
+  - **流式非 200 错误体提取**：修复在 `OpenAIProvider.stream` 中遇到非 200 HTTP 响应时抛出空 message 的问题，增加流式错误 body 前置提取与解析；
+  - **错误信封结构化解析拓展**：增强 `APIErrorEnvelope` 与 `extractErrorMessage`，统一支持提取 `error.message` 与顶层 `message`，使网关层返回的真实错误（如模型协议不匹配、配额不足或白名单提示）能完整透明地在界面呈现。
+
 ### Changed
 
 - **行内代码与键帽微徽章视觉质感重构与排版居中算法（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownInlineNS.swift` / `DesignTokens.swift`）**：

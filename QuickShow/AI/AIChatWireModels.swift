@@ -624,12 +624,13 @@ final class ResponsesToolCallAccumulator {
     }
 }
 
-/// 非 2xx 时的错误信封：`{"error":{"message":"..."}}`。
+/// 非 2xx 时的错误信封：`{"error":{"message":"..."}}` 或 `{"message":"..."}`。
 struct APIErrorEnvelope: Decodable {
     struct APIErrorBody: Decodable {
         let message: String?
     }
     let error: APIErrorBody?
+    let message: String?
 }
 
 /// GET /models 响应：OpenAI 格式 `{"data":[{"id":"..."}]}`。

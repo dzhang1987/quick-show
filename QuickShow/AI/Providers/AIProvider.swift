@@ -126,6 +126,37 @@ struct AIModelSpec: Identifiable, Codable, Equatable {
     }
 }
 
+// MARK: - HTTP 自定义头部与预设模型
+struct HTTPHeaderEntry: Identifiable, Codable, Equatable {
+    var id: String
+    var key: String
+    var value: String
+
+    init(id: String = UUID().uuidString, key: String = "", value: String = "") {
+        self.id = id
+        self.key = key
+        self.value = value
+    }
+}
+
+/// 常用内置 HTTP 头部预设（供下拉选择填充）
+struct HTTPHeaderPreset: Identifiable {
+    let id: String
+    let displayName: String
+    let key: String
+    let value: String
+
+    static let presets: [HTTPHeaderPreset] = [
+        HTTPHeaderPreset(id: "ua-opencode", displayName: "User-Agent: OpenCode (兼容各类网关)", key: "User-Agent", value: "opencode/1.1.28"),
+        HTTPHeaderPreset(id: "ua-cline", displayName: "User-Agent: Cline", key: "User-Agent", value: "cline/3.5.0"),
+        HTTPHeaderPreset(id: "ua-claude-code", displayName: "User-Agent: Claude Code", key: "User-Agent", value: "claude-code/0.1.0"),
+        HTTPHeaderPreset(id: "ua-codex", displayName: "User-Agent: Codex CLI", key: "User-Agent", value: "codex/1.0.0"),
+        HTTPHeaderPreset(id: "ua-cursor", displayName: "User-Agent: Cursor", key: "User-Agent", value: "cursor/0.40.0"),
+        HTTPHeaderPreset(id: "referer", displayName: "HTTP-Referer (OpenRouter 标识)", key: "HTTP-Referer", value: "https://quickshow.local"),
+        HTTPHeaderPreset(id: "title", displayName: "X-Title (客户端名称)", key: "X-Title", value: "QuickShow")
+    ]
+}
+
 // MARK: - 服务商实体模型
 struct AIProvider: Identifiable, Codable, Equatable {
     var id: String                    // 唯一标识，如 "alibaba", "openai", "qoder", "antigravity"
@@ -136,6 +167,7 @@ struct AIProvider: Identifiable, Codable, Equatable {
     var isEnabled: Bool               // 是否启用
     var models: [AIModelSpec]         // 该提供商下的模型池
     var iconName: String              // 服务商单色 SF Symbol 矢量图标 (强类型存储，杜绝运行时字符串猜测)
+    var customHeaders: [HTTPHeaderEntry] // 自定义 HTTP 头部配置
 
     init(
         id: String = UUID().uuidString,
@@ -145,7 +177,8 @@ struct AIProvider: Identifiable, Codable, Equatable {
         apiProtocol: AIProtocolOption = .chat,
         isEnabled: Bool = true,
         models: [AIModelSpec] = [],
-        iconName: String = "server.rack"
+        iconName: String = "server.rack",
+        customHeaders: [HTTPHeaderEntry] = []
     ) {
         self.id = id
         self.name = name
@@ -155,6 +188,7 @@ struct AIProvider: Identifiable, Codable, Equatable {
         self.isEnabled = isEnabled
         self.models = models
         self.iconName = iconName
+        self.customHeaders = customHeaders
     }
 
     init(from decoder: Decoder) throws {
@@ -166,6 +200,7 @@ struct AIProvider: Identifiable, Codable, Equatable {
         self.apiProtocol = try container.decode(AIProtocolOption.self, forKey: .apiProtocol)
         self.isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
         self.models = try container.decode([AIModelSpec].self, forKey: .models)
+        self.customHeaders = (try? container.decodeIfPresent([HTTPHeaderEntry].self, forKey: .customHeaders)) ?? []
         if let icon = try container.decodeIfPresent(String.self, forKey: .iconName) {
             self.iconName = icon
         } else {
@@ -289,4 +324,30 @@ extension AIProvider {
         "antigravity": { antigravityPreset().models }
     ]
 }
+
+// MARK: - URLRequest 头部注入扩展
+extension URLRequest {
+    /// 统一为网络请求注入服务商配置的自定义请求头及兼容客户端默认标识
+    mutating func applyCustomHeaders(
+        from provider: AIProvider?,
+        defaultUserAgent: String = "opencode/1.1.28 QuickShow/1.0"
+    ) {
+        var hasUserAgent = false
+        if let headers = provider?.customHeaders {
+            for header in headers {
+                let key = header.key.trimmingCharacters(in: .whitespacesAndNewlines)
+                let val = header.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !key.isEmpty else { continue }
+                self.setValue(val, forHTTPHeaderField: key)
+                if key.caseInsensitiveCompare("User-Agent") == .orderedSame {
+                    hasUserAgent = true
+                }
+            }
+        }
+        if !hasUserAgent {
+            self.setValue(defaultUserAgent, forHTTPHeaderField: "User-Agent")
+        }
+    }
+}
+
 

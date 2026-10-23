@@ -70,6 +70,7 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                     if !apiKey.isEmpty {
                         req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
                     }
+                    req.applyCustomHeaders(from: provider)
 
                     let thinkingFields = self.thinkingFields(for: model.id, level: options.thinkingLevel)
                     let bodyData = try await MainActor.run {
@@ -89,7 +90,19 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                     let (bytes, response) = try await URLSession.shared.bytes(for: req)
                     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
                         let status = (response as? HTTPURLResponse)?.statusCode ?? 500
-                        throw AIChatError.http(status: status, message: "")
+                        var errorBody = ""
+                        do {
+                            var lines: [String] = []
+                            for try await line in bytes.lines {
+                                lines.append(line)
+                                if lines.count >= 20 { break }
+                            }
+                            errorBody = lines.joined(separator: "\n")
+                        } catch {
+                            // 读取失败回退为空
+                        }
+                        let message = AIChatService.shared.extractErrorMessage(from: errorBody)
+                        throw AIChatError.http(status: status, message: message)
                     }
 
                     let chatAccumulator = ChatToolCallAccumulator()
@@ -217,12 +230,14 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
         if !apiKey.isEmpty {
             req.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         }
+        req.applyCustomHeaders(from: provider)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 500
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw AIChatError.http(status: status, message: body)
+            let message = AIChatService.shared.extractErrorMessage(from: body)
+            throw AIChatError.http(status: status, message: message)
         }
 
         guard let decoded = try? JSONDecoder().decode(ModelListResponse.self, from: data) else {

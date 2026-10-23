@@ -305,6 +305,62 @@ struct AIServiceSettingsForm: View {
                 Text(providerURLFooter(for: provider.type))
             }
 
+            // HTTP 头部配置（可选，适配网关白名单与自定义客户端标识）
+            Section {
+                let headers = provider.customHeaders
+                if headers.isEmpty {
+                    Text("暂未配置自定义请求头（默认携带兼容客户端标识）")
+                        .font(.system(size: Theme.Typography.footnote))
+                        .foregroundColor(.secondary)
+                } else {
+                    ForEach(Array(headers.enumerated()), id: \.element.id) { index, _ in
+                        HStack(spacing: 8) {
+                            TextField("Header 名（如 User-Agent）", text: headerKeyBinding(for: provider.id, at: index))
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 160)
+                            TextField("Header 值", text: headerValueBinding(for: provider.id, at: index))
+                                .textFieldStyle(.roundedBorder)
+                            Button {
+                                removeHeader(for: provider.id, at: index)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundColor(Theme.Colors.statusWarning)
+                            }
+                            .buttonStyle(.plain)
+                            .help("删除此请求头")
+                        }
+                    }
+                }
+
+                HStack(spacing: 12) {
+                    Menu {
+                        ForEach(HTTPHeaderPreset.presets) { preset in
+                            Button(preset.displayName) {
+                                addHeaderPreset(preset, for: provider.id)
+                            }
+                        }
+                    } label: {
+                        Label("选择内置头信息", systemImage: "chevron.down.circle")
+                            .font(.system(size: Theme.Typography.footnote))
+                    }
+                    .menuStyle(.borderedButton)
+                    .controlSize(.small)
+
+                    Button {
+                        addCustomHeader(for: provider.id)
+                    } label: {
+                        Label("添加自定义头", systemImage: "plus")
+                            .font(.system(size: Theme.Typography.footnote))
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+            } header: {
+                Text("HTTP 请求头配置（可选）")
+            } footer: {
+                Text("可下拉选择内置客户端标识（如 OpenCode、Cline 等），或自由配置自定义 Header。")
+            }
+
             // 凭据与认证中心
             Section {
                 let storedKey = providerStore.apiKey(for: provider.id) ?? ""
@@ -1365,6 +1421,63 @@ struct AIServiceSettingsForm: View {
                 providerStore.saveProvider(p)
             }
         )
+    }
+
+    // MARK: - HTTP Header Bindings
+
+    private func headerKeyBinding(for providerId: String, at index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                let list = providerStore.provider(for: providerId)?.customHeaders ?? []
+                guard index < list.count else { return "" }
+                return list[index].key
+            },
+            set: { newKey in
+                guard var p = providerStore.provider(for: providerId) else { return }
+                guard index < p.customHeaders.count else { return }
+                p.customHeaders[index].key = newKey
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func headerValueBinding(for providerId: String, at index: Int) -> Binding<String> {
+        Binding(
+            get: {
+                let list = providerStore.provider(for: providerId)?.customHeaders ?? []
+                guard index < list.count else { return "" }
+                return list[index].value
+            },
+            set: { newVal in
+                guard var p = providerStore.provider(for: providerId) else { return }
+                guard index < p.customHeaders.count else { return }
+                p.customHeaders[index].value = newVal
+                providerStore.saveProvider(p)
+            }
+        )
+    }
+
+    private func addHeaderPreset(_ preset: HTTPHeaderPreset, for providerId: String) {
+        guard var p = providerStore.provider(for: providerId) else { return }
+        if let idx = p.customHeaders.firstIndex(where: { $0.key.caseInsensitiveCompare(preset.key) == .orderedSame }) {
+            p.customHeaders[idx].value = preset.value
+        } else {
+            p.customHeaders.append(HTTPHeaderEntry(key: preset.key, value: preset.value))
+        }
+        providerStore.saveProvider(p)
+    }
+
+    private func addCustomHeader(for providerId: String) {
+        guard var p = providerStore.provider(for: providerId) else { return }
+        p.customHeaders.append(HTTPHeaderEntry(key: "", value: ""))
+        providerStore.saveProvider(p)
+    }
+
+    private func removeHeader(for providerId: String, at index: Int) {
+        guard var p = providerStore.provider(for: providerId) else { return }
+        guard index < p.customHeaders.count else { return }
+        p.customHeaders.remove(at: index)
+        providerStore.saveProvider(p)
     }
 
     // MARK: - Model Bindings
