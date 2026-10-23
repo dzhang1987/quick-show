@@ -6,6 +6,10 @@
 
 ### Fixed
 
+- **`get_quickshow_state` 状态查询工具真源对齐与多会话架构修复（`BuiltInTools.swift`）**：
+  - **当前生效模型与协议真源修复**：彻底消除此前直接读取已废弃全局 `UserDefaults` 键（`ai.selectedModel` / `ai.apiProtocol`）导致模型切换后状态返回陈旧滞后（如选中 `gpt-5.6-sol` 却仍返回 `deepseek-v4.1-flash`）的 Bug；升级为在主线程动态解析当前执行会话（`ToolExecutionContext` / `ChatSession.modelId`）与激活智能体的真实生效模型，并联动匹配所属服务商的实时 API 协议；
+  - **默认值兜底与状态上下文增强**：为 `panel_scale_option`、`theme_variant`、`appearance_mode` 补充设计默认值兜底（规避未曾设置时返回 `null`）；同时扩展 `provider_name`（服务商名）、`active_agent`（智能体 ID）与 `thinking_level`（思考档位）等状态字段，保持数据透明。
+
 - **AI 工具调用结果与提问卡片复制按钮交互及布局对齐重构（`AIToolCardView.swift` / `AskUserToolViews.swift` / `MarkdownCodeBlock.swift`）**：
   - **复制按钮 Hover 断层修复**：修复工具卡片中 `.onHover` 仅作用于局部滚动框导致鼠标上移点击按钮瞬间按钮消失的问题，将状态监听与响应区域提升至整个卡片外层并保证平滑连贯；
   - **Header-Content 像素级排版对齐**：彻底移除此前工具调用结果卡片右上角悬浮顶格贴边的 `overlay` 实现，重构为与 Markdown 普通代码块完全一致的内部 Header 行（左侧 `json` 语言标签，右侧复制按钮，距顶 12pt、距右 14pt，下方预留 8pt 内容呼吸间距），卡片内边距与圆角（`insetCard`）严格与普通代码块保持 100% 像素级对齐；

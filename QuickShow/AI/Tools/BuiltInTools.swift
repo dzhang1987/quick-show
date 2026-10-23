@@ -456,7 +456,7 @@ final class QuickShowStateTool: AITool {
     let category: ToolCategory = .system
     /// 纯读宿主状态快照，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
-    let description = "获取 QuickShow 宿主应用的当前状态：面板/AI 窗是否可见、侧栏开关、当前模型、主题与外观等。"
+    let description = "获取 QuickShow 宿主应用的当前状态：面板/AI 窗是否可见、侧栏开关、当前生效模型、服务商、主题与外观等。"
     var parametersSchema: [String: Any] {
         ["type": "object", "properties": [String: Any](), "required": [String]()]
     }
@@ -464,28 +464,68 @@ final class QuickShowStateTool: AITool {
     func execute(arguments: [String: Any]) async throws -> String {
         let defaults = UserDefaults.standard
 
-        // 实时窗口可见性：NSApp.windows 中查找主面板（FloatingPanel）与 AI 窗（AIPanel）
-        let visibility: (panel: Bool, aiWindow: Bool) = await MainActor.run {
+        // 在主线程一次性原子读取窗口可见性与当前执行上下文（会话、生效模型、所属服务商）
+        let executionSessionId = ToolExecutionContext.currentSessionId
+        let runtime = await MainActor.run { () -> (panelVisible: Bool, aiVisible: Bool, effectiveModel: String, apiProtocol: String, providerName: String?, activeAgentId: String, thinkingLevel: String) in
             let panelVisible = NSApp.windows.contains { $0 is FloatingPanel && $0.isVisible }
             let aiVisible = NSApp.windows.contains { $0 is AIPanel && $0.isVisible }
-            return (panelVisible, aiVisible)
+
+            let state = AIChatState.shared
+            let session: ChatSession? = {
+                if let execId = executionSessionId, let target = state.store.session(id: execId) {
+                    return target
+                }
+                return state.store.currentSession
+            }()
+
+            let currentAgent = session?.agentId.flatMap { AIAgentStore.shared.agent(for: $0) } ?? state.currentAgent
+
+            // 模型真源解析：会话绑定优先 -> 智能体默认 -> 全局兜底
+            let sessionModel = session?.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let effectiveModel: String = {
+                if let sessionModel, !sessionModel.isEmpty {
+                    return sessionModel
+                }
+                if !currentAgent.modelId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return currentAgent.modelId
+                }
+                return AIChatService.shared.selectedModel
+            }()
+
+            // 查找生效模型归属的 Provider
+            let matchedProvider = AIProviderStore.shared.providers.first(where: { $0.models.contains(where: { $0.id == effectiveModel }) })
+                ?? AIProviderStore.shared.provider(for: currentAgent.providerId)
+
+            let proto = matchedProvider?.apiProtocol.rawValue
+                ?? defaults.string(forKey: "ai.apiProtocol")
+                ?? "chat"
+
+            let providerName = matchedProvider?.name
+            let agentId = currentAgent.id
+            let thinking = (session?.thinkingLevel ?? currentAgent.thinkingLevel)?.rawValue ?? "default"
+
+            return (panelVisible, aiVisible, effectiveModel, proto, providerName, agentId, thinking)
         }
 
         var state: [String: Any] = [
-            "panel_visible": visibility.panel,
-            "ai_window_visible": visibility.aiWindow,
+            "panel_visible": runtime.panelVisible,
+            "ai_window_visible": runtime.aiVisible,
             "sidebar_visible": defaults.bool(forKey: "ai.sidebarVisible"),
             "show_seconds": boolSetting(defaults, "showSeconds", fallingBack: true),
             "is_24_hour_format": boolSetting(defaults, "is24HourFormat", fallingBack: true),
-            "show_on_launch": boolSetting(defaults, "showOnLaunch", fallingBack: true)
+            "show_on_launch": boolSetting(defaults, "showOnLaunch", fallingBack: true),
+            "current_model": runtime.effectiveModel,
+            "api_protocol": runtime.apiProtocol,
+            "active_agent": runtime.activeAgentId,
+            "thinking_level": runtime.thinkingLevel,
+            "panel_scale_option": defaults.string(forKey: "panelScaleOption") ?? PanelScaleOption.auto.rawValue,
+            "theme_variant": defaults.string(forKey: "themeVariant") ?? ThemeVariant.standard.rawValue,
+            "appearance_mode": defaults.string(forKey: "appearanceMode") ?? AppearanceMode.dark.rawValue
         ]
 
-        // 字符串类配置：键缺失用 null 占位，保持结构稳定
-        state["current_model"] = defaults.string(forKey: "ai.selectedModel") ?? NSNull()
-        state["api_protocol"] = defaults.string(forKey: "ai.apiProtocol") ?? NSNull()
-        state["panel_scale_option"] = defaults.string(forKey: "panelScaleOption") ?? NSNull()
-        state["theme_variant"] = defaults.string(forKey: "themeVariant") ?? NSNull()
-        state["appearance_mode"] = defaults.string(forKey: "appearanceMode") ?? NSNull()
+        if let providerName = runtime.providerName {
+            state["provider_name"] = providerName
+        }
 
         return toolSuccessJSON(state)
     }
