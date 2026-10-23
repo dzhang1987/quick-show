@@ -234,7 +234,7 @@ struct ChatMessageRow: View, Equatable {
             StreamingMessageView(content: message.content, hasReasoning: !(message.reasoning?.isEmpty ?? true))
         case .failed(let errorText):
             // 失败态保留提示卡片（状态提示，非正文排版）
-            let retryTitle = canResumeAfterTools ? "载入最新成果并继续" : "重试"
+            let retryTitle = canResumeAfterTools ? "继续回答" : "重试"
             FailedMessageView(errorText: errorText, retryTitle: retryTitle, onRetry: onRetry)
         case .done:
             // 落定态：完整块级 Markdown 渲染（AIChatMarkdownView）；
@@ -896,22 +896,25 @@ struct FailedMessageView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Button(action: onRetry) {
-                HStack(spacing: Theme.Spacing.sm) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(Theme.Typography.text(11, .semibold))
-                    Text(retryTitle)
-                        .font(Theme.Typography.text(11, .semibold))
+            HStack {
+                Spacer()
+                Button(action: onRetry) {
+                    HStack(spacing: Theme.Spacing.sm) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(Theme.Typography.text(11, .semibold))
+                        Text(retryTitle)
+                            .font(Theme.Typography.text(11, .semibold))
+                    }
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .padding(.horizontal, Theme.Spacing.xxl)
+                    .padding(.vertical, Theme.Spacing.md)
+                    .background(
+                        RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                            .fill(Theme.Colors.surfaceButton)
+                    )
                 }
-                .foregroundColor(Theme.Colors.contentPrimary)
-                .padding(.horizontal, Theme.Spacing.xxl)
-                .padding(.vertical, Theme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                        .fill(Theme.Colors.surfaceButton)
-                )
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, Theme.Spacing.xxl)
         .padding(.vertical, Theme.Spacing.lg)

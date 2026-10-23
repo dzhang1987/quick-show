@@ -19,6 +19,10 @@
 
 ### Changed
 
+- **断点续跑重试卡片交互与文案体验优化（`AIChatMessageRow.swift`）**：
+  - 将工具执行就绪后尾部生成失败的生硬文案「载入最新成果并继续」优化为更自然、直观的「继续回答」；
+  - 优化 `FailedMessageView` 失败卡片布局，将重试 / 继续操作按钮调整为居右对齐，提升视觉平衡感。
+
 - **行内代码与键帽微徽章视觉质感重构与排版居中算法（`NativeTextFlowView.swift` / `FlowLayoutManager` / `MarkdownInlineNS.swift` / `DesignTokens.swift`）**：
   - **TextKit 底层圆角绘制（`fillBackgroundRectArray` 接管）**：在 `FlowLayoutManager` 中接管系统底层背景绘制，使用 `NSBezierPath(roundedRect:..., xRadius: 3.5, yRadius: 3.5)` 赋予行内代码（Inline Code）与按键（`<kbd>`）精致的胶囊圆角，彻底消除原生直角硬色块；
   - **通透中性柔底与微光描边（方案 A 钛灰风格）**：彻底替换原本死板发脏的纯黑 `0.10` 背景，升级为自适应柔和中性底（浅色 `0.055` 微透柔灰，深色 `0.12` 近白）搭配 `0.5pt` 精细轮廓微描边（浅色 `0.09`，深色 `0.14`），兼具清晰度与耐看度；
@@ -65,7 +69,7 @@
 
 - **子智能体成果反向热同步与智能断点续跑闭环（`AgentCoordinator.swift` / `AIChatState+Streaming.swift` / `AIChatState.swift` / `AIChatMessageRow.swift`）**：
   - **成果反向热同步（`handleChildSessionCompleted` / `refreshSubagentResultsInParent`）**：子智能体专属会话成功执行结束时，主动反向同步成果与产物至主会话 `launch_subagents` 工具调用记录并更新本地任务注册表状态，就地刷新 JSON 与产物路径，并触发气泡轻提示；
-  - **智能断点续跑机制（Smart Resume / `resumeConversationAfterTools`）**：当并发工具调用已全部执行完毕、仅尾部助手生成失败时，保留全部成果与工具调用历史记录，不再将已有工作抹杀；失败消息卡片自适应呈现「载入最新成果并继续」，点击重试时直接基于已就绪的工具产物向模型发起最终总结；
+  - **智能断点续跑机制（Smart Resume / `resumeConversationAfterTools`）**：当并发工具调用已全部执行完毕、仅尾部助手生成失败时，保留全部成果与工具调用历史记录，不再将已有工作抹杀；失败消息卡片自适应呈现「继续回答」并居右布局，点击重试时直接基于已就绪的工具产物向模型发起最终总结；
   - **重试前置热刷新**：主会话重试请求前，先行主动扫描并热刷新关联子会话的最新成果，杜绝脏数据。
 
 - **输入坞消息排队与中途插入体系完整升级（`QueuedMessagesPanel` / `AIChatState+Queue.swift` / `SettingsStore.swift` / `AIChatInputFields.swift`）**：
