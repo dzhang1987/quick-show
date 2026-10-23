@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **AI 思考与工具调用回合级聚合重构与视觉降噪（`AgentTurnTrace.swift` / `AgentProcessDisclosureView.swift` / `AIToolCardView.swift` / `AIChatMessageRow.swift` / `AIChatMessageList.swift`）**：
+  - **回合级聚合与“千层饼”根治（`AgentTurnTrace`）**：彻底打破此前以单条物理消息为单位各自弹折叠框导致多轮 ReAct 调研时连续出现多节孤立抽屉（“千层饼/手风琴”现象）的缺陷，抽象 `AgentTurnTrace` 回合轨迹模型，将同一个 Assistant 回答回合内发生的全部思考与多轮工具调用统一聚合成唯一的过程栏，中间无正文的纯过程消息完全静默零占位；
+  - **去卡片化极简通透流（`AgentProcessDisclosureView`）**：移除原先粗笨突兀的圆角大盒子底色与硬边框，收起态升级为约 24pt 高度的极简通透指示栏（微图标 + 弱化状态文本 + 细微 hover 反馈），像优雅的原生元数据标签一样自然融入正文上方，彻底消除信息层级倒置；
+  - **多轮执行时间线（Execution Timeline）**：展开态自动适配单轮与多轮场景，单轮直接呈现思考与工具明细，多轮按轮次时间线节点（`第 1 轮` $\rightarrow$ `第 2 轮` $\rightarrow$ ... $\rightarrow$ `最终推理`）结构化展开，因果链条一目了然；
+  - **工具状态徽标视觉降噪（`ToolStatusBadge`）**：成功完成态（`done`）彻底去除扎眼的亮绿色大药丸与边框，改为安静克制的浅灰色 `✓ 完成` 小字，仅在失败/拒绝（警示色）与运行中（强调色 Spinner）保留视觉焦点，告别“一排绿灯”的视觉喧宾夺主；
+  - **伴生富卡片空占位 680pt 幽灵巨幅空白根治（`actualRichCardToolCalls`）**：修复此前回合聚合后将多轮累积的数十上百个抓取/搜索工具盲目传入 `ForEach` 渲染 `RichCardHostView`，导致几十个空 `ZStack` 在 `VStack(spacing: 8)` 内部累积出数百 pt 巨大幽灵空白的严重排版 Bug；增加 `actualRichCardToolCalls` 前置严格信封过滤，普通工具 0 节点注入视图树，正文与底部操作栏恢复紧密自然贴合。
+
 ### Fixed
 
 - **`get_quickshow_state` 状态查询工具真源对齐与多会话架构修复（`BuiltInTools.swift`）**：

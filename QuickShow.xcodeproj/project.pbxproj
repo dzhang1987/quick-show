@@ -159,6 +159,7 @@
 		9C6E9CC1DF2EDE421FC52145 /* StatusBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63AE6828207BF9FDF55E3684 /* StatusBarView.swift */; };
 		9CC49B9EED1B8F61AF97F815 /* SystemStatusModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97D5B500F6579D728562FD78 /* SystemStatusModels.swift */; };
 		9D96224049AC887256641D8E /* AgentTaskRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 21134A9335F219AB7305BD80 /* AgentTaskRegistry.swift */; };
+		9E0BDB925D00E66421B6B9C6 /* AgentProcessDisclosureView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 845DA57204565F5ECD576142 /* AgentProcessDisclosureView.swift */; };
 		9E38DE65482A7373C1D072C5 /* MarkdownParser+HTML.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2AF20CBDE803B2DBE7B286F /* MarkdownParser+HTML.swift */; };
 		9EC1ACFED3A4A9661527135F /* AgentCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD9C9B9111A65CB009BE7781 /* AgentCoordinator.swift */; };
 		A0BF9301E8B82626DD2FA111 /* MarkdownInlineNS.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45F95C301D8EAA9E9754EDDA /* MarkdownInlineNS.swift */; };
@@ -190,6 +191,7 @@
 		BB78F3A31A458B9F6F1696ED /* MarkdownRubyView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26778E15F3656253862B5DF3 /* MarkdownRubyView.swift */; };
 		BCA168CFDF64148C50E16B54 /* ToolHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0989D30E3C1BC6B6EE366424 /* ToolHelpers.swift */; };
 		BE888E9AFDD4F957ED54EC36 /* AIChatState+Queue.swift in Sources */ = {isa = PBXBuildFile; fileRef = B981BD8A323C69B8BF55E0FF /* AIChatState+Queue.swift */; };
+		BFA74018A62D8EEA2EB02E21 /* AgentTurnTrace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3EFE5990FA7E3A37ADAE15B7 /* AgentTurnTrace.swift */; };
 		C0058F793D0318039BDABCB3 /* AIServiceSettingsForm.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02EDB0F7F9308986A84F3401 /* AIServiceSettingsForm.swift */; };
 		C0DD578E6B16FCC9F371BDDE /* ChatInteractionCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D34C41B0F26C7CA7ADE96904 /* ChatInteractionCenter.swift */; };
 		C1896B407D5E0672E54B2900 /* MarkdownBlockSegmenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = D02AEC11818DC838F2930F60 /* MarkdownBlockSegmenter.swift */; };
@@ -318,6 +320,7 @@
 		3B9E47FFC6045EDC0E50BE6F /* MonitoringStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MonitoringStore.swift; sourceTree = "<group>"; };
 		3BA2EFE2F727CEF5B0BEBC55 /* AppState+Forwarding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AppState+Forwarding.swift"; sourceTree = "<group>"; };
 		3C1EBF97941477D84BA6F706 /* ImageAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageAttachment.swift; sourceTree = "<group>"; };
+		3EFE5990FA7E3A37ADAE15B7 /* AgentTurnTrace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentTurnTrace.swift; sourceTree = "<group>"; };
 		4270992A33D3DD27F0515539 /* AIModelAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIModelAdapter.swift; sourceTree = "<group>"; };
 		433A1892E197A5B47911FC16 /* MathViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathViews.swift; sourceTree = "<group>"; };
 		43831AB6E51C2763821F7C2A /* MarkdownDetailsRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDetailsRenderer.swift; sourceTree = "<group>"; };
@@ -375,6 +378,7 @@
 		804C2AFE4E28879F9C343208 /* AIChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatView.swift; sourceTree = "<group>"; };
 		821BCF327327B8A737D704CE /* AIChatInputDock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatInputDock.swift; sourceTree = "<group>"; };
 		8322A730C764D5D83AF6150D /* MarkdownMathRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownMathRenderer.swift; sourceTree = "<group>"; };
+		845DA57204565F5ECD576142 /* AgentProcessDisclosureView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentProcessDisclosureView.swift; sourceTree = "<group>"; };
 		85A4755878CF39901ECD372A /* MarkdownDisplaySegment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownDisplaySegment.swift; sourceTree = "<group>"; };
 		85B8699E1E8A77A02CC99293 /* MarkdownImageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownImageView.swift; sourceTree = "<group>"; };
 		866A72EC3C1233BDDF97513F /* MermaidBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MermaidBlockView.swift; sourceTree = "<group>"; };
@@ -637,6 +641,7 @@
 		51140C791DB8B1B86DE4B6FC /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				845DA57204565F5ECD576142 /* AgentProcessDisclosureView.swift */,
 				1E37CE378A41F6F97F6C536A /* AIChatAttachmentViews.swift */,
 				74A9D4A1FDD11B7A91379508 /* AIChatContextRingView.swift */,
 				3544D1B995838ACC9069019C /* AIChatDrawerPanel.swift */,
@@ -743,6 +748,7 @@
 		727AE6DE1B375F15B376972B /* AI */ = {
 			isa = PBXGroup;
 			children = (
+				3EFE5990FA7E3A37ADAE15B7 /* AgentTurnTrace.swift */,
 				8F2E6C97F54F40A8B7EE282B /* AIChatService.swift */,
 				3690C0A5C026E98A6BD709AF /* AIChatService+Completion.swift */,
 				593FA64731993CAEC270C733 /* AIChatService+Config.swift */,
@@ -1197,8 +1203,10 @@
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
 				9EC1ACFED3A4A9661527135F /* AgentCoordinator.swift in Sources */,
 				83F1D36249ECBC0185115E85 /* AgentFunctionalTests.swift in Sources */,
+				9E0BDB925D00E66421B6B9C6 /* AgentProcessDisclosureView.swift in Sources */,
 				4368B1BFFDC6D5AAB24BCA41 /* AgentRoleProfile.swift in Sources */,
 				9D96224049AC887256641D8E /* AgentTaskRegistry.swift in Sources */,
+				BFA74018A62D8EEA2EB02E21 /* AgentTurnTrace.swift in Sources */,
 				B0403BCEFDB95A4BFCBB03F5 /* AlibabaAuthMethods.swift in Sources */,
 				55CE4CE50988B2857EC44061 /* AntigravityAuthMethods.swift in Sources */,
 				014193ACDD080820A1EA300C /* AntigravityCloudCodeAdapter.swift in Sources */,

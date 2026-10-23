@@ -6,6 +6,10 @@ import SwiftUI
 
 struct ChatMessageRow: View, Equatable {
     let message: ChatMessage
+    /// 回合聚合轨迹（仅在该 Assistant MessageGroup 内负责呈现过程栏的消息上非空）
+    var turnTrace: AgentTurnTrace? = nil
+    /// 本回合累积的全部工具调用（用于末条统一呈现伴生富卡片）
+    var allGroupToolCalls: [ToolCallRecord] = []
     /// 是否已被压缩摘要化（纯显示态：驱动整行降档透明度；行内不直接消费，
     /// 参与 Equatable 判定使压缩落盘瞬间相关行重绘弱化）。
     let isSummarized: Bool
@@ -31,6 +35,8 @@ struct ChatMessageRow: View, Equatable {
     /// 使 .equatable() 能在流式期间跳过未变更行。
     static func == (lhs: ChatMessageRow, rhs: ChatMessageRow) -> Bool {
         lhs.message == rhs.message
+            && lhs.turnTrace == rhs.turnTrace
+            && lhs.allGroupToolCalls == rhs.allGroupToolCalls
             && lhs.isSummarized == rhs.isSummarized
             && lhs.canRegenerate == rhs.canRegenerate
             && lhs.canEditLastRound == rhs.canEditLastRound
@@ -197,29 +203,53 @@ struct ChatMessageRow: View, Equatable {
         }
     }
 
+    /// 生效的回合执行轨迹：优先使用父级传入的聚合轨迹，单消息孤立使用时回退自身提取
+    private var effectiveTrace: AgentTurnTrace? {
+        if let turnTrace {
+            return turnTrace.isEmpty ? nil : turnTrace
+        }
+        return AgentTurnTrace.extract(from: [message], isStreaming: isLive)
+    }
+
+    /// 生效的伴生富卡片数据源：仅过滤出真正携带富卡片（如地图、文件预览）信封的工具调用，
+    /// 严禁向外层 VStack 注入几十上百个空卡片节点（杜绝空节点 item spacing 累积产生数百 pt 巨大幽灵空白）
+    private var actualRichCardToolCalls: [ToolCallRecord] {
+        let candidates = !allGroupToolCalls.isEmpty ? allGroupToolCalls : (message.toolCalls ?? [])
+        return candidates.filter { record in
+            guard let result = record.result, !result.isEmpty else { return false }
+            return RichCard.extract(fromToolResultJSON: result) != nil
+        }
+    }
+
     @ViewBuilder
     private var assistantContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-            if let reasoning = message.reasoning, !reasoning.isEmpty {
-                ReasoningDisclosureView(reasoning: reasoning, isLive: isLive)
-            }
-            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+        // 中间纯过程消息（已被回合末条聚合，无独立正文）：静默零占位，彻底消除千层饼
+        let isSilentIntermediate = (turnTrace == nil && message.content.isEmpty && !allGroupToolCalls.isEmpty)
+        if !isSilentIntermediate {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                // 1. 思考与工具调用一体化过程轨迹（回合级聚合：多轮合一，去卡片化极简通透流）
+                if let trace = effectiveTrace {
+                    AgentProcessDisclosureView(
+                        turnId: message.id,
+                        trace: trace,
+                        hasContent: !message.content.isEmpty
+                    )
+                }
+                // 2. 最终结果正文
                 assistantTextPart
-                if showsActionRow, (message.toolCalls?.isEmpty ?? true) {
-                    actionRow
+                // 3. 伴生结果富卡片（仅当确实有地图等卡片时渲染，杜绝空节点占位撑开空白）
+                if !actualRichCardToolCalls.isEmpty {
+                    ForEach(actualRichCardToolCalls, id: \.id) { record in
+                        RichCardHostView(resultJSON: record.result ?? "")
+                    }
                 }
-            }
-            if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
-                AIToolCallCardView(toolCalls: toolCalls)
-                ForEach(toolCalls, id: \.id) { record in
-                    RichCardHostView(resultJSON: record.result ?? "")
-                }
+                // 4. 底部统一操作栏
                 if showsActionRow {
                     actionRow
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// 助手消息的文本部分（按状态分派）；纯工具调用消息（无文本）不渲染空文本段。
@@ -230,8 +260,8 @@ struct ChatMessageRow: View, Equatable {
         switch message.state {
         case .sending, .streaming:
             // 流式/首 token 等待：纯文本增量 + 块状光标（流结束后切完整 AST 渲染）；
-            // hasReasoning 让空正文态决定是否补「思考中…」阶段词（有 reasoning 时折叠区已承载活性）
-            StreamingMessageView(content: message.content, hasReasoning: !(message.reasoning?.isEmpty ?? true))
+            // effectiveTrace 让空正文态决定是否补「思考中…」阶段词（有思考或工具时上方过程折叠栏已承载活性）
+            StreamingMessageView(content: message.content, hasReasoning: effectiveTrace != nil)
         case .failed(let errorText):
             // 失败态保留提示卡片（状态提示，非正文排版）
             let retryTitle = canResumeAfterTools ? "继续回答" : "重试"
@@ -311,177 +341,7 @@ struct BlinkingCaret: View {
     }
 }
 
-// MARK: - 思考过程折叠卡片（10行默认展开 + 跟随输出 + Markdown排版 + 视觉分层）
 
-/// 思考过程（reasoning）折叠卡：
-/// - 默认展开（约 10 行限高滚动区，内容少时自适应贴合不留空，超出时内滚）；落定后保持展开，可随时手动点击标题收起为单行摘要；
-/// - 流式期间随输出实时自动贴底滚动展示（跟随输出展示）；
-/// - 支持完整块级 Markdown 排版（段落、列表、代码块、引用、数学公式、表格），通过专有 ReasoningMarkdownView 渲染；
-/// - 样式层级区别于正文：轻量内凹卡片背景 + 0.5pt 细描边 + 左侧引导细竖线 + 11.5pt 字号与次级文字色阶，代码块走紧凑模式（不启动 Mermaid WebView 预览）。
-struct ReasoningDisclosureView: View {
-    let reasoning: String
-    /// 是否仍在生成中：节流门控期间中间帧可丢，收尾帧必须全量（防止末尾增量被门控吞掉）。
-    let isLive: Bool
-
-    @State private var expanded = true
-    @State private var rendered: String = ""
-    @State private var lastRenderAt: Date = .distantPast
-    @State private var contentHeight: CGFloat = 0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: Theme.Spacing.sm) {
-                    Image(systemName: "brain")
-                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                        .foregroundColor(isLive ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-                    Text(isLive ? String(localized: "思考中…") : String(localized: "思考过程"))
-                        .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
-                        .foregroundColor(isLive ? Theme.Colors.accent : Theme.Colors.contentSecondaryStrong)
-                    if !expanded {
-                        Text(summary)
-                            .font(Theme.Typography.text(Theme.Typography.footnote))
-                            .foregroundColor(Theme.Colors.contentTertiary)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    Spacer(minLength: Theme.Spacing.sm)
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(Theme.Typography.text(Theme.Typography.micro, .medium))
-                        .foregroundColor(Theme.Colors.contentTertiary)
-                }
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.vertical, Theme.Spacing.md)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(expanded ? String(localized: "收起思考过程") : String(localized: "展开思考过程"))
-
-            if expanded {
-                Rectangle()
-                    .fill(Theme.Colors.cardStroke)
-                    .frame(height: Theme.Layout.dividerHeight)
-                    .padding(.horizontal, Theme.Spacing.md)
-
-                ScrollViewReader { proxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                            if rendered.isEmpty && isLive {
-                                HStack(spacing: Theme.Spacing.sm) {
-                                    BlinkingCaret()
-                                    Text("思考中…")
-                                        .font(Theme.Typography.text(Theme.Typography.footnote))
-                                        .foregroundColor(Theme.Colors.contentTertiary)
-                                }
-                                .padding(.vertical, 2)
-                            } else {
-                                ReasoningMarkdownView(content: rendered, useCache: !isLive)
-                                if isLive {
-                                    BlinkingCaret()
-                                }
-                            }
-                            Color.clear
-                                .frame(height: 1)
-                                .id("reasoningBottomAnchor")
-                        }
-                        .background(
-                            GeometryReader { geo in
-                                Color.clear.preference(key: ReasoningHeightPreferenceKey.self, value: geo.size.height)
-                            }
-                        )
-                    }
-                    .frame(height: contentHeight > 0 ? min(contentHeight, Theme.Layout.reasoningMaxHeight) : nil)
-                    .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
-                    .onPreferenceChange(ReasoningHeightPreferenceKey.self) { h in
-                        let clamped = min(h, Theme.Layout.reasoningMaxHeight)
-                        if clamped > 0, abs(contentHeight - clamped) >= 1.0 {
-                            contentHeight = clamped
-                        }
-                    }
-                    .onChange(of: rendered) { _ in
-                        if isLive && expanded {
-                            DispatchQueue.main.async {
-                                withAnimation(.easeOut(duration: 0.12)) {
-                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                                }
-                            }
-                        }
-                    }
-                    .onChange(of: expanded) { isExpanded in
-                        if isExpanded && isLive {
-                            DispatchQueue.main.async {
-                                withAnimation(.easeOut(duration: 0.12)) {
-                                    proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                                }
-                            }
-                        }
-                    }
-                    .onAppear {
-                        if isLive && expanded {
-                            DispatchQueue.main.async {
-                                proxy.scrollTo("reasoningBottomAnchor", anchor: .bottom)
-                            }
-                        }
-                    }
-                }
-                .padding(.leading, 2.5 + Theme.Spacing.md)
-                .overlay(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1.25, style: .continuous)
-                        .fill(isLive ? Theme.Colors.accent.opacity(0.45) : Theme.Colors.contentTertiary.opacity(0.35))
-                        .frame(width: 2.5)
-                        .padding(.vertical, 2)
-                }
-                .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
-                .padding(.horizontal, Theme.Spacing.xl)
-                .padding(.vertical, Theme.Spacing.md)
-                .transition(.opacity)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                .fill(Theme.Colors.surfaceInset)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
-        )
-        .onAppear {
-            rendered = reasoning
-            lastRenderAt = Date()
-        }
-        .onChange(of: reasoning) { newValue in
-            let now = Date()
-            guard now.timeIntervalSince(lastRenderAt) >= 0.08 else { return }
-            lastRenderAt = now
-            rendered = newValue
-        }
-        // 收尾对账：生成结束时无论门控窗口如何都渲染全量，防止末尾增量被节流吞掉
-        .onChange(of: isLive) { live in
-            if !live { rendered = reasoning }
-        }
-    }
-
-    /// 摘要：取最近一个非空段落（流式期间摘要行随增量实时更新，单行截断）。
-    private var summary: String {
-        let paragraphs = rendered
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-        return paragraphs.last ?? String(localized: "思考中…")
-    }
-}
-
-// MARK: - 思考内容高度偏好键
-
-private struct ReasoningHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
 
 // MARK: - 思考专有 Markdown 渲染器
 

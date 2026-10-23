@@ -18,29 +18,38 @@ struct AIToolCallCardView: View {
     let toolCalls: [ToolCallRecord]
 
     var body: some View {
+        EmbeddedToolCallListView(toolCalls: toolCalls)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                    .fill(Theme.Colors.chatAssistantBubble)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                    .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
+            )
+    }
+}
+
+/// 内嵌式工具调用列表：专供 AgentProcessDisclosureView 等复合容器内嵌渲染。
+/// 消除独立外层大白底卡片与硬边框，直接融入父级背景。
+struct EmbeddedToolCallListView: View {
+    let toolCalls: [ToolCallRecord]
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(toolCalls.enumerated()), id: \.element.id) { index, record in
-                // 条目间细若游丝的分隔线（与气泡/输入卡同款 0.5pt 语言）
                 if index > 0 {
                     Rectangle()
-                        .fill(Theme.Colors.cardStroke)
+                        .fill(Theme.Colors.cardStroke.opacity(0.6))
                         .frame(height: Theme.Layout.dividerHeight)
-                        .padding(.horizontal, Theme.Spacing.xxl)
+                        .padding(.horizontal, Theme.Spacing.md)
                 }
                 ToolCallRow(record: record)
-                    .padding(.horizontal, Theme.Spacing.xxl)
-                    .padding(.vertical, Theme.Spacing.xl)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.sm)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.chatAssistantBubble)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
-        )
     }
 }
 
@@ -49,7 +58,7 @@ struct AIToolCallCardView: View {
 /// 工具行展开态记忆（record.id 键控）：LazyVStack 反实例化重建（滚动回收）时恢复
 /// 上次展开态，不回折叠——用户展开过的行高度 300~500pt，回落即 doc 塌缩（连环
 /// 塌缩雪崩的贡献源，见 MarkdownImageCache 渲染高度记忆注释）。主线程读写。
-private enum ToolCallExpansionMemory {
+enum ToolCallExpansionMemory {
     private static var expandedById: [String: Bool] = [:]
 
     static func expanded(for record: ToolCallRecord) -> Bool? {
@@ -64,7 +73,7 @@ private enum ToolCallExpansionMemory {
 /// 一条工具调用：头部行（工具名 + 状态徽标 + 展开箭头）常驻，点击展开参数与结果。
 /// 默认折叠策略：失败 / 已拒绝默认展开（错误详情直接可见），其余默认折叠保持紧凑；
 /// 运行中的条目状态落定到 failed/denied 时自动展开一次，暴露错误。
-private struct ToolCallRow: View {
+struct ToolCallRow: View {
     let record: ToolCallRecord
 
     /// 展开 / 折叠（参数与结果区）。反实例化重建经 ToolCallExpansionMemory 恢复。
@@ -119,11 +128,11 @@ private struct ToolCallRow: View {
         Button {
             setExpanded(!expanded)
         } label: {
-            HStack(spacing: Theme.Spacing.lg) {
-                // 主标题：中文展示名（正文常规字族，中文不走等宽）
+            HStack(spacing: Theme.Spacing.md) {
+                // 主标题：中文展示名（正文常规字族，字号与色阶更克制）
                 Text(displayName)
-                    .font(Theme.Typography.text(12, .medium))
-                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .font(Theme.Typography.text(11.5, .medium))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
@@ -156,7 +165,7 @@ private struct ToolCallRow: View {
                 }
                 ToolStatusBadge(status: record.status)
                 Image(systemName: "chevron.right")
-                    .font(Theme.Typography.text(9, .semibold))
+                    .font(Theme.Typography.text(8, .semibold))
                     .foregroundColor(Theme.Colors.contentTertiary)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
             }
@@ -341,11 +350,17 @@ private struct ToolCallResultBlock: View {
 
 // MARK: - 状态徽标
 
-/// 状态徽标：胶囊底 + 图标 + 文案，五态视觉区分——
-/// pending 灰「排队中」/ running 强调色 spinner「执行中」/ done 绿「完成」/
-/// failed 红「失败」/ denied 灰「已拒绝」。
-private struct ToolStatusBadge: View {
+/// 状态徽标：五态视觉区分——
+/// pending 灰「排队中」/ running 强调色 spinner「执行中」/ done 极简灰「完成」/
+/// failed 警示色「失败」/ denied 灰「已拒绝」。
+/// 成功态降噪：去除亮绿底胶囊与描边，避免多工具列表形成刺眼的排状绿灯。
+struct ToolStatusBadge: View {
     let status: ToolCallStatus
+
+    /// 是否为静默状态（成功态/排队态降噪：无药丸边框与亮色底，融入背景）
+    private var isQuiet: Bool {
+        status == .done || status == .pending || status == .denied
+    }
 
     var body: some View {
         HStack(spacing: Theme.Spacing.xs) {
@@ -357,16 +372,24 @@ private struct ToolStatusBadge: View {
                     .frame(width: 10, height: 10)
             } else {
                 Image(systemName: iconName)
-                    .font(Theme.Typography.text(9, .semibold))
+                    .font(Theme.Typography.text(8.5, .semibold))
             }
             Text(label)
-                .font(Theme.Typography.text(10, .medium))
+                .font(Theme.Typography.text(10, .regular))
         }
         .foregroundColor(color)
-        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.horizontal, isQuiet ? Theme.Spacing.xs : Theme.Spacing.md)
         .padding(.vertical, Theme.Spacing.xxs)
-        .background(Capsule(style: .continuous).fill(color.opacity(0.12)))
-        .overlay(Capsule(style: .continuous).stroke(color.opacity(0.28), lineWidth: 0.5))
+        .background {
+            if !isQuiet {
+                Capsule(style: .continuous).fill(color.opacity(0.12))
+            }
+        }
+        .overlay {
+            if !isQuiet {
+                Capsule(style: .continuous).stroke(color.opacity(0.28), lineWidth: 0.5)
+            }
+        }
     }
 
     private var label: String {
@@ -393,7 +416,7 @@ private struct ToolStatusBadge: View {
         switch status {
         case .pending: return Theme.Colors.contentTertiary
         case .running: return Theme.Colors.accent
-        case .done: return Theme.Colors.statusGood
+        case .done: return Theme.Colors.contentTertiary
         case .failed: return Theme.Colors.statusWarning
         case .denied: return Theme.Colors.contentTertiary
         }

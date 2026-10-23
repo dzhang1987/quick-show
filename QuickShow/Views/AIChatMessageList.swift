@@ -149,35 +149,46 @@ struct SessionMessageList: View {
                 // 实测缓存高度，切换高度恒等 → doc 恒稳。间距语义与 LazyVStack 一致。
                 VStack(alignment: .leading, spacing: Theme.Spacing.chatGroupGap) {
                     ForEach(MessageListDerivations.groupedMessages(cache: groupingCache, messages: messages)) { group in
+                        let isAssistantGroup = (group.role == .assistant)
+                        let groupTurnTrace = isAssistantGroup ? AgentTurnTrace.extract(from: group.messages, isStreaming: isStreamingSession) : nil
+                        let allGroupToolCalls = isAssistantGroup ? group.messages.flatMap { $0.toolCalls ?? [] } : []
+
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                             ForEach(group.messages) { message in
-                                // 压缩边界卡：有未压缩新消息时，按位插入在首条未压缩消息之前；
-                                // id 与会话/边界绑定：边界变化即新视图，展开态不带入新位置（默认收起）。
-                                if showsCompactionCard,
-                                   let boundaryId = compactionBoundaryMessageId,
-                                   message.id == boundaryId {
-                                    CompactionBoundaryCard(
-                                        isCompacting: isCompactingThisSession,
-                                        summarizedCount: sessionCompactionInfo?.summarizedCount ?? 0,
-                                        summary: sessionCompactionInfo?.summary ?? ""
-                                    )
-                                    .id("compaction.\(sessionId.uuidString).\(boundaryId.uuidString)")
-                                }
-                                ChatVirtualRow(
-                                    messageId: message.id,
-                                    cachedHeight: rowHeights[message.id],
-                                    inWindow: virtualWindowIds.contains(message.id)
-                                ) {
-                                    // 已压缩行降档：id ∈ summarizedMessageIDs 的行整行降到可读下限档
-                                    // 透明度——严格从本会话自己的 sessionCompactionInfo 判定，杜绝跨会话污染。
-                                    let isSummarized = sessionCompactionInfo?.summarizedIDs.contains(message.id.uuidString) ?? false
-                                    ChatMessageRow(
-                                        message: message,
-                                        isSummarized: isSummarized,
-                                        canRegenerate: message.id == lastRegeneratableAssistantId,
-                                        canEditLastRound: message.id == lastEditableUserMessageId,
-                                        canResumeAfterTools: message.id == messages.last?.id && state.canResumeAfterTools(in: sessionId),
-                                        isEditing: state.editingMessageId == message.id,
+                                let isLastInGroup = (message.id == group.messages.last?.id)
+                                // 回合级聚合：多轮智能体调用中的中间纯过程消息（无正文）统一由末条聚合呈现，此处静默跳过消除千层饼
+                                let isSilentIntermediate = isAssistantGroup && !isLastInGroup && message.content.isEmpty
+
+                                if !isSilentIntermediate {
+                                    // 压缩边界卡：有未压缩新消息时，按位插入在首条未压缩消息之前；
+                                    // id 与会话/边界绑定：边界变化即新视图，展开态不带入新位置（默认收起）。
+                                    if showsCompactionCard,
+                                       let boundaryId = compactionBoundaryMessageId,
+                                       message.id == boundaryId {
+                                        CompactionBoundaryCard(
+                                            isCompacting: isCompactingThisSession,
+                                            summarizedCount: sessionCompactionInfo?.summarizedCount ?? 0,
+                                            summary: sessionCompactionInfo?.summary ?? ""
+                                        )
+                                        .id("compaction.\(sessionId.uuidString).\(boundaryId.uuidString)")
+                                    }
+                                    ChatVirtualRow(
+                                        messageId: message.id,
+                                        cachedHeight: rowHeights[message.id],
+                                        inWindow: virtualWindowIds.contains(message.id)
+                                    ) {
+                                        // 已压缩行降档：id ∈ summarizedMessageIDs 的行整行降到可读下限档
+                                        // 透明度——严格从本会话自己的 sessionCompactionInfo 判定，杜绝跨会话污染。
+                                        let isSummarized = sessionCompactionInfo?.summarizedIDs.contains(message.id.uuidString) ?? false
+                                        ChatMessageRow(
+                                            message: message,
+                                            turnTrace: isLastInGroup ? groupTurnTrace : nil,
+                                            allGroupToolCalls: isLastInGroup ? allGroupToolCalls : [],
+                                            isSummarized: isSummarized,
+                                            canRegenerate: message.id == lastRegeneratableAssistantId,
+                                            canEditLastRound: message.id == lastEditableUserMessageId,
+                                            canResumeAfterTools: message.id == messages.last?.id && state.canResumeAfterTools(in: sessionId),
+                                            isEditing: state.editingMessageId == message.id,
                                         onBeginEdit: {
                                             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                                                 state.editingMessageId = message.id
@@ -218,6 +229,7 @@ struct SessionMessageList: View {
                                     }
                                 )
                                 .id(message.id)
+                                }
                             }
                         }
                     }
@@ -682,6 +694,7 @@ extension SessionMessageList: Equatable {
               lhs.messages.last?.state == rhs.messages.last?.state,
               lhs.messages.last?.content.count == rhs.messages.last?.content.count,
               lhs.messages.last?.reasoning?.count == rhs.messages.last?.reasoning?.count,
+              lhs.messages.last?.toolCalls == rhs.messages.last?.toolCalls,
               lhs.compactionStamp == rhs.compactionStamp
         else {
             return false
