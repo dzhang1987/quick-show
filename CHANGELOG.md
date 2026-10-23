@@ -6,6 +6,10 @@
 
 ### Changed
 
+- **并发专家任务监控托盘收敛重构与穿梭抽屉（`SubagentTaskTray.swift` / `AIChatInputDock.swift`）**：
+  - **极简常态药丸（`SubagentTaskTray`）**：将输入坞上方原本粗笨的展开式任务卡片收敛为极简药丸徽章（`⬡ N 个专家`），常态下零侵占输入与对话视口；
+  - **优雅弹性展开与历史回溯**：点击药丸向上弹出半透明毛玻璃浮层面板，列出并发专家的专属角色、动作动态与进度，支持一键穿梭与单任务中止；子任务完成后保持会话级可追溯。
+
 - **AI 思考与工具调用回合级聚合重构与视觉降噪（`AgentTurnTrace.swift` / `AgentProcessDisclosureView.swift` / `AIToolCardView.swift` / `AIChatMessageRow.swift` / `AIChatMessageList.swift`）**：
   - **回合级聚合与“千层饼”根治（`AgentTurnTrace`）**：彻底打破此前以单条物理消息为单位各自弹折叠框导致多轮 ReAct 调研时连续出现多节孤立抽屉（“千层饼/手风琴”现象）的缺陷，抽象 `AgentTurnTrace` 回合轨迹模型，将同一个 Assistant 回答回合内发生的全部思考与多轮工具调用统一聚合成唯一的过程栏，中间无正文的纯过程消息完全静默零占位；
   - **去卡片化极简通透流（`AgentProcessDisclosureView`）**：移除原先粗笨突兀的圆角大盒子底色与硬边框，收起态升级为约 24pt 高度的极简通透指示栏（微图标 + 弱化状态文本 + 细微 hover 反馈），像优雅的原生元数据标签一样自然融入正文上方，彻底消除信息层级倒置；
@@ -14,6 +18,10 @@
   - **伴生富卡片空占位 680pt 幽灵巨幅空白根治（`actualRichCardToolCalls`）**：修复此前回合聚合后将多轮累积的数十上百个抓取/搜索工具盲目传入 `ForEach` 渲染 `RichCardHostView`，导致几十个空 `ZStack` 在 `VStack(spacing: 8)` 内部累积出数百 pt 巨大幽灵空白的严重排版 Bug；增加 `actualRichCardToolCalls` 前置严格信封过滤，普通工具 0 节点注入视图树，正文与底部操作栏恢复紧密自然贴合。
 
 ### Fixed
+
+- **Qoder 国际版与 OpenAI 兼容网关工具调用续跑 400 报错根治（`QoderProvider.swift` / `AIChatWireModels.swift`）**：
+  - **Assistant 空内容规范化（杜绝 `content: null`）**：修复大模型仅发起工具调用而无文本生成时 `ChatCompletionMessage` 将 `content` 编码为 JSON `null`，导致 Qoder Java 网关及部分国内/代理反向代理在转发下游模型时反序列化丢弃 `tool_calls`，进而引发上游大模型拒绝并报 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'` 的严重兼容性缺陷；在模型装配层将带 `tool_calls` 的 assistant 消息的缺省 `content` 规范化为 `""`（空字符串），获得 100% 协议与网关透传兼容；
+  - **Qoder 消息流与工具调用配对安全规整（`normalizeMessagesForQoder`）**：对齐官方 `opencode-qoder` 规范实现深层安全规整，确保所有 `role: "tool"` 消息必须且只能紧跟在其所属的 `role: "assistant"` 之后，自动丢弃任何因历史截断产生的孤立 tool 消息，并在工具执行发生意外中断时自动补齐结果占位，彻底杜绝下游底座模型 400 校验失败。
 
 - **AI 思考、工具调用与最终正文一体化流式跟随（`AIChatMessageList.swift` / `ChatScrollCoordinator.swift`）**：
   - **一体化流式数据特征戳（`liveTurnStreamingStamp`）**：彻底打破此前流式期间依赖底层 `frameDidChangeNotification` 非动画贴底而在多轮工具离散追加时失效停滞的缺陷，将当前 Assistant 回合内的**轮次推进（Round 1 $\rightarrow$ 2 $\rightarrow$ ...）、工具全生命周期（派发 / 运行中 / 完成）、思考字符增量（~40 字符步长微推合帧）与正文输出增量（~50 字符步长微推合帧）**统一收敛为单一自洽的流式特征签名；

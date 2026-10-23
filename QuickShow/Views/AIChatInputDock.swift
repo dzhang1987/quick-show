@@ -122,7 +122,7 @@ struct AIChatInputDock: View {
             && state.inputText.isEmpty
             && state.imageAttachments.isEmpty
             && state.pendingQueue.isEmpty
-            && !hasActiveSubagentTasks
+            && !hasSubagentContent
             && !state.isStreaming
             && interaction.request == nil
             && !dockHovered
@@ -148,17 +148,20 @@ struct AIChatInputDock: View {
     private var hasDockGrowth: Bool {
         !state.pendingQueue.isEmpty
             || !state.imageAttachments.isEmpty
-            || hasActiveSubagentTasks
+            || hasSubagentContent
     }
 
-    private var hasActiveSubagentTasks: Bool {
+    private var hasSubagentContent: Bool {
         guard SettingsStore.currentExecutionMode == .multi else { return false }
-        let current = state.store.currentSession
-        let rootId = current?.parentSessionId ?? current?.id
-        let isChild = current?.parentSessionId != nil
-        let tasks = rootId != nil ? taskRegistry.runningTasks(parentSessionId: rootId!) : []
-        let otherActive = isChild ? tasks.filter { $0.childSessionId != current?.id } : tasks
-        return !otherActive.isEmpty || state.agentSteeringNotice != nil
+        if state.agentSteeringNotice != nil { return true }
+        guard let current = state.store.currentSession else { return false }
+        let rootId = current.parentSessionId ?? current.id
+        let isChild = current.parentSessionId != nil
+        let tasks = taskRegistry.runningTasks(parentSessionId: rootId)
+        let otherActive = isChild ? tasks.filter { $0.childSessionId != current.id } : tasks
+        if !otherActive.isEmpty { return true }
+        let childSessions = state.store.childSessions(of: rootId)
+        return !childSessions.isEmpty
     }
 
     private var inputArea: some View {

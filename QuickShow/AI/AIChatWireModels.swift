@@ -139,13 +139,19 @@ struct ChatCompletionMessage: Codable {
         ChatCompletionMessage(role: "tool", content: .text(content), toolCalls: nil, toolCallId: callID)
     }
 
-    /// 自定义编码：content 为 nil 时显式写 null（assistant 仅含 tool_calls 的合法形态）；
+    /// 自定义编码：content 为 nil 时，若携带 tool_calls 则编码为空字符串 ""（提升国内与代理网关兼容性，
+    /// 避免反序列化丢失 tool_calls 导致上游报错）；其他情况显式写 null。
     /// tool_calls / tool_call_id 仅在存在时输出。
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(role, forKey: .role)
         if let content {
             try container.encode(content, forKey: .content)
+        } else if role == "assistant" && toolCalls != nil {
+            // OpenAI 兼容协议兼容性：部分国内与代理网关（如 Qoder、阿里百炼等）反序列化 content: null 时
+            // 会误将 tool_calls 丢弃，导致下游报错 "Messages with role 'tool' must be a response to a preceding message with 'tool_calls'"。
+            // 编码为空字符串 "" 可获得 100% 广泛兼容。
+            try container.encode("", forKey: .content)
         } else {
             try container.encodeNil(forKey: .content)
         }

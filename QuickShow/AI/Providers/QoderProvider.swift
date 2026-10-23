@@ -75,7 +75,6 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                     let cleanModelId = model.id.replacingOccurrences(of: "qoder/", with: "")
                     let isReasoning = (options.thinkingLevel == .off) ? false : model.supportsThinking
 
-                    var systemText = ""
                     let currentAgent = await MainActor.run {
                         AIAgentStore.shared.agent(for: options.agentId ?? "") ?? AIAgentStore.shared.activeAgent
                     }
@@ -96,33 +95,8 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                         ])
                     }
 
-                    var userMessages: [[String: Any]] = []
-                    var lastUserText = ""
-
-                    for msg in messages {
-                        if msg.role == "system" {
-                            let text = msg.content?.extractedText ?? ""
-                            if !text.isEmpty {
-                                systemText += (systemText.isEmpty ? "" : "\n") + text
-                            }
-                        } else {
-                            if msg.role == "user" {
-                                if let text = msg.content?.extractedText, !text.isEmpty {
-                                    lastUserText = text
-                                }
-                            }
-                            if let encodedMsgData = try? JSONEncoder().encode(msg),
-                               let dict = try? JSONSerialization.jsonObject(with: encodedMsgData) as? [String: Any] {
-                                userMessages.append(dict)
-                            } else {
-                                let rawContent = msg.content?.extractedText ?? ""
-                                userMessages.append([
-                                    "role": msg.role,
-                                    "content": rawContent
-                                ])
-                            }
-                        }
-                    }
+                    let (systemText, lastUserText, normalizedUserMessages) = Self.normalizeMessagesForQoder(messages)
+                    var userMessages = normalizedUserMessages
 
                     if userMessages.isEmpty {
                         userMessages.append([
@@ -496,5 +470,156 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
         }
 
         return ("", "", "", "")
+    }
+
+    // MARK: - Qoder 消息与工具流配对安全规整
+
+    /// 将发往 Qoder 的 wire 消息进行结构与工具配对规整（对齐官方 opencode-qoder normalizeToolExchanges）：
+    /// 1. 抽取 system 文本，拼接至顶层；
+    /// 2. 提取末条 user 文本，供 chat_context / originalContent 使用；
+    /// 3. Assistant 消息携带 tool_calls 时，强制确保 content 为非 null（空字符串 ""），杜绝 Qoder Java 网关转发时丢失 tool_calls；
+    /// 4. 严格规整 tool 消息配对：role == "tool" 必须且只能紧跟在其所属的 assistant(tool_calls) 之后；丢弃任何孤立 tool 消息；
+    /// 5. 若 assistant 发起的 tool_calls 在本轮缺少某个回传结果，自动补全占位，杜绝上游校验失败。
+    private static func normalizeMessagesForQoder(
+        _ messages: [ChatCompletionMessage]
+    ) -> (systemText: String, lastUserText: String, userMessages: [[String: Any]]) {
+        var systemText = ""
+        var rawNonSystem: [[String: Any]] = []
+
+        for msg in messages {
+            if msg.role == "system" {
+                let text = msg.content?.extractedText ?? ""
+                if !text.isEmpty {
+                    systemText += (systemText.isEmpty ? "" : "\n") + text
+                }
+            } else {
+                if let encodedMsgData = try? JSONEncoder().encode(msg),
+                   var dict = try? JSONSerialization.jsonObject(with: encodedMsgData) as? [String: Any] {
+                    // 确保 assistant 角色 content 绝不为 null
+                    if dict["role"] as? String == "assistant" {
+                        if dict["content"] is NSNull || dict["content"] == nil {
+                            dict["content"] = ""
+                        }
+                    }
+                    rawNonSystem.append(dict)
+                } else {
+                    let rawContent = msg.content?.extractedText ?? ""
+                    rawNonSystem.append([
+                        "role": msg.role,
+                        "content": rawContent
+                    ])
+                }
+            }
+        }
+
+        // 工具消息流安全规整：
+        var normalized: [[String: Any]] = []
+        var pendingAssistant: [String: Any]?
+        var pendingToolCalls: [[String: Any]] = []
+        var toolResultsForAssistant: [[String: Any]] = []
+
+        func flushPendingAssistant() {
+            guard var assistant = pendingAssistant else { return }
+            if pendingToolCalls.isEmpty {
+                if assistant["content"] is NSNull || assistant["content"] == nil {
+                    assistant["content"] = ""
+                }
+                normalized.append(assistant)
+                pendingAssistant = nil
+                return
+            }
+
+            var resultMap: [String: [String: Any]] = [:]
+            for res in toolResultsForAssistant {
+                if let id = (res["tool_call_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
+                    if resultMap[id] == nil {
+                        resultMap[id] = res
+                    }
+                }
+            }
+
+            var validToolCalls: [[String: Any]] = []
+            var orderedResults: [[String: Any]] = []
+
+            for tc in pendingToolCalls {
+                let id = (tc["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if let matched = resultMap[id] {
+                    validToolCalls.append(tc)
+                    orderedResults.append(matched)
+                } else {
+                    // 结果缺失时补齐占位，防止上游 400
+                    validToolCalls.append(tc)
+                    orderedResults.append([
+                        "role": "tool",
+                        "tool_call_id": id,
+                        "content": "[Tool execution was interrupted or cancelled]"
+                    ])
+                }
+            }
+
+            assistant["content"] = (assistant["content"] as? String) ?? ""
+            assistant["tool_calls"] = validToolCalls
+            normalized.append(assistant)
+            normalized.append(contentsOf: orderedResults)
+
+            pendingAssistant = nil
+            pendingToolCalls = []
+            toolResultsForAssistant = []
+        }
+
+        for dict in rawNonSystem {
+            let role = dict["role"] as? String ?? ""
+            if role == "assistant" {
+                flushPendingAssistant()
+                let toolCalls = dict["tool_calls"] as? [[String: Any]] ?? []
+                if toolCalls.isEmpty {
+                    var copy = dict
+                    if copy["content"] is NSNull || copy["content"] == nil { copy["content"] = "" }
+                    normalized.append(copy)
+                    continue
+                }
+                // 规整 toolCalls 内每个 call 的 id 去空白
+                let cleanedCalls = toolCalls.map { tc -> [String: Any] in
+                    var callCopy = tc
+                    let rawId = (callCopy["id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    callCopy["id"] = rawId.isEmpty ? "call_qoder_\(UUID().uuidString.prefix(8))" : rawId
+                    return callCopy
+                }
+                var copy = dict
+                copy["tool_calls"] = cleanedCalls
+                if copy["content"] is NSNull || copy["content"] == nil { copy["content"] = "" }
+                pendingAssistant = copy
+                pendingToolCalls = cleanedCalls
+                toolResultsForAssistant = []
+                continue
+            }
+
+            if role == "tool" {
+                if pendingAssistant != nil {
+                    toolResultsForAssistant.append(dict)
+                }
+                // 孤立 tool 消息直接丢弃，绝不送往上游
+                continue
+            }
+
+            // 其他角色（如 user）：先 flush 前置 assistant，再入列
+            flushPendingAssistant()
+            normalized.append(dict)
+        }
+
+        flushPendingAssistant()
+
+        // 提取末条 user 文本供 chat_context / originalContent
+        var lastUserText = ""
+        for dict in normalized.reversed() {
+            if dict["role"] as? String == "user" {
+                if let str = dict["content"] as? String {
+                    lastUserText = str
+                    break
+                }
+            }
+        }
+
+        return (systemText, lastUserText, normalized)
     }
 }
