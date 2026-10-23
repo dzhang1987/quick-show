@@ -334,9 +334,18 @@ struct SessionMessageList: View {
                     if isActive, isPinned { scrollToBottom(proxy, animated: false) }
                 }
             }
-            // 流式/渐进增量的跟随不再走本层（无 0.12s 节流路径）：documentView 高度变化由
-            // ChatScrollCoordinator 的 frame 通知路径逐帧程序化贴底（pinned 时），与布局
-            // 同步、零追赶误差——本层只保留流式结束的收尾动画（无插入动画并发，安全）。
+            // 活跃回合一体化流式跟随（思考 + 工具 + 正文 + 轮次）：
+            // 响应式监听当前回合增量特征戳；当处于跟随态（isPinned）且正在生成时，
+            // 下一 runloop（待 SwiftUI 几何布局落定撑开高度后）平滑贴底，保持最新内容在输入坞上方。
+            .onChange(of: liveTurnStreamingStamp) { _ in
+                guard isActive, isPinned, isStreamingSession else { return }
+                DispatchQueue.main.async {
+                    if isPinned {
+                        scrollToBottom(proxy, animated: true)
+                    }
+                }
+            }
+            // 流式结束收尾：pinned 时补一次收尾动画贴底（无插入动画并发，安全）。
             .onChange(of: isStreamingSession) { streaming in
                 if !streaming, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
@@ -672,6 +681,34 @@ struct SessionMessageList: View {
         MessageListDerivations.lastEditableUserMessageId(messages: messages,
                                                          isActive: isActive,
                                                          isGenerating: state.isGenerating)
+    }
+
+    /// 活跃回合统一流式跟随特征戳（思考 + 工具 + 正文 + 轮次 一体化响应式驱动）：
+    /// 当处于流式会话中时，将当前回合的轮次、工具全生命周期（派发/执行/落定）、
+    /// 思考增量与正文打字增量步长合帧为单一特征签名，驱动外层视口自洽、丝滑贴底跟随。
+    private var liveTurnStreamingStamp: String {
+        guard isStreamingSession else { return "" }
+        guard let lastGroup = MessageListDerivations.groupedMessages(cache: groupingCache, messages: messages).last,
+              lastGroup.role == .assistant else { return "" }
+
+        // 1. 轮次推进（Round 1 -> 2 -> ...）
+        let roundCount = lastGroup.messages.count
+
+        // 2. 工具全生命周期（派发 / 正在运行 / 执行完成）
+        let allCalls = lastGroup.messages.flatMap { $0.toolCalls ?? [] }
+        let toolCount = allCalls.count
+        let runningTools = allCalls.filter { $0.status == .running }.count
+        let doneTools = allCalls.filter { $0.status == .done }.count
+
+        // 3. 思考增量（步长合帧：每 ~40 字符平滑触发一帧微推）
+        let totalReasoningChars = lastGroup.messages.reduce(0) { $0 + ($1.reasoning?.count ?? 0) }
+        let reasoningFrame = totalReasoningChars / 40
+
+        // 4. 正文增量（步长合帧：每 ~50 字符平滑触发一帧微推）
+        let totalContentChars = lastGroup.messages.reduce(0) { $0 + $1.content.count }
+        let contentFrame = totalContentChars / 50
+
+        return "\(roundCount)_\(toolCount)_\(runningTools)_\(doneTools)_\(reasoningFrame)_\(contentFrame)"
     }
 }
 

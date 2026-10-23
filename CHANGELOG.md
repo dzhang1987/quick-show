@@ -15,6 +15,12 @@
 
 ### Fixed
 
+- **AI 思考、工具调用与最终正文一体化流式跟随（`AIChatMessageList.swift` / `ChatScrollCoordinator.swift`）**：
+  - **一体化流式数据特征戳（`liveTurnStreamingStamp`）**：彻底打破此前流式期间依赖底层 `frameDidChangeNotification` 非动画贴底而在多轮工具离散追加时失效停滞的缺陷，将当前 Assistant 回合内的**轮次推进（Round 1 $\rightarrow$ 2 $\rightarrow$ ...）、工具全生命周期（派发 / 运行中 / 完成）、思考字符增量（~40 字符步长微推合帧）与正文输出增量（~50 字符步长微推合帧）**统一收敛为单一自洽的流式特征签名；
+  - **微批次平滑贴底与输入坞对齐**：监听流式特征戳，在下一 runloop（待 SwiftUI 几何布局落定撑开高度后）执行 0.18s `easeOut` 动画贴底，配合 0.34s 程序化遮蔽窗，彻底消除视口偏离底部超 120pt 误弹 `↓` 按钮并将最新工具遮挡在输入坞下方的缺陷；
+  - **统一阅读主权保护（防强拽）**：在思考、工具调用或正文输出的任何阶段，用户一旦向上滑动滚轮，`ChatScrollCoordinator` 的真实滚轮判别（`userDriven`）立即将 `isPinned` 置为 `false` 并挂起自动贴底，绝不打扰用户查看历史；回到底部容差区或点击 `↓` 按钮即刻恢复统一跟随；
+  - **真实物理高度计算加固**：在 `distanceFromBottom`、`isAtBottom` 和 `scrollPinnedToBottom` 中统一采用 `max(doc.bounds.height, doc.frame.height)`，防御 SwiftUI 虚拟宿主在特定时序下的尺寸微抖。
+
 - **`get_quickshow_state` 状态查询工具真源对齐与多会话架构修复（`BuiltInTools.swift`）**：
   - **当前生效模型与协议真源修复**：彻底消除此前直接读取已废弃全局 `UserDefaults` 键（`ai.selectedModel` / `ai.apiProtocol`）导致模型切换后状态返回陈旧滞后（如选中 `gpt-5.6-sol` 却仍返回 `deepseek-v4.1-flash`）的 Bug；升级为在主线程动态解析当前执行会话（`ToolExecutionContext` / `ChatSession.modelId`）与激活智能体的真实生效模型，并联动匹配所属服务商的实时 API 协议；
   - **默认值兜底与状态上下文增强**：为 `panel_scale_option`、`theme_variant`、`appearance_mode` 补充设计默认值兜底（规避未曾设置时返回 `null`）；同时扩展 `provider_name`（服务商名）、`active_agent`（智能体 ID）与 `thinking_level`（思考档位）等状态字段，保持数据透明。

@@ -319,7 +319,8 @@ final class ChatScrollCoordinator {
     private func distanceFromBottom(_ scrollView: NSScrollView) -> CGFloat {
         guard let doc = scrollView.contentView.documentView else { return 0 }
         let clip = scrollView.contentView
-        let maxOffset = max(0, doc.bounds.height - clip.bounds.height)
+        let docH = max(doc.bounds.height, doc.frame.height)
+        let maxOffset = max(0, docH - clip.bounds.height)
         let offset = doc.isFlipped ? clip.bounds.origin.y : -clip.bounds.origin.y
         return max(0, maxOffset - offset)
     }
@@ -442,10 +443,11 @@ final class ChatScrollCoordinator {
     private func isAtBottom(_ scrollView: NSScrollView) -> Bool {
         guard let doc = scrollView.contentView.documentView else { return true }
         let clip = scrollView.contentView
+        let docH = max(doc.bounds.height, doc.frame.height)
         guard doc.isFlipped else {
             return clip.bounds.origin.y <= bottomTolerance
         }
-        let maxOffset = max(0, doc.bounds.height - clip.bounds.height)
+        let maxOffset = max(0, docH - clip.bounds.height)
         return (maxOffset - clip.bounds.origin.y) <= bottomTolerance
     }
 
@@ -466,8 +468,9 @@ final class ChatScrollCoordinator {
         guard let sv = attached[sessionId]?.view, let doc = sv.contentView.documentView else {
             return false
         }
+        let docH = max(doc.bounds.height, doc.frame.height)
         let bottomY = doc.isFlipped
-            ? max(0, doc.bounds.height - sv.contentView.bounds.height)
+            ? max(0, docH - sv.contentView.bounds.height)
             : 0
         let target = NSPoint(x: 0, y: bottomY)
         if animated {
