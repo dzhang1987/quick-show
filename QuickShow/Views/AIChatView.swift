@@ -707,6 +707,7 @@ struct AIChatView: View {
                     state: state,
                     messages: state.store.messages(in: sid),
                     compactionStamp: state.compactionStamp(for: sid),
+                    editingMessageId: isActive ? state.editingMessageId : nil,
                     onTapImage: { attachment in
                         withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                             zoomedAttachment = attachment

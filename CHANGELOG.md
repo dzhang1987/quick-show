@@ -47,6 +47,10 @@
 
 ### Fixed
 
+- **就地编辑与文本输入系统响应修复（`AIChatMessageList.swift` / `AIChatView.swift` / `AIChatInputFields.swift`）**：
+  - **消息列表 Equatable 补全（根治“点击铅笔无反应、滚动后才刷新”）**：在 `SessionMessageList` 显式引入 `editingMessageId: UUID?` 入参，并在 `SessionMessageList.==` 判等防线中加入 `guard lhs.editingMessageId == rhs.editingMessageId else { return false }`，使点击消息编辑、取消编辑或提交重发时单行能够毫秒级即时展开为就地编辑气泡，杜绝必须发生列表滚动才被动触发重绘的问题；
+  - **输入框与 `EscapePolicyCenter.isModalActive` 彻底解绑（根治“就地编辑框与底座无法打字、光标仅能删除”）**：严格厘清 `EscapePolicyCenter` 的单一职责为 ESC 键分发调度，彻底移除在 `ChatInputNSTextView.keyDown` 及 `doCommandBy` 中将 `isModalActive` 错误充当“全局键盘拦截锁”的逻辑，解除了就地编辑框（`ChatInlineEditTextView`）底层复用该视图时产生的“自己屏蔽自己打字输入”的死锁，全面恢复 AppKit 文本系统的原生打字、拼音组字与快捷键输入能力。
+
 - **Qoder 国际版与 OpenAI 兼容网关工具调用续跑 400 报错根治（`QoderProvider.swift` / `AIChatWireModels.swift`）**：
   - **Assistant 空内容规范化（杜绝 `content: null`）**：修复大模型仅发起工具调用而无文本生成时 `ChatCompletionMessage` 将 `content` 编码为 JSON `null`，导致 Qoder Java 网关及部分国内/代理反向代理在转发下游模型时反序列化丢弃 `tool_calls`，进而引发上游大模型拒绝并报 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'` 的严重兼容性缺陷；在模型装配层将带 `tool_calls` 的 assistant 消息的缺省 `content` 规范化为 `""`（空字符串），获得 100% 协议与网关透传兼容；
   - **Qoder 消息流与工具调用配对安全规整（`normalizeMessagesForQoder`）**：对齐官方 `opencode-qoder` 规范实现深层安全规整，确保所有 `role: "tool"` 消息必须且只能紧跟在其所属的 `role: "assistant"` 之后，自动丢弃任何因历史截断产生的孤立 tool 消息，并在工具执行发生意外中断时自动补齐结果占位，彻底杜绝下游底座模型 400 校验失败。

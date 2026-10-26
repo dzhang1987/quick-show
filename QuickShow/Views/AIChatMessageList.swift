@@ -19,6 +19,8 @@ struct SessionMessageList: View {
     let messages: [ChatMessage]
     /// 本会话压缩状态特征戳（包含 isCompacting/条数/摘要 hash，会话隔离零污染）。
     let compactionStamp: String
+    /// 当前正在就地编辑的消息 ID（仅活跃会话注入，非活跃会话恒为 nil；驱动单行即时展开与精准刷新）。
+    let editingMessageId: UUID?
     let onTapImage: (ChatImageAttachment) -> Void
     @Binding var scrollSnapshots: [UUID: ScrollSnapshot]
     let scrollCoordinator: ChatScrollCoordinator
@@ -82,6 +84,7 @@ struct SessionMessageList: View {
         state: AIChatState,
         messages: [ChatMessage],
         compactionStamp: String,
+        editingMessageId: UUID?,
         onTapImage: @escaping (ChatImageAttachment) -> Void,
         scrollSnapshots: Binding<[UUID: ScrollSnapshot]>,
         scrollCoordinator: ChatScrollCoordinator,
@@ -92,6 +95,7 @@ struct SessionMessageList: View {
         self.state = state
         self.messages = messages
         self.compactionStamp = compactionStamp
+        self.editingMessageId = editingMessageId
         self.onTapImage = onTapImage
         self._scrollSnapshots = scrollSnapshots
         self.scrollCoordinator = scrollCoordinator
@@ -188,7 +192,7 @@ struct SessionMessageList: View {
                                             canRegenerate: message.id == lastRegeneratableAssistantId,
                                             canEditLastRound: message.id == lastEditableUserMessageId,
                                             canResumeAfterTools: message.id == messages.last?.id && state.canResumeAfterTools(in: sessionId),
-                                            isEditing: state.editingMessageId == message.id,
+                                            isEditing: editingMessageId == message.id,
                                         onBeginEdit: {
                                             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                                                 state.editingMessageId = message.id
@@ -722,6 +726,7 @@ extension SessionMessageList: Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.sessionId == rhs.sessionId,
               lhs.isActive == rhs.isActive,
+              lhs.editingMessageId == rhs.editingMessageId,
               lhs.messages.count == rhs.messages.count,
               lhs.messages.first?.id == rhs.messages.first?.id,
               lhs.messages.last?.id == rhs.messages.last?.id,
