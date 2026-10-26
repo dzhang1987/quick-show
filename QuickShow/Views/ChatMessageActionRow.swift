@@ -28,44 +28,91 @@ struct ChatMessageActionRow: View {
 
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
-            if !message.content.isEmpty {
-                ChatActionIconButton(
-                    systemName: copied ? "checkmark" : "square.on.square",
-                    tint: copied ? Theme.Colors.accent : nil,
-                    help: String(localized: "复制"),
-                    rowHovered: rowHovered,
-                    action: onCopy
-                )
-            }
+            if message.role == .assistant {
+                // 助手消息：操作按钮靠左
+                if !message.content.isEmpty {
+                    ChatActionIconButton(
+                        systemName: copied ? "checkmark" : "square.on.square",
+                        tint: copied ? Theme.Colors.accent : nil,
+                        help: String(localized: "复制"),
+                        rowHovered: rowHovered,
+                        action: onCopy
+                    )
+                }
 
-            if message.role == .assistant, canRegenerate {
-                ChatActionIconButton(
-                    systemName: "arrow.clockwise",
-                    tint: nil,
-                    help: String(localized: "重新生成"),
-                    rowHovered: rowHovered,
-                    action: onRegenerate
-                )
-            }
+                if canRegenerate {
+                    ChatActionIconButton(
+                        systemName: "arrow.clockwise",
+                        tint: nil,
+                        help: String(localized: "重新生成"),
+                        rowHovered: rowHovered,
+                        action: onRegenerate
+                    )
+                }
 
-            // 撤回/编辑：与复制行为一致——常驻可见（静止 38% 灰、行 hover 提亮），不做 hover 浮现
-            if message.role == .user, canEditLastRound {
-                ChatActionIconButton(
-                    systemName: "pencil",
-                    tint: nil,
-                    help: String(localized: "编辑并重发"),
-                    rowHovered: rowHovered,
-                    action: onBeginEdit
-                )
-                ChatActionIconButton(
-                    systemName: "arrow.uturn.backward",
-                    tint: nil,
-                    help: String(localized: "撤回该轮（内容回填输入框）"),
-                    rowHovered: rowHovered,
-                    action: onWithdraw
-                )
+                Spacer(minLength: Theme.Spacing.sm)
+
+                // 方案 C：右侧弱化常驻显示两者（如 "18:27 · 1.8s"），Hover 提亮
+                ChatMessageMetaLabel(message: message, rowHovered: rowHovered)
+            } else {
+                // 用户消息：紧凑靠右，时间在左，操作按钮在右
+                ChatMessageMetaLabel(message: message, rowHovered: rowHovered)
+
+                if !message.content.isEmpty {
+                    ChatActionIconButton(
+                        systemName: copied ? "checkmark" : "square.on.square",
+                        tint: copied ? Theme.Colors.accent : nil,
+                        help: String(localized: "复制"),
+                        rowHovered: rowHovered,
+                        action: onCopy
+                    )
+                }
+
+                // 撤回/编辑：与复制行为一致——常驻可见（静止 38% 灰、行 hover 提亮），不做 hover 浮现
+                if canEditLastRound {
+                    ChatActionIconButton(
+                        systemName: "pencil",
+                        tint: nil,
+                        help: String(localized: "编辑并重发"),
+                        rowHovered: rowHovered,
+                        action: onBeginEdit
+                    )
+                    ChatActionIconButton(
+                        systemName: "arrow.uturn.backward",
+                        tint: nil,
+                        help: String(localized: "撤回该轮（内容回填输入框）"),
+                        rowHovered: rowHovered,
+                        action: onWithdraw
+                    )
+                }
             }
         }
+    }
+}
+
+/// 操作行元信息标签（时间与耗时）
+/// 方案 C：弱化常驻显示两者（如 "18:27 · 1.8s" 或 "18:27"）；
+/// 整行 hover 提亮至 65%，自身 hover 提亮至 85% 并微显圆角底。
+struct ChatMessageMetaLabel: View {
+    let message: ChatMessage
+    let rowHovered: Bool
+
+    @State private var hovered = false
+
+    var body: some View {
+        Text(message.actionRowMetaText)
+            .font(Theme.Typography.text(10, .regular).monospacedDigit())
+            .foregroundColor(Color.primary.opacity(hovered ? 0.85 : (rowHovered ? 0.65 : 0.35)))
+            .padding(.horizontal, 4)
+            .frame(height: 18)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(Color.primary.opacity(hovered ? 0.08 : 0))
+            )
+            .contentShape(Rectangle())
+            .onHover { isHovering in
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = isHovering }
+            }
     }
 }
 

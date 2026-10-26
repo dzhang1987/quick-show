@@ -140,6 +140,10 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     /// 转向注入弱标记：仅经 steering 队列注入的 user 消息为 true（普通发送与
     /// follow-up 注入均为 nil），供 UI 在气泡上方渲染「已转向」弱记号。
     var isSteered: Bool?
+    /// 消息创建/发送时间戳（默认当前时刻，旧数据缺失时自动回填解码时刻）。
+    var createdAt: Date
+    /// 助手消息生成耗时（秒，仅助手消息落定或中止时计算并写入；用户消息恒为 nil）。
+    var durationSeconds: Double?
 
     /// 消息角色。system 仅用于请求注入，不进入 UI 会话数组。
     enum Role: String, Codable {
@@ -168,7 +172,9 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         images: [ChatImageAttachment] = [],
         toolCalls: [ToolCallRecord]? = nil,
         reasoning: String? = nil,
-        isSteered: Bool? = nil
+        isSteered: Bool? = nil,
+        createdAt: Date = Date(),
+        durationSeconds: Double? = nil
     ) {
         self.id = id
         self.role = role
@@ -178,13 +184,15 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.toolCalls = toolCalls
         self.reasoning = reasoning
         self.isSteered = isSteered
+        self.createdAt = createdAt
+        self.durationSeconds = durationSeconds
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, content, state, images, toolCalls, reasoning, isSteered
+        case id, role, content, state, images, toolCalls, reasoning, isSteered, createdAt, durationSeconds
     }
 
-    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning / isSteered 等新字段）。
+    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning / isSteered / createdAt / durationSeconds 等新字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -198,6 +206,64 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         reasoning = try container.decodeIfPresent(String.self, forKey: .reasoning)
         // 旧会话无 isSteered 字段：缺失即 nil（非转向消息，无弱标记），不打断解码。
         isSteered = try container.decodeIfPresent(Bool.self, forKey: .isSteered)
+        // 旧会话无 createdAt 字段：缺失兜底使用当前时刻，不打断解码。
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        // 旧会话无 durationSeconds 字段：缺失即 nil。
+        durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
+    }
+}
+
+// MARK: - 时间与耗时格式化扩展
+extension ChatMessage {
+    private static let shortTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private static let fullTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    /// 短时间展示（如 "17:21"）
+    var formattedShortTime: String {
+        Self.shortTimeFormatter.string(from: createdAt)
+    }
+
+    /// 完整时间戳展示（如 "2026-10-26 17:21:35"）
+    var formattedFullTimestamp: String {
+        Self.fullTimestampFormatter.string(from: createdAt)
+    }
+
+    /// 耗时格式化展示（如 "1.8s"、"1m 20s"；无耗时返回 nil）
+    var formattedDuration: String? {
+        guard let durationSeconds, durationSeconds > 0 else { return nil }
+        if durationSeconds < 60 {
+            return String(format: "%.1fs", durationSeconds)
+        } else {
+            let minutes = Int(durationSeconds) / 60
+            let seconds = Int(durationSeconds) % 60
+            return "\(minutes)m \(seconds)s"
+        }
+    }
+
+    /// 操作栏常驻显示的元信息文本（方案 C：如 "18:27 · 1.8s" 或 "18:27"）
+    var actionRowMetaText: String {
+        if role == .assistant, let duration = formattedDuration {
+            return "\(formattedShortTime) · \(duration)"
+        }
+        return formattedShortTime
+    }
+
+    /// 操作栏 Tooltip 详细文本（同时承载精确时间与耗时）
+    var actionRowTooltip: String {
+        if let duration = formattedDuration {
+            return "\(formattedFullTimestamp) · 耗时 \(duration)"
+        } else {
+            return formattedFullTimestamp
+        }
     }
 }
 

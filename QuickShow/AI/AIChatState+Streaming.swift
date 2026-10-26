@@ -662,6 +662,9 @@ extension AIChatState {
             switch message.state {
             case .sending, .streaming:
                 message.state = state
+                if message.role == .assistant {
+                    message.durationSeconds = max(0.1, Date().timeIntervalSince(message.createdAt))
+                }
             default:
                 break
             }

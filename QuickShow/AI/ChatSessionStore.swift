@@ -286,6 +286,9 @@ final class ChatSessionStore: ObservableObject {
     func updateMessageState(_ messageId: UUID, state: ChatMessage.MessageState, in sessionId: UUID) {
         updateMessage(id: messageId, in: sessionId, touch: true, persist: true) { msg in
             msg.state = state
+            if msg.role == .assistant, (state == .done || state == .aborted), msg.durationSeconds == nil {
+                msg.durationSeconds = max(0.1, Date().timeIntervalSince(msg.createdAt))
+            }
         }
     }
 

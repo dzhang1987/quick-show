@@ -6,6 +6,10 @@
 
 ### Added
 
+- **对话消息时间戳与生成耗时精准统计及弱化常驻呈现（`ChatModels.swift` / `ChatMessageActionRow.swift` / `AIChatState+Streaming.swift` / `ChatSessionStore.swift`）**：
+  - **客观生命周期时间与耗时记录（`ChatMessage`）**：数据模型新增 `createdAt: Date` 与 `durationSeconds: Double?` 字段，自定义解码平滑兼容历史会话；在助手消息落定或中止时基于真实客观时间戳准确记录整轮思考与工具回路总耗时；
+  - **操作行弱化常驻与层级防噪（`ChatMessageMetaLabel`）**：助手消息操作栏右侧采用 10pt 等宽数字弱化常驻呈现「时间 · 耗时」（如 `18:36 · 1.8s`，旧历史消息展示 `18:36`），用户消息右侧紧凑附带发送时间；平时保持 0.35 极淡灰度不抢正文，Hover 平滑提亮至 0.65/0.85，免除传统 Tooltip 悬浮等待成本与系统层级遮挡弊端。
+
 - **文件覆盖写入事后安全网与对话内一键撤销（`UndoSnapshotManager.swift` / `AIToolCardView.swift` / `BuiltInTools.swift`）**：
   - **覆盖前影子快照（`UndoSnapshotManager`）**：在执行 `write_file` 覆盖文件前自动在内存中暂存原始内容并生成 `undo_token`；
   - **对话流原生撤销胶囊**：工具调用卡片行内挂载 `[ ⎌ 撤销写入 ]` 微按钮，点击后瞬间原子回滚旧文件并切换为 `✓ 已还原`，兼顾自主执行效率与 100% 事后可逆性；
