@@ -38,9 +38,9 @@ struct ToolConfirmationDrawerContent: View {
                         RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                             .fill(Theme.Colors.surfaceBadge)
                     )
-                Text("请求执行权限")
+                Text(request.riskLevel.isDestructive ? String(localized: "高危指令待确认") : String(localized: "请求执行权限"))
                     .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
-                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .foregroundColor(request.riskLevel.isDestructive ? Color.red.opacity(0.9) : Theme.Colors.contentPrimary)
                 Spacer(minLength: 0)
                 if let displayName, displayName != request.toolName {
                     Text(displayName)
@@ -50,18 +50,43 @@ struct ToolConfirmationDrawerContent: View {
                 }
             }
 
+            // 破坏性操作高危告警提示条
+            if case .destructive(let reason) = request.riskLevel {
+                HStack(spacing: Theme.Spacing.xs) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(Color.red.opacity(0.9))
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(reason)
+                        .font(Theme.Typography.text(Theme.Typography.caption, .medium))
+                        .foregroundColor(Color.red.opacity(0.9))
+                }
+                .padding(.horizontal, Theme.Spacing.md)
+                .padding(.vertical, Theme.Spacing.xxs)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                        .fill(Color.red.opacity(0.12))
+                )
+            }
+
             argumentsBlock
 
             // 按钮行：消极在左、积极在右（拒绝远离主操作区）
             HStack(spacing: Theme.Spacing.lg) {
-                DrawerActionButton(title: String(localized: "拒绝"), style: .secondary) {
+                DrawerActionButton(title: String(localized: "拒绝 (ESC)"), style: .secondary) {
                     ChatInteractionCenter.shared.resolveConfirmation(.denied)
                 }
                 Spacer(minLength: 0)
-                DrawerActionButton(title: String(localized: "本会话总是允许"), style: .outlined) {
-                    ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
+                if !request.riskLevel.isDestructive {
+                    let memoryTitle = request.suggestedScope?.displayTitle ?? String(localized: "本会话总是允许")
+                    DrawerActionButton(title: "\(memoryTitle) (⌘⏎)", style: .outlined) {
+                        if let scope = request.suggestedScope {
+                            ChatInteractionCenter.shared.resolveConfirmation(.allowSuggestedScope(scope))
+                        } else {
+                            ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
+                        }
+                    }
                 }
-                DrawerActionButton(title: String(localized: "执行"), style: .primary) {
+                DrawerActionButton(title: String(localized: "执行 (⏎)"), style: .primary) {
                     ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
                 }
             }

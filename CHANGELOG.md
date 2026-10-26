@@ -4,7 +4,21 @@
 
 ## [Unreleased]
 
+### Added
+
+- **AI 工具三层语义安全防线与规则通配引擎（`ToolRisk.swift` / `ToolRiskTests.swift` / `AI_TOOL_PERMISSION_ARCHITECTURE.md`）**：
+  - **操作语义风险定级（`ToolRiskLevel` / `ToolRiskEvaluator`）**：打破粗暴的模式化开关与单一 `isDangerous` 布尔硬编码，构建基于开闭原则（OCP）的策略链；
+  - **Tier 0 只读命令秒级直通**：实现 `ShellSemanticRiskEvaluator`，智能识别 `git status`、`git diff`、`git log`、`ls`、`pwd`、`cat`、`pnpm list`、`cargo check` 等只读安全命令，100% 零弹窗免审执行，保障沉浸心流；
+  - **Tier 1 前缀与目录通配规则引擎（`ToolPermissionPolicyEngine`）**：彻底消除此前按 `toolName + argumentsJSON` 严格字符串哈希匹配导致的重复打扰弊端，支持命令前缀（如 `git *`、`pnpm *`）和工程目录通配放行与会话级记忆；
+  - **Tier 2 破坏性高危硬门禁（Hard Gate）**：精准拦截 `rm -rf`、`sudo`、`git reset --hard`、`git push --force` 以及修改系统配置等操作，即使存在通配规则也强制要求显式二次确认，筑牢宿主安全底线；
+  - **专项功能测试全覆盖（`ToolRiskTests`）**：新增覆盖只读识别、破坏性拦截、前缀提取与规则匹配等 34 项专项测试用例，全套件 108 项测试 100% 通过。
+
 ### Changed
+
+- **工具权限确认抽屉视觉与全键盘盲操升级（`ToolConfirmationDrawer.swift` / `AIChatKeyMonitor.swift` / `ChatInteractionCenter.swift` / `AIToolExecutor.swift`）**：
+  - **高危指令视觉透视**：高危破坏性指令抽屉自动挂载红色警示胶囊并透出具体原因（如“包含递归强力删除文件指令”），消除黑盒猜疑；
+  - **全键盘主键区盲操**：权限抽屉在场时，按 **`⏎`** 触发单次执行，按 **`⌘⏎`** 一键允许建议前缀并记入当前会话，按 **`ESC`** 拒绝退出，手不离主键盘区。
+
 
 - **并发专家任务监控托盘收敛重构与穿梭抽屉（`SubagentTaskTray.swift` / `AIChatInputDock.swift`）**：
   - **极简常态药丸（`SubagentTaskTray`）**：将输入坞上方原本粗笨的展开式任务卡片收敛为极简药丸徽章（`⬡ N 个专家`），常态下零侵占输入与对话视口；

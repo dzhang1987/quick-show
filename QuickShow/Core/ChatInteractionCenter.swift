@@ -27,6 +27,10 @@ struct ToolConfirmationRequest: Identifiable {
     let argumentsJSON: String
     /// 单行摘要（去换行、限 200 字），供 UI 直接展示
     let summary: String
+    /// 评估得出的风险等级
+    let riskLevel: ToolRiskLevel
+    /// 建议放行的规则作用域（如命令前缀 "git"、工作区目录）
+    let suggestedScope: PermissionScopeSuggestion?
 }
 
 /// 危险工具确认结果
@@ -34,6 +38,7 @@ enum ToolConfirmationOutcome {
     case denied
     case executeOnce
     case alwaysAllowThisSession
+    case allowSuggestedScope(PermissionScopeSuggestion)
 }
 
 /// 用户提问请求（1..N 题）
@@ -120,7 +125,12 @@ final class ChatInteractionCenter: ObservableObject {
     // MARK: - 逻辑层调用（挂起等待 UI 响应）
 
     /// 请求危险工具确认。UI 无观察者时立即返回 `.denied`（默认拒绝，安全兜底）。
-    func requestToolConfirmation(toolName: String, argumentsJSON: String) async -> ToolConfirmationOutcome {
+    func requestToolConfirmation(
+        toolName: String,
+        argumentsJSON: String,
+        riskLevel: ToolRiskLevel? = nil,
+        suggestedScope: PermissionScopeSuggestion? = nil
+    ) async -> ToolConfirmationOutcome {
         // 无 UI 兜底：默认拒绝，绝不弹任何 AppKit 弹窗
         guard uiActive else { return .denied }
         // 防重入：实际对话回路串行执行工具，不应并发请求；遇到并发防御性拒绝
@@ -129,11 +139,14 @@ final class ChatInteractionCenter: ObservableObject {
             return .denied
         }
 
+        let effectiveRisk = riskLevel ?? .scopedMutation(suggestedScope: .toolName(name: toolName))
         let req = ToolConfirmationRequest(
             id: UUID(),
             toolName: toolName,
             argumentsJSON: argumentsJSON,
-            summary: Self.singleLineSummary(argumentsJSON)
+            summary: Self.singleLineSummary(argumentsJSON),
+            riskLevel: effectiveRisk,
+            suggestedScope: suggestedScope
         )
         request = .toolConfirmation(req)
         notifyIfInactive(for: .toolConfirmation(req))
@@ -288,7 +301,19 @@ final class ChatInteractionCenter: ObservableObject {
         AICompletionNotifier.shared.cancelInteractionNotification(id: id)
     }
 
-    // MARK: - 会话内「总是允许」记忆
+    // MARK: - 会话内「总是允许」记忆与规则
+
+    /// 该工具+参数在本会话内是否已被规则或精确记忆允许（命中则跳过确认）。
+    func isSessionAllowed(tool: AITool, arguments: [String: Any], argumentsJSON: String) -> Bool {
+        let risk = ToolRiskClassifier.shared.evaluateRisk(tool: tool, arguments: arguments)
+        if risk.isAutoApproved {
+            return true
+        }
+        if ToolPermissionPolicyEngine.shared.isAllowed(tool: tool, arguments: arguments, risk: risk) {
+            return true
+        }
+        return isSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
+    }
 
     /// 该工具+参数原文在本会话内是否已被允许（命中则跳过确认）。
     func isSessionAllowed(toolName: String, argumentsJSON: String) -> Bool {
@@ -303,6 +328,7 @@ final class ChatInteractionCenter: ObservableObject {
     /// 会话切换/新对话时调用，记忆随会话失效（幂等）
     func resetSessionMemory() {
         sessionAllowedKeys.removeAll()
+        ToolPermissionPolicyEngine.shared.resetRules()
     }
 
     // MARK: - 私有辅助

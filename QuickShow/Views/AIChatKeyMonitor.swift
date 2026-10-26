@@ -104,6 +104,36 @@ final class AIChatKeyMonitor {
             return event
         }
 
+        // 权限抽屉在场时的键盘盲操：⏎ 执行单次，⌘⏎ 允许并记忆规则
+        if event.keyCode == 36 || event.keyCode == 76 {
+            if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
+                return event
+            }
+            let handledDrawer = MainActor.assumeIsolated { () -> Bool in
+                guard let req = ChatInteractionCenter.shared.request,
+                      case .toolConfirmation(let confirmation) = req else {
+                    return false
+                }
+                if cleanFlags == [.command] {
+                    if !confirmation.riskLevel.isDestructive {
+                        if let scope = confirmation.suggestedScope {
+                            ChatInteractionCenter.shared.resolveConfirmation(.allowSuggestedScope(scope))
+                        } else {
+                            ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
+                        }
+                        return true
+                    }
+                } else if cleanFlags.isEmpty {
+                    ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
+                    return true
+                }
+                return false
+            }
+            if handledDrawer {
+                return nil
+            }
+        }
+
         guard cleanFlags == [.command] else { return event }
         switch event.keyCode {
         case 35: onToggleQuickSwitcher(); return nil // ⌘P: 快速切换/搜索面板

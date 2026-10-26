@@ -58,9 +58,15 @@ final class AIToolExecutor {
             return makeFailure(call, message: "参数解析失败：\(error.localizedDescription)")
         }
 
-        // 3) 危险工具：执行前经用户确认
-        if tool.isDangerous {
-            let confirmed = await confirmDangerousExecution(tool: tool, argumentsJSON: call.argumentsJSON)
+        // 3) 动态风险评估与受控审批
+        let risk = ToolRiskClassifier.shared.evaluateRisk(tool: tool, arguments: arguments)
+        if !risk.isAutoApproved {
+            let confirmed = await confirmDangerousExecution(
+                tool: tool,
+                arguments: arguments,
+                argumentsJSON: call.argumentsJSON,
+                risk: risk
+            )
             guard confirmed else {
                 return ToolExecutionResult(
                     callID: call.id,
@@ -145,25 +151,39 @@ final class AIToolExecutor {
         return dict
     }
 
-    // MARK: - 危险确认
+    // MARK: - 危险确认与动态放行
 
     /// 经输入坞抽屉请求危险工具确认（原 NSAlert 逻辑已整体移除）。
-    /// 流程：会话记忆命中 → 直接放行；否则发布请求并挂起等待 UI 响应。
+    /// 流程：会话记忆或规则命中 → 直接放行；否则发布请求并挂起等待 UI 响应。
     /// 返回 true = 允许执行，false = 拒绝。
-    /// 会话记忆以「工具名 + 参数原文」为键，`.alwaysAllowThisSession` 时写入。
     @MainActor
-    private func confirmDangerousExecution(tool: AITool, argumentsJSON: String) async -> Bool {
+    private func confirmDangerousExecution(
+        tool: AITool,
+        arguments: [String: Any],
+        argumentsJSON: String,
+        risk: ToolRiskLevel
+    ) async -> Bool {
         let center = ChatInteractionCenter.shared
 
-        // 1) 会话内已允许同一命令：直接放行，不再打扰用户
-        if center.isSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON) {
+        // 1) 会话记忆或规则命中：直接放行，不再打扰用户
+        if center.isSessionAllowed(tool: tool, arguments: arguments, argumentsJSON: argumentsJSON) {
             return true
         }
 
-        // 2) 发布抽屉请求并挂起（summary 由交互中心按单行摘要规则生成；无 UI 时中心兜底 .denied）
+        // 2) 提取建议的作用域
+        let suggestedScope: PermissionScopeSuggestion?
+        if case .scopedMutation(let scope) = risk {
+            suggestedScope = scope
+        } else {
+            suggestedScope = nil
+        }
+
+        // 3) 发布抽屉请求并挂起
         let outcome = await center.requestToolConfirmation(
             toolName: tool.name,
-            argumentsJSON: argumentsJSON
+            argumentsJSON: argumentsJSON,
+            riskLevel: risk,
+            suggestedScope: suggestedScope
         )
         switch outcome {
         case .denied:
@@ -171,6 +191,13 @@ final class AIToolExecutor {
         case .executeOnce:
             return true
         case .alwaysAllowThisSession:
+            center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
+            if let suggestedScope {
+                ToolPermissionPolicyEngine.shared.recordScopeSuggestion(suggestedScope)
+            }
+            return true
+        case .allowSuggestedScope(let scope):
+            ToolPermissionPolicyEngine.shared.recordScopeSuggestion(scope)
             center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
             return true
         }
