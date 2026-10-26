@@ -47,6 +47,10 @@
 
 ### Fixed
 
+- **智能体回合执行时间线多轮思考高度状态污染与大块空白根治（`AgentProcessDisclosureView.swift`）**：
+  - **轮次思考独立组件抽取与状态隔离（`TurnReasoningSectionView`）**：打破此前在父视图 `AgentProcessDisclosureView` 层级共用单一 `reasoningContentHeight` 状态及全局 `TurnReasoningHeightPreferenceKey`（`max` 冒泡叠加）的缺陷，将各轮次的思考排版抽离为独立的私有子组件，每轮独立测量与管理自身的物理内容高度；
+  - **物理内容自适应紧贴（Shrink-to-fit）与限高（Clamping）**：当后续轮次思考仅有 1~2 行短文本时，容器高度完全自适应贴合文字物理尺寸，左侧细竖线紧跟内容截断，彻底消除由于前置长轮次残留高度引发的约 160pt 异常大块黑色空白；同时保持超过 180pt 长思考内容的原生优雅限高与流式平滑自动滚动。
+
 - **就地编辑与文本输入系统响应修复（`AIChatMessageList.swift` / `AIChatView.swift` / `AIChatInputFields.swift`）**：
   - **消息列表 Equatable 补全（根治“点击铅笔无反应、滚动后才刷新”）**：在 `SessionMessageList` 显式引入 `editingMessageId: UUID?` 入参，并在 `SessionMessageList.==` 判等防线中加入 `guard lhs.editingMessageId == rhs.editingMessageId else { return false }`，使点击消息编辑、取消编辑或提交重发时单行能够毫秒级即时展开为就地编辑气泡，杜绝必须发生列表滚动才被动触发重绘的问题；
   - **输入框与 `EscapePolicyCenter.isModalActive` 彻底解绑（根治“就地编辑框与底座无法打字、光标仅能删除”）**：严格厘清 `EscapePolicyCenter` 的单一职责为 ESC 键分发调度，彻底移除在 `ChatInputNSTextView.keyDown` 及 `doCommandBy` 中将 `isModalActive` 错误充当“全局键盘拦截锁”的逻辑，解除了就地编辑框（`ChatInlineEditTextView`）底层复用该视图时产生的“自己屏蔽自己打字输入”的死锁，全面恢复 AppKit 文本系统的原生打字、拼音组字与快捷键输入能力。

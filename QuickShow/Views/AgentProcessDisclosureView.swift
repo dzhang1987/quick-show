@@ -25,14 +25,6 @@ enum TurnProcessDisclosureMemory {
     }
 }
 
-/// 思考内容高度偏好键（自适应限高计算）
-private struct TurnReasoningHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
 /// 智能体回合执行过程折叠视图
 struct AgentProcessDisclosureView: View {
     let turnId: UUID
@@ -41,9 +33,6 @@ struct AgentProcessDisclosureView: View {
 
     @State private var expanded: Bool
     @State private var hovered = false
-    @State private var renderedReasoning: String = ""
-    @State private var lastRenderAt: Date = .distantPast
-    @State private var reasoningContentHeight: CGFloat = 0
 
     init(
         turnId: UUID,
@@ -82,21 +71,9 @@ struct AgentProcessDisclosureView: View {
         .onHover { isHovering in
             hovered = isHovering
         }
-        .onAppear {
-            renderedReasoning = trace.steps.last?.reasoning ?? ""
-            lastRenderAt = Date()
-        }
-        .onChange(of: trace.steps.last?.reasoning) { newValue in
-            guard let newValue else { return }
-            let now = Date()
-            guard now.timeIntervalSince(lastRenderAt) >= 0.08 else { return }
-            lastRenderAt = now
-            renderedReasoning = newValue
-        }
-        // 收尾对账：生成结束时全量同步思考，并平滑收起至单行摘要（除非用户手动固定展开）
+        // 收尾对账：生成结束时平滑收起至单行摘要（除非用户手动固定展开）
         .onChange(of: trace.isLive) { live in
             if !live {
-                renderedReasoning = trace.steps.last?.reasoning ?? ""
                 if TurnProcessDisclosureMemory.userToggledState(for: turnId) == nil {
                     withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                         expanded = false
@@ -257,7 +234,11 @@ struct AgentProcessDisclosureView: View {
     private func singleStepContent(step: AgentTurnTrace.Step) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.md) {
             if step.hasReasoning, let reasoning = step.reasoning {
-                reasoningSection(content: reasoning, isLive: step.isLive)
+                TurnReasoningSectionView(
+                    content: reasoning,
+                    isLive: step.isLive,
+                    isExpanded: expanded
+                )
             }
             if step.hasTools {
                 EmbeddedToolCallListView(toolCalls: step.toolCalls)
@@ -291,7 +272,11 @@ struct AgentProcessDisclosureView: View {
                     // 节点内部内容
                     VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
                         if step.hasReasoning, let reasoning = step.reasoning {
-                            reasoningSection(content: reasoning, isLive: step.isLive)
+                            TurnReasoningSectionView(
+                                content: reasoning,
+                                isLive: step.isLive,
+                                isExpanded: expanded
+                            )
                         }
                         if step.hasTools {
                             EmbeddedToolCallListView(toolCalls: step.toolCalls)
@@ -309,15 +294,29 @@ struct AgentProcessDisclosureView: View {
             }
         }
     }
+}
 
-    // MARK: - 思考过程排版区
+// MARK: - 单轮独立思考过程排版区 (Turn Reasoning Section View)
 
-    @ViewBuilder
-    private func reasoningSection(content: String, isLive: Bool) -> some View {
+/// 独立管理单轮思考过程的渲染、流式节流与高度自适应：
+/// 1. 物理高度自适应包裹（shrink-to-fit）：单轮内容较短时紧贴文字，杜绝多余空白；
+/// 2. 超过上限时限高滚动（max-height clamping）：内容超长时锁定在 reasoningMaxHeight 并平滑滚动；
+/// 3. 轮次间状态完全隔离：彻底杜绝多轮聚合时不同轮次的高度状态互相污染。
+private struct TurnReasoningSectionView: View {
+    let content: String
+    let isLive: Bool
+    let isExpanded: Bool
+
+    @State private var measuredHeight: CGFloat = 0
+    @State private var renderedReasoning: String = ""
+    @State private var lastRenderAt: Date = .distantPast
+
+    var body: some View {
         ScrollViewReader { proxy in
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.sm) {
-                    if renderedReasoning.isEmpty && isLive {
+                    let text = renderedReasoning.isEmpty ? content : renderedReasoning
+                    if text.isEmpty && isLive {
                         HStack(spacing: Theme.Spacing.sm) {
                             BlinkingCaret()
                             Text("思考中…")
@@ -326,7 +325,7 @@ struct AgentProcessDisclosureView: View {
                         }
                         .padding(.vertical, 2)
                     } else {
-                        ReasoningMarkdownView(content: content, useCache: !isLive)
+                        ReasoningMarkdownView(content: text, useCache: !isLive)
                         if isLive {
                             BlinkingCaret()
                         }
@@ -337,25 +336,42 @@ struct AgentProcessDisclosureView: View {
                 }
                 .background(
                     GeometryReader { geo in
-                        Color.clear.preference(key: TurnReasoningHeightPreferenceKey.self, value: geo.size.height)
+                        Color.clear.preference(key: TurnReasoningContentHeightKey.self, value: geo.size.height)
                     }
                 )
             }
-            .frame(height: reasoningContentHeight > 0 ? min(reasoningContentHeight, Theme.Layout.reasoningMaxHeight) : nil)
+            .frame(height: measuredHeight > 0 ? min(measuredHeight, Theme.Layout.reasoningMaxHeight) : nil)
             .frame(maxHeight: Theme.Layout.reasoningMaxHeight)
-            .onPreferenceChange(TurnReasoningHeightPreferenceKey.self) { h in
-                let clamped = min(h, Theme.Layout.reasoningMaxHeight)
-                if clamped > 0, abs(reasoningContentHeight - clamped) >= 1.0 {
-                    reasoningContentHeight = clamped
+            .onPreferenceChange(TurnReasoningContentHeightKey.self) { h in
+                if h > 0, abs(measuredHeight - h) >= 1.0 {
+                    measuredHeight = h
                 }
             }
-            .onChange(of: content) { _ in
-                if isLive && expanded {
-                    DispatchQueue.main.async {
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            proxy.scrollTo("turnReasoningBottomAnchor", anchor: .bottom)
+            .onAppear {
+                renderedReasoning = content
+                lastRenderAt = Date()
+            }
+            .onChange(of: content) { newValue in
+                if isLive {
+                    let now = Date()
+                    if now.timeIntervalSince(lastRenderAt) >= 0.08 {
+                        lastRenderAt = now
+                        renderedReasoning = newValue
+                    }
+                    if isExpanded {
+                        DispatchQueue.main.async {
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                proxy.scrollTo("turnReasoningBottomAnchor", anchor: .bottom)
+                            }
                         }
                     }
+                } else {
+                    renderedReasoning = newValue
+                }
+            }
+            .onChange(of: isLive) { live in
+                if !live {
+                    renderedReasoning = content
                 }
             }
         }
@@ -368,5 +384,12 @@ struct AgentProcessDisclosureView: View {
                 .padding(.vertical, 2)
                 .padding(.leading, Theme.Spacing.xs)
         }
+    }
+}
+
+private struct TurnReasoningContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
