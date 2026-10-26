@@ -23,11 +23,11 @@
   - **Assistant 空内容规范化（杜绝 `content: null`）**：修复大模型仅发起工具调用而无文本生成时 `ChatCompletionMessage` 将 `content` 编码为 JSON `null`，导致 Qoder Java 网关及部分国内/代理反向代理在转发下游模型时反序列化丢弃 `tool_calls`，进而引发上游大模型拒绝并报 `Messages with role 'tool' must be a response to a preceding message with 'tool_calls'` 的严重兼容性缺陷；在模型装配层将带 `tool_calls` 的 assistant 消息的缺省 `content` 规范化为 `""`（空字符串），获得 100% 协议与网关透传兼容；
   - **Qoder 消息流与工具调用配对安全规整（`normalizeMessagesForQoder`）**：对齐官方 `opencode-qoder` 规范实现深层安全规整，确保所有 `role: "tool"` 消息必须且只能紧跟在其所属的 `role: "assistant"` 之后，自动丢弃任何因历史截断产生的孤立 tool 消息，并在工具执行发生意外中断时自动补齐结果占位，彻底杜绝下游底座模型 400 校验失败。
 
-- **AI 思考、工具调用与最终正文一体化流式跟随（`AIChatMessageList.swift` / `ChatScrollCoordinator.swift`）**：
-  - **一体化流式数据特征戳（`liveTurnStreamingStamp`）**：彻底打破此前流式期间依赖底层 `frameDidChangeNotification` 非动画贴底而在多轮工具离散追加时失效停滞的缺陷，将当前 Assistant 回合内的**轮次推进（Round 1 $\rightarrow$ 2 $\rightarrow$ ...）、工具全生命周期（派发 / 运行中 / 完成）、思考字符增量（~40 字符步长微推合帧）与正文输出增量（~50 字符步长微推合帧）**统一收敛为单一自洽的流式特征签名；
-  - **微批次平滑贴底与输入坞对齐**：监听流式特征戳，在下一 runloop（待 SwiftUI 几何布局落定撑开高度后）执行 0.18s `easeOut` 动画贴底，配合 0.34s 程序化遮蔽窗，彻底消除视口偏离底部超 120pt 误弹 `↓` 按钮并将最新工具遮挡在输入坞下方的缺陷；
-  - **统一阅读主权保护（防强拽）**：在思考、工具调用或正文输出的任何阶段，用户一旦向上滑动滚轮，`ChatScrollCoordinator` 的真实滚轮判别（`userDriven`）立即将 `isPinned` 置为 `false` 并挂起自动贴底，绝不打扰用户查看历史；回到底部容差区或点击 `↓` 按钮即刻恢复统一跟随；
-  - **真实物理高度计算加固**：在 `distanceFromBottom`、`isAtBottom` 和 `scrollPinnedToBottom` 中统一采用 `max(doc.bounds.height, doc.frame.height)`，防御 SwiftUI 虚拟宿主在特定时序下的尺寸微抖。
+- **AI 思考、工具调用与最终正文一体化跟随及流式打字丝滑上滚修复（`AIChatMessageList.swift` / `ChatScrollCoordinator.swift`）**：
+  - **高频打字与离散结构解耦（根治 30px 文本高频震颤/闪烁）**：彻底剥离高频打字与思考字符增量，正文与思考的高频连续逐行流式上滚 100% 交还给 `ChatScrollCoordinator` 的 `frameDidChangeNotification` 同步非动画贴底承接，彻底消除 0.18s `easeOut` 动画踩踏导致的视口高频震颤与文本严重闪烁，恢复原生极度丝滑的逐行上滚；
+  - **离散结构特征戳（`liveTurnStructuralStamp`）无动画校准**：仅监听轮次推进（Round 1 $\rightarrow$ 2 $\rightarrow$ ...）与工具全生命周期（派发 / 运行中 / 完成）等宏观结构跃迁，在下一 runloop 布局落定后执行 `scrollToBottom(animated: false)` 保证工具卡精准对齐，绝不与连续打字流并发产生冲突；动画收尾仅保留在生成完全结束（`isStreamingSession == false`）终态；
+  - **真实物理高度与越界回弹判别加固**：在 `distanceFromBottom`、`isAtBottom`、`scrollPinnedToBottom` 以及 `handleBoundsChanged` 的橡皮筋回弹判定中统一采用 `max(doc.bounds.height, doc.frame.height)`，防御 SwiftUI 虚拟宿主在特定时序下的尺寸微抖；
+  - **会话 Equatable 工具感知扩展**：覆盖末尾活跃回合所有消息的工具变迁，杜绝多轮智能体调用场景下非末条消息的工具更新被 Equatable 吞咽。
 
 - **`get_quickshow_state` 状态查询工具真源对齐与多会话架构修复（`BuiltInTools.swift`）**：
   - **当前生效模型与协议真源修复**：彻底消除此前直接读取已废弃全局 `UserDefaults` 键（`ai.selectedModel` / `ai.apiProtocol`）导致模型切换后状态返回陈旧滞后（如选中 `gpt-5.6-sol` 却仍返回 `deepseek-v4.1-flash`）的 Bug；升级为在主线程动态解析当前执行会话（`ToolExecutionContext` / `ChatSession.modelId`）与激活智能体的真实生效模型，并联动匹配所属服务商的实时 API 协议；

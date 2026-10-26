@@ -334,14 +334,16 @@ struct SessionMessageList: View {
                     if isActive, isPinned { scrollToBottom(proxy, animated: false) }
                 }
             }
-            // 活跃回合一体化流式跟随（思考 + 工具 + 正文 + 轮次）：
-            // 响应式监听当前回合增量特征戳；当处于跟随态（isPinned）且正在生成时，
-            // 下一 runloop（待 SwiftUI 几何布局落定撑开高度后）平滑贴底，保持最新内容在输入坞上方。
-            .onChange(of: liveTurnStreamingStamp) { _ in
+            // 活跃回合离散结构校准（轮次推进与工具全生命周期）：
+            // 响应式监听当前回合离散结构特征戳；当处于跟随态（isPinned）且正在生成时，
+            // 下一 runloop（待 SwiftUI 几何布局落定撑开高度后）无动画贴底，保证最新工具或轮次对齐输入坞上方。
+            // ⚠️ 绝不在此处使用动画（animated: true），避免与连续打字流并发产生抽搐冲突；
+            // 正文与思考的连续逐行流式上滚交由 ChatScrollCoordinator 逐帧同步承接。
+            .onChange(of: liveTurnStructuralStamp) { _ in
                 guard isActive, isPinned, isStreamingSession else { return }
                 DispatchQueue.main.async {
                     if isPinned {
-                        scrollToBottom(proxy, animated: true)
+                        scrollToBottom(proxy, animated: false)
                     }
                 }
             }
@@ -683,10 +685,13 @@ struct SessionMessageList: View {
                                                          isGenerating: state.isGenerating)
     }
 
-    /// 活跃回合统一流式跟随特征戳（思考 + 工具 + 正文 + 轮次 一体化响应式驱动）：
-    /// 当处于流式会话中时，将当前回合的轮次、工具全生命周期（派发/执行/落定）、
-    /// 思考增量与正文打字增量步长合帧为单一特征签名，驱动外层视口自洽、丝滑贴底跟随。
-    private var liveTurnStreamingStamp: String {
+    /// 活跃回合离散结构特征戳（轮次推进与工具全生命周期）：
+    /// 当处于流式会话中时，仅监听轮次推进（Round 1 -> 2 -> ...）与工具的派发/运行/落定等离散结构跃迁。
+    /// ⚠️ 核心纪律（2026-10 排查定证）：
+    /// 严禁将高频打字/思考增量（content/reasoning）合入本特征戳！
+    /// 正文与思考的连续逐行流式上滚由 ChatScrollCoordinator 的 frame 变化监听在主线程同步、非动画贴底承接，
+    /// 零追赶误差、零抖动；本特征戳仅负责在工具或轮次增删落定后的下一 runloop 执行无动画贴底校准。
+    private var liveTurnStructuralStamp: String {
         guard isStreamingSession else { return "" }
         guard let lastGroup = MessageListDerivations.groupedMessages(cache: groupingCache, messages: messages).last,
               lastGroup.role == .assistant else { return "" }
@@ -700,15 +705,7 @@ struct SessionMessageList: View {
         let runningTools = allCalls.filter { $0.status == .running }.count
         let doneTools = allCalls.filter { $0.status == .done }.count
 
-        // 3. 思考增量（步长合帧：每 ~40 字符平滑触发一帧微推）
-        let totalReasoningChars = lastGroup.messages.reduce(0) { $0 + ($1.reasoning?.count ?? 0) }
-        let reasoningFrame = totalReasoningChars / 40
-
-        // 4. 正文增量（步长合帧：每 ~50 字符平滑触发一帧微推）
-        let totalContentChars = lastGroup.messages.reduce(0) { $0 + $1.content.count }
-        let contentFrame = totalContentChars / 50
-
-        return "\(roundCount)_\(toolCount)_\(runningTools)_\(doneTools)_\(reasoningFrame)_\(contentFrame)"
+        return "\(roundCount)_\(toolCount)_\(runningTools)_\(doneTools)"
     }
 }
 
@@ -731,11 +728,14 @@ extension SessionMessageList: Equatable {
               lhs.messages.last?.state == rhs.messages.last?.state,
               lhs.messages.last?.content.count == rhs.messages.last?.content.count,
               lhs.messages.last?.reasoning?.count == rhs.messages.last?.reasoning?.count,
-              lhs.messages.last?.toolCalls == rhs.messages.last?.toolCalls,
               lhs.compactionStamp == rhs.compactionStamp
         else {
             return false
         }
+        // 覆盖末尾活跃回合内全部工具调用状态变迁（规避多轮场景下非末条消息的工具更新被 Equatable 吞咽）
+        let lhsCalls = lhs.messages.suffix(4).flatMap { $0.toolCalls ?? [] }
+        let rhsCalls = rhs.messages.suffix(4).flatMap { $0.toolCalls ?? [] }
+        guard lhsCalls == rhsCalls else { return false }
         // 关键性能防线：非活跃常驻会话对坞体高度不敏感，无需重算；
         // 活跃会话仅在坞高变化超过 0.5pt 阈值时触发重排，消除失焦/聚焦及窗口激活时的浮点微抖引发的整树重绘风暴。
         if lhs.isActive {

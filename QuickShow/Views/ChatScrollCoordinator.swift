@@ -381,8 +381,9 @@ final class ChatScrollCoordinator {
             // 回弹抑制：origin 自底部越界区（rubber band，flipped 下 last.y > maxOffset）
             // 回收的 movedUp 不算上滚意图——越界态只能由下拉/弹性产生，真实上滚从
             // maxOffset 出发不经此区，两集合不交。
-            let maxOffset = max(0, (scrollView.contentView.documentView?.bounds.height ?? 0)
-                                - scrollView.contentView.bounds.height)
+            let docH = max(scrollView.contentView.documentView?.bounds.height ?? 0,
+                           scrollView.contentView.documentView?.frame.height ?? 0)
+            let maxOffset = max(0, docH - scrollView.contentView.bounds.height)
             let cameFromOverscroll = flipped
                 ? last.y > maxOffset + 0.5
                 : last.y < -maxOffset - 0.5
