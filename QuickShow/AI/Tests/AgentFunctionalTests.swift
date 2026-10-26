@@ -34,6 +34,7 @@ enum AgentFunctionalTests {
         testTaskRegistryAndInputRouting()
         testAntigravityToolsAndThoughtSignature()
         ToolRiskTests.run()
+        ChatInputHistoryTests.run()
         await testChaosAndConcurrencyStress()
 
         print("==================================================")

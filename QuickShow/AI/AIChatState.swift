@@ -68,6 +68,8 @@ final class AIChatState: ObservableObject {
     /// 当前会话的消息（由 ChatSessionStore 同步而来，供 AIChatView 直接渲染）。
     @Published private(set) var messages: [ChatMessage] = []
     @Published var inputText: String = ""
+    /// 输入历史跟踪器（管理清空状态下上下箭头历史用户消息导航）
+    let historyTracker = ChatInputHistoryTracker()
     /// 行内重命名进行中的会话 id（侧栏 TextField 与快捷键监听共用的稳定真源；nil = 未在重命名）。
     /// 置于 state 层：AIChatState.shared 单例引用恒稳定，keyMonitor 闭包不再捕获 View struct 的
     /// @State 链（结构重构后该捕获链失效导致 ESC 无法消费重命名态）。
@@ -368,6 +370,7 @@ final class AIChatState: ObservableObject {
                 if sessionChanged {
                     self.editingMessageId = nil
                     self.cancelAbortConfirmation()
+                    self.historyTracker.reset()
                     ChatInteractionCenter.shared.resetSessionMemory()
                 }
             }
@@ -527,6 +530,7 @@ final class AIChatState: ObservableObject {
     /// 添加图片附件（Wave 2 拖拽/粘贴入口调用；内部统一转 JPEG base64）。
     func addImageAttachment(_ attachment: ChatImageAttachment) {
         imageAttachments.append(attachment)
+        historyTracker.onUserEdited(newText: inputText, newImages: imageAttachments)
     }
 
     /// 直接由 NSImage 添加图片附件（转换失败返回 false）。
@@ -536,11 +540,53 @@ final class AIChatState: ObservableObject {
             return false
         }
         imageAttachments.append(attachment)
+        historyTracker.onUserEdited(newText: inputText, newImages: imageAttachments)
         return true
     }
 
     func removeImageAttachment(id: UUID) {
         imageAttachments.removeAll { $0.id == id }
+        historyTracker.onUserEdited(newText: inputText, newImages: imageAttachments)
+    }
+
+    // MARK: - 输入历史快捷导航
+
+    /// 向上切换历史用户消息（清空状态或历史浏览中按 ↑ 触发）：
+    /// 成功切换返回 true，未处理（如非空草稿打字中）返回 false 放行原生光标移动。
+    @discardableResult
+    func navigateInputHistoryUp() -> Bool {
+        let result = historyTracker.navigateUp(
+            currentText: inputText,
+            currentImages: imageAttachments,
+            messages: messages
+        )
+        switch result {
+        case .updated(let item):
+            inputText = item.content
+            imageAttachments = item.images
+            return true
+        case .unhandled:
+            return false
+        }
+    }
+
+    /// 向下切换历史用户消息（历史浏览中按 ↓ 触发）：
+    /// 成功切换返回 true，未处理（如未处于历史浏览中）返回 false 放行原生光标移动。
+    @discardableResult
+    func navigateInputHistoryDown() -> Bool {
+        let result = historyTracker.navigateDown(
+            currentText: inputText,
+            currentImages: imageAttachments,
+            messages: messages
+        )
+        switch result {
+        case .updated(let item):
+            inputText = item.content
+            imageAttachments = item.images
+            return true
+        case .unhandled:
+            return false
+        }
     }
 
     // MARK: - 会话操作（Wave 2 侧边栏调用）
@@ -659,6 +705,7 @@ final class AIChatState: ObservableObject {
         // 显式丢弃草稿时，确保新会话独立草稿同步清空（消除残留）
         newSessionDraft = ""
         store.persistNewSessionDraft("")
+        historyTracker.reset()
     }
 
     /// 内置 system 引导：角色定位 + 工具安全边界与 ask_user 纪律。

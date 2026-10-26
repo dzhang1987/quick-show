@@ -302,7 +302,10 @@ struct AIChatInputDock: View {
                     onSubmitAlternative: { submitAlternative() },
                     onEscape: { onEscape() },
                     onInsertImages: { images in insertImages(images) },
-                    onRecallFirst: { state.recallFirstQueuedInput() }
+                    onRecallFirst: { state.recallFirstQueuedInput() },
+                    onHistoryUp: { state.navigateInputHistoryUp() },
+                    onHistoryDown: { state.navigateInputHistoryDown() },
+                    onTextEdited: { state.historyTracker.onUserEdited(newText: state.inputText, newImages: state.imageAttachments) }
                 )
                 // 双通道与：草稿恢复期 inputEmpty 滞后为 true（@State 初值、首帧无变化事件），
                 // state.inputText 非空即有文字，placeholder 不显示——防重影（见 inputEmpty 声明处注释）。

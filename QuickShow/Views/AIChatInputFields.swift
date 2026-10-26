@@ -24,6 +24,12 @@ struct ChatInputTextView: NSViewRepresentable {
     let onInsertImages: ([NSImage]) -> Void
     /// ⌘⌫ 撤回队首（仅空输入框时由 NSTextView 触发；空队列时调用方静默不动作）。
     let onRecallFirst: () -> Void
+    /// ↑ 向上切换历史（清空状态或历史浏览中触发；未处理返回 false 放行原生光标移动）。
+    var onHistoryUp: (() -> Bool)? = nil
+    /// ↓ 向下切换历史（历史浏览中触发；未处理返回 false 放行原生光标移动）。
+    var onHistoryDown: (() -> Bool)? = nil
+    /// 用户手动编辑内容通知（用于脱离历史浏览态）。
+    var onTextEdited: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -137,6 +143,7 @@ struct ChatInputTextView: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             // 提交/普通输入：合并同步 text 与空态（仅在不等时写，避免与 updateNSView 形成回写回路）
             syncInputState(tv)
+            parent.onTextEdited?()
         }
 
         /// 同步输入状态（供 textDidChange 与 IME setMarkedText/unmarkText 回调共用）：
@@ -186,7 +193,43 @@ struct ChatInputTextView: NSViewRepresentable {
                 }
                 return false
             }
+            // ↑ 向上切换历史（清空状态或历史浏览中触发；未处理返回 false 放行原生光标移动）
+            if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                if canHandleHistoryNavigation(textView), let onHistoryUp = parent.onHistoryUp, onHistoryUp() {
+                    applyHistoryText(to: textView)
+                    return true
+                }
+                return false
+            }
+            // ↓ 向下切换历史（历史浏览中触发；未处理返回 false 放行原生光标移动）
+            if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                if canHandleHistoryNavigation(textView), let onHistoryDown = parent.onHistoryDown, onHistoryDown() {
+                    applyHistoryText(to: textView)
+                    return true
+                }
+                return false
+            }
             return false
+        }
+
+        /// 历史导航前置按键门控：带修饰键（⇧, ⌘, ⌥, ⌃）或处于输入法组字中时全放行
+        private func canHandleHistoryNavigation(_ textView: NSTextView) -> Bool {
+            let modifiers = NSEvent.modifierFlags.intersection([.shift, .command, .option, .control])
+            guard modifiers.isEmpty else { return false }
+            guard !textView.hasMarkedText() else { return false }
+            return true
+        }
+
+        /// 将历史切换文本同步至 NSTextView 并将光标移至文末
+        private func applyHistoryText(to textView: NSTextView) {
+            let newText = parent.text
+            if textView.string != newText {
+                textView.string = newText
+            }
+            let end = (newText as NSString).length
+            textView.setSelectedRange(NSRange(location: end, length: 0))
+            parent.isInputEmpty = newText.isEmpty
+            textView.scrollRangeToVisible(NSRange(location: end, length: 0))
         }
 
         /// 监听窗口成为 key：保证 AI 窗每次唤出时输入框拿到第一响应者。
