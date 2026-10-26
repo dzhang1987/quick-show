@@ -280,16 +280,13 @@ struct ChatMessageRow: View, Equatable {
                     .transaction { $0.animation = nil }
             }
         case .aborted:
-            // 中止：保留半截内容的富渲染 + 弱标记
-            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
-                if !skipsTextPart {
-                    AssistantMarkdownView(content: message.content)
-                        .id(message.id)
-                        .textSelection(.enabled)
-                        // 白屏防线（勿动族）：同 .done 分支，结构性替换禁用祖先隐式动画，防 CA 事务竞态。
-                        .transaction { $0.animation = nil }
-                }
-                AbortedTag()
+            // 中止：保留半截内容的富渲染（AbortedTag 统一收口至 actionRow 靠左紧凑展示）
+            if !skipsTextPart {
+                AssistantMarkdownView(content: message.content)
+                    .id(message.id)
+                    .textSelection(.enabled)
+                    // 白屏防线（勿动族）：同 .done 分支，结构性替换禁用祖先隐式动画，防 CA 事务竞态。
+                    .transaction { $0.animation = nil }
             }
         }
     }

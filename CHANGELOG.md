@@ -24,6 +24,10 @@
 
 ### Changed
 
+- **助手消息操作栏与时间耗时紧凑聚合排版（`ChatMessageActionRow.swift` / `AIChatMessageRow.swift`）**：
+  - **消除左右割裂鸿沟（移除 `Spacer`）**：彻底移除此前将时间和耗时推至屏幕最右边缘的 `Spacer`，将复制、重试与时间耗时标签（如 `20:41 · 14.9s`）作为一个统一、低干扰的紧凑工具组收敛至正文左下方对齐排列，终结视线大跨度横跳；
+  - **中止态视觉收口与一体化对齐**：将「已中止」状态标签由单独占用一行改为并入操作栏同排呈现（如 `[已中止]   20:42 · 2.3s`），彻底消除了正文为空时右下角孤零零漂浮碎屑文本的异样感。
+
 - **`ask_user` 伪审批剥离与提问抽屉全键盘盲操支持（`AIChatState.swift` / `UserQuestionDrawer.swift` / `DrawerWidgets.swift` / `AIChatKeyMonitor.swift`）**：
   - **工具安全职责边界矫正**：彻底从内置 System Prompt 移除“有副作用操作必须调 ask_user 确认”的历史指令，明确由客户端底层三层安全引擎直接治理，杜绝模型在写文件/跑命令前多此一举发起假审批；
   - **提问抽屉单选默认预选**：单选题默认预选第一项（推荐项），开箱即处于可提交态，用户无需触碰鼠标即可直接按 **`⏎`** 极速采纳默认答案；
@@ -46,6 +50,12 @@
   - **伴生富卡片空占位 680pt 幽灵巨幅空白根治（`actualRichCardToolCalls`）**：修复此前回合聚合后将多轮累积的数十上百个抓取/搜索工具盲目传入 `ForEach` 渲染 `RichCardHostView`，导致几十个空 `ZStack` 在 `VStack(spacing: 8)` 内部累积出数百 pt 巨大幽灵空白的严重排版 Bug；增加 `actualRichCardToolCalls` 前置严格信封过滤，普通工具 0 节点注入视图树，正文与底部操作栏恢复紧密自然贴合。
 
 ### Fixed
+
+- **强行终止撤回与编辑按钮不可见及需滚动才刷新根治（`AIChatMessageList.swift` / `AIChatState+Streaming.swift` / `AIChatState+SessionEdits.swift` / `ChatSessionStore.swift` / `QuickShowApp.swift`）**：
+  - **门控判据精准解耦历史全量扫描**：重构 `AIChatState.isGenerating`，优先以运行时流集合真源（`isStreaming`）为准，非活跃时仅检查末尾助手回复状态，彻底消除包含多轮思考与工具调用的会话中历史未收口中间态误锁整会话撤回/编辑功能的缺陷；
+  - **消息列表 Equatable 完整性补齐（根治“强行终止后必须滚动才刷新出按钮”）**：在 `SessionMessageList` 中显式引入 `isStreaming: Bool` 入参，并在 `SessionMessageList.==` 判等中补齐 `lhs.isStreaming == rhs.isStreaming` 比对，杜绝流式状态变迁被 SwiftUI 缓存误判跳过；同时重构消息列表内的撤回编辑门控为本会话本地纯派生；
+  - **强行终止 0 延迟解冻**：在用户点击终止的瞬间同步移出活跃流集合并广播状态变更，上一轮用户消息的「编辑并重发」与「撤回该轮」图标在终止同一渲染帧内直接呈现；
+  - **历史悬挂消息冷启动全量健康自愈**：在 `ChatSessionStore.load()` 扩展对主会话的自动纠偏落盘，并将会话存储预热提前至应用启动时，存量遗留在 `.sending`/`.streaming` 的孤儿状态自动落定纠偏为 `.aborted`。
 
 - **智能体回合执行时间线多轮思考高度状态污染与大块空白根治（`AgentProcessDisclosureView.swift`）**：
   - **轮次思考独立组件抽取与状态隔离（`TurnReasoningSectionView`）**：打破此前在父视图 `AgentProcessDisclosureView` 层级共用单一 `reasoningContentHeight` 状态及全局 `TurnReasoningHeightPreferenceKey`（`max` 冒泡叠加）的缺陷，将各轮次的思考排版抽离为独立的私有子组件，每轮独立测量与管理自身的物理内容高度；

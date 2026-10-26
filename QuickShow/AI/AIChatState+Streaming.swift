@@ -78,9 +78,10 @@ extension AIChatState {
             }
         }
 
-        // 新建该会话的流式上下文；旧上下文若残留（异常路径兜底）先强制冲刷半截内容再重建。
+        // 新建该会话的流式上下文；旧上下文若残留（异常路径兜底）先强制冲刷半截内容并自愈挂起状态再重建。
         if streamContexts[sessionId] != nil {
             forceFlushPendingTokens(in: sessionId)
+            settleDanglingStreamingMessages(in: sessionId, fallbackState: .aborted)
             streamContexts[sessionId] = nil
         }
         let ctx = StreamContext()
@@ -458,6 +459,9 @@ extension AIChatState {
         pendingQueues[sessionId] = nil
         streamingSessionIds.remove(sessionId)
         syncStreamingState()
+        // 兜底自愈：确保流收尾后，本会话内绝无遗留任何未落定的 .sending 或 .streaming 消息
+        let fallbackState: ChatMessage.MessageState = didComplete ? .done : .aborted
+        settleDanglingStreamingMessages(in: sessionId, fallbackState: fallbackState)
         // 流结束后异步检查水位：达阈值则自动压缩（不阻塞输入；isCompacting 已天然防重入）。
         maybeAutoCompact(sessionId: sessionId)
         // 当前会话流式结束时无条件清理二次确认状态，防止残留
@@ -482,6 +486,11 @@ extension AIChatState {
         notifyCompletionIfNeeded(sessionId: sessionId)
     }
 
+    /// 纠偏收口：确保指定会话中所有遗留的未落定发送/流式状态助手消息得到妥善落定
+    func settleDanglingStreamingMessages(in sessionId: UUID, fallbackState: ChatMessage.MessageState = .aborted) {
+        store.settleDanglingMessages(in: sessionId, fallbackState: fallbackState)
+    }
+
     /// 中止流式生成并落定半截回复为 .aborted。
     /// 默认中止「当前会话」；指定 sessionId 时中止目标会话（侧栏中止按钮调用），
     /// 不影响其他会话的进行中生成。
@@ -492,6 +501,13 @@ extension AIChatState {
 
         // 联动取消该主会话派生的所有后台子智能体
         AgentCoordinator.shared.abortSubagents(for: sessionId)
+
+        // 兜底将该会话中所有残留的 sending/streaming 助手消息统一收口为 .aborted
+        settleDanglingStreamingMessages(in: sessionId, fallbackState: .aborted)
+
+        // 同步移出活跃流集合并更新流状态，使 UI 零延迟解除生成态锁定（撤回/编辑按钮瞬时可见）
+        streamingSessionIds.remove(sessionId)
+        syncStreamingState()
 
         guard let ctx = streamContexts[sessionId] else { return }
         ctx.abortRequested = true

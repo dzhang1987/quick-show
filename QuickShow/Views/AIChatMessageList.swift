@@ -13,6 +13,8 @@ import SwiftUI
 struct SessionMessageList: View {
     let sessionId: UUID
     let isActive: Bool
+    /// 本会话是否正处于流式生成中（显式传入驱动 Equatable 差异感知，消除外部隐式读取跳过整树重绘）。
+    let isStreaming: Bool
     /// 会话门面（读取本会话流式状态、发起重试）；更新由父级重渲染驱动。
     let state: AIChatState
     /// 本会话消息（父级传入；隐藏会话无需独立订阅 store）。
@@ -81,6 +83,7 @@ struct SessionMessageList: View {
     init(
         sessionId: UUID,
         isActive: Bool,
+        isStreaming: Bool,
         state: AIChatState,
         messages: [ChatMessage],
         compactionStamp: String,
@@ -92,6 +95,7 @@ struct SessionMessageList: View {
     ) {
         self.sessionId = sessionId
         self.isActive = isActive
+        self.isStreaming = isStreaming
         self.state = state
         self.messages = messages
         self.compactionStamp = compactionStamp
@@ -122,7 +126,7 @@ struct SessionMessageList: View {
     /// 嵌在坞区留白内部，置于真正底部上方此距离。
     private let bottomTolerance: CGFloat = 18
 
-    private var isStreamingSession: Bool { state.isStreaming(sessionId: sessionId) }
+    private var isStreamingSession: Bool { isStreaming }
 
     // ⚠️ 刻意移除「首帧骨架 → 下一 runloop 再建真实内容」的两段式切换。
     // 原因：骨架把真实内容推迟到一个独立的 CA 事务，与历史冷启动白屏同源——
@@ -681,12 +685,24 @@ struct SessionMessageList: View {
                                                             isStreaming: isStreamingSession)
     }
 
+    /// 本会话是否正在生成：优先以本会话活跃流状态为准，其次看最后一条助手回复状态，杜绝全局隐式穿透。
+    private var isGeneratingThisSession: Bool {
+        if isStreaming { return true }
+        if let lastAssistant = messages.last(where: { $0.role == .assistant }) {
+            switch lastAssistant.state {
+            case .sending, .streaming: return true
+            default: return false
+            }
+        }
+        return false
+    }
+
     /// 会话内最后一条 user 消息 id：仅活跃会话 + 非生成中时提供
     /// （撤回/编辑只对当前会话最后一轮有效；隐藏会话与生成中不显示入口）。
     private var lastEditableUserMessageId: UUID? {
         MessageListDerivations.lastEditableUserMessageId(messages: messages,
                                                          isActive: isActive,
-                                                         isGenerating: state.isGenerating)
+                                                         isGenerating: isGeneratingThisSession)
     }
 
     /// 活跃回合离散结构特征戳（轮次推进与工具全生命周期）：
@@ -726,6 +742,7 @@ extension SessionMessageList: Equatable {
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         guard lhs.sessionId == rhs.sessionId,
               lhs.isActive == rhs.isActive,
+              lhs.isStreaming == rhs.isStreaming,
               lhs.editingMessageId == rhs.editingMessageId,
               lhs.messages.count == rhs.messages.count,
               lhs.messages.first?.id == rhs.messages.first?.id,

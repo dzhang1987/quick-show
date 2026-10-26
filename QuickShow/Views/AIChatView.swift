@@ -704,6 +704,7 @@ struct AIChatView: View {
                 SessionMessageList(
                     sessionId: sid,
                     isActive: isActive,
+                    isStreaming: state.isStreaming(sessionId: sid),
                     state: state,
                     messages: state.store.messages(in: sid),
                     compactionStamp: state.compactionStamp(for: sid),

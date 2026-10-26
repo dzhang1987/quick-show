@@ -29,7 +29,11 @@ struct ChatMessageActionRow: View {
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
             if message.role == .assistant {
-                // 助手消息：操作按钮靠左
+                // 助手消息：操作按钮与元信息靠左紧凑对齐，消除Spacer鸿沟与边缘漂浮
+                if message.state == .aborted {
+                    AbortedTag()
+                }
+
                 if !message.content.isEmpty {
                     ChatActionIconButton(
                         systemName: copied ? "checkmark" : "square.on.square",
@@ -50,9 +54,6 @@ struct ChatMessageActionRow: View {
                     )
                 }
 
-                Spacer(minLength: Theme.Spacing.sm)
-
-                // 方案 C：右侧弱化常驻显示两者（如 "18:27 · 1.8s"），Hover 提亮
                 ChatMessageMetaLabel(message: message, rowHovered: rowHovered)
             } else {
                 // 用户消息：紧凑靠右，时间在左，操作按钮在右

@@ -36,9 +36,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 注册内置富卡片（地图卡等）：须在任何聊天视图渲染前完成
         RichCardRegistry.shared.registerBuiltIns()
 
-        // 预热 AI 智能体与服务商存储，触发存量配置平滑升级
+        // 预热 AI 智能体、服务商与会话存储，触发存量配置与会话状态平滑自愈，消除首开顿感
         _ = AIProviderStore.shared
         _ = AIAgentStore.shared
+        _ = ChatSessionStore.shared
 
         // 尽早安装通知代理：通知点击可能在冷启动时先于用户交互到达
         AICompletionNotifier.shared.installDelegateIfNeeded()

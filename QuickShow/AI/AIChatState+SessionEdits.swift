@@ -6,17 +6,19 @@ extension AIChatState {
 
     // MARK: - 最后一轮撤回 / 编辑重发 / 对话导出
 
-    /// 当前会话是否正在生成（存在 streaming/sending 状态的 assistant 消息）。
-    /// UI 用它做撤回 / 编辑重发等按钮的门控；与 isStreaming 语义一致，但以消息状态为准，
-    /// 可覆盖「上下文残留但流集合已清」等边界。
+    /// 当前会话是否正在生成：
+    /// 优先以运行时流集合真源（isStreaming）为准；
+    /// 若不在活跃流集合中，仅检查当前末尾活跃轮次中的助手消息是否仍处于 sending/streaming 状态，
+    /// 杜绝被历史孤儿中间态消息误判绑架。
     var isGenerating: Bool {
-        messages.contains { message in
-            guard message.role == .assistant else { return false }
-            switch message.state {
+        if isStreaming { return true }
+        if let lastAssistant = messages.last(where: { $0.role == .assistant }) {
+            switch lastAssistant.state {
             case .sending, .streaming: return true
             default: return false
             }
         }
+        return false
     }
 
     /// 撤回最后一轮：删除当前会话最后一条 user 消息及其之后的所有消息（助手回复、工具轮、失败占位等），

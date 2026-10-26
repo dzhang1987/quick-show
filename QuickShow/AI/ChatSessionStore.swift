@@ -303,6 +303,25 @@ final class ChatSessionStore: ObservableObject {
         }
     }
 
+    /// 纠偏收口：将指定会话中仍处于 sending/streaming 状态的助手消息统一落定为目标状态（默认 .aborted）
+    func settleDanglingMessages(in sessionId: UUID, fallbackState: ChatMessage.MessageState = .aborted) {
+        mutate(sessionId, persist: true) { session in
+            for i in session.messages.indices {
+                if session.messages[i].role == .assistant {
+                    switch session.messages[i].state {
+                    case .sending, .streaming:
+                        session.messages[i].state = fallbackState
+                        if session.messages[i].durationSeconds == nil {
+                            session.messages[i].durationSeconds = max(0.1, Date().timeIntervalSince(session.messages[i].createdAt))
+                        }
+                    default:
+                        break
+                    }
+                }
+            }
+        }
+    }
+
     /// 删除指定消息。
     func removeMessage(id: UUID, in sessionId: UUID) {
         mutate(sessionId) { $0.messages.removeAll { $0.id == id } }
@@ -813,35 +832,52 @@ final class ChatSessionStore: ObservableObject {
         // 2. 跨进程重启自愈：冷启动时内存中必定无活跃任务，若子会话仍停留在 taskStatus == .running：
         //    - 若最后一条助手消息已完成（state == .done 且非空），自愈为 .completed；
         //    - 若中途打断（流式未完结），自愈为 .failed，并将半截消息落定为 .aborted。
+        // 3. 全局会话冷启动自愈：冷启动时无任何在途流，任何遗留在 .sending/.streaming 的助手消息统一纠偏落定为 .aborted。
         for i in 0..<loaded.count {
             var session = loaded[i]
-            guard session.parentSessionId != nil else { continue }
-
-            if session.taskStatus == .failed,
-               session.taskSummary?.contains("超时") == true {
-                if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
-                   lastAssistant.state == .done,
-                   !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    session.taskStatus = .completed
-                    session.taskSummary = String(lastAssistant.content.prefix(120))
+            if session.parentSessionId != nil {
+                if session.taskStatus == .failed,
+                   session.taskSummary?.contains("超时") == true {
+                    if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
+                       lastAssistant.state == .done,
+                       !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        session.taskStatus = .completed
+                        session.taskSummary = String(lastAssistant.content.prefix(120))
+                        loaded[i] = session
+                        persist(session)
+                    }
+                } else if session.taskStatus == .running {
+                    if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
+                       lastAssistant.state == .done,
+                       !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        session.taskStatus = .completed
+                        session.taskSummary = String(lastAssistant.content.prefix(120))
+                    } else {
+                        session.taskStatus = .failed
+                        session.taskSummary = String(localized: "应用重启，任务已中断")
+                        for mIndex in 0..<session.messages.count {
+                            if session.messages[mIndex].state == .streaming || session.messages[mIndex].state == .sending {
+                                session.messages[mIndex].state = .aborted
+                            }
+                        }
+                    }
                     loaded[i] = session
                     persist(session)
                 }
-            } else if session.taskStatus == .running {
-                if let lastAssistant = session.messages.last(where: { $0.role == .assistant }),
-                   lastAssistant.state == .done,
-                   !lastAssistant.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    session.taskStatus = .completed
-                    session.taskSummary = String(lastAssistant.content.prefix(120))
-                } else {
-                    session.taskStatus = .failed
-                    session.taskSummary = String(localized: "应用重启，任务已中断")
-                    for mIndex in 0..<session.messages.count {
-                        if session.messages[mIndex].state == .streaming || session.messages[mIndex].state == .sending {
-                            session.messages[mIndex].state = .aborted
-                        }
+            }
+
+            var sessionChanged = false
+            for mIndex in 0..<session.messages.count {
+                if session.messages[mIndex].role == .assistant,
+                   (session.messages[mIndex].state == .streaming || session.messages[mIndex].state == .sending) {
+                    session.messages[mIndex].state = .aborted
+                    if session.messages[mIndex].durationSeconds == nil {
+                        session.messages[mIndex].durationSeconds = max(0.1, Date().timeIntervalSince(session.messages[mIndex].createdAt))
                     }
+                    sessionChanged = true
                 }
+            }
+            if sessionChanged {
                 loaded[i] = session
                 persist(session)
             }
