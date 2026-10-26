@@ -29,6 +29,7 @@ enum ToolRiskTests {
         testShellMutationPrefixExtraction()
         testFileRiskEvaluation()
         testPolicyEngineRuleMatching()
+        testUndoSnapshotLifecycle()
 
         print("==================================================")
         print("📊 权限测试完成汇总：通过 \(passedCount) 项，失败 \(failedCount) 项")
@@ -167,5 +168,42 @@ enum ToolRiskTests {
         // 5. 重置规则
         engine.resetRules()
         assertTest(!engine.isAllowed(tool: shellTool, arguments: ["command": testCmd], risk: risk), "重置后规则失效")
+    }
+
+    // MARK: - 6. 文件覆盖快照与撤销还原测试
+
+    private static func testUndoSnapshotLifecycle() {
+        let manager = UndoSnapshotManager.shared
+        manager.clearAll()
+
+        let tempPath = NSTemporaryDirectory() + "quickshow_undo_test_\(UUID().uuidString).txt"
+        let initialContent = "Original Content 12345"
+        let modifiedContent = "Overwritten by AI"
+
+        do {
+            try initialContent.write(toFile: tempPath, atomically: true, encoding: .utf8)
+            defer { try? FileManager.default.removeItem(atPath: tempPath) }
+
+            // 1. 创建覆盖前快照
+            let token = manager.createSnapshot(path: tempPath)
+            assertTest(manager.canUndo(token: token), "快照创建成功且处于可撤销状态")
+            assertTest(!manager.isUndone(token: token), "初始状态未被撤销")
+
+            // 2. 模拟写入覆盖
+            try modifiedContent.write(toFile: tempPath, atomically: true, encoding: .utf8)
+            let readModified = try String(contentsOfFile: tempPath, encoding: .utf8)
+            assertTest(readModified == modifiedContent, "模拟文件被覆盖写入成功")
+
+            // 3. 执行撤销
+            try manager.undo(token: token)
+            assertTest(manager.isUndone(token: token), "撤销状态被标记为已撤销")
+            assertTest(!manager.canUndo(token: token), "已撤销快照不再允许二次撤销")
+
+            // 4. 验证内容已还原
+            let restoredContent = try String(contentsOfFile: tempPath, encoding: .utf8)
+            assertTest(restoredContent == initialContent, "文件原始内容成功原子还原")
+        } catch {
+            assertTest(false, "撤销快照测试抛错：\(error.localizedDescription)")
+        }
     }
 }

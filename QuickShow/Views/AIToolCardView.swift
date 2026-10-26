@@ -163,6 +163,9 @@ struct ToolCallRow: View {
                     .buttonStyle(.plain)
                     .help("切换到该子智能体的独立会话")
                 }
+                if let undoToken = extractUndoToken(from: record), let uuid = UUID(uuidString: undoToken) {
+                    ToolUndoActionButton(token: uuid)
+                }
                 ToolStatusBadge(status: record.status)
                 Image(systemName: "chevron.right")
                     .font(Theme.Typography.text(8, .semibold))
@@ -181,6 +184,14 @@ struct ToolCallRow: View {
             return nil
         }
         return json["task_id"] as? String
+    }
+
+    private func extractUndoToken(from record: ToolCallRecord) -> String? {
+        guard let result = record.result, let data = result.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["undo_token"] as? String
     }
 
     // MARK: 展开区（参数 + 结果）
@@ -420,5 +431,51 @@ struct ToolStatusBadge: View {
         case .failed: return Theme.Colors.statusWarning
         case .denied: return Theme.Colors.contentTertiary
         }
+    }
+}
+
+// MARK: - 工具撤销微按钮
+
+/// 工具撤销操作微按钮（事后安全网：还原写文件覆盖）
+private struct ToolUndoActionButton: View {
+    let token: UUID
+    @State private var isUndone: Bool
+    @State private var isHovered = false
+
+    init(token: UUID) {
+        self.token = token
+        _isUndone = State(initialValue: UndoSnapshotManager.shared.isUndone(token: token))
+    }
+
+    var body: some View {
+        Button {
+            guard !isUndone else { return }
+            do {
+                try UndoSnapshotManager.shared.undo(token: token)
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    isUndone = true
+                }
+            } catch {
+                NSLog("[QuickShow] 撤销写入失败：\(error.localizedDescription)")
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Image(systemName: isUndone ? "checkmark" : "arrow.uturn.backward")
+                    .font(Theme.Typography.text(9, .semibold))
+                Text(isUndone ? String(localized: "已还原") : String(localized: "撤销写入"))
+                    .font(Theme.Typography.text(10, .medium))
+            }
+            .foregroundColor(isUndone ? Theme.Colors.contentTertiary : Theme.Colors.accent)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(isUndone ? Theme.Colors.surfaceBadge : (isHovered ? Theme.Colors.accent.opacity(0.18) : Theme.Colors.accent.opacity(0.10)))
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(isUndone)
+        .onHover { isHovered = $0 }
+        .help(isUndone ? String(localized: "文件已还原为修改前状态") : String(localized: "点击还原此文件修改"))
     }
 }

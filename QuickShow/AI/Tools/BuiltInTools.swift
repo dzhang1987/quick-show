@@ -351,12 +351,19 @@ final class WriteFileTool: AITool {
         let content = try requiredString(arguments, "content")
         let url = try resolveWhitelistedURL(path)
 
+        // 写入前快照备份（事后安全网：支持一键撤销还原）
+        let undoToken = UndoSnapshotManager.shared.createSnapshot(path: url.path)
+
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
         } catch {
             throw ToolExecutionError("写入文件失败：\(error.localizedDescription)")
         }
-        return toolSuccessJSON(["path": url.path, "written_bytes": content.utf8.count])
+        return toolSuccessJSON([
+            "path": url.path,
+            "written_bytes": content.utf8.count,
+            "undo_token": undoToken.uuidString
+        ])
     }
 }
 

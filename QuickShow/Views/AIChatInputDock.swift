@@ -359,11 +359,55 @@ struct AIChatInputDock: View {
                     .accessibilityHidden(!showDockSecondaryTools)
                     .animation(.easeOut(duration: Theme.Motion.contentFade), value: showDockSecondaryTools)
                 }
+                securityRulesBadge
                 Spacer(minLength: 0)
                 sendButton
             }
             .padding(.horizontal, Theme.Spacing.xl)
             .padding(.bottom, Theme.Spacing.lg)
+        }
+    }
+
+    /// 会话权限规则微徽章（仅在有活跃规则时显示，0 规则时完全隐形）
+    @ViewBuilder
+    private var securityRulesBadge: some View {
+        let count = ToolPermissionPolicyEngine.shared.activeRulesCount
+        if count > 0 {
+            Menu {
+                Text(String(localized: "当前会话已放行规则："))
+                Divider()
+                ForEach(Array(ToolPermissionPolicyEngine.shared.activeRules().enumerated()), id: \.offset) { _, rule in
+                    switch rule {
+                    case .shellPrefix(let prefix):
+                        Text("• " + String(localized: "命令前缀：") + "\(prefix) *")
+                    case .directory(let path):
+                        Text("• " + String(localized: "目录写入：") + URL(fileURLWithPath: path).lastPathComponent)
+                    case .tool(let name):
+                        Text("• " + String(localized: "工具：") + name)
+                    }
+                }
+                Divider()
+                Button(role: .destructive) {
+                    ToolPermissionPolicyEngine.shared.resetRules()
+                } label: {
+                    Label(String(localized: "重置会话规则"), systemImage: "arrow.counterclockwise")
+                }
+            } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "shield.fill")
+                        .font(Theme.Typography.text(8.5, .semibold))
+                    Text("\(count)")
+                        .font(Theme.Typography.text(9, .medium))
+                }
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Theme.Colors.surfaceBadge)
+                .cornerRadius(4)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help(String(localized: "查看或重置当前会话已放行的权限规则"))
         }
     }
 

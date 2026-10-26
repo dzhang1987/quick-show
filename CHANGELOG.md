@@ -6,12 +6,17 @@
 
 ### Added
 
+- **文件覆盖写入事后安全网与对话内一键撤销（`UndoSnapshotManager.swift` / `AIToolCardView.swift` / `BuiltInTools.swift`）**：
+  - **覆盖前影子快照（`UndoSnapshotManager`）**：在执行 `write_file` 覆盖文件前自动在内存中暂存原始内容并生成 `undo_token`；
+  - **对话流原生撤销胶囊**：工具调用卡片行内挂载 `[ ⎌ 撤销写入 ]` 微按钮，点击后瞬间原子回滚旧文件并切换为 `✓ 已还原`，兼顾自主执行效率与 100% 事后可逆性；
+  - **输入坞安全态势徽标（`SecurityRulesBadge` / `AIChatInputDock.swift`）**：输入坞底部极简展现当前会话生效的规则数（`🛡️ N`），点击可呼出气泡查看通配规则或一键清空重置，0 规则时完全隐形。
+
 - **AI 工具三层语义安全防线与规则通配引擎（`ToolRisk.swift` / `ToolRiskTests.swift` / `AI_TOOL_PERMISSION_ARCHITECTURE.md`）**：
   - **操作语义风险定级（`ToolRiskLevel` / `ToolRiskEvaluator`）**：打破粗暴的模式化开关与单一 `isDangerous` 布尔硬编码，构建基于开闭原则（OCP）的策略链；
   - **Tier 0 只读命令秒级直通**：实现 `ShellSemanticRiskEvaluator`，智能识别 `git status`、`git diff`、`git log`、`ls`、`pwd`、`cat`、`pnpm list`、`cargo check` 等只读安全命令，100% 零弹窗免审执行，保障沉浸心流；
   - **Tier 1 前缀与目录通配规则引擎（`ToolPermissionPolicyEngine`）**：彻底消除此前按 `toolName + argumentsJSON` 严格字符串哈希匹配导致的重复打扰弊端，支持命令前缀（如 `git *`、`pnpm *`）和工程目录通配放行与会话级记忆；
   - **Tier 2 破坏性高危硬门禁（Hard Gate）**：精准拦截 `rm -rf`、`sudo`、`git reset --hard`、`git push --force` 以及修改系统配置等操作，即使存在通配规则也强制要求显式二次确认，筑牢宿主安全底线；
-  - **专项功能测试全覆盖（`ToolRiskTests`）**：新增覆盖只读识别、破坏性拦截、前缀提取与规则匹配等 34 项专项测试用例，全套件 108 项测试 100% 通过。
+  - **专项功能测试全覆盖（`ToolRiskTests`）**：新增覆盖只读识别、破坏性拦截、前缀提取、规则匹配及文件撤销快照等 40 项专项测试用例，全套件 108 项测试 100% 通过。
 
 ### Changed
 

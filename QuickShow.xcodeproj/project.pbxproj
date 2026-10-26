@@ -211,6 +211,7 @@
 		DA4C6170D2969158BA1E3B38 /* MathFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11F7A6D46279250D573223B /* MathFont.swift */; };
 		DB289B1C35342CF3AC4D608A /* SystemActions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E6CE4C4D3B3C24C822C936D /* SystemActions.swift */; };
 		DCDB0D7025AB22155393A0E1 /* EscapePolicyCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B72D1E41F51F05F018ABF /* EscapePolicyCenter.swift */; };
+		DCF33B823E928EF2F566C1F5 /* UndoSnapshotManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2E02C809FFCB72EBC066666 /* UndoSnapshotManager.swift */; };
 		E108512E8D3CBEADB6FED32B /* MarkdownBlockRegistry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6EEC1734C7857CABA40F8EC4 /* MarkdownBlockRegistry.swift */; };
 		E2C291958D569BA34D5376A2 /* OAuthLoopbackServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D3297FE65CF234E49F00924 /* OAuthLoopbackServer.swift */; };
 		E43C415855C8BBED80A00E20 /* MathLatexPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0141A6CA2B73E4ABC098FAD /* MathLatexPipeline.swift */; };
@@ -481,6 +482,7 @@
 		F29D2A7DA65EFB27452D51FD /* MTFontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontManager.swift; sourceTree = "<group>"; };
 		F2A3B0D346751AEDEDF6F425 /* MathSyntaxSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSyntaxSanitizer.swift; sourceTree = "<group>"; };
 		F2AF20CBDE803B2DBE7B286F /* MarkdownParser+HTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MarkdownParser+HTML.swift"; sourceTree = "<group>"; };
+		F2E02C809FFCB72EBC066666 /* UndoSnapshotManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoSnapshotManager.swift; sourceTree = "<group>"; };
 		F343BA658D7F0A1EFEE0927A /* MarkdownHeadingRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownHeadingRenderer.swift; sourceTree = "<group>"; };
 		F42092753AD4E207BC630CA5 /* highlight.min.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = highlight.min.js; sourceTree = "<group>"; };
 		F4584DE26B61ECF74718A252 /* ExpandedMonitoringView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpandedMonitoringView.swift; sourceTree = "<group>"; };
@@ -827,6 +829,7 @@
 				50C23D0E1A7BC0F0F3B38D7D /* SendMessageTool.swift */,
 				0989D30E3C1BC6B6EE366424 /* ToolHelpers.swift */,
 				14DCDB9EEF3F06AD6DBAB1C9 /* ToolRisk.swift */,
+				F2E02C809FFCB72EBC066666 /* UndoSnapshotManager.swift */,
 				3AFB3D5D67FEAD99004EDE09 /* WebTools.swift */,
 				B4AF676850B86A33336B61A1 /* WebToolsConfig.swift */,
 			);
@@ -1351,6 +1354,7 @@
 				24B4188248E6CB4C048D52E1 /* ToolJSONText.swift in Sources */,
 				8AFCBE0A50A37C12A7ECC685 /* ToolRisk.swift in Sources */,
 				729CCA3F9CB91922110686EE /* ToolRiskTests.swift in Sources */,
+				DCF33B823E928EF2F566C1F5 /* UndoSnapshotManager.swift in Sources */,
 				E7A3A2A6109B04DDA6F3C1CE /* UserQuestionDrawer.swift in Sources */,
 				7E7814E04576707C2E177CD2 /* WebTools.swift in Sources */,
 				98306E98A125B50A8995082D /* WebToolsConfig.swift in Sources */,
