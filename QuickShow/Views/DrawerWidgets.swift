@@ -7,6 +7,7 @@ import SwiftUI
 /// hover 提亮。选项说明文字经 tooltip 展示（胶囊保持单行紧凑）。
 struct DrawerOptionCapsule: View {
     let option: UserQuestionOption
+    var prefixNumber: Int? = nil
     let selected: Bool
     let action: () -> Void
 
@@ -18,6 +19,10 @@ struct DrawerOptionCapsule: View {
                 if selected {
                     Image(systemName: "checkmark")
                         .font(Theme.Typography.text(Theme.Typography.micro, .bold))
+                } else if let prefixNumber {
+                    Text("\(prefixNumber)")
+                        .font(Theme.Typography.mono(Theme.Typography.micro, .medium))
+                        .foregroundColor(Theme.Colors.contentTertiary)
                 }
                 Text(option.label)
                     .font(Theme.Typography.text(Theme.Typography.footnote, .medium))

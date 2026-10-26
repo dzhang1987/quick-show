@@ -104,33 +104,72 @@ final class AIChatKeyMonitor {
             return event
         }
 
-        // 权限抽屉在场时的键盘盲操：⏎ 执行单次，⌘⏎ 允许并记忆规则
+        // 抽屉在场时的键盘盲操：⏎ 执行/提交，⌘⏎ 允许并记忆/强制提交，数字键 1-9 切换选项
         if event.keyCode == 36 || event.keyCode == 76 {
             if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
                 return event
             }
             let handledDrawer = MainActor.assumeIsolated { () -> Bool in
-                guard let req = ChatInteractionCenter.shared.request,
-                      case .toolConfirmation(let confirmation) = req else {
-                    return false
-                }
-                if cleanFlags == [.command] {
-                    if !confirmation.riskLevel.isDestructive {
-                        if let scope = confirmation.suggestedScope {
-                            ChatInteractionCenter.shared.resolveConfirmation(.allowSuggestedScope(scope))
-                        } else {
-                            ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
+                guard let req = ChatInteractionCenter.shared.request else { return false }
+                switch req {
+                case .toolConfirmation(let confirmation):
+                    if cleanFlags == [.command] {
+                        if !confirmation.riskLevel.isDestructive {
+                            if let scope = confirmation.suggestedScope {
+                                ChatInteractionCenter.shared.resolveConfirmation(.allowSuggestedScope(scope))
+                            } else {
+                                ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
+                            }
+                            return true
                         }
+                    } else if cleanFlags.isEmpty {
+                        ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
                         return true
                     }
-                } else if cleanFlags.isEmpty {
-                    ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
-                    return true
+                case .userQuestions:
+                    if cleanFlags == [.command] {
+                        NotificationCenter.default.post(name: .quickShowSubmitUserQuestions, object: nil)
+                        return true
+                    } else if cleanFlags.isEmpty {
+                        // 焦点在文本输入区时普通回车用于换行，未在文本框输入时直接回车提交默认选项
+                        if let textView = event.window?.firstResponder as? NSTextView, !textView.string.isEmpty {
+                            return false
+                        }
+                        NotificationCenter.default.post(name: .quickShowSubmitUserQuestions, object: nil)
+                        return true
+                    }
                 }
                 return false
             }
             if handledDrawer {
                 return nil
+            }
+        }
+
+        // 提问抽屉在场时，非打字态下按数字键 1-9 快速切换选项
+        if cleanFlags.isEmpty {
+            let numberKeyCodes: [UInt16: Int] = [
+                18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8,
+                83: 0, 84: 1, 85: 2, 86: 3, 87: 4, 88: 5, 89: 6, 91: 7, 92: 8
+            ]
+            if let optionIndex = numberKeyCodes[event.keyCode] {
+                let isEditingText = (event.window?.firstResponder is NSTextView)
+                if !isEditingText {
+                    let handledNumber = MainActor.assumeIsolated { () -> Bool in
+                        guard let req = ChatInteractionCenter.shared.request, case .userQuestions = req else {
+                            return false
+                        }
+                        NotificationCenter.default.post(
+                            name: .quickShowSelectQuestionOption,
+                            object: nil,
+                            userInfo: ["index": optionIndex]
+                        )
+                        return true
+                    }
+                    if handledNumber {
+                        return nil
+                    }
+                }
             }
         }
 

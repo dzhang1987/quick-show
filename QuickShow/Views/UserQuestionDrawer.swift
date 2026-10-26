@@ -1,5 +1,12 @@
 import SwiftUI
 
+// MARK: - 用户提问抽屉通知事件（全键盘盲操支持）
+
+extension Notification.Name {
+    static let quickShowSubmitUserQuestions = Notification.Name("quickShowSubmitUserQuestions")
+    static let quickShowSelectQuestionOption = Notification.Name("quickShowSelectQuestionOption")
+}
+
 // MARK: - 用户提问抽屉
 
 /// AI 提问面板：每题 = header 短标签 + 问题文本 + 选项胶囊组（单选互斥 / 多选开关态）；
@@ -17,6 +24,18 @@ struct UserQuestionDrawerContent: View {
     @State private var customText = ""
     /// 题目区自然高度测量（用于自适应，消除多余空白）
     @State private var questionsContentHeight: CGFloat = 0
+
+    init(request: UserQuestionRequest) {
+        self.request = request
+        // 单选题默认预选第一项（推荐项），使用户可直接敲回车秒级确认
+        var initialSelections: [UUID: Set<UUID>] = [:]
+        for question in request.questions {
+            if !question.multiple, let firstOption = question.options.first {
+                initialSelections[question.id] = [firstOption.id]
+            }
+        }
+        _selections = State(initialValue: initialSelections)
+    }
 
     /// 可提交判据：任一题有选中项，或统一输入条有非空白内容。
     private var canSubmit: Bool {
@@ -49,11 +68,11 @@ struct UserQuestionDrawerContent: View {
 
             // 按钮行：消极在左、积极在右
             HStack(spacing: Theme.Spacing.lg) {
-                DrawerActionButton(title: String(localized: "取消"), style: .secondary) {
+                DrawerActionButton(title: String(localized: "取消 (ESC)"), style: .secondary) {
                     ChatInteractionCenter.shared.cancelQuestions()
                 }
                 Spacer(minLength: 0)
-                DrawerActionButton(title: String(localized: "提交答案"), style: .primary, enabled: canSubmit) {
+                DrawerActionButton(title: String(localized: "提交答案 (⏎)"), style: .primary, enabled: canSubmit) {
                     submit()
                 }
             }
@@ -63,6 +82,19 @@ struct UserQuestionDrawerContent: View {
         .padding(.bottom, Theme.Spacing.xl)
         .onPreferenceChange(DrawerQuestionsHeightPreferenceKey.self) { height in
             questionsContentHeight = height
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .quickShowSubmitUserQuestions)) { _ in
+            if canSubmit {
+                submit()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .quickShowSelectQuestionOption)) { note in
+            if let index = note.userInfo?["index"] as? Int,
+               let firstQuestion = request.questions.first,
+               index >= 0 && index < firstQuestion.options.count {
+                let targetOption = firstQuestion.options[index]
+                toggleOption(targetOption.id, for: firstQuestion)
+            }
         }
     }
 
@@ -118,9 +150,10 @@ struct UserQuestionDrawerContent: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             DrawerOptionFlowLayout(spacing: Theme.Spacing.md) {
-                ForEach(question.options) { option in
+                ForEach(Array(question.options.enumerated()), id: \.element.id) { index, option in
                     DrawerOptionCapsule(
                         option: option,
+                        prefixNumber: index + 1,
                         selected: selections[question.id]?.contains(option.id) == true
                     ) {
                         toggleOption(option.id, for: question)
