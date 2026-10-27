@@ -12,8 +12,9 @@ extension AIChatState {
     /// 其他会话的进行中生成不受影响（并行生成核心语义）。
     func send() {
         // 生成中的 ⏎：根据偏好设置（追加 vs 插入）进入对应队列。
-        // 输入框/附件清空由 UI 层处理，此处不消费输入框。
-        if isStreaming {
+        // 注意：新会话草稿待命态（currentSessionId == nil）下，哪怕后台有其他会话在生成，当前动作也绝对是普通发送并创建新会话！
+        let isDraftState = (store.currentSessionId == nil)
+        if isStreaming && !isDraftState {
             let action = SettingsStore.currentStreamingReturnAction
             if action == .followUp {
                 let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -134,7 +135,8 @@ extension AIChatState {
     /// ⌘⏎ 替代发送键路：在生成中执行与默认配置相反的动作（追加 ⇄ 插入）；
     /// 非生成中退化为普通 send()。
     func sendAlternative() {
-        if isStreaming {
+        let isDraftState = (store.currentSessionId == nil)
+        if isStreaming && !isDraftState {
             let action = SettingsStore.currentStreamingReturnAction
             if action == .followUp {
                 // 默认是追加，则 ⌘⏎ 执行立即插入

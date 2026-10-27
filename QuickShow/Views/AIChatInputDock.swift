@@ -123,7 +123,7 @@ struct AIChatInputDock: View {
             && state.imageAttachments.isEmpty
             && state.pendingQueue.isEmpty
             && !hasSubagentContent
-            && !state.isStreaming
+            && !isCurrentSessionStreaming
             && interaction.request == nil
             && !dockHovered
     }
@@ -142,7 +142,7 @@ struct AIChatInputDock: View {
     private var watermarkBreaksThrough: Bool { (state.contextWatermark?.ratio ?? 0) > 0.8 }
 
     /// 发送钮实心态判据：可发送或生成中（驱动 禁用灰箭头 ⇄ 实心强调色 的淡变）。
-    private var sendButtonSolid: Bool { state.isStreaming || canSend }
+    private var sendButtonSolid: Bool { isCurrentSessionStreaming || canSend }
 
     /// 生长区是否在场（队列/附件/活跃子智能体任一非空）：与 inputArea 生长区容器的 if 判据同源。
     private var hasDockGrowth: Bool {
@@ -713,15 +713,20 @@ struct AIChatInputDock: View {
         }
     }
 
+    /// 当前输入区归属的会话是否正在流式生成中（处于新会话草稿待命态时恒为 false）。
+    private var isCurrentSessionStreaming: Bool {
+        state.store.currentSessionId != nil && state.isStreaming
+    }
+
     private var sendButton: some View {
         Button {
-            if state.isStreaming {
+            if isCurrentSessionStreaming {
                 state.abortStreaming()
             } else {
                 state.send()
             }
         } label: {
-            Image(systemName: state.isStreaming ? "stop.fill" : "arrow.up")
+            Image(systemName: isCurrentSessionStreaming ? "stop.fill" : "arrow.up")
                 .font(Theme.Typography.text(13, .bold))
                 .foregroundColor(sendButtonForeground)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
@@ -729,8 +734,8 @@ struct AIChatInputDock: View {
                 .animation(.easeOut(duration: Theme.Motion.contentFade), value: sendButtonSolid)
         }
         .buttonStyle(.plain)
-        .disabled(!state.isStreaming && !canSend)
-        .help(state.isStreaming ? String(localized: "中止生成") : String(localized: "发送（⏎）· 生成中可排队追加或 ⌘⏎ 插入"))
+        .disabled(!isCurrentSessionStreaming && !canSend)
+        .help(isCurrentSessionStreaming ? String(localized: "中止生成") : String(localized: "发送（⏎）· 生成中可排队追加或 ⌘⏎ 插入"))
     }
 
     // MARK: - 状态与动作
@@ -741,11 +746,11 @@ struct AIChatInputDock: View {
     }
 
     /// ⏎ 发送键路（ChatInputNSTextView 回调）：
-    /// - 非生成中：普通发送，清空由 send() 内部完成（含未配置端点时保留输入的语义）；
+    /// - 非生成中（含草稿待命态）：普通发送，清空由 send() 内部完成（含未配置端点时保留输入的语义）；
     /// - 生成中：数据层把 send() 转入 steering 队列（send 内 isStreaming 分支提前返回，
     ///   不消费输入态），此处按「入队反馈 = 输入框清空 + 队列胶囊浮现」由 UI 侧补齐清空。
     private func submitInput() {
-        let wasStreaming = state.isStreaming
+        let wasStreaming = isCurrentSessionStreaming
         state.send()
         if wasStreaming { clearDraft() }
     }
@@ -754,7 +759,7 @@ struct AIChatInputDock: View {
     /// - 生成中：执行与默认偏好相反的动作（追加 ⇄ 插入）；
     /// - 非生成中：普通发送。
     private func submitAlternative() {
-        let wasStreaming = state.isStreaming
+        let wasStreaming = isCurrentSessionStreaming
         state.sendAlternative()
         if wasStreaming { clearDraft() }
     }
@@ -764,9 +769,9 @@ struct AIChatInputDock: View {
     ///   （enqueueFollowUp 与 enqueueSteering 同样不消费输入态）；
     /// - 非生成中：退化为普通发送（与 ⏎ 同路径，send 内自守门控）。
     private func submitFollowUp() {
-        // 门控信号与数据层 enqueueFollowUp 同源（isStreaming）：
+        // 门控信号与数据层 enqueueFollowUp 同源（isCurrentSessionStreaming）：
         // 残留边界（消息态生成中但流集合已清）下入队会被拒，此处退化为普通发送不丢草稿。
-        guard state.isStreaming else {
+        guard isCurrentSessionStreaming else {
             state.send()
             return
         }
@@ -788,14 +793,14 @@ struct AIChatInputDock: View {
     /// 发送键底：可用 = 实心操作色（亮暗双模式自适应：琥珀暖金/科技青，全图最强图底反转——强调只在可发送瞬间登场），
     /// 流式 = 警告红；空态/禁用 = 无底（透明），杜绝空态下高亮实心色块抢夺视觉重心。
     private var sendButtonFill: Color {
-        if state.isStreaming { return Theme.Colors.statusWarning.opacity(0.9) }
+        if isCurrentSessionStreaming { return Theme.Colors.statusWarning.opacity(0.9) }
         return canSend ? Theme.Colors.actionButtonFill : Color.clear
     }
 
     /// 发送键图标：实心强调色底上自适应高对比前景色（亮暗双模式自适应：琥珀暖色亮色纯白/暗色深褐黑，对比度均 > 4.5:1），
     /// 流式红底用白色；禁用态 contentTertiary（≈4.7:1，灰箭头静止可读但不抢眼）。
     private var sendButtonForeground: Color {
-        if state.isStreaming { return .white }
+        if isCurrentSessionStreaming { return .white }
         if canSend { return Theme.Colors.actionButtonForeground }
         return Theme.Colors.contentTertiary
     }

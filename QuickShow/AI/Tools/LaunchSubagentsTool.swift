@@ -55,8 +55,12 @@ final class LaunchSubagentsTool: AITool {
             let session: ChatSession
             if let execId = executionSessionId, let target = AIChatState.shared.store.session(id: execId) {
                 session = target
+            } else if let current = AIChatState.shared.store.currentSession {
+                session = current
+            } else if let first = AIChatState.shared.store.sessions.first {
+                session = first
             } else {
-                session = AIChatState.shared.store.ensureCurrentSession()
+                session = AIChatState.shared.store.createSession()
             }
             let rootId = session.parentSessionId ?? session.id
             let lastWithImages = session.messages.last { !$0.images.isEmpty }

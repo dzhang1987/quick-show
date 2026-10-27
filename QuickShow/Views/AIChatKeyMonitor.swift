@@ -137,6 +137,10 @@ final class AIChatKeyMonitor {
                             return true
                         }
                     } else if cleanFlags.isEmpty {
+                        // 焦点在文本输入区且已有文字时（用户正在草稿或对话输入），普通回车放行给输入框发送，绝不可被抽屉盲操抢先吞掉
+                        if let textView = event.window?.firstResponder as? NSTextView, !textView.string.isEmpty {
+                            return false
+                        }
                         NotificationCenter.default.post(name: .quickShowExecuteToolConfirmation, object: nil)
                         return true
                     }

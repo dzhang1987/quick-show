@@ -308,8 +308,10 @@ final class AIChatState: ObservableObject {
 
     /// 由 streamingSessionIds 与当前会话派生 isStreaming（视图旧调用点语义保持）。
     /// 流集合变化、会话切换时统一调用，保证两信号永不脱节。
-    func syncStreamingState() {
-        let streaming = currentSessionId.map { streamingSessionIds.contains($0) } ?? false
+    /// 支持传入 targetSessionId 参数解决 Combine @Published willSet 时序先于属性赋值的问题。
+    func syncStreamingState(targetSessionId: UUID?? = nil) {
+        let targetId = (targetSessionId != nil) ? targetSessionId! : currentSessionId
+        let streaming = targetId.map { streamingSessionIds.contains($0) } ?? false
         if isStreaming != streaming {
             isStreaming = streaming
             if !streaming {
@@ -365,7 +367,7 @@ final class AIChatState: ObservableObject {
                 if let sessionId {
                     self.unreadSessionIds.remove(sessionId)
                 }
-                self.syncStreamingState()
+                self.syncStreamingState(targetSessionId: .some(sessionId))
                 // 会话切换/新对话：危险工具「总是允许」记忆随会话失效（幂等，仅真实切换时清）。
                 if sessionChanged {
                     self.editingMessageId = nil
@@ -592,20 +594,29 @@ final class AIChatState: ObservableObject {
     // MARK: - 会话操作（Wave 2 侧边栏调用）
 
     /// 新建会话（⌘N 或侧栏按钮）：
-    /// 惰性新建：不创建任何空会话对象，进入新会话草稿待命态，恢复新会话独立草稿。
+    /// 惰性新建：不预先创建空会话文件，进入草稿待命态（currentSessionId = nil）。
+    /// 只有在用户输入首条消息并发送时，才真正创建会话，绝不影响后台正在生成的会话。
     func newSession() {
         draftAgentId = nil
         draftModelId = nil
         draftThinkingLevel = nil
+
+        // 若当前已经处于草稿待命态，直接复用当前界面并重新聚焦
         guard store.currentSessionId != nil else {
-            // 当前已在新会话草稿态，复用当前界面并在下一 runloop 请求输入框重新聚焦
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
             }
             return
         }
+
+        // 保存切走前的草稿
         flushDraft()
+
+        // 切换到草稿待命态
         store.currentSessionId = nil
+        syncStreamingState(targetSessionId: .some(nil))
+
+        // 重新聚焦输入框
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
         }

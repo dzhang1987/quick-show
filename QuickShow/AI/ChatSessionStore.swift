@@ -79,14 +79,10 @@ final class ChatSessionStore: ObservableObject {
         session(id: sessionId)?.messages ?? []
     }
 
-    /// 确保存在当前会话：有则返回，无则回退第一个，仍无则新建。
+    /// 确保存在当前会话：有则返回；草稿态或无会话时创建新会话并设为当前（严禁将用户的草稿态偷偷切回旧会话）。
     @discardableResult
     func ensureCurrentSession() -> ChatSession {
         if let current = currentSession { return current }
-        if let first = sessions.first {
-            currentSessionId = first.id
-            return first
-        }
         return createSession()
     }
 

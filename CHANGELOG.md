@@ -70,6 +70,12 @@
 
 ### Fixed
 
+- **后台生成中惰性新建会话被误锁为生成态导致消息蒸发与无法创建会话根治（`AIChatState.swift` / `AIChatState+Streaming.swift` / `AIChatInputDock.swift` / `ChatSessionStore.swift` / `AIChatKeyMonitor.swift` / `AIChatView.swift` / `LaunchSubagentsTool.swift` / `SendMessageTool.swift`）**：
+  - **Combine `@Published willSet` 时序穿透根治**：修复 `store.currentSessionId = nil` 进入惰性草稿待命态时，`$currentSessionId.sink` 响应由于 `@Published` 提前发射导致计算属性读取到底层旧会话 ID、进而误把后台会话的生成状态赋给全局 `isStreaming` 的严重缺陷；在 `syncStreamingState(targetSessionId:)` 增加显式目标会话参数，闭包直接消费新值，并在 `newSession()` 中显式锁定为 `false`；
+  - **草稿待命态输入坞与发送动作绝对隔离**：在 `AIChatInputDock` 中引入 `isCurrentSessionStreaming` 严守逻辑，草稿待命态下发送按钮恒为向上箭头（↑），敲回车绝不误触发 steering/follow-up 插入指令，杜绝草稿在 `enqueueSteering` 处因 `currentSessionId == nil` 被静默丢弃并被 UI 层提前清空的恶性输入丢失 Bug；
+  - **惰性新建（Lazy Creation）纯净恢复**：严格遵循首条消息发送前不提前创建空会话与空文件规范，侧栏彻底移除多余占位行，底部「新对话」在草稿待命态下呈现自适应微光高亮作为状态指引；
+  - **后台任务会话越权篡改消除**：重构 `ChatSessionStore.ensureCurrentSession()`，移除草稿态下将 `currentSessionId` 偷偷改写为旧会话首项的副作用逻辑；`LaunchSubagentsTool` 与 `SendMessageTool` 工具执行前将会话上下文安全隔离，严禁后台任务篡改用户当前的前台草稿待命状态。
+
 - **强行终止撤回与编辑按钮不可见及需滚动才刷新根治（`AIChatMessageList.swift` / `AIChatState+Streaming.swift` / `AIChatState+SessionEdits.swift` / `ChatSessionStore.swift` / `QuickShowApp.swift`）**：
   - **门控判据精准解耦历史全量扫描**：重构 `AIChatState.isGenerating`，优先以运行时流集合真源（`isStreaming`）为准，非活跃时仅检查末尾助手回复状态，彻底消除包含多轮思考与工具调用的会话中历史未收口中间态误锁整会话撤回/编辑功能的缺陷；
   - **消息列表 Equatable 完整性补齐（根治“强行终止后必须滚动才刷新出按钮”）**：在 `SessionMessageList` 中显式引入 `isStreaming: Bool` 入参，并在 `SessionMessageList.==` 判等中补齐 `lhs.isStreaming == rhs.isStreaming` 比对，杜绝流式状态变迁被 SwiftUI 缓存误判跳过；同时重构消息列表内的撤回编辑门控为本会话本地纯派生；

@@ -35,6 +35,8 @@ struct AIChatView: View {
     @ObservedObject private var interaction = ChatInteractionCenter.shared
     /// 智能体仓库：观察当前激活智能体或角色变更以实时刷新顶栏身份。
     @ObservedObject private var agentStore = AIAgentStore.shared
+    /// 多会话数据层：观察会话列表、当前选中会话及消息变更（确保首条发送时即时移开欢迎页遮罩）。
+    @ObservedObject private var store = ChatSessionStore.shared
     var onOpenSettings: (() -> Void)?
     var onClose: (() -> Void)?
 
@@ -94,7 +96,7 @@ struct AIChatView: View {
     /// 无论 Combine 订阅延迟、首帧时序差或事件竞争，只要 currentSessionId 有效，
     /// 首帧求值时绝对将其置于集合头部，物理彻底杜绝所有子视图 opacity=0 引发的白屏。
     private var effectiveResidentSessionIds: [UUID] {
-        guard let current = state.store.currentSessionId else {
+        guard let current = store.currentSessionId else {
             return residentSessionIds
         }
         if residentSessionIds.contains(current) {
@@ -359,14 +361,14 @@ struct AIChatView: View {
         }
         // 会话切换检测（根级恒挂载）：把新会话置入 LRU 常驻集合头部，超限淘汰尾部（视图卸载）。
         // 移除 dropFirst 确保所有生命周期与会话变更（包含初始恢复与切回）100% 同步更新常驻状态。
-        .onReceive(state.store.$currentSessionId) { newId in
+        .onReceive(store.$currentSessionId) { newId in
             updateResidency(for: newId)
             scrollCoordinator.activeSessionId = newId
         }
         // 会话删除检测：清理被删会话的滚动快照与 LRU 常驻项，防死项累积。
         // 以 id 集合 + removeDuplicates 收敛触发频率（流式冲刷不改 id 集合，不重复扇出）；
         // 初始订阅重放时 knownSessionIds 为空，subtracting 结果为空，不误判。
-        .onReceive(state.store.$sessions.map { Set($0.map { $0.id }) }.removeDuplicates()) { currentIds in
+        .onReceive(store.$sessions.map { Set($0.map { $0.id }) }.removeDuplicates()) { currentIds in
             let disappeared = knownSessionIds.subtracting(currentIds)
                 if !disappeared.isEmpty {
                     for id in disappeared {
@@ -374,7 +376,7 @@ struct AIChatView: View {
                         residentSessionIds.removeAll { $0 == id }
                     }
                     // 同步清理磁盘持久层，防死会话的位置记录残留（重挂载锚点已失效）。
-                    state.store.persistScrollPositions(
+                    store.persistScrollPositions(
                         scrollSnapshots.mapValues {
                             ChatSessionStore.PersistedScrollPosition(
                                 topMessageID: $0.topVisibleMessageID, isPinned: $0.isPinned
@@ -386,7 +388,7 @@ struct AIChatView: View {
             // 恒定保证：当前会话必须常驻（residency 误删/竞态兜底；丢失则全部层 opacity=0 → 整片白屏）。
             // 侧栏选中只读 currentSessionId、与 residency 无关：residency 丢失时侧栏看似正常，
             // 但消息区全白，切一次会话才恢复——故此处每次扇出后无条件补齐。
-            if let current = state.store.currentSessionId, !residentSessionIds.contains(current) {
+            if let current = store.currentSessionId, !residentSessionIds.contains(current) {
                 updateResidency(for: current)
             }
         }
@@ -456,7 +458,7 @@ struct AIChatView: View {
     /// CombineLatest + removeDuplicates 异步扇出，切换瞬间可能与 ZStack 直读的 store
     /// 真源差一帧——出现「ZStack 已空、overlay 判据仍非空」的单帧空白）。
     private var activeSessionMessagesEmpty: Bool {
-        state.store.currentSession?.messages.isEmpty ?? true
+        store.currentSession?.messages.isEmpty ?? true
     }
 
     private var mainColumn: some View {
@@ -568,7 +570,7 @@ struct AIChatView: View {
         WindowDragHandle()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .overlay {
-                if let current = state.store.currentSession, current.parentSessionId != nil {
+                if let current = store.currentSession, current.parentSessionId != nil {
                     SubagentTopNavBar(
                         state: state,
                         onNavigateUp: { _ = navigateUpToParentAgent() },
@@ -590,7 +592,7 @@ struct AIChatView: View {
                         Spacer(minLength: Theme.Spacing.md)
 
                         mainSessionTitleView
-                            .id(state.store.currentSessionId)
+                            .id(store.currentSessionId)
 
                         Spacer(minLength: Theme.Spacing.md)
 
@@ -615,7 +617,7 @@ struct AIChatView: View {
     // MARK: - 主 Agent 会话标题（居中展示：Agent 身份 + 会话主题，拖拽完全穿透）
 
     private var mainSessionTitleView: some View {
-        let currentSession = state.store.currentSession
+        let currentSession = store.currentSession
         let agentId = currentSession?.agentId ?? agentStore.activeAgentId
         let agent = agentStore.agent(for: agentId) ?? agentStore.activeAgent
         let sessionTitle = currentSession?.title ?? String(localized: "新会话")
@@ -702,13 +704,13 @@ struct AIChatView: View {
         // 行会跳过未变内容，开销与原单会话同量级。
         ZStack(alignment: .top) {
             ForEach(effectiveResidentSessionIds, id: \.self) { sid in
-                let isActive = sid == state.store.currentSessionId
+                let isActive = sid == store.currentSessionId
                 SessionMessageList(
                     sessionId: sid,
                     isActive: isActive,
                     isStreaming: state.isStreaming(sessionId: sid),
                     state: state,
-                    messages: state.store.messages(in: sid),
+                    messages: store.messages(in: sid),
                     compactionStamp: state.compactionStamp(for: sid),
                     editingMessageId: isActive ? state.editingMessageId : nil,
                     onTapImage: { attachment in
