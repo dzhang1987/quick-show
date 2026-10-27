@@ -494,6 +494,11 @@ struct AIChatView: View {
                 state: state,
                 dockTotalHeight: $dockTotalHeight,
                 hasClipboardImage: hasClipboardImage,
+                onTapImage: { attachment in
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                        zoomedAttachment = attachment
+                    }
+                },
                 onRefreshClipboard: { refreshClipboardAvailability() },
                 onExportConversation: { exportConversation() },
                 onEscape: { handleEscape() }

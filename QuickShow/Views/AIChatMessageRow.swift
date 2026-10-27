@@ -57,6 +57,7 @@ struct ChatMessageRow: View, Equatable {
                         if isEditing {
                             MessageEditBubble(
                                 message: message,
+                                onTapImage: onTapImage,
                                 onCommit: { text, images in
                                     onEditResend(text, images)
                                 },
@@ -169,7 +170,18 @@ struct ChatMessageRow: View, Equatable {
                 }
                 .foregroundColor(Theme.Colors.contentTertiary)
             }
-            VStack(alignment: .trailing, spacing: Theme.Spacing.xl) {
+            userBubbleContent
+        }
+    }
+
+    @ViewBuilder
+    private var userBubbleContent: some View {
+        if message.content.isEmpty && !message.images.isEmpty {
+            // 纯图模式：极致轻盈，直接呈现带微光边框的圆角图卡，消除多余灰底厚边距
+            MessageImageThumbs(images: message.images, onTap: onTapImage)
+        } else {
+            // 图文混排或纯文字模式：紧凑气泡，内部图文左对齐自然排版
+            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                 if !message.images.isEmpty {
                     MessageImageThumbs(images: message.images, onTap: onTapImage)
                 }
@@ -182,8 +194,8 @@ struct ChatMessageRow: View, Equatable {
                         .textSelection(.enabled)
                 }
             }
-            .padding(.horizontal, Theme.Spacing.xxl)
-            .padding(.vertical, Theme.Spacing.xl)
+            .padding(.horizontal, message.images.isEmpty ? Theme.Spacing.xxl : Theme.Spacing.lg)
+            .padding(.vertical, message.images.isEmpty ? Theme.Spacing.xl : Theme.Spacing.lg)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.userBubble, style: .continuous)
                     .fill(Theme.Colors.userBubbleFill)

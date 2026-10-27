@@ -6,6 +6,11 @@
 
 ### Added
 
+- **用户消息图片附件大画幅自适应呈现与全链路点击预览（`AIChatAttachmentViews.swift` / `AIChatInputDock.swift` / `AIChatMessageRow.swift` / `AIChatView.swift` / `MessageEditBubble.swift`）**：
+  - **单图大画幅比例自适应**：单张图片卡片根据图片原生宽高比动态自适应计算最佳画幅（最大 340×260pt），保持原有纵横比与呼吸感；多图规整紧凑网格流横排；
+  - **纯图气泡极简呈现**：用户仅发送图片而无 Prompt 文本时，消除多余灰底厚边距，直接呈现带微光边框的精致圆角图卡；图文混排时正文与缩略图自然左对齐排版；
+  - **全链路大图预览打通**：输入坞待发送附件缩略图、就地编辑气泡内图片均打通点击大图预览，无缝唤起全屏高保真灯箱并支持原图尺寸缩放与文件定位。
+
 - **Markdown 专业排版升级与多层嵌套引文及高亮语法渲染（`AssistantMarkdownView.swift` / `MarkdownParser+Inline.swift` / `NativeTextFlowView.swift` / `MarkdownBlockquoteRenderer.swift` / `MarkdownHeadingRenderer.swift` / `MarkdownListRenderer.swift`）**：
   - **GFM 高亮语法支持（`==text==`）**：行内解析器支持 CommonMark/GFM 扩展语法 `==高亮文本==`，底层在 TextKit 中绘制精致柔和的高亮微黄衬底；
   - **排版梯级与格式塔亲密性**：重构六级标题梯级落差（h1 20 / h2 17.5 / h3 15.5 / h4 14 / h5 13.5 / h6 13），粗体与小标题提升至 bold + 100% 标签白；加大标题前留白（28/24/20pt）拉开成组，标题后（6/5pt）牢固吸附后文；列表项间距放宽至 7.5pt，彻底打破文字墙拥挤感；

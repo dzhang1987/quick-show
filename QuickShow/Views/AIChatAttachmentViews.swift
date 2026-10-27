@@ -72,16 +72,21 @@ enum PasteboardImageExtractor {
 
 // MARK: - 输入区附件条（待发送）
 
-/// 已选图片附件的缩略图胶囊横排：输入区上方，hover 显示移除钮。
+/// 已选图片附件的缩略图胶囊横排：输入区上方，点击预览，hover 显示移除钮。
 struct ImageAttachmentStrip: View {
     let attachments: [ChatImageAttachment]
+    var onTap: ((ChatImageAttachment) -> Void)? = nil
     let onRemove: (UUID) -> Void
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Theme.Spacing.lg) {
                 ForEach(attachments) { attachment in
-                    PendingAttachmentThumb(attachment: attachment, onRemove: { onRemove(attachment.id) })
+                    PendingAttachmentThumb(
+                        attachment: attachment,
+                        onTap: { onTap?(attachment) },
+                        onRemove: { onRemove(attachment.id) }
+                    )
                 }
             }
             .padding(.vertical, Theme.Spacing.xxs) // 给 hover 移除钮留出血
@@ -89,22 +94,32 @@ struct ImageAttachmentStrip: View {
     }
 }
 
-/// 单个待发送附件：44pt 圆角缩略图 + hover 右上角移除钮。
+/// 单个待发送附件：44pt 圆角缩略图 + 点击大图预览 + hover 右上角移除钮。
 private struct PendingAttachmentThumb: View {
     let attachment: ChatImageAttachment
+    var onTap: (() -> Void)? = nil
     let onRemove: () -> Void
 
     @State private var hovered = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            thumbImage
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                        .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-                )
+            Button {
+                onTap?()
+            } label: {
+                thumbImage
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                            .stroke(
+                                hovered ? Theme.Colors.accent.opacity(0.65) : Theme.Colors.chatStrokeStrong,
+                                lineWidth: hovered ? 1 : 0.5
+                            )
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(attachment.fileName.map { "\($0) (点击预览)" } ?? String(localized: "点击预览图片"))
 
             if hovered {
                 Button(action: onRemove) {
@@ -116,13 +131,12 @@ private struct PendingAttachmentThumb: View {
                 .buttonStyle(.plain)
                 .offset(x: 4, y: -4)
                 .transition(.opacity)
-                .help("移除该图片")
+                .help(String(localized: "移除该图片"))
             }
         }
         .onHover { hovering in
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
-        .help(attachment.fileName ?? String(localized: "图片附件"))
     }
 
     @ViewBuilder
@@ -145,24 +159,61 @@ private struct PendingAttachmentThumb: View {
 
 // MARK: - 消息气泡内缩略图
 
-/// 用户消息气泡内的图片附件横排：点击回调交给外层（放大预览）。
+/// 用户消息气泡内的图片附件排版：
+/// - 单图：大画幅自适应卡片（保持原图比例，最大 340×260pt，呼吸感自然）；
+/// - 多图：规整紧凑网格流横排（每张 72~110pt，自适应折行且紧凑收敛）。
 struct MessageImageThumbs: View {
     let images: [ChatImageAttachment]
     let onTap: (ChatImageAttachment) -> Void
 
     var body: some View {
-        // 单图放大展示，多图横排；超过气泡宽度自然换行
-        FlowRow(spacing: Theme.Spacing.lg) {
+        if images.count == 1, let single = images.first {
+            singleImageView(single)
+        } else {
+            multiImagesView
+        }
+    }
+
+    /// 单图大画幅视图
+    @ViewBuilder
+    private func singleImageView(_ attachment: ChatImageAttachment) -> some View {
+        let size = singleImageSize(for: attachment)
+        Button {
+            onTap(attachment)
+        } label: {
+            if let image = ChatImageCache.thumbnail(for: attachment) {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: size.width, height: size.height)
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                            .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
+                    )
+            } else {
+                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                    .fill(Theme.Colors.surfaceTrack)
+                    .frame(width: size.width, height: size.height)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(String(localized: "点击放大查看"))
+    }
+
+    /// 多图网格流视图
+    private var multiImagesView: some View {
+        FlowRow(spacing: Theme.Spacing.md) {
             ForEach(images) { attachment in
-                Button { onTap(attachment) } label: {
+                let size = multiThumbSize(for: attachment)
+                Button {
+                    onTap(attachment)
+                } label: {
                     if let image = ChatImageCache.thumbnail(for: attachment) {
                         Image(nsImage: image)
                             .resizable()
                             .aspectRatio(contentMode: .fill)
-                            .frame(
-                                width: thumbSize(for: attachment).width,
-                                height: thumbSize(for: attachment).height
-                            )
+                            .frame(width: size.width, height: size.height)
                             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
@@ -171,19 +222,44 @@ struct MessageImageThumbs: View {
                     } else {
                         RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
                             .fill(Theme.Colors.surfaceTrack)
-                            .frame(width: 96, height: 72)
+                            .frame(width: size.width, height: size.height)
                     }
                 }
                 .buttonStyle(.plain)
-                .help("点击放大查看")
+                .help(String(localized: "点击放大查看"))
             }
         }
     }
 
-    /// 气泡内缩略图尺寸：按原图宽高比等比收缩到上限框内（最长边 160，最短边保底 56）。
-    private func thumbSize(for attachment: ChatImageAttachment) -> CGSize {
-        let maxSide: CGFloat = 160
-        let minSide: CGFloat = 56
+    /// 单图精简预览尺寸：按原图宽高比收敛至 [minSide, 180×140] 内，克制优雅不霸屏
+    private func singleImageSize(for attachment: ChatImageAttachment) -> CGSize {
+        let maxWidth: CGFloat = 180
+        let maxHeight: CGFloat = 140
+        let minSide: CGFloat = 64
+
+        let w = CGFloat(max(attachment.pixelWidth, 1))
+        let h = CGFloat(max(attachment.pixelHeight, 1))
+
+        let widthScale = maxWidth / w
+        let heightScale = maxHeight / h
+        let scale = min(widthScale, heightScale, 1.0)
+
+        var finalW = w * scale
+        var finalH = h * scale
+
+        if finalW < minSide && finalH < minSide {
+            let boost = minSide / max(finalW, finalH)
+            finalW *= boost
+            finalH *= boost
+        }
+
+        return CGSize(width: finalW.rounded(), height: finalH.rounded())
+    }
+
+    /// 多图网格内单张缩略图尺寸：规整紧凑（最长边 88，保底 60）
+    private func multiThumbSize(for attachment: ChatImageAttachment) -> CGSize {
+        let maxSide: CGFloat = 88
+        let minSide: CGFloat = 60
         let w = CGFloat(max(attachment.pixelWidth, 1))
         let h = CGFloat(max(attachment.pixelHeight, 1))
         let scale = min(maxSide / w, maxSide / h, 1.0)
@@ -194,7 +270,7 @@ struct MessageImageThumbs: View {
     }
 }
 
-/// 极简流式行：子视图放不下时换行（仅用于附件横排，非通用组件）。
+/// 极简流式行：子视图放不下时换行，精准上报真实占据宽度（彻底消除盲目撑满容器的空白 bug）。
 private struct FlowRow: Layout {
     var spacing: CGFloat = 8
 
@@ -203,9 +279,12 @@ private struct FlowRow: Layout {
         var x: CGFloat = 0
         var y: CGFloat = 0
         var rowHeight: CGFloat = 0
+        var maxRowWidth: CGFloat = 0
+
         for subview in subviews {
             let size = subview.sizeThatFits(.unspecified)
             if x + size.width > maxWidth, x > 0 {
+                maxRowWidth = max(maxRowWidth, x - spacing)
                 x = 0
                 y += rowHeight + spacing
                 rowHeight = 0
@@ -213,7 +292,11 @@ private struct FlowRow: Layout {
             x += size.width + spacing
             rowHeight = max(rowHeight, size.height)
         }
-        return CGSize(width: maxWidth, height: y + rowHeight)
+        if x > 0 {
+            maxRowWidth = max(maxRowWidth, x - spacing)
+        }
+        let totalHeight = y + rowHeight
+        return CGSize(width: min(maxRowWidth, maxWidth), height: totalHeight)
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {

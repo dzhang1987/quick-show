@@ -25,6 +25,8 @@ struct AIChatInputDock: View {
     @Binding var dockTotalHeight: CGFloat
     /// 剪贴板是否有可用图片（父级持有，控制 ⊕ 菜单「剪贴板导入」可用态）。
     let hasClipboardImage: Bool
+    /// 点击图片附件放大预览回调
+    var onTapImage: ((ChatImageAttachment) -> Void)? = nil
     /// 进入坞区时刷新剪贴板图片可用态（父级 refreshClipboardAvailability）。
     let onRefreshClipboard: () -> Void
     /// 导出整段对话 Markdown（父级 exportConversation）。
@@ -176,11 +178,15 @@ struct AIChatInputDock: View {
                     // 支持立即插入提权、就地编辑与删除；置于坞体顶部、随内容向上生长。
                     QueuedMessagesPanel(state: state)
 
-                    // 待发送图片附件条：缩略图胶囊横排，可单个移除
+                    // 待发送图片附件条：缩略图胶囊横排，点击放大预览，可单个移除
                     if !state.imageAttachments.isEmpty {
-                        ImageAttachmentStrip(attachments: state.imageAttachments) { id in
-                            state.removeImageAttachment(id: id)
-                        }
+                        ImageAttachmentStrip(
+                            attachments: state.imageAttachments,
+                            onTap: onTapImage,
+                            onRemove: { id in
+                                state.removeImageAttachment(id: id)
+                            }
+                        )
                     }
                 }
                 // 坞体高度上报已上移至 inputArea 根（整体实测直写 @State），

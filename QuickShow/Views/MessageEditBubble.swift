@@ -13,6 +13,8 @@ import SwiftUI
 struct MessageEditBubble: View {
     /// 编辑对象：原消息文本/图片作为草稿初值（进入编辑态时锁定，编辑期间不变）。
     let message: ChatMessage
+    /// 点击图片附件放大预览回调
+    var onTapImage: ((ChatImageAttachment) -> Void)? = nil
     /// 确认重发：把清理后的文本与图片附件交回父级（父级退出编辑态并转交 onEditResend）。
     let onCommit: (String, [ChatImageAttachment]) -> Void
     /// 取消编辑：父级退出编辑态（带淡出动画）。
@@ -26,10 +28,12 @@ struct MessageEditBubble: View {
 
     init(
         message: ChatMessage,
+        onTapImage: ((ChatImageAttachment) -> Void)? = nil,
         onCommit: @escaping (String, [ChatImageAttachment]) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.message = message
+        self.onTapImage = onTapImage
         self.onCommit = onCommit
         self.onCancel = onCancel
         _editText = State(initialValue: message.content)
@@ -39,7 +43,10 @@ struct MessageEditBubble: View {
     var body: some View {
         VStack(alignment: .trailing, spacing: Theme.Spacing.lg) {
             if !editImages.isEmpty {
-                ImageAttachmentStrip(attachments: editImages) { id in
+                ImageAttachmentStrip(
+                    attachments: editImages,
+                    onTap: onTapImage
+                ) { id in
                     editImages.removeAll { $0.id == id }
                 }
             }
