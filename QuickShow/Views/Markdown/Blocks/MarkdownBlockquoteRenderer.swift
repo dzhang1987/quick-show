@@ -45,8 +45,20 @@ final class MarkdownBlockquoteRenderer: MarkdownBlockRenderer {
         guard blockquoteLength > 0 else { return }
         let blockquoteRange = NSRange(location: startIndex, length: blockquoteLength)
 
-        // 打上 flowBlockquote 属性供 FlowLayoutManager 绘制左侧装饰细竖条与轻背景
-        result.addAttribute(.flowBlockquote, value: true, range: blockquoteRange)
+        // 打上 flowBlockquote 属性（支持嵌套深度 Int 1, 2, 3...）供 FlowLayoutManager 绘制多层竖条与衬底
+        var existingLevels: [(range: NSRange, level: Int)] = []
+        result.enumerateAttribute(.flowBlockquote, in: blockquoteRange, options: []) { val, r, _ in
+            if let currentLevel = val as? Int {
+                existingLevels.append((r, currentLevel + 1))
+            } else if val != nil {
+                existingLevels.append((r, 2))
+            } else {
+                existingLevels.append((r, 1))
+            }
+        }
+        for item in existingLevels {
+            result.addAttribute(.flowBlockquote, value: item.level, range: item.range)
+        }
 
         // 为引文块内所有段落增加 18pt 缩进，为左侧细竖条与边距预留呼吸空间
         let quoteIndent: CGFloat = 18

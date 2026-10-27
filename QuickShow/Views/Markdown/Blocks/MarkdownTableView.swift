@@ -17,8 +17,8 @@ struct MarkdownTableView: View {
                     MarkdownInlineText(
                         inlines: header,
                         bodyColor: Theme.Colors.contentPrimary,
-                        baseSize: 12.5,
-                        weight: .semibold,
+                        baseSize: 13,
+                        weight: .bold,
                         explicitColor: Theme.Colors.contentPrimary
                     )
                     .multilineTextAlignment(textAlignment(at: column))

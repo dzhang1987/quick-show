@@ -131,8 +131,14 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
             prefixFont = MarkdownInlineNS.monoFont(size: 12)
             prefixColor = NSColor.secondaryLabelColor
         } else {
-            prefixText = (depth == 0 ? "•" : "◦") + "\t"
-            prefixFont = MarkdownInlineNS.font(size: 12, weight: .medium)
+            let symbol: String
+            switch depth {
+            case 0: symbol = "•"
+            case 1: symbol = "◦"
+            default: symbol = "▪"
+            }
+            prefixText = "\(symbol)\t"
+            prefixFont = MarkdownInlineNS.font(size: depth == 1 ? 13 : 12, weight: .medium)
             prefixColor = NSColor.secondaryLabelColor
             if depth == 0 && item.taskState == nil {
                 baselineOffset = 0.5
@@ -149,7 +155,7 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         itemPiece.append(NSAttributedString(string: prefixText, attributes: prefixAttrs))
 
         // 2. 正文内容
-        let bodyOpacity: CGFloat = item.taskState == true ? 0.55 : 0.80
+        let bodyOpacity: CGFloat = item.taskState == true ? 0.55 : 0.82
         var subLists: [(items: [MarkdownListItem], ordered: Bool)] = []
 
         let bodyFont = MarkdownInlineNS.font(size: 13, weight: .regular)
@@ -183,20 +189,20 @@ final class MarkdownListRenderer: MarkdownBlockRenderer {
         let hangingIndent: CGFloat = baseIndent + hangingOffset
 
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 5
+        style.lineSpacing = 5.5
         style.firstLineHeadIndent = baseIndent
         style.headIndent = hangingIndent
         style.tabStops = [NSTextTab(textAlignment: .left, location: hangingIndent)]
 
         if !subLists.isEmpty {
-            style.paragraphSpacing = 3
+            style.paragraphSpacing = 4
         } else if hasNextListItem {
-            style.paragraphSpacing = 3.5
+            style.paragraphSpacing = 7.5 // 适度放宽间距，多行列表项具备呼吸感
         } else if let next = nextBlock {
             if case .heading = next {
-                style.paragraphSpacing = 16
+                style.paragraphSpacing = 20
             } else {
-                style.paragraphSpacing = 10
+                style.paragraphSpacing = 12
             }
         } else {
             style.paragraphSpacing = 0
@@ -283,8 +289,15 @@ struct MarkdownListItemRow: View {
                 .foregroundColor(Theme.Colors.contentTertiary)
                 .frame(minWidth: 14, alignment: .trailing)
         } else {
-            Text(depth == 0 ? "•" : "◦")
-                .font(Theme.Typography.text(13, .medium))
+            let symbol: String = {
+                switch depth {
+                case 0: return "•"
+                case 1: return "◦"
+                default: return "▪"
+                }
+            }()
+            Text(symbol)
+                .font(Theme.Typography.text(depth == 1 ? 13 : 12, .medium))
                 .foregroundColor(Theme.Colors.contentTertiary)
                 .frame(minWidth: 14, alignment: .trailing)
         }

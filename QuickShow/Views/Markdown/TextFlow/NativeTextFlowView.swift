@@ -6,8 +6,6 @@ import AppKit
 extension NSAttributedString.Key {
     /// 标记该区间为引用块（Blockquote），驱动 LayoutManager 绘制左侧装饰细条与衬底
     static let flowBlockquote = NSAttributedString.Key("quickshow.flow.blockquote")
-    /// 标记该区间为 H1 标题，驱动 LayoutManager 在末尾绘制底部分割线
-    static let flowHeading1 = NSAttributedString.Key("quickshow.flow.heading1")
     /// 标记该区间为水平分割线（Horizontal Rule），驱动 LayoutManager 绘制水平居中细线
     static let flowHorizontalRule = NSAttributedString.Key("quickshow.flow.horizontalRule")
     /// 标记该区间为行内代码（Inline Code），驱动 LayoutManager 绘制圆角背景与精致微描边
@@ -147,48 +145,60 @@ final class FlowLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
         // 1. 绘制引用块（Blockquote）：背景底色与左侧装饰竖线
         drawBlockquotes(in: validCharRange, origin: origin)
 
-        // 2. 绘制 H1 标题底部分割线
-        drawHeading1Dividers(in: validCharRange, origin: origin)
-
-        // 3. 绘制水平分割线（Horizontal Rule）
+        // 2. 绘制水平分割线（Horizontal Rule，由 Markdown 原文「---」驱动）
         drawHorizontalRules(in: validCharRange, origin: origin)
     }
 
     private func drawBlockquotes(in charRange: NSRange, origin: NSPoint) {
         guard let storage = textStorage, let container = textContainers.first else { return }
         let fullLength = storage.length
+        guard fullLength > 0 else { return }
         let entireRange = NSRange(location: 0, length: fullLength)
 
-        var handledRanges = Set<NSRange>()
+        // 1. 扫描出整篇文档中所有连续最外层引用块（Outer Quote Blocks）
+        var outerBlocks: [NSRange] = []
+        var currentOuterStart: Int? = nil
+        var currentOuterEnd: Int = 0
 
-        storage.enumerateAttribute(.flowBlockquote, in: charRange, options: []) { value, subRange, _ in
-            guard value != nil else { return }
+        storage.enumerateAttribute(.flowBlockquote, in: entireRange, options: []) { val, range, _ in
+            if val != nil {
+                if let start = currentOuterStart {
+                    if range.location == currentOuterEnd {
+                        currentOuterEnd = range.location + range.length
+                    } else {
+                        outerBlocks.append(NSRange(location: start, length: currentOuterEnd - start))
+                        currentOuterStart = range.location
+                        currentOuterEnd = range.location + range.length
+                    }
+                } else {
+                    currentOuterStart = range.location
+                    currentOuterEnd = range.location + range.length
+                }
+            }
+        }
+        if let start = currentOuterStart {
+            outerBlocks.append(NSRange(location: start, length: currentOuterEnd - start))
+        }
 
-            // 扩展到该 blockquote 在整篇文档中的完整有效区间，避免局部脏区重绘导致底板与竖条被切断
-            var effectiveRange = NSRange(location: NSNotFound, length: 0)
-            _ = storage.attribute(.flowBlockquote, at: subRange.location, longestEffectiveRange: &effectiveRange, in: entireRange)
-            guard effectiveRange.location != NSNotFound, effectiveRange.length > 0 else { return }
+        // 2. 遍历每个最外层引用块（整块绘制唯一完整底板，杜绝打碎重叠）
+        for outerRange in outerBlocks {
+            guard NSIntersectionRange(outerRange, charRange).length > 0 || outerRange.location == charRange.location else { continue }
 
-            // 同一个重绘周期内去重，避免重复绘制
-            guard handledRanges.insert(effectiveRange).inserted else { return }
-
-            let glyphRange = self.glyphRange(forCharacterRange: effectiveRange, actualCharacterRange: nil)
-            guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
+            let outerGlyphRange = self.glyphRange(forCharacterRange: outerRange, actualCharacterRange: nil)
+            guard outerGlyphRange.location != NSNotFound, outerGlyphRange.length > 0 else { continue }
 
             var firstLineTop: CGFloat?
             var lastLineBottom: CGFloat = 0
             var maxLineWidth: CGFloat = 0
 
-            self.enumerateLineFragments(forGlyphRange: glyphRange) { rect, usedRect, _, _, _ in
+            self.enumerateLineFragments(forGlyphRange: outerGlyphRange) { rect, usedRect, _, _, _ in
                 if firstLineTop == nil {
-                    // 首行真实字形墨水顶边（完全不受外部空白污染）
                     firstLineTop = usedRect.minY
                 }
-                // 末行真实字形墨水底边（完全绕过任何段后 paragraphSpacing 污染）
                 lastLineBottom = max(lastLineBottom, usedRect.maxY)
                 maxLineWidth = max(maxLineWidth, rect.width)
             }
-            guard let firstTop = firstLineTop, lastLineBottom > firstTop else { return }
+            guard let firstTop = firstLineTop, lastLineBottom > firstTop else { continue }
 
             // 统一垂直内边距：上下严格对称 8pt
             let padV: CGFloat = 8
@@ -199,7 +209,7 @@ final class FlowLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
             let cardHeight = cardBottom - cardTop
             let cardWidth = max(container.size.width, maxLineWidth)
 
-            // 背景衬底（圆角微底板，对应 Theme.Colors.surfaceBadge）
+            // 背景衬底：整块引用绘制唯一连贯底板
             let bgRect = NSRect(
                 x: origin.x,
                 y: cardTop,
@@ -210,42 +220,67 @@ final class FlowLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
             MarkdownInlineNS.adaptiveLabel(opacity: 0.04).setFill()
             bgPath.fill()
 
-            // 左侧 Accent 质感竖线：严格内嵌于 bgRect，上下留出 4pt 安全呼吸感（杜绝任何冒头与贴底）
-            let barInsetV: CGFloat = 4
-            let barRect = NSRect(
-                x: origin.x + 4,
-                y: cardTop + barInsetV,
-                width: 3,
-                height: max(cardHeight - barInsetV * 2, 4)
-            )
-            let barPath = NSBezierPath(roundedRect: barRect, xRadius: 1.5, yRadius: 1.5)
-            MarkdownInlineNS.accentColor.setFill()
-            barPath.fill()
-        }
-    }
+            // 计算该外层块包含的最大嵌套层级
+            var maxLevel = 1
+            storage.enumerateAttribute(.flowBlockquote, in: outerRange, options: []) { val, _, _ in
+                if let l = val as? Int { maxLevel = max(maxLevel, l) }
+            }
 
-    private func drawHeading1Dividers(in charRange: NSRange, origin: NSPoint) {
-        guard let storage = textStorage, let container = textContainers.first else { return }
+            // 3. 逐层绘制各嵌套级别的左侧 Accent 质感竖线
+            for level in 1...maxLevel {
+                var levelRanges: [NSRange] = []
+                var lStart: Int? = nil
+                var lEnd: Int = 0
+                storage.enumerateAttribute(.flowBlockquote, in: outerRange, options: []) { val, r, _ in
+                    let cur = (val as? Int) ?? (val != nil ? 1 : 0)
+                    if cur >= level {
+                        if let start = lStart {
+                            if r.location == lEnd {
+                                lEnd = r.location + r.length
+                            } else {
+                                levelRanges.append(NSRange(location: start, length: lEnd - start))
+                                lStart = r.location
+                                lEnd = r.location + r.length
+                            }
+                        } else {
+                            lStart = r.location
+                            lEnd = r.location + r.length
+                        }
+                    }
+                }
+                if let start = lStart {
+                    levelRanges.append(NSRange(location: start, length: lEnd - start))
+                }
 
-        storage.enumerateAttribute(.flowHeading1, in: charRange, options: []) { value, range, _ in
-            guard value != nil else { return }
-            let glyphRange = self.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
-            guard glyphRange.location != NSNotFound, glyphRange.length > 0 else { return }
+                for subRange in levelRanges {
+                    let gRange = self.glyphRange(forCharacterRange: subRange, actualCharacterRange: nil)
+                    guard gRange.location != NSNotFound, gRange.length > 0 else { continue }
 
-            let lastGlyph = glyphRange.location + glyphRange.length - 1
-            var effectiveRange = NSRange(location: NSNotFound, length: 0)
-            let lastLineRect = self.lineFragmentRect(forGlyphAt: lastGlyph, effectiveRange: &effectiveRange)
-            guard !lastLineRect.isEmpty else { return }
+                    var subTop: CGFloat?
+                    var subBottom: CGFloat = 0
+                    self.enumerateLineFragments(forGlyphRange: gRange) { _, usedRect, _, _, _ in
+                        if subTop == nil { subTop = usedRect.minY }
+                        subBottom = max(subBottom, usedRect.maxY)
+                    }
+                    guard let top = subTop, subBottom > top else { continue }
 
-            let lineY = origin.y + lastLineRect.maxY - 1
-            let dividerRect = NSRect(
-                x: origin.x,
-                y: lineY,
-                width: container.size.width,
-                height: 0.5
-            )
-            MarkdownInlineNS.adaptiveLabel(opacity: 0.09).setFill()
-            NSBezierPath(rect: dividerRect).fill()
+                    let barTop = level == 1 ? cardTop + 4 : origin.y + top - 2
+                    let barBottom = level == 1 ? cardBottom - 4 : origin.y + subBottom + 2
+                    let barX = origin.x + 4 + CGFloat(level - 1) * 16
+                    let barRect = NSRect(
+                        x: barX,
+                        y: barTop,
+                        width: 3,
+                        height: max(barBottom - barTop, 4)
+                    )
+                    let barPath = NSBezierPath(roundedRect: barRect, xRadius: 1.5, yRadius: 1.5)
+                    let barColor = level == 1
+                        ? MarkdownInlineNS.accentColor
+                        : MarkdownInlineNS.accentColor.withAlphaComponent(max(1.0 - CGFloat(level - 1) * 0.25, 0.40))
+                    barColor.setFill()
+                    barPath.fill()
+                }
+            }
         }
     }
 
@@ -266,9 +301,9 @@ final class FlowLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
                 x: origin.x,
                 y: lineY,
                 width: container.size.width,
-                height: 0.5
+                height: 0.75
             )
-            MarkdownInlineNS.adaptiveLabel(opacity: 0.09).setFill()
+            MarkdownInlineNS.adaptiveLabel(opacity: 0.20).setFill()
             NSBezierPath(rect: dividerRect).fill()
         }
     }

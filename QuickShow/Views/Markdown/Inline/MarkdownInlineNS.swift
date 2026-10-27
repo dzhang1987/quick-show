@@ -5,7 +5,7 @@ import CoreText
 /// 行内 token → NSAttributedString（供含公式的段落使用）。
 /// 语义严格对齐 SwiftUI 版 MarkdownInline.render：
 /// text→引号归一 + baseColor/baseFont；code→等宽 + surfaceTrack 底；
-/// bold→semibold + labelColor；italic→斜体；link→accent + 下划线（title 忽略）；
+/// bold→bold + labelColor；italic→斜体；link→accent + 下划线（title 忽略）；
 /// strikethrough→strikethroughStyle；underline→underlineStyle；
 /// highlight→accent 半透明 backgroundColor；subscript/superscript→小号字体 + baselineOffset；
 /// lineBreak→换行；footnoteRef→小号 accent 上标；image→链接样式「[图片: alt]」降级；
@@ -184,7 +184,7 @@ enum MarkdownInlineNS {
                 result.append(piece)
 
             case let .bold(inner):
-                var boldFont = font(size: baseSize, weight: .semibold)
+                var boldFont = font(size: baseSize, weight: .bold)
                 if baseFont.fontDescriptor.symbolicTraits.contains(.italic) {
                     boldFont = NSFontManager.shared.convert(boldFont, toHaveTrait: .italicFontMask)
                 }

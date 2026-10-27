@@ -187,6 +187,18 @@ extension MarkdownParser {
                 }
             }
 
+            // 高亮 ==text==（GFM 扩展语法）。
+            if current == "=", index + 1 < chars.count, chars[index + 1] == "=",
+               let close = findClosingDouble(chars, from: index + 2, marker: "=") {
+                let inner = String(chars[(index + 2)..<close])
+                if !inner.isEmpty {
+                    flush()
+                    tokens.append(.highlight(parseInlines(inner, references: references)))
+                    index = close + 2
+                    continue
+                }
+            }
+
             // 粗斜体 / 粗体 / 斜体（*/_ 三符号 → 双符号 → 单符号 依次优先；
             // 下划线遵循 CommonMark 词内保护规则：开启前不得紧邻字母/数字，闭合后不得紧邻字母/数字）。
             if (current == "*" || current == "_"), canOpenEmphasis(chars, at: index, marker: current) {

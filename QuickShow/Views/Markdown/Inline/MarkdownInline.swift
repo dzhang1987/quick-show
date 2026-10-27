@@ -39,7 +39,7 @@ enum MarkdownInline {
         isBold: Bool,
         isItalic: Bool
     ) -> Font {
-        let weight: Font.Weight = isBold ? (baseWeight == .bold ? .bold : .semibold) : baseWeight
+        let weight: Font.Weight = isBold ? .bold : baseWeight
         let base = Theme.Typography.text(size, weight)
         return isItalic ? base.italic() : base
     }

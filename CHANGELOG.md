@@ -6,6 +6,11 @@
 
 ### Added
 
+- **Markdown 专业排版升级与多层嵌套引文及高亮语法渲染（`AssistantMarkdownView.swift` / `MarkdownParser+Inline.swift` / `NativeTextFlowView.swift` / `MarkdownBlockquoteRenderer.swift` / `MarkdownHeadingRenderer.swift` / `MarkdownListRenderer.swift`）**：
+  - **GFM 高亮语法支持（`==text==`）**：行内解析器支持 CommonMark/GFM 扩展语法 `==高亮文本==`，底层在 TextKit 中绘制精致柔和的高亮微黄衬底；
+  - **排版梯级与格式塔亲密性**：重构六级标题梯级落差（h1 20 / h2 17.5 / h3 15.5 / h4 14 / h5 13.5 / h6 13），粗体与小标题提升至 bold + 100% 标签白；加大标题前留白（28/24/20pt）拉开成组，标题后（6/5pt）牢固吸附后文；列表项间距放宽至 7.5pt，彻底打破文字墙拥挤感；
+  - **多层嵌套引文阶梯竖条与柔底（Blockquote）**：底层 `FlowLayoutManager` 支持嵌套深度计算，逐层绘制阶梯式 Accent 竖线与微透明柔和衬底，多层嵌套引文层次分明、通透优雅。
+
 - **AI 工具旁路大模型安全守卫与只读环境探测探针扩展（`AIToolShadowGuard.swift` / `ToolRisk.swift` / `AIToolExecutor.swift` / `AISettingsSections.swift` / `AIServiceSettingsForm.swift` / `ToolRiskTests.swift`）**：
   - **Shadow Guardrail 旁路智能审核（`AIToolShadowGuard`）**：当 Shell 命令未命中静态白名单（且未触发破坏性硬门禁）时，后台异步唤起轻量级模型对命令语义进行快速裁决，判定为纯只读环境探测（系统/硬件/网络状态感知等）则秒级免审放行，兼顾沉浸式流畅体验与系统底层安全；
   - **无害重定向精准剔除与只读探针扩充**：优化 `ShellSemanticRiskEvaluator`，识别并过滤 `>/dev/null`、`2>&1` 等无害流重定向，杜绝因标准流丢弃误判为文件写入；新增扩展 `sysctl`、`pmset -g`、`defaults read`、`arch`、`hostname`、`id`、`vm_stat`、`netstat` 等系统探测命令及各语言 shell 版本查询；

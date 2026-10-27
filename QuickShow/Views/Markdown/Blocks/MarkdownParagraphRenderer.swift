@@ -21,7 +21,7 @@ final class MarkdownParagraphRenderer: MarkdownBlockRenderer {
 
     func topSpacing(for block: MarkdownBlock, after previous: MarkdownBlock?) -> CGFloat? {
         if let prev = previous, case .heading = prev {
-            return Theme.Spacing.lg // 8: 紧随标题
+            return Theme.Spacing.md // 6: 紧随标题收紧（亲密性）
         }
         return Theme.Spacing.card // 16: 段落间距
     }
@@ -34,7 +34,7 @@ final class MarkdownParagraphRenderer: MarkdownBlockRenderer {
     ) {
         guard case let .paragraph(inlines) = block else { return }
         let baseFont = MarkdownInlineNS.font(size: 13, weight: .regular)
-        let baseColor = MarkdownInlineNS.adaptiveLabel(opacity: 0.80)
+        let baseColor = MarkdownInlineNS.adaptiveLabel(opacity: 0.82)
         let render = MarkdownInlineNS.renderNS(
             inlines,
             baseFont: baseFont,
@@ -49,12 +49,12 @@ final class MarkdownParagraphRenderer: MarkdownBlockRenderer {
         }
 
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = 5
+        style.lineSpacing = 5.5
         if let next = nextBlock {
             if case .heading = next {
-                style.paragraphSpacing = 18
+                style.paragraphSpacing = 20 // 与后续小节标题拉开充足间距
             } else {
-                style.paragraphSpacing = 12
+                style.paragraphSpacing = 13 // 段间距舒适呼吸
             }
         } else {
             style.paragraphSpacing = 0

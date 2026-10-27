@@ -13,8 +13,8 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
 
     func capabilities(for block: MarkdownBlock) -> BlockCapabilities {
         guard case let .heading(_, inlines) = block else { return .interactiveWidget }
-        // H1 ~ H6 纯排版标题在无复杂内联（图片、注音）时可无缝并入连续 TextKit 文本流；
-        // H1 通过 FlowLayoutManager 绘制底部分割线，保持与正文连贯框选复制。
+        // H1 ~ H6 纯排版标题在无复杂内联（图片、注音）时可无缝并入连续 TextKit 文本流，
+        // 保持与正文连贯框选复制。各级标题依靠字号、字重与段落留白塑造视觉层级。
         if !inlines.containsImage && !inlines.containsRuby {
             return .textFlowCompatible
         }
@@ -24,15 +24,15 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
     func topSpacing(for block: MarkdownBlock, after previous: MarkdownBlock?) -> CGFloat? {
         guard case let .heading(level, _) = block else { return nil }
         if let prev = previous, case .heading = prev {
-            return Theme.Spacing.lg // 8: 标题后收紧成组
+            return 18 // 连续标题间距：保留从容呼吸感，彻底消除挤压踩踏
         }
         switch level {
-        case 1: return Theme.Spacing.section + Theme.Spacing.lg // 26
-        case 2: return Theme.Spacing.divider                    // 20
-        case 3: return Theme.Spacing.card                       // 16
-        case 4: return Theme.Spacing.xxxl                       // 14
-        case 5: return Theme.Spacing.xxl                        // 12
-        default: return Theme.Spacing.xl                        // 10
+        case 1: return 28 // 顶层大标题大呼吸
+        case 2: return 24 // 二级章节
+        case 3: return 20 // 三级常用小节（拉开与前文距离）
+        case 4: return 16 // 四级要点
+        case 5: return 14
+        default: return 12
         }
     }
 
@@ -45,12 +45,12 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
         guard case let .heading(level, inlines) = block else { return }
         let (size, weight): (CGFloat, NSFont.Weight) = {
             switch level {
-            case 1: return (18, .bold)
-            case 2: return (16, .semibold)
-            case 3: return (14, .semibold)
-            case 4: return (13, .semibold)
-            case 5: return (12.5, .semibold)
-            default: return (12, .semibold)
+            case 1: return (20, .bold)
+            case 2: return (17.5, .bold)
+            case 3: return (15.5, .bold)
+            case 4: return (14, .semibold)
+            case 5: return (13.5, .semibold)
+            default: return (13, .semibold)
             }
         }()
 
@@ -63,18 +63,24 @@ final class MarkdownHeadingRenderer: MarkdownBlockRenderer {
         )
         let headingPiece = NSMutableAttributedString(attributedString: render.attributed)
 
-        if level == 1 {
-            headingPiece.addAttribute(.flowHeading1, value: true, range: NSRange(location: 0, length: headingPiece.length))
-        }
-
         let hasNext = nextBlock != nil
         if hasNext {
             headingPiece.append(NSAttributedString(string: "\n", attributes: [.font: font, .foregroundColor: NSColor.labelColor]))
         }
 
         let style = NSMutableParagraphStyle()
-        style.lineSpacing = level == 1 ? 4 : 2
-        style.paragraphSpacing = hasNext ? (level == 1 ? 14 : 8) : 0
+        style.lineSpacing = level <= 2 ? 4 : 3
+        if let next = nextBlock {
+            if case .heading = next {
+                // 连续标题：必须留足大标题间距（16~22pt），彻底消除挤压
+                style.paragraphSpacing = level == 1 ? 22 : (level <= 3 ? 18 : 16)
+            } else {
+                // 亲密性原则：紧随正文/列表时贴近下文（7pt/6pt），与上方大留白形成清晰模块感
+                style.paragraphSpacing = level == 1 ? 12 : (level <= 3 ? 7 : 6)
+            }
+        } else {
+            style.paragraphSpacing = 0
+        }
         headingPiece.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: headingPiece.length))
 
         result.append(headingPiece)
@@ -95,23 +101,17 @@ struct MarkdownHeadingView: View {
     var body: some View {
         switch level {
         case 1:
-            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
-                headingText(size: 18, weight: .bold)
-                Rectangle()
-                    .fill(Theme.Colors.cardStroke)
-                    .frame(height: Theme.Layout.dividerHeight)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            headingText(size: 20, weight: .bold)
         case 2:
-            headingText(size: 16, weight: .semibold)
+            headingText(size: 17.5, weight: .bold)
         case 3:
-            headingText(size: 14, weight: .semibold)
+            headingText(size: 15.5, weight: .bold)
         case 4:
-            headingText(size: 13, weight: .semibold)
+            headingText(size: 14, weight: .semibold)
         case 5:
-            headingText(size: 12.5, weight: .semibold)
+            headingText(size: 13.5, weight: .semibold)
         default:
-            headingText(size: 12, weight: .semibold)
+            headingText(size: 13, weight: .semibold)
         }
     }
 

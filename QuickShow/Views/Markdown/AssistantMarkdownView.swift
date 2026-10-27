@@ -20,13 +20,12 @@ extension EnvironmentValues {
 // MARK: - 助手消息 Markdown 完整渲染宿主
 
 /// 助手落定消息：消费 MarkdownParser 的完整块级 AST。
-/// 视觉层次原则（2026-10 排版专项，对标 DeepSeek / Claude Code 对话排版）：
+/// 视觉层次原则（2026-10 排版专项，对标现代高级对话与专业文档排版）：
 /// - 无气泡：正文直接铺在玻璃材质上左对齐、无内边距，层级全靠字号/字重/留白表达
-/// - 六级排版：h1 18 bold（附减弱底部分隔线）/ h2 16 / h3 14 / h4 13 / h5 12.5 / h6 12 semibold，均 contentPrimary；
-///   正文与列表降两档（primary 0.80），与加粗档（contentPrimary semibold）肉眼可分
-/// - 间距节奏：块间距不由 VStack 统一值承担，改为每块自带顶距——
-///   标题前 26/20/16（与上文拉开成组），标题后 8（与紧随内容成组），内容块之间 16，首块无顶距
-/// - 行高：正文/列表/代码 lineSpacing 6（13pt ≈ 1.7 倍）；列表项间 8、嵌套子项间 6
+/// - 六级排版：h1 20 bold / h2 17.5 bold / h3 15.5 bold（与正文拉开 2.5pt 落差）/ h4 14 / h5 13.5 / h6 13 semibold；
+///   正文与列表为 13pt regular（adaptive 0.82 柔和白），粗体与小标题提升至 bold + 100% 标签白，视觉重心极其明确
+/// - 间距节奏：遵循格式塔亲密性原则——标题前 28/24/20（与上文拉开成组），标题后 6/5（与紧随内容牢固吸附），段间距 13，首块无顶距
+/// - 行高：正文/列表 lineSpacing 5.5（13pt ≈ 1.7 倍）；列表项间距放宽至 7.5pt（破除拥挤文字墙）
 /// - 引号归一：成对 ASCII 直引号显示为「」（仅 text token，代码/链接不受影响）
 struct AssistantMarkdownView: View, Equatable {
     let content: String
