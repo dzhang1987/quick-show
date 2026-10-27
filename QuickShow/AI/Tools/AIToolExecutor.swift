@@ -170,7 +170,17 @@ final class AIToolExecutor {
             return true
         }
 
-        // 2) 提取建议的作用域
+        // 2) 旁路智能安全守卫（AIToolShadowGuard）：
+        //    绝对破坏性操作强制一票否决；其余非破坏性的灰色命令进入后台大模型快速审查
+        if !risk.isDestructive {
+            if await AIToolShadowGuard.shared.auditForAutoApproval(tool: tool, arguments: arguments) {
+                // 审核通过：记录本会话免审记忆，直接放行
+                center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
+                return true
+            }
+        }
+
+        // 3) 提取建议的作用域
         let suggestedScope: PermissionScopeSuggestion?
         if case .scopedMutation(let scope) = risk {
             suggestedScope = scope
@@ -178,7 +188,7 @@ final class AIToolExecutor {
             suggestedScope = nil
         }
 
-        // 3) 发布抽屉请求并挂起
+        // 4) 发布抽屉请求并挂起
         let outcome = await center.requestToolConfirmation(
             toolName: tool.name,
             argumentsJSON: argumentsJSON,

@@ -6,6 +6,12 @@
 
 ### Added
 
+- **AI 工具旁路大模型安全守卫与只读环境探测探针扩展（`AIToolShadowGuard.swift` / `ToolRisk.swift` / `AIToolExecutor.swift` / `AISettingsSections.swift` / `AIServiceSettingsForm.swift` / `ToolRiskTests.swift`）**：
+  - **Shadow Guardrail 旁路智能审核（`AIToolShadowGuard`）**：当 Shell 命令未命中静态白名单（且未触发破坏性硬门禁）时，后台异步唤起轻量级模型对命令语义进行快速裁决，判定为纯只读环境探测（系统/硬件/网络状态感知等）则秒级免审放行，兼顾沉浸式流畅体验与系统底层安全；
+  - **无害重定向精准剔除与只读探针扩充**：优化 `ShellSemanticRiskEvaluator`，识别并过滤 `>/dev/null`、`2>&1` 等无害流重定向，杜绝因标准流丢弃误判为文件写入；新增扩展 `sysctl`、`pmset -g`、`defaults read`、`arch`、`hostname`、`id`、`vm_stat`、`netstat` 等系统探测命令及各语言 shell 版本查询；
+  - **偏好设置与持久化**：在「AI 偏好设置」中新增「智能安全守卫」设置节，支持用户自主启闭旁路智能审查功能；
+  - **测试用例扩充**：补充覆盖复合命令、无害流重定向、系统探针及 Shadow Guard 裁决解析的单测用例。
+
 - **AI Chat 输入坞历史用户消息上下箭头快捷翻阅（`ChatInputHistoryTracker.swift` / `AIChatState.swift` / `AIChatInputFields.swift` / `AIChatInputDock.swift` / `ChatInputHistoryTests.swift`）**：
   - **清空状态进入与无损还原**：输入坞在清空状态（无文本草稿、无图片附件）下，按 **`↑`（上箭头）** 自动进入历史浏览模式，倒序调出当前会话最近发送的用户消息，并将光标精准置于文本末尾；在历史模式下按 **`↓`（下箭头）** 向更新历史翻阅，当越过最新一条时自动还原为清空状态并退出历史模式；
   - **多模态附件完整回填**：历史消息若携带图片附件，翻阅时连同附件与 Prompt 文本一并回填至生长区附件条，动态切换或还原清空时附件条跟随平滑收起；

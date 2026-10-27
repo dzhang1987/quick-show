@@ -30,6 +30,7 @@ enum ToolRiskTests {
         testFileRiskEvaluation()
         testPolicyEngineRuleMatching()
         testUndoSnapshotLifecycle()
+        testShadowGuardDecisionParsing()
 
         print("==================================================")
         print("📊 权限测试完成汇总：通过 \(passedCount) 项，失败 \(failedCount) 项")
@@ -53,12 +54,38 @@ enum ToolRiskTests {
             "pnpm list",
             "cargo check",
             "which swift",
-            "sw_vers"
+            "sw_vers",
+            "zsh --version",
+            "bash --version",
+            "arch",
+            "hostname",
+            "id",
+            "sysctl -n machdep.cpu.brand_string 2>/dev/null",
+            "uname -m >/dev/null 2>&1",
+            "vm_stat | head -6",
+            "pmset -g batt",
+            "defaults read -g AppleInterfaceStyle",
+            "echo '=== who/where ==='; whoami; pwd; echo; echo '=== macOS ==='; sw_vers; echo; echo '=== arch / chip ==='; uname -m; sysctl -n machdep.cpu.brand_string 2>/dev/null; echo; echo '=== shell ==='; echo $SHELL; zsh --version",
+            "echo '=== uptime ==='; uptime; echo; echo '=== mem (GB) ==='; echo \"total: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB\"; vm_stat | head -6; echo; echo '=== battery ==='; pmset -g batt; echo; echo '=== cpu top5 ==='; ps -Ao %cpu,comm -r | head -6; echo; echo '=== cpu brand/cores ==='; sysctl -n machdep.cpu.brand_string; sysctl -n hw.ncpu hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu 2>/dev/null"
         ]
 
         for cmd in safeCommands {
             let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
             assertTest(risk == .readOnly, "只读命令判定免审直通：\(cmd)")
+        }
+
+        // 反向校验：包含真实文件写入或危险内核配置修改的不可免审
+        let nonReadOnlyCommands = [
+            "echo 'test' > output.txt",
+            "ls -la >> list.log",
+            "sysctl -w net.inet.ip.forwarding=1",
+            "sysctl debug.test=1",
+            "pmset sleep 0",
+            "defaults write -g Key test"
+        ]
+        for cmd in nonReadOnlyCommands {
+            let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
+            assertTest(risk != .readOnly, "非只读或修改型命令被成功拦截：\(cmd)")
         }
     }
 
@@ -205,5 +232,33 @@ enum ToolRiskTests {
         } catch {
             assertTest(false, "撤销快照测试抛错：\(error.localizedDescription)")
         }
+    }
+
+    // MARK: - 7. 旁路大模型守卫决策解析测试
+
+    private static func testShadowGuardDecisionParsing() {
+        let guardrail = AIToolShadowGuard.shared
+
+        // 1. 标准 JSON 解析
+        assertTest(guardrail.parseAuditDecision(from: "{\"is_safe\": true}") == true, "标准 JSON 安全判定成功")
+        assertTest(guardrail.parseAuditDecision(from: "{\"is_safe\": false, \"reason\": \"write file\"}") == false, "标准 JSON 风险拦截判定成功")
+
+        // 2. Markdown 代码块包裹
+        let mdJson = """
+        ```json
+        {
+            "is_safe": true,
+            "reason": "only reads battery"
+        }
+        ```
+        """
+        assertTest(guardrail.parseAuditDecision(from: mdJson) == true, "Markdown 包裹 JSON 安全解析成功")
+
+        // 3. 容错包含文本判定
+        let textWrapped = "审查结果如下：\n{\"is_safe\": true}\n请放行"
+        assertTest(guardrail.parseAuditDecision(from: textWrapped) == true, "带外围说明文字的 JSON 安全解析成功")
+
+        let dangerText = "评估结果：该命令可能产生文件修改\n{\"is_safe\": false}"
+        assertTest(guardrail.parseAuditDecision(from: dangerText) == false, "带外围说明文字的 JSON 拦截成功")
     }
 }

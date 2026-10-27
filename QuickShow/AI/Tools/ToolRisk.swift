@@ -171,21 +171,62 @@ final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
             .filter { !$0.isEmpty }
     }
 
+    /// 检查命令是否包含真实的文件重定向写操作
+    /// 忽略无害的标准流丢弃与流合并（如 >/dev/null, 2>/dev/null, &>/dev/null, 2>&1 等）
+    private func hasFileWritingRedirection(_ cmd: String) -> Bool {
+        guard cmd.contains(">") else { return false }
+
+        var stripped = cmd
+        let safePatterns = [
+            #"(?:>>|>|1>|2>|&>)\s*/dev/null"#,
+            #"(?:2>&1|1>&2|>&1|>&2)"#
+        ]
+        for pattern in safePatterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
+                let range = NSRange(stripped.startIndex..<stripped.endIndex, in: stripped)
+                stripped = regex.stringByReplacingMatches(in: stripped, range: range, withTemplate: " ")
+            }
+        }
+
+        return stripped.contains(">")
+    }
+
     /// 单个子命令是否为只读安全命令
     private func isSubCommandReadOnly(_ cmd: String) -> Bool {
+        // 1. 若命令包含针对真实文件的重定向写入（排除 /dev/null 与流合并），直接拒绝只读直通
+        if hasFileWritingRedirection(cmd) {
+            return false
+        }
+
         let tokens = cmd.split(separator: " ").map(String.init)
         guard let first = tokens.first?.lowercased() else { return true }
 
-        // 基础只读系统命令
+        // sysctl 默认只读读取内核硬件配置；但如果带有 -w 或 = 则属于写操作
+        if first == "sysctl" {
+            return !tokens.contains("-w") && !cmd.contains("=")
+        }
+
+        // pmset -g 为系统电源/电池状态查询；其余参数为配置修改
+        if first == "pmset" {
+            return tokens.contains("-g")
+        }
+
+        // defaults read 为 macOS 偏好只读读取
+        if first == "defaults" {
+            return tokens.contains("read")
+        }
+
+        // 基础只读系统环境探测与监控命令
         let safeBasicCommands: Set<String> = [
             "pwd", "ls", "which", "whereis", "whoami", "uname", "date",
             "echo", "cat", "head", "tail", "grep", "egrep", "fgrep",
             "wc", "stat", "file", "find", "diff", "sw_vers", "system_profiler",
-            "ps", "df", "du", "uptime", "basename", "dirname", "env", "printenv"
+            "ps", "df", "du", "uptime", "basename", "dirname", "env", "printenv",
+            "arch", "hostname", "id", "readlink", "realpath", "printf",
+            "vm_stat", "ioreg", "netstat"
         ]
         if safeBasicCommands.contains(first) {
-            // 注意：若命令中包含重定向写操作 (>) 则不是只读
-            return !cmd.contains(">")
+            return true
         }
 
         // Git 只读子命令
@@ -204,24 +245,25 @@ final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
                 if sub == "stash" {
                     return tokens.contains("list") || tokens.contains("show")
                 }
-                return !cmd.contains(">")
+                return true
             }
         }
 
-        // 包管理与编译器只读版本/列表查询
+        // 包管理、编译器与常用 Shell 只读版本/列表查询
         let safeVersionCheckers: Set<String> = [
             "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc",
-            "swift", "xcodebuild", "python", "python3", "ruby", "go"
+            "swift", "xcodebuild", "python", "python3", "ruby", "go",
+            "zsh", "bash", "sh"
         ]
         if safeVersionCheckers.contains(first) {
             if tokens.contains("-v") || tokens.contains("--version") || tokens.contains("version") {
-                return !cmd.contains(">")
+                return true
             }
             if (first == "pnpm" || first == "npm" || first == "yarn") && (tokens.contains("list") || tokens.contains("ls") || tokens.contains("outdated")) {
-                return !cmd.contains(">")
+                return true
             }
             if first == "cargo" && (tokens.contains("check") || tokens.contains("clippy")) {
-                return !cmd.contains(">")
+                return true
             }
         }
 

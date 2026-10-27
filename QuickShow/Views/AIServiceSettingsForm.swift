@@ -984,6 +984,9 @@ struct AIServiceSettingsForm: View {
         // 内置系统工具开关（按类别展示）
         AIToolsSettingsSection()
 
+        // 智能安全守卫（旁路 LLM 审核）
+        AISecurityShadowGuardSettingsSection()
+
         // 文件读写沙盒白名单
         AIFileWhitelistSettingsSection()
 

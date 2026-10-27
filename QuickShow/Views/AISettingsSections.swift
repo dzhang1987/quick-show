@@ -129,6 +129,29 @@ struct AIToolsSettingsSection: View {
     }
 }
 
+/// 「智能安全审查」小节：旁路大模型安全守卫开关。
+/// 持久化：UserDefaults 键 "ai.security.shadowGuard.enabled"（布尔值，默认 true）。
+struct AISecurityShadowGuardSettingsSection: View {
+    @AppStorage("ai.security.shadowGuard.enabled")
+    private var isEnabled: Bool = true
+
+    var body: some View {
+        Section {
+            Toggle(isOn: $isEnabled) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("AI 旁路智能安全审查")
+                        .font(.system(size: Theme.Typography.body))
+                    Text("当 Shell 命令未命中预设白名单时，后台异步智能识别纯只读环境探测命令并免审放行（破坏性命令强制硬门禁拦截）")
+                        .font(.system(size: Theme.Typography.footnote))
+                        .foregroundColor(.secondary)
+                }
+            }
+        } header: {
+            Text("智能安全守卫")
+        }
+    }
+}
+
 /// 「文件访问白名单」小节：目录路径列表（NSOpenPanel 选目录添加，逐行可删）。
 /// 持久化：UserDefaults 键 "ai.tools.fileWhitelist"（[String] 目录路径数组）。
 struct AIFileWhitelistSettingsSection: View {

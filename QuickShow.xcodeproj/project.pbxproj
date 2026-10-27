@@ -34,6 +34,7 @@
 		12936723ACBBFE0CBDDB36E8 /* AIChatService+Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 593FA64731993CAEC270C733 /* AIChatService+Config.swift */; };
 		134C9389697F7A8589E3C21A /* AICompletionNotifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = D68032BC793ACA6923E904D1 /* AICompletionNotifier.swift */; };
 		159E3E3CAC278CD785E62232 /* CalendarGridViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D62EF6286590CCC841D39FB /* CalendarGridViews.swift */; };
+		15B5436FEE435AFD75F667F1 /* AIToolShadowGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4D2D68DDC67A6D6D39F8D226 /* AIToolShadowGuard.swift */; };
 		16E81EBBA25542856B8CEC7D /* MTMathImage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DB2782A10BC852F7C88D212 /* MTMathImage.swift */; };
 		193E5F0FE7A4523525789E42 /* Shims.swift in Sources */ = {isa = PBXBuildFile; fileRef = 622B97F8A4F6847EC8A4273F /* Shims.swift */; };
 		194F5B779730C818139915F1 /* ToolConfirmationDrawer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F2DD99010D040E245B74EB6 /* ToolConfirmationDrawer.swift */; };
@@ -334,6 +335,7 @@
 		43F92A8FBA3124D94941090E /* ToolJSONText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToolJSONText.swift; sourceTree = "<group>"; };
 		45F95C301D8EAA9E9754EDDA /* MarkdownInlineNS.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownInlineNS.swift; sourceTree = "<group>"; };
 		4CB3F9819E7541B279D9C3FB /* PanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelManager.swift; sourceTree = "<group>"; };
+		4D2D68DDC67A6D6D39F8D226 /* AIToolShadowGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIToolShadowGuard.swift; sourceTree = "<group>"; };
 		4E15717BBFCB8B1FE8ED7396 /* AIProviderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIProviderService.swift; sourceTree = "<group>"; };
 		4EBFCA705B22FA81D696553E /* AskUserToolViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AskUserToolViews.swift; sourceTree = "<group>"; };
 		50C23D0E1A7BC0F0F3B38D7D /* SendMessageTool.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SendMessageTool.swift; sourceTree = "<group>"; };
@@ -824,6 +826,7 @@
 			children = (
 				1B0D0E7933D7284CE91B0FBB /* AIToolExecutor.swift */,
 				297C69DBAA8EAA91A1CB2756 /* AIToolRegistry.swift */,
+				4D2D68DDC67A6D6D39F8D226 /* AIToolShadowGuard.swift */,
 				E80B8E81B7EA035907A34056 /* AskUserTool.swift */,
 				57013FDF715F8B5844F318F0 /* BuiltInTools.swift */,
 				24E60125A8F4987918F0A070 /* HTMLTextExtractor.swift */,
@@ -1215,6 +1218,7 @@
 				809266C1C45B4248D7842710 /* AIToolCardView.swift in Sources */,
 				5B5A3E7275818436396E7FAF /* AIToolExecutor.swift in Sources */,
 				C487EBACFBBB0EA6317F469E /* AIToolRegistry.swift in Sources */,
+				15B5436FEE435AFD75F667F1 /* AIToolShadowGuard.swift in Sources */,
 				A42B4A28AE6A886BD709BD63 /* AIWindowManager.swift in Sources */,
 				9EC1ACFED3A4A9661527135F /* AgentCoordinator.swift in Sources */,
 				83F1D36249ECBC0185115E85 /* AgentFunctionalTests.swift in Sources */,
