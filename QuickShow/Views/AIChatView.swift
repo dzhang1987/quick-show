@@ -348,7 +348,9 @@ struct AIChatView: View {
             if drawerGone {
                 NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)
             } else {
-                NSApp.keyWindow?.makeFirstResponder(nil)
+                DispatchQueue.main.async {
+                    NSApp.keyWindow?.makeFirstResponder(nil)
+                }
             }
         }
         // 坞体实测高度同步给滚动协调器，以精准界定滚轮穿透的物理底区

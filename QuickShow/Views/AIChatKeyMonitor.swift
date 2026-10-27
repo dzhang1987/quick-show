@@ -59,23 +59,23 @@ final class AIChatKeyMonitor {
                 return event
             }
             // ⌃D (keyCode 2) 或 ⌘⌫ (keyCode 51)：删除高亮会话
-            if (cleanFlags.contains(.control) && event.keyCode == 2) || (cleanFlags == [.command] && event.keyCode == 51) {
+            if (cleanFlags.contains(.control) && event.keyCode == KeyEquivalentCode.d.rawValue) || (cleanFlags == [.command] && event.keyCode == KeyEquivalentCode.delete.rawValue) {
                 onQuickSwitcherDelete()
                 return nil
             }
-            if event.keyCode == 126 { // Up Arrow
+            if event.keyCode == KeyEquivalentCode.upArrow.rawValue { // Up Arrow
                 onQuickSwitcherUp()
                 return nil
             }
-            if event.keyCode == 125 { // Down Arrow
+            if event.keyCode == KeyEquivalentCode.downArrow.rawValue { // Down Arrow
                 onQuickSwitcherDown()
                 return nil
             }
-            if event.keyCode == 36 || event.keyCode == 76 { // Return / Enter
+            if event.keyCode == KeyEquivalentCode.returnKey.rawValue || event.keyCode == KeyEquivalentCode.keypadEnter.rawValue { // Return / Enter
                 onQuickSwitcherSelect()
                 return nil
             }
-            if event.keyCode == 48 { // Tab / Shift+Tab
+            if event.keyCode == KeyEquivalentCode.tab.rawValue { // Tab / Shift+Tab
                 if cleanFlags.contains(.shift) {
                     onQuickSwitcherUp()
                 } else {
@@ -83,17 +83,31 @@ final class AIChatKeyMonitor {
                 }
                 return nil
             }
-            if cleanFlags == [.command] && (event.keyCode == 35 || event.keyCode == 3) {
+            if cleanFlags == [.command] && (event.keyCode == KeyEquivalentCode.p.rawValue || event.keyCode == KeyEquivalentCode.f.rawValue) {
                 onDismissQuickSwitcher()
                 return nil
             }
         }
 
         // ESC：优先交给 EscapePolicyCenter 策略化调度中心自顶向下消费
-        if event.keyCode == 53 {
+        if event.keyCode == KeyEquivalentCode.escape.rawValue {
             // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音
             if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
                 return event
+            }
+            // 提问抽屉在场特化：若用户焦点停留在自由输入框，ESC 优先退出输入状态，切回选择题盲操模式
+            let handledDrawerDefocus = MainActor.assumeIsolated { () -> Bool in
+                guard let req = ChatInteractionCenter.shared.request, case .userQuestions = req else {
+                    return false
+                }
+                if event.window?.firstResponder is NSTextView {
+                    event.window?.makeFirstResponder(nil)
+                    return true
+                }
+                return false
+            }
+            if handledDrawerDefocus {
+                return nil
             }
             let handled = MainActor.assumeIsolated {
                 EscapePolicyCenter.shared.handleEscape()
@@ -104,8 +118,8 @@ final class AIChatKeyMonitor {
             return event
         }
 
-        // 抽屉在场时的键盘盲操：⏎ 执行/提交，⌘⏎ 允许并记忆/强制提交，数字键 1-9 切换选项
-        if event.keyCode == 36 || event.keyCode == 76 {
+        // 抽屉在场时的键盘盲操：⏎ 执行/提交，⌘⏎ 允许并记忆/强制提交
+        if event.keyCode == KeyEquivalentCode.returnKey.rawValue || event.keyCode == KeyEquivalentCode.keypadEnter.rawValue {
             if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
                 return event
             }
@@ -123,7 +137,7 @@ final class AIChatKeyMonitor {
                             return true
                         }
                     } else if cleanFlags.isEmpty {
-                        ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
+                        NotificationCenter.default.post(name: .quickShowExecuteToolConfirmation, object: nil)
                         return true
                     }
                 case .userQuestions:
@@ -146,45 +160,113 @@ final class AIChatKeyMonitor {
             }
         }
 
-        // 提问抽屉在场时，非打字态下按数字键 1-9 快速切换选项
+        // 提问抽屉在场时的键盘盲操：Tab / ↑ / ↓ 切换题目焦点，数字键 1-9 切换选项
+        // Tab / Shift+Tab：切换题目焦点（提问抽屉在场时，无论是否在输入框，Tab 均用于切题并释放输入焦点）
+        if event.keyCode == KeyEquivalentCode.tab.rawValue {
+            let step = cleanFlags.contains(.shift) ? -1 : 1
+            let handledTab = MainActor.assumeIsolated { () -> Bool in
+                guard let req = ChatInteractionCenter.shared.request,
+                      case .userQuestions(let userQuestionsReq) = req else { return false }
+                if event.window?.firstResponder is NSTextView {
+                    event.window?.makeFirstResponder(nil)
+                }
+                if userQuestionsReq.questions.count > 1 {
+                    NotificationCenter.default.post(
+                        name: .quickShowNavigateQuestion,
+                        object: nil,
+                        userInfo: ["step": step]
+                    )
+                }
+                return true
+            }
+            if handledTab { return nil }
+        }
+
+        // 方向键 ↑ / ↓ 切换题目焦点
+        if event.keyCode == KeyEquivalentCode.upArrow.rawValue || event.keyCode == KeyEquivalentCode.downArrow.rawValue {
+            let step = (event.keyCode == KeyEquivalentCode.upArrow.rawValue) ? -1 : 1
+            let handledArrow = MainActor.assumeIsolated { () -> Bool in
+                guard let req = ChatInteractionCenter.shared.request,
+                      case .userQuestions(let userQuestionsReq) = req,
+                      userQuestionsReq.questions.count > 1 else { return false }
+                if let tv = event.window?.firstResponder as? NSTextView {
+                    // 输入框为空时（通常为自动持焦），按 ↑/↓ 脱离输入框并切题；已有内容时保留光标移动
+                    if tv.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        event.window?.makeFirstResponder(nil)
+                    } else {
+                        return false
+                    }
+                }
+                NotificationCenter.default.post(
+                    name: .quickShowNavigateQuestion,
+                    object: nil,
+                    userInfo: ["step": step]
+                )
+                return true
+            }
+            if handledArrow { return nil }
+        }
+
+        // 数字键 1-9 快速切换选项
         if cleanFlags.isEmpty {
             let numberKeyCodes: [UInt16: Int] = [
-                18: 0, 19: 1, 20: 2, 21: 3, 23: 4, 22: 5, 26: 6, 28: 7, 25: 8,
-                83: 0, 84: 1, 85: 2, 86: 3, 87: 4, 88: 5, 89: 6, 91: 7, 92: 8
+                KeyEquivalentCode.num1.rawValue: 0,
+                KeyEquivalentCode.num2.rawValue: 1,
+                KeyEquivalentCode.num3.rawValue: 2,
+                KeyEquivalentCode.num4.rawValue: 3,
+                KeyEquivalentCode.num5.rawValue: 4,
+                KeyEquivalentCode.num6.rawValue: 5,
+                KeyEquivalentCode.num7.rawValue: 6,
+                KeyEquivalentCode.num8.rawValue: 7,
+                KeyEquivalentCode.num9.rawValue: 8,
+                KeyEquivalentCode.keypad1.rawValue: 0,
+                KeyEquivalentCode.keypad2.rawValue: 1,
+                KeyEquivalentCode.keypad3.rawValue: 2,
+                KeyEquivalentCode.keypad4.rawValue: 3,
+                KeyEquivalentCode.keypad5.rawValue: 4,
+                KeyEquivalentCode.keypad6.rawValue: 5,
+                KeyEquivalentCode.keypad7.rawValue: 6,
+                KeyEquivalentCode.keypad8.rawValue: 7,
+                KeyEquivalentCode.keypad9.rawValue: 8
             ]
             if let optionIndex = numberKeyCodes[event.keyCode] {
-                let isEditingText = (event.window?.firstResponder is NSTextView)
-                if !isEditingText {
-                    let handledNumber = MainActor.assumeIsolated { () -> Bool in
-                        guard let req = ChatInteractionCenter.shared.request, case .userQuestions = req else {
-                            return false
+                let handledNumber = MainActor.assumeIsolated { () -> Bool in
+                    guard let req = ChatInteractionCenter.shared.request, case .userQuestions = req else {
+                        return false
+                    }
+                    if let tv = event.window?.firstResponder as? NSTextView {
+                        // 兜底：若输入框为空（未输入任何内容），按 1-9 直接脱离输入框并选中选项
+                        if tv.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            event.window?.makeFirstResponder(nil)
+                        } else {
+                            return false // 输入框已有文本时放行打字输入
                         }
-                        NotificationCenter.default.post(
-                            name: .quickShowSelectQuestionOption,
-                            object: nil,
-                            userInfo: ["index": optionIndex]
-                        )
-                        return true
                     }
-                    if handledNumber {
-                        return nil
-                    }
+                    NotificationCenter.default.post(
+                        name: .quickShowSelectQuestionOption,
+                        object: nil,
+                        userInfo: ["index": optionIndex]
+                    )
+                    return true
+                }
+                if handledNumber {
+                    return nil
                 }
             }
         }
 
         guard cleanFlags == [.command] else { return event }
         switch event.keyCode {
-        case 35: onToggleQuickSwitcher(); return nil // ⌘P: 快速切换/搜索面板
-        case 33: onPreviousSession(); return nil     // ⌘[: 上一个会话
-        case 30: onNextSession(); return nil         // ⌘]: 下一个会话
-        case 45: onNewSession(); return nil          // ⌘N: 新会话
-        case 11: onToggleSidebar(); return nil       // ⌘B: 侧栏显隐
-        case 3:  onFocusSearch(); return nil         // ⌘F: 聚焦搜索
-        case 126: return onNavigateUp() ? nil : event   // ⌘↑: 返回主 Agent
-        case 125: return onNavigateDown() ? nil : event // ⌘↓: 钻入子 Agent
-        case 123: return onNavigateLeft() ? nil : event // ⌘←: 切换到前一个同级子 Agent
-        case 124: return onNavigateRight() ? nil : event // ⌘→: 切换到后一个同级子 Agent
+        case KeyEquivalentCode.p.rawValue: onToggleQuickSwitcher(); return nil // ⌘P: 快速切换/搜索面板
+        case KeyEquivalentCode.leftBracket.rawValue: onPreviousSession(); return nil     // ⌘[: 上一个会话
+        case KeyEquivalentCode.rightBracket.rawValue: onNextSession(); return nil         // ⌘]: 下一个会话
+        case KeyEquivalentCode.n.rawValue: onNewSession(); return nil          // ⌘N: 新会话
+        case KeyEquivalentCode.b.rawValue: onToggleSidebar(); return nil       // ⌘B: 侧栏显隐
+        case KeyEquivalentCode.f.rawValue: onFocusSearch(); return nil         // ⌘F: 聚焦搜索
+        case KeyEquivalentCode.upArrow.rawValue: return onNavigateUp() ? nil : event   // ⌘↑: 返回主 Agent
+        case KeyEquivalentCode.downArrow.rawValue: return onNavigateDown() ? nil : event // ⌘↓: 钻入子 Agent
+        case KeyEquivalentCode.leftArrow.rawValue: return onNavigateLeft() ? nil : event // ⌘←: 切换到前一个同级子 Agent
+        case KeyEquivalentCode.rightArrow.rawValue: return onNavigateRight() ? nil : event // ⌘→: 切换到后一个同级子 Agent
         default: return event
         }
         return event

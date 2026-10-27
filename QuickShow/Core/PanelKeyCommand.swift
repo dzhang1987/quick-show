@@ -70,6 +70,18 @@ enum KeyEquivalentCode: UInt16, Sendable, CaseIterable {
     case escape = 53
     case keypadEnter = 76
 
+    // 小键盘数字键 (Keypad)
+    case keypad0 = 82
+    case keypad1 = 83
+    case keypad2 = 84
+    case keypad3 = 85
+    case keypad4 = 86
+    case keypad5 = 87
+    case keypad6 = 88
+    case keypad7 = 89
+    case keypad8 = 91
+    case keypad9 = 92
+
     // 方向键
     case leftArrow = 123
     case rightArrow = 124
