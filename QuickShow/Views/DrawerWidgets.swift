@@ -64,7 +64,7 @@ struct DrawerOptionCapsule: View {
 // MARK: - 抽屉按钮
 
 /// 抽屉操作按钮三样式：primary（accent 实心，主操作）/ secondary（surfaceButton 底，消极操作）
-/// / outlined（描边，第三样式）。禁用态 = chatSendDisabledFill 底 + 弱化字（发送钮同款语言）。
+/// / outlined（描边，第三样式）。紧凑轻盈的原生按钮，快捷键作为轻量微文字随行展示。
 struct DrawerActionButton: View {
     enum Style {
         case primary
@@ -73,6 +73,7 @@ struct DrawerActionButton: View {
     }
 
     let title: String
+    var shortcut: String? = nil
     let style: Style
     var enabled: Bool = true
     let action: () -> Void
@@ -81,19 +82,29 @@ struct DrawerActionButton: View {
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(Theme.Typography.text(Theme.Typography.body, .medium))
-                .foregroundColor(foregroundColor)
-                .padding(.horizontal, Theme.Spacing.card)
-                .padding(.vertical, Theme.Spacing.md)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                        .fill(fillColor)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                        .strokeBorder(strokeColor, lineWidth: 0.5)
-                )
+            HStack(spacing: Theme.Spacing.xs) {
+                Text(title)
+                    .font(Theme.Typography.text(Theme.Typography.callout, .medium))
+                    .foregroundColor(foregroundColor)
+                    .lineLimit(1)
+
+                if let shortcut {
+                    Text(shortcut)
+                        .font(Theme.Typography.mono(Theme.Typography.micro, .medium))
+                        .foregroundColor(shortcutForegroundColor)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.xxl)
+            .padding(.vertical, Theme.Spacing.smd)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(fillColor)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .strokeBorder(strokeColor, lineWidth: 0.5)
+            )
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
@@ -118,7 +129,9 @@ struct DrawerActionButton: View {
         switch style {
         case .outlined:
             return Theme.Colors.badgeStroke
-        default:
+        case .secondary:
+            return Theme.Colors.chatStrokeStrong
+        case .primary:
             return Color.clear
         }
     }
@@ -126,12 +139,21 @@ struct DrawerActionButton: View {
     private var foregroundColor: Color {
         switch style {
         case .primary:
-            // 与发送钮同款：强调色底上取深色对比最稳；禁用态降弱化字
-            return enabled ? Color.black.opacity(0.72) : Theme.Colors.contentTertiary
+            // 实心强调色钮：严格使用系统设计令牌 actionButtonForeground，标准主题纯白，杜绝蓝底黑字！
+            return enabled ? Theme.Colors.actionButtonForeground : Theme.Colors.contentTertiary
         case .secondary:
             return Theme.Colors.contentPrimary
         case .outlined:
             return hovered ? Theme.Colors.contentPrimary : Theme.Colors.contentSecondaryStrong
+        }
+    }
+
+    private var shortcutForegroundColor: Color {
+        switch style {
+        case .primary:
+            return enabled ? Theme.Colors.actionButtonForeground.opacity(0.75) : Theme.Colors.contentTertiary
+        case .secondary, .outlined:
+            return Theme.Colors.contentTertiary
         }
     }
 }
