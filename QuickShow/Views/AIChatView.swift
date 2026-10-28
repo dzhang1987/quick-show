@@ -275,6 +275,15 @@ struct AIChatView: View {
             return true
         }
         .escapeResponder(
+            id: "active_quote",
+            isActive: state.activeQuote != nil
+        ) {
+            withAnimation(.easeOut(duration: 0.15)) {
+                state.clearQuote()
+            }
+            return true
+        }
+        .escapeResponder(
             id: "message_edit",
             isActive: state.editingMessageId != nil
         ) {

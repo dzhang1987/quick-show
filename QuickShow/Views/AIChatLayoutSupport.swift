@@ -20,6 +20,256 @@ extension Notification.Name {
     static let aiChatQuickSwitcherDelete = Notification.Name("aiChat.quickSwitcherDelete")
     /// AI 运行模式变更通知（单 Agent / 多 Agent 协作模式切换时广播）
     static let aiExecutionModeDidChange = Notification.Name("aiChat.executionModeDidChange")
+    /// 请求平滑滚动并短暂高亮某条消息（点击引用预览时发布，SessionMessageList 观察）
+    static let aiChatScrollToMessage = Notification.Name("aiChat.scrollToMessage")
+    /// 触发 @ 引用确认通知（点击面板候选行时广播，ChatInputNSTextView 消费清理 @ 词）
+    static let aiChatConfirmAtMention = Notification.Name("aiChat.confirmAtMention")
+}
+
+// MARK: - 划词局部引用调度中心与微型药丸
+
+/// 划词引用调度中心：通过窗口事件监听与悬浮子面板（Child Window），实现 100% 稳定的划词悬浮引用按钮
+@MainActor
+final class ChatSelectionQuoteCoordinator: NSObject, ObservableObject {
+    static let shared = ChatSelectionQuoteCoordinator()
+
+    private var pillPanel: NSPanel?
+    private var eventMonitor: Any?
+    private weak var activeTextView: NSTextView?
+    @Published var selectedText: String = ""
+
+    override private init() {
+        super.init()
+        setupEventMonitor()
+    }
+
+    /// 启动全局鼠标与滚动监控（单例常驻）
+    private func setupEventMonitor() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp, .scrollWheel]) { [weak self] event in
+            guard let self else { return event }
+            if event.type == .leftMouseUp {
+                DispatchQueue.main.async {
+                    self.evaluateCurrentSelection()
+                }
+            } else if event.type == .scrollWheel {
+                // 滚动时不消失：实时更新药丸位置，跟随选区移动（取消划词才消失）
+                if self.pillPanel?.isVisible == true {
+                    DispatchQueue.main.async {
+                        self.evaluateCurrentSelection()
+                    }
+                }
+            }
+            return event
+        }
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleScrollViewDidScroll(_:)),
+            name: NSScrollView.didLiveScrollNotification,
+            object: nil
+        )
+    }
+
+    @objc private func handleScrollViewDidScroll(_ note: Notification) {
+        if pillPanel?.isVisible == true {
+            evaluateCurrentSelection()
+        }
+    }
+
+    /// 针对特定文本视图精确评估划词选区
+    func evaluateSelection(in textView: NSTextView) {
+        if textView is ChatInputNSTextView {
+            hidePill()
+            return
+        }
+        let range = textView.selectedRange()
+        // 核心准则：只有选区为空（取消划词）才消失
+        guard range.length > 0 else {
+            hidePill()
+            return
+        }
+        guard let fullString = textView.string as NSString?,
+              range.location + range.length <= fullString.length else {
+            hidePill()
+            return
+        }
+        let text = fullString.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            hidePill()
+            return
+        }
+        guard let window = textView.window ?? NSApp.keyWindow,
+              let layoutManager = textView.layoutManager,
+              let textContainer = textView.textContainer else {
+            hidePill()
+            return
+        }
+
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        rect.origin.x += textView.textContainerInset.width
+        rect.origin.y += textView.textContainerInset.height
+
+        // 视口可见性约束：若所在滚动容器视口中选区已被滚出视野，则隐藏
+        if let clipView = textView.enclosingScrollView?.contentView {
+            let rectInClip = textView.convert(rect, to: clipView)
+            let visibleRect = clipView.bounds
+            if rectInClip.maxY < visibleRect.minY || rectInClip.minY > visibleRect.maxY {
+                hidePill()
+                return
+            }
+        }
+
+        self.activeTextView = textView
+        let rectInWindow = textView.convert(rect, to: nil)
+        let rectInScreen = window.convertToScreen(rectInWindow)
+
+        showPill(text: text, anchorScreenRect: rectInScreen, parentWindow: window)
+    }
+
+    /// 检查当前聚焦窗口与活动文本视图中的选区
+    func evaluateCurrentSelection() {
+        if let active = activeTextView, active.window != nil {
+            evaluateSelection(in: active)
+            return
+        }
+        if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
+            evaluateSelection(in: tv)
+            return
+        }
+        hidePill()
+    }
+
+    private func ensurePanel() -> NSPanel {
+        if let pillPanel { return pillPanel }
+        // 预留充足透明留白（116 x 52），彻底消除阴影被窗口边界截断产生的直角黑边
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 116, height: 52),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.becomesKeyOnlyIfNeeded = false
+        panel.level = .popUpMenu
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        // 关键防线：严禁开启 borderless 窗口的 hasShadow，否则 WindowServer 会绘制矩形死黑投影外框
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+
+        let hosting = NSHostingView(rootView: FloatingQuotePillContentView())
+        hosting.wantsLayer = true
+        hosting.layer?.backgroundColor = NSColor.clear.cgColor
+        panel.contentView = hosting
+        self.pillPanel = panel
+        return panel
+    }
+
+    func showPill(text: String, anchorScreenRect: NSRect, parentWindow: NSWindow) {
+        selectedText = text
+        let panel = ensurePanel()
+        let panelW: CGFloat = 116
+        let panelH: CGFloat = 52
+
+        // 窗口尺寸内含充足透明呼吸间距，使药丸视觉中心恰好悬停在选区上方 8pt 处
+        var pillX = anchorScreenRect.midX - panelW / 2
+        var pillY = anchorScreenRect.maxY - 4
+
+        // 窗口边缘防溢出约束
+        if let screen = parentWindow.screen ?? NSScreen.main {
+            let visibleFrame = screen.visibleFrame
+            pillX = max(visibleFrame.minX + 8, min(pillX, visibleFrame.maxX - panelW - 8))
+            // 若上方空间不足以容纳药丸，则智能沉降到选区下方
+            if pillY + panelH > visibleFrame.maxY - 8 {
+                pillY = anchorScreenRect.minY - panelH + 4
+            }
+        }
+
+        panel.setFrame(NSRect(x: pillX, y: pillY, width: panelW, height: panelH), display: true)
+        if panel.parent !== parentWindow {
+            if let oldParent = panel.parent {
+                oldParent.removeChildWindow(panel)
+            }
+            parentWindow.addChildWindow(panel, ordered: .above)
+        }
+        panel.orderFront(nil)
+        EscapePolicyCenter.shared.push(scope: .chat, id: "selection_quote_pill") { [weak self] in
+            guard let self, self.pillPanel?.isVisible == true else { return false }
+            if let tv = self.activeTextView {
+                let loc = tv.selectedRange().location
+                tv.setSelectedRange(NSRange(location: loc != NSNotFound ? loc : 0, length: 0))
+            }
+            self.hidePill()
+            return true
+        }
+    }
+
+    func hidePill() {
+        EscapePolicyCenter.shared.pop(scope: .chat, id: "selection_quote_pill")
+        guard let panel = pillPanel, panel.isVisible else {
+            selectedText = ""
+            activeTextView = nil
+            return
+        }
+        panel.orderOut(nil)
+        selectedText = ""
+        activeTextView = nil
+    }
+
+    func commitQuote() {
+        guard !selectedText.isEmpty else { return }
+        let quoteText = selectedText
+        let tv = activeTextView
+        AIChatState.shared.setQuote(text: quoteText, role: .assistant)
+        // 核心诉求：点击引用后，取消文本划词选区
+        if let tv {
+            let loc = tv.selectedRange().location
+            tv.setSelectedRange(NSRange(location: loc != NSNotFound ? loc : 0, length: 0))
+        }
+        // 引用药丸消失
+        hidePill()
+        // 输入坞获取光标并聚焦
+        NotificationCenter.default.post(name: .aiChatForceFocusInput, object: nil)
+    }
+}
+
+/// 划词悬浮微型小药丸内容视图
+struct FloatingQuotePillContentView: View {
+    @ObservedObject private var coordinator = ChatSelectionQuoteCoordinator.shared
+    @State private var isHovered = false
+
+    var body: some View {
+        Button {
+            coordinator.commitQuote()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "quote.opening")
+                    .font(Theme.Typography.text(10, .bold))
+                Text(String(localized: "引用"))
+                    .font(Theme.Typography.text(11, .semibold))
+            }
+            .foregroundColor(isHovered ? Theme.Colors.accent : Theme.Colors.contentPrimary)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(
+                ZStack {
+                    Capsule().fill(Color(nsColor: .windowBackgroundColor))
+                    Capsule().fill(.regularMaterial)
+                    Capsule().fill(Theme.Colors.chatBase.opacity(0.92))
+                }
+            )
+            .overlay(
+                Capsule().strokeBorder(Theme.Colors.accent.opacity(isHovered ? 0.75 : 0.35), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.12), radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.clear)
+    }
 }
 
 // MARK: - 单条消息

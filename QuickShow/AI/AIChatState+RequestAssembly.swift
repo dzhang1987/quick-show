@@ -152,15 +152,28 @@ extension AIChatState {
         return result
     }
 
-    /// 普通单条消息 → wire 消息：用户消息带图时组装多模态 content 数组。
+    /// 普通单条消息 → wire 消息：用户消息带图时组装多模态 content 数组；若携带引用上下文则格式化注入 Markdown 语义块。
     private func makeBasicRequestMessage(from message: ChatMessage) -> ChatCompletionMessage {
         let role = message.role.rawValue
+        var textContent = message.content
+        if let quote = message.quote, !quote.text.isEmpty {
+            let quoteLines = quote.text.split(separator: "\n", omittingEmptySubsequences: false)
+                .map { "> \($0)" }
+                .joined(separator: "\n")
+            textContent = """
+            > [针对以下引文]
+            \(quoteLines)
+
+            \(message.content)
+            """
+        }
+
         guard message.role == .user, !message.images.isEmpty else {
-            return ChatCompletionMessage(role: role, content: message.content)
+            return ChatCompletionMessage(role: role, content: textContent)
         }
         var parts: [ChatContentPart] = []
-        if !message.content.isEmpty {
-            parts.append(.textPart(message.content))
+        if !textContent.isEmpty {
+            parts.append(.textPart(textContent))
         }
         for image in message.images {
             parts.append(.imagePart(dataURI: image.dataURI))

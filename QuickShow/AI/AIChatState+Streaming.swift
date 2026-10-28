@@ -16,13 +16,15 @@ extension AIChatState {
         let isDraftState = (store.currentSessionId == nil)
         if isStreaming && !isDraftState {
             let action = SettingsStore.currentStreamingReturnAction
+            let quote = activeQuote
             if action == .followUp {
                 let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
                 let images = imageAttachments
-                enqueueFollowUp(text: userInput, images: images)
+                enqueueFollowUp(text: userInput, images: images, quote: quote)
             } else {
-                enqueueSteering()
+                enqueueSteering(quote: quote)
             }
+            activeQuote = nil
             return
         }
 
@@ -91,7 +93,7 @@ extension AIChatState {
         // 落盘合并：三次变更先只改内存（persist: false），首个流式合帧时再统一落盘一次。
         var userContent = userInput
         if userContent.isEmpty, !images.isEmpty { userContent = "请查看图片。" }
-        let userMessage = ChatMessage(role: .user, content: userContent, state: .done, images: images)
+        let userMessage = ChatMessage(role: .user, content: userContent, state: .done, images: images, quote: activeQuote)
         let isFirstUserMessage = session.messages.allSatisfy { $0.role != .user }
         store.appendMessage(userMessage, to: sessionId, persist: false)
 
@@ -104,6 +106,7 @@ extension AIChatState {
 
         inputText = ""
         imageAttachments = []
+        activeQuote = nil
         // 发送即消费草稿：立即从内存与磁盘移除该会话草稿，不留残留。
         discardCurrentDraft()
 
@@ -138,15 +141,17 @@ extension AIChatState {
         let isDraftState = (store.currentSessionId == nil)
         if isStreaming && !isDraftState {
             let action = SettingsStore.currentStreamingReturnAction
+            let quote = activeQuote
             if action == .followUp {
                 // 默认是追加，则 ⌘⏎ 执行立即插入
-                enqueueSteering()
+                enqueueSteering(quote: quote)
             } else {
                 // 默认是插入，则 ⌘⏎ 执行追加
                 let userInput = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
                 let images = imageAttachments
-                enqueueFollowUp(text: userInput, images: images)
+                enqueueFollowUp(text: userInput, images: images, quote: quote)
             }
+            activeQuote = nil
             return
         }
         send()

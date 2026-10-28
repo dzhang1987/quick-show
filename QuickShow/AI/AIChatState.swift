@@ -20,6 +20,7 @@ struct QueuedChatInput: Identifiable, Equatable {
     let kind: Kind
     let text: String
     let images: [ChatImageAttachment]
+    var quote: ChatQuoteContext? = nil
 }
 
 // MARK: - 上下文压缩信息（UI 契约）
@@ -82,6 +83,14 @@ final class AIChatState: ObservableObject {
     var lastQuickSwitcherDismissTime: Date = .distantPast
     /// 待发送图片附件（Wave 2 附件 UI 消费；发送后清空）。
     @Published var imageAttachments: [ChatImageAttachment] = []
+    /// 待发送输入所挂载的引用上下文（划词/菜单或 @ 触发；发送后清空）
+    @Published var activeQuote: ChatQuoteContext? = nil
+    /// @ 引用菜单是否处于激活状态
+    @Published var isAtMentionMenuPresented: Bool = false
+    /// @ 引用搜索过滤关键词
+    @Published var atMentionQuery: String = ""
+    /// @ 引用菜单当前高亮索引
+    @Published var atMentionSelectedIndex: Int = 0
     /// 当前会话是否生成中（视图层旧调用点语义不变；由 syncStreamingState 维护）。
     @Published private(set) var isStreaming: Bool = false
     /// 生成中的会话集合（侧栏状态可视化消费：呼吸点 + 可点击中止）。
@@ -525,6 +534,60 @@ final class AIChatState: ObservableObject {
             discardCurrentDraft()
             inputText = ""
         }
+        clearQuote()
+        dismissAtMention()
+    }
+
+    // MARK: - 引用与 @ 候选菜单管理
+
+    /// 挂载待发送引用上下文
+    func setQuote(text: String, messageId: UUID? = nil, role: ChatMessage.Role? = nil) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        activeQuote = ChatQuoteContext(messageId: messageId, text: trimmed, role: role)
+    }
+
+    /// 清空待发送引用
+    func clearQuote() {
+        activeQuote = nil
+    }
+
+    /// 获取当前会话可供 @ 引用的历史消息列表（倒序排前 6 条，排除 system 与正在生成态）
+    func candidateQuoteMessages() -> [ChatMessage] {
+        guard let current = store.currentSession else { return [] }
+        let candidates = current.messages.filter { msg in
+            guard msg.role != .system else { return false }
+            switch msg.state {
+            case .done, .aborted:
+                return !msg.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            default:
+                return false
+            }
+        }.reversed()
+
+        if atMentionQuery.isEmpty {
+            return Array(candidates.prefix(6))
+        } else {
+            let lower = atMentionQuery.lowercased()
+            return Array(candidates.filter { $0.content.lowercased().contains(lower) }.prefix(6))
+        }
+    }
+
+    /// 确认选择 @ 菜单中对应候选消息作为引用
+    func selectAtMentionCandidate(at index: Int) {
+        let list = candidateQuoteMessages()
+        guard index >= 0 && index < list.count else { return }
+        let target = list[index]
+        setQuote(text: target.content, messageId: target.id, role: target.role)
+        dismissAtMention()
+    }
+
+    /// 关闭 @ 候选菜单
+    func dismissAtMention() {
+        isAtMentionMenuPresented = false
+        atMentionQuery = ""
+        atMentionSelectedIndex = 0
+        EscapePolicyCenter.shared.pop(scope: .chat, id: "at_mention_menu")
     }
 
     // MARK: - 图片附加

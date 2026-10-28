@@ -346,3 +346,83 @@ struct ImageZoomOverlay: View {
         .transition(.opacity)
     }
 }
+
+// MARK: - 输入坞待发送引用条（结构化生长胶囊）
+
+/// 输入坞生长区内的引用胶囊：展示当前挂载的引用片段、来源角色与一键关闭按钮
+struct ActiveQuoteStrip: View {
+    @ObservedObject var state: AIChatState
+    @State private var closeButtonHovered = false
+
+    var body: some View {
+        if let quote = state.activeQuote {
+            HStack(spacing: Theme.Spacing.sm) {
+                Image(systemName: "quote.opening")
+                    .font(Theme.Typography.text(10, .semibold))
+                    .foregroundColor(Theme.Colors.accent)
+
+                if let role = quote.role {
+                    Text(role == .assistant ? String(localized: "AI 回复") : String(localized: "你的提问"))
+                        .font(Theme.Typography.text(10, .semibold))
+                        .foregroundColor(role == .assistant ? Theme.Colors.accent : Theme.Colors.contentSecondary)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule().fill(Color.white.opacity(0.08))
+                        )
+                }
+
+                Text(quote.text)
+                    .font(Theme.Typography.text(11))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: Theme.Spacing.sm)
+
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        state.clearQuote()
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(Theme.Typography.text(9, .bold))
+                        .foregroundColor(closeButtonHovered ? Theme.Colors.contentPrimary : Theme.Colors.contentTertiary)
+                        .padding(4)
+                        .background(
+                            Circle().fill(Color.white.opacity(closeButtonHovered ? 0.15 : 0.06))
+                        )
+                }
+                .buttonStyle(.plain)
+                .onHover { closeButtonHovered = $0 }
+                .help(String(localized: "取消引用"))
+            }
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, 5)
+            .background(
+                ZStack {
+                    // 实色遮挡层：彻底消除暗黑模式下底层消息流的字迹穿透
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(Color(nsColor: .windowBackgroundColor))
+
+                    // 磨砂模糊层
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(.regularMaterial)
+
+                    // 暗色流光衬底
+                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                        .fill(Theme.Colors.chatBase.opacity(0.85))
+                }
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .strokeBorder(Theme.Colors.accent.opacity(0.35), lineWidth: 0.8)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 2, y: 1)
+            .transition(.asymmetric(
+                insertion: .opacity.combined(with: .scale(scale: 0.95)),
+                removal: .opacity
+            ))
+        }
+    }
+}

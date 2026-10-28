@@ -98,7 +98,8 @@ struct ChatMessageRow: View, Equatable {
             onCopy: copyContent,
             onRegenerate: onRegenerate,
             onBeginEdit: onBeginEdit,
-            onWithdraw: onWithdraw
+            onWithdraw: onWithdraw,
+            onQuote: quoteContent
         )
     }
 
@@ -109,6 +110,9 @@ struct ChatMessageRow: View, Equatable {
         if !message.content.isEmpty {
             Button { copyContent() } label: {
                 Label("复制消息", systemImage: "square.on.square")
+            }
+            Button { quoteContent() } label: {
+                Label("引用此消息", systemImage: "quote.opening")
             }
         }
         if message.role == .user, canEditLastRound {
@@ -152,6 +156,12 @@ struct ChatMessageRow: View, Equatable {
         DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) { copied = false }
     }
 
+    private func quoteContent() {
+        guard !message.content.isEmpty else { return }
+        AIChatState.shared.setQuote(text: message.content, messageId: message.id, role: message.role)
+        NotificationCenter.default.post(name: .aiChatForceFocusInput, object: nil)
+    }
+
 
     /// 用户消息：右对齐气泡，微透流光自适应底板（Theme.Colors.userBubbleFill），
     /// 辅以与主题色同源的 0.5pt 精细微光受光 rim（Theme.Colors.userBubbleStroke），圆角 18 对话语言；
@@ -181,7 +191,46 @@ struct ChatMessageRow: View, Equatable {
             MessageImageThumbs(images: message.images, onTap: onTapImage)
         } else {
             // 图文混排或纯文字模式：紧凑气泡，内部图文左对齐自然排版
-            VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                if let quote = message.quote {
+                    Button {
+                        if let targetId = quote.messageId {
+                            NotificationCenter.default.post(
+                                name: .aiChatScrollToMessage,
+                                object: nil,
+                                userInfo: ["messageId": targetId]
+                            )
+                        }
+                    } label: {
+                        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
+                            RoundedRectangle(cornerRadius: 1)
+                                .fill(Theme.Colors.accent.opacity(0.85))
+                                .frame(width: 2)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                if let role = quote.role {
+                                    Text(role == .assistant ? String(localized: "引用 AI 回复") : String(localized: "引用提问"))
+                                        .font(Theme.Typography.text(10, .semibold))
+                                        .foregroundColor(Theme.Colors.contentTertiary)
+                                }
+                                Text(quote.text)
+                                    .font(Theme.Typography.text(11))
+                                    .foregroundColor(Theme.Colors.contentSecondary)
+                                    .lineLimit(2)
+                                    .truncationMode(.tail)
+                                    .multilineTextAlignment(.leading)
+                            }
+                        }
+                        .padding(.horizontal, Theme.Spacing.md)
+                        .padding(.vertical, Theme.Spacing.xs)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                                .fill(Color.black.opacity(0.18))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "点击跳转至原消息"))
+                }
                 if !message.images.isEmpty {
                     MessageImageThumbs(images: message.images, onTap: onTapImage)
                 }

@@ -6,6 +6,16 @@
 
 ### Added
 
+- **对话历史 `@` 快捷引用与跨块划词即时引用体系（`AtMentionQuotePopupView.swift` / `ChatSelectionQuoteCoordinator` / `AIChatInputFields.swift` / `AIChatState.swift` / `NativeTextFlowView.swift`）**：
+  - **`@` 快捷引用候选浮层**：在输入框内键入 `@` 符号即刻在输入坞正上方弹出历史消息候选菜单，支持键盘方向键导航与快捷回车注入，所选历史内容以引用片段胶囊形式精准挂载在待发送区域；
+  - **划词即刻引用调度中心（`ChatSelectionQuoteCoordinator`）**：在助手的原生连续文本流（`NativeTextFlowView`）中划选任意文字时，即刻计算字形矩形并弹出微药丸「引用所选内容」，点击无缝转为引用片段并自动聚焦主输入框。
+
+### Fixed
+
+- **会话贴底状态解除跟随与向上滚动吸附死锁根治（`ChatScrollCoordinator.swift`）**：
+  - **彻底消灭贴底误判与吸底死锁**：重构 `handleBoundsChanged` 中的 `movedUp` 逻辑，消除此前由于将贴底微小触碰（`last.y > maxOffset + 0.5`）误判为弹性越界回弹而导致 `unpin` 被跳过的缺陷；只要用户滚轮驱动视口朝向内容上方移动，即刻解除跟随态（`isPinned = false`），彻底杜绝会话结束时视口卡死在底部无法向上滚动的现象；
+  - **输入坞滚轮穿透边界盲区消除**：为悬浮输入坞的物理判定矩形补充上部阴影与呼吸缓冲区（`Theme.Spacing.card`），彻底消除输入坞与正文操作栏之间由于阴影层遮蔽导致的滚轮事件被吞死角。
+
 - **用户消息图片附件大画幅自适应呈现与全链路点击预览（`AIChatAttachmentViews.swift` / `AIChatInputDock.swift` / `AIChatMessageRow.swift` / `AIChatView.swift` / `MessageEditBubble.swift`）**：
   - **单图大画幅比例自适应**：单张图片卡片根据图片原生宽高比动态自适应计算最佳画幅（最大 340×260pt），保持原有纵横比与呼吸感；多图规整紧凑网格流横排；
   - **纯图气泡极简呈现**：用户仅发送图片而无 Prompt 文本时，消除多余灰底厚边距，直接呈现带微光边框的精致圆角图卡；图文混排时正文与缩略图自然左对齐排版；

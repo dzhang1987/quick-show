@@ -381,6 +381,49 @@ final class NonScrollingTextView: NSTextView, NSTextViewDelegate {
         nextResponder?.scrollWheel(with: event)
     }
 
+    // MARK: - NSTextViewDelegate 核心选区回调（划词即刻响应）
+    func textViewDidChangeSelection(_ notification: Notification) {
+        ChatSelectionQuoteCoordinator.shared.evaluateSelection(in: self)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        super.mouseUp(with: event)
+        ChatSelectionQuoteCoordinator.shared.evaluateSelection(in: self)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event) ?? NSMenu()
+        let range = selectedRange()
+        if range.length > 0, let str = textStorage?.string {
+            let nsStr = str as NSString
+            if range.location + range.length <= nsStr.length {
+                let selectedText = nsStr.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !selectedText.isEmpty {
+                    let quoteItem = NSMenuItem(
+                        title: String(localized: "引用所选内容"),
+                        action: #selector(quoteSelectedTextAction(_:)),
+                        keyEquivalent: ""
+                    )
+                    quoteItem.target = self
+                    quoteItem.representedObject = selectedText
+                    quoteItem.image = NSImage(systemSymbolName: "quote.opening", accessibilityDescription: nil)
+                    menu.insertItem(quoteItem, at: 0)
+                    menu.insertItem(NSMenuItem.separator(), at: 1)
+                }
+            }
+        }
+        return menu
+    }
+
+    @objc private func quoteSelectedTextAction(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String, !text.isEmpty else { return }
+        let loc = selectedRange().location
+        setSelectedRange(NSRange(location: loc != NSNotFound ? loc : 0, length: 0))
+        ChatSelectionQuoteCoordinator.shared.hidePill()
+        AIChatState.shared.setQuote(text: text, role: .assistant)
+        NotificationCenter.default.post(name: .aiChatForceFocusInput, object: nil)
+    }
+
     // 点击链接直接在默认浏览器打开
     func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
         if let url = link as? URL {

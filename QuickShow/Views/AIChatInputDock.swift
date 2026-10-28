@@ -148,7 +148,8 @@ struct AIChatInputDock: View {
 
     /// 生长区是否在场（队列/附件/活跃子智能体任一非空）：与 inputArea 生长区容器的 if 判据同源。
     private var hasDockGrowth: Bool {
-        !state.pendingQueue.isEmpty
+        state.activeQuote != nil
+            || !state.pendingQueue.isEmpty
             || !state.imageAttachments.isEmpty
             || hasSubagentContent
     }
@@ -173,6 +174,9 @@ struct AIChatInputDock: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.lg) {
                     // 并发子智能体任务浮动监控托盘
                     SubagentTaskTray(state: state)
+
+                    // 待发送引用片段胶囊条
+                    ActiveQuoteStrip(state: state)
 
                     // 排队消息一体化面板（插入 / 追加）：生成中 ⏎ / ⌘⏎ 的消息在此排队，
                     // 支持立即插入提权、就地编辑与删除；置于坞体顶部、随内容向上生长。
@@ -279,6 +283,27 @@ struct AIChatInputDock: View {
             if hovering { onRefreshClipboard() }
             dockHovered = hovering
         }
+        // @ 快捷引用历史消息候选浮层（悬浮在输入坞上方）
+        .overlay(alignment: .bottom) {
+            if state.isAtMentionMenuPresented {
+                AtMentionQuotePopupView(
+                    state: state,
+                    onConfirm: { index in
+                        NotificationCenter.default.post(
+                            name: .aiChatConfirmAtMention,
+                            object: nil,
+                            userInfo: ["index": index]
+                        )
+                    },
+                    onDismiss: {
+                        state.dismissAtMention()
+                    }
+                )
+                .padding(.bottom, dockTotalHeight + Theme.Spacing.sm)
+                .transition(.opacity.combined(with: .scale(scale: 0.96)))
+                .animation(.spring(response: 0.22, dampingFraction: 0.8), value: state.isAtMentionMenuPresented)
+            }
+        }
     }
 
     /// 坞体总高回写：去抖（<0.5pt 跳过）防微抖重渲染；首帧 fallback → 实测校准一次。
@@ -303,6 +328,7 @@ struct AIChatInputDock: View {
                 ChatInputTextView(
                     text: $state.inputText,
                     isInputEmpty: $inputEmpty,
+                    state: state,
                     onSubmit: { submitInput() },
                     onSubmitFollowUp: { submitFollowUp() },
                     onSubmitAlternative: { submitAlternative() },

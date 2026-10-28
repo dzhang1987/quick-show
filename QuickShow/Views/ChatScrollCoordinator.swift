@@ -208,9 +208,9 @@ final class ChatScrollCoordinator {
             return event
         }
 
-        // 路径 2：精确界定悬浮输入坞在窗口坐标系中的物理几何矩形（阅读列横向 × 底部真实坞高）
-        // 原实现错误将 height 扩大为全窗口高度（contentView.bounds.height），导致居中悬浮的快速切换面板被误判为输入坞；
-        // 第一性原理：穿透范围只能严格限制在输入坞真实的物理底区（y: 0 ..< dockHeight），超出该区域的一律放行原生事件。
+        // 路径 2：界定悬浮输入坞在窗口坐标系中的物理几何矩形（阅读列横向 × 底部真实坞高 + 阴影缓冲区）
+        // 穿透范围严格覆盖输入坞物理底区及上方阴影/操作行呼吸边缘，杜绝悬浮卡片边缘缝隙吞事件；
+        // 超出该区域且非当前会话的独立组件（如居中快速切换面板、顶栏控件）放行原生事件。
         let svFrameInWindow = sv.convert(sv.bounds, to: nil)
         let loc = event.locationInWindow
         let dockEffectiveHeight = max(dockHeight, Theme.Layout.chatDockHeightFallback)
@@ -218,7 +218,7 @@ final class ChatScrollCoordinator {
             x: svFrameInWindow.minX,
             y: 0,
             width: svFrameInWindow.width,
-            height: dockEffectiveHeight
+            height: dockEffectiveHeight + Theme.Spacing.card
         )
 
         guard dockRect.contains(loc) else {
@@ -378,21 +378,17 @@ final class ChatScrollCoordinator {
             .map { Date().timeIntervalSince($0) < userScrollRecencyWindow }) ?? false
 
         if movedUp {
-            // 回弹抑制：origin 自底部越界区（rubber band，flipped 下 last.y > maxOffset）
-            // 回收的 movedUp 不算上滚意图——越界态只能由下拉/弹性产生，真实上滚从
-            // maxOffset 出发不经此区，两集合不交。
+            // 回弹抑制与离底意图判定（第一性原理重构）：
+            // 只有当当前视口仍然深陷于底部弹性越界区（origin.y > maxOffset + 1.0）时，才视为自然回弹；
+            // 一旦用户主动滚轮（userDriven）驱动视口进入或脱离 maxOffset（origin.y <= maxOffset + 1.0），
+            // 用户明确表达了向上浏览历史的意图，必须立即解除跟随态（unpin），消除临界微抖将上滚误判为越界回弹的吸底死锁！
             let docH = max(scrollView.contentView.documentView?.bounds.height ?? 0,
                            scrollView.contentView.documentView?.frame.height ?? 0)
             let maxOffset = max(0, docH - scrollView.contentView.bounds.height)
-            let cameFromOverscroll = flipped
-                ? last.y > maxOffset + 0.5
-                : last.y < -maxOffset - 0.5
-            // 事件来源判别：近期滚轮事件驱动的上滚 = 用户明确离底意图，一律 unpin，
-            // 18pt 容差不豁免；无近期事件 = 被动 clamp/回弹 → 不动 pin。
-            // （实证：塌缩 clamp 的 bounds 通知在 documentView.setFrame 调用栈内同步投出、
-            //  先于 frame 通知，任何遮蔽窗都罩不住，只能按来源判别；几何方向判别两头漏——
-            //  容差吞咽真实上滚 / 无条件 unpin 误伤 clamp。）
-            if userDriven && !cameFromOverscroll {
+            let isStillInDeepOverscroll = flipped
+                ? (origin.y > maxOffset + 1.0)
+                : (origin.y < -maxOffset - 1.0)
+            if userDriven && !isStillInDeepOverscroll {
                 setPinned(sessionId, false)
             }
             return

@@ -353,9 +353,10 @@ final class AIWindowManager {
         // 危险工具确认 sheet 抢占 key 状态时父窗会 resignKey，属本窗内交互，
         // 不视为被动切走（sheet 关闭后焦点自然回归父窗）
         if panel.attachedSheet != nil { return }
-        // 关窗隐藏时清理二次确认提醒，绝不将悬挂状态带入下次开窗
+        // 关窗隐藏时清理二次确认提醒与悬浮药丸，绝不将悬挂状态带入下次开窗
         MainActor.assumeIsolated {
             AIChatState.shared.cancelAbortConfirmation()
+            ChatSelectionQuoteCoordinator.shared.hidePill()
         }
         // 隐藏前落盘当前位置/大小，确保本次移动被记住。
         saveFrame()

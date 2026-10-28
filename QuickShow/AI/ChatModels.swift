@@ -122,8 +122,31 @@ struct ToolCallRecord: Codable, Equatable {
 
 // MARK: - 消息模型
 
+/// 对话引用上下文：记录被引用的片段与源信息（划词选区或@消息引用）
+struct ChatQuoteContext: Identifiable, Equatable, Codable {
+    var id: UUID = UUID()
+    /// 被引用消息的 ID（便于点击引用条平滑定位与高亮源消息）
+    var messageId: UUID?
+    /// 被引用的文本内容（划词局部文本或整条消息摘录）
+    var text: String
+    /// 被引用消息的角色 (user / assistant)
+    var role: ChatMessage.Role?
+
+    init(
+        id: UUID = UUID(),
+        messageId: UUID? = nil,
+        text: String,
+        role: ChatMessage.Role? = nil
+    ) {
+        self.id = id
+        self.messageId = messageId
+        self.text = text
+        self.role = role
+    }
+}
+
 /// 单条对话消息。相较于旧版新增 `images` 图片附件、`toolCalls` 工具调用记录、
-/// `reasoning` 思考过程与 `isSteered` 转向标记字段，旧数据缺失这些字段时分别按
+/// `reasoning` 思考过程、`isSteered` 转向标记与 `quote` 引用上下文，旧数据缺失这些字段时分别按
 /// 空数组 / nil 解码，保证向后兼容。
 struct ChatMessage: Identifiable, Equatable, Codable {
     let id: UUID
@@ -144,6 +167,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     var createdAt: Date
     /// 助手消息生成耗时（秒，仅助手消息落定或中止时计算并写入；用户消息恒为 nil）。
     var durationSeconds: Double?
+    /// 针对特定消息或划词片段的引用上下文（可选，仅携带引用的提问非空）。
+    var quote: ChatQuoteContext?
 
     /// 消息角色。system 仅用于请求注入，不进入 UI 会话数组。
     enum Role: String, Codable {
@@ -174,7 +199,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         reasoning: String? = nil,
         isSteered: Bool? = nil,
         createdAt: Date = Date(),
-        durationSeconds: Double? = nil
+        durationSeconds: Double? = nil,
+        quote: ChatQuoteContext? = nil
     ) {
         self.id = id
         self.role = role
@@ -186,13 +212,14 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         self.isSteered = isSteered
         self.createdAt = createdAt
         self.durationSeconds = durationSeconds
+        self.quote = quote
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, role, content, state, images, toolCalls, reasoning, isSteered, createdAt, durationSeconds
+        case id, role, content, state, images, toolCalls, reasoning, isSteered, createdAt, durationSeconds, quote
     }
 
-    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning / isSteered / createdAt / durationSeconds 等新字段）。
+    /// 自定义解码：兼容旧持久化数据（缺失 images / toolCalls / reasoning / isSteered / createdAt / durationSeconds / quote 等新字段）。
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -210,6 +237,8 @@ struct ChatMessage: Identifiable, Equatable, Codable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         // 旧会话无 durationSeconds 字段：缺失即 nil。
         durationSeconds = try container.decodeIfPresent(Double.self, forKey: .durationSeconds)
+        // 旧会话无 quote 字段：缺失即 nil，不打断解码。
+        quote = try container.decodeIfPresent(ChatQuoteContext.self, forKey: .quote)
     }
 }
 

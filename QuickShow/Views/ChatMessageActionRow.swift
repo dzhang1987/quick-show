@@ -25,6 +25,8 @@ struct ChatMessageActionRow: View {
     let onBeginEdit: () -> Void
     /// 撤回最后一轮（内容回填输入框）。
     let onWithdraw: () -> Void
+    /// 引用整条消息内容
+    let onQuote: () -> Void
 
     var body: some View {
         HStack(spacing: Theme.Spacing.sm) {
@@ -41,6 +43,13 @@ struct ChatMessageActionRow: View {
                         help: String(localized: "复制"),
                         rowHovered: rowHovered,
                         action: onCopy
+                    )
+                    ChatActionIconButton(
+                        systemName: "quote.opening",
+                        tint: nil,
+                        help: String(localized: "引用"),
+                        rowHovered: rowHovered,
+                        action: onQuote
                     )
                 }
 
@@ -60,6 +69,13 @@ struct ChatMessageActionRow: View {
                 ChatMessageMetaLabel(message: message, rowHovered: rowHovered)
 
                 if !message.content.isEmpty {
+                    ChatActionIconButton(
+                        systemName: "quote.opening",
+                        tint: nil,
+                        help: String(localized: "引用"),
+                        rowHovered: rowHovered,
+                        action: onQuote
+                    )
                     ChatActionIconButton(
                         systemName: copied ? "checkmark" : "square.on.square",
                         tint: copied ? Theme.Colors.accent : nil,

@@ -9,11 +9,13 @@ import SwiftUI
 /// NSTextView 包装：实现 ⏎ 发送 / ⇧⏎ 换行 / 中文输入法组字放行 / 图片粘贴与拖入。
 /// 为什么不用 SwiftUI TextField/TextEditor：⏎ 语义必须自定义，且必须在 doCommandBy 层
 /// 通过 markedRange 判定中文输入法组字，避免组字回车被误判为发送。
+@MainActor
 struct ChatInputTextView: NSViewRepresentable {
     @Binding var text: String
     /// 输入内容是否为空的独立回写通道：IME 组字期间 SwiftUI 绑定不更新，
     /// 需由 setMarkedText 回调驱动，避免组字文本与 placeholder 重叠。
     @Binding var isInputEmpty: Bool
+    var state: AIChatState = AIChatState.shared
     let onSubmit: () -> Void
     /// ⌥⏎ 追问：生成中入 follow-up 队列 / 非生成中退化普通发送（语义由调用方承载）。
     let onSubmitFollowUp: () -> Void
@@ -131,6 +133,7 @@ struct ChatInputTextView: NSViewRepresentable {
         coordinator.stopObservingWindow()
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ChatInputTextView
         weak var textView: ChatInputNSTextView?
@@ -143,6 +146,7 @@ struct ChatInputTextView: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView else { return }
             // 提交/普通输入：合并同步 text 与空态（仅在不等时写，避免与 updateNSView 形成回写回路）
             syncInputState(tv)
+            checkAtMentionTrigger(tv)
             parent.onTextEdited?()
         }
 
@@ -161,7 +165,84 @@ struct ChatInputTextView: NSViewRepresentable {
             }
         }
 
+        /// 检测光标前是否存在 @token 并驱动 state 的 @ 菜单展开与过滤
+        private func checkAtMentionTrigger(_ tv: NSTextView) {
+            guard !tv.hasMarkedText() else { return }
+            let str = tv.string as NSString
+            let cursor = tv.selectedRange().location
+            guard cursor <= str.length, cursor > 0 else {
+                if parent.state.isAtMentionMenuPresented {
+                    parent.state.dismissAtMention()
+                }
+                return
+            }
+
+            let textBeforeCursor = str.substring(with: NSRange(location: 0, length: cursor))
+            let lastWhitespace = (textBeforeCursor as NSString).rangeOfCharacter(from: .whitespacesAndNewlines, options: .backwards)
+            let tokenStart = (lastWhitespace.location == NSNotFound) ? 0 : lastWhitespace.location + 1
+            let token = (textBeforeCursor as NSString).substring(from: tokenStart)
+
+            if token.hasPrefix("@") {
+                let query = String(token.dropFirst())
+                parent.state.atMentionQuery = query
+                if !parent.state.isAtMentionMenuPresented {
+                    parent.state.isAtMentionMenuPresented = true
+                    parent.state.atMentionSelectedIndex = 0
+                    EscapePolicyCenter.shared.push(scope: .chat, id: "at_mention_menu") { [weak self] in
+                        guard let self, self.parent.state.isAtMentionMenuPresented else { return false }
+                        self.parent.state.dismissAtMention()
+                        return true
+                    }
+                }
+            } else {
+                if parent.state.isAtMentionMenuPresented {
+                    parent.state.dismissAtMention()
+                }
+            }
+        }
+
+        /// 清除当前触发 @ 菜单的 @token 词
+        func removeAtToken(from textView: NSTextView) {
+            let str = textView.string as NSString
+            let cursor = textView.selectedRange().location
+            guard cursor <= str.length, cursor > 0 else { return }
+            let textBeforeCursor = str.substring(with: NSRange(location: 0, length: cursor))
+            let lastWhitespace = (textBeforeCursor as NSString).rangeOfCharacter(from: .whitespacesAndNewlines, options: .backwards)
+            let tokenStart = (lastWhitespace.location == NSNotFound) ? 0 : lastWhitespace.location + 1
+            let tokenRange = NSRange(location: tokenStart, length: cursor - tokenStart)
+            if (str.substring(with: tokenRange) as NSString).hasPrefix("@") {
+                textView.replaceCharacters(in: tokenRange, with: "")
+                textView.setSelectedRange(NSRange(location: tokenStart, length: 0))
+                parent.text = textView.string
+                parent.isInputEmpty = textView.string.isEmpty
+            }
+        }
+
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            // @ 引用菜单展开时的键盘接管：
+            if parent.state.isAtMentionMenuPresented {
+                if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                    parent.state.atMentionSelectedIndex = max(0, parent.state.atMentionSelectedIndex - 1)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                    let count = parent.state.candidateQuoteMessages().count
+                    if count > 0 {
+                        parent.state.atMentionSelectedIndex = min(count - 1, parent.state.atMentionSelectedIndex + 1)
+                    }
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                    if textView.hasMarkedText() { return false }
+                    removeAtToken(from: textView)
+                    parent.state.selectAtMentionCandidate(at: parent.state.atMentionSelectedIndex)
+                    return true
+                }
+                if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                    parent.state.dismissAtMention()
+                    return true
+                }
+            }
             // ⏎：中文 IME 组字期间 markedRange 非空 → 放行给输入法先提交候选字，绝不触发发送
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 if textView.hasMarkedText() { return false }
@@ -255,10 +336,23 @@ struct ChatInputTextView: NSViewRepresentable {
                 name: .aiChatForceFocusInput,
                 object: nil
             )
+            // @ 引用菜单点击确认
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(confirmAtMentionRequested(_:)),
+                name: .aiChatConfirmAtMention,
+                object: nil
+            )
         }
 
         func stopObservingWindow() {
             NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func confirmAtMentionRequested(_ note: Notification) {
+            guard let index = note.userInfo?["index"] as? Int, let tv = textView else { return }
+            removeAtToken(from: tv)
+            parent.state.selectAtMentionCandidate(at: index)
         }
 
         @objc private func windowDidBecomeKey(_ note: Notification) {
@@ -276,21 +370,24 @@ struct ChatInputTextView: NSViewRepresentable {
         @objc private func refocusInputRequested(_ note: Notification) {
             guard let textView, let window = textView.window else { return }
             if let responder = window.firstResponder as? NSTextView, responder !== textView {
-                return
+                // 仅当持焦的是其他正在编辑的输入框（如侧栏重命名）时才让位；只读文本流（划词气泡）不阻断
+                if responder.isEditable {
+                    return
+                }
             }
             window.makeFirstResponder(textView)
         }
 
-        /// AI 窗呼出后的强制聚焦（AIWindowManager.show 在上屏+激活后发布）：
-        /// 无条件接管第一响应者，清掉面板隐藏期间残留的侧栏 field editor 焦点。
-        /// didBecomeKey 兜底的让位守卫只适用于窗口已可见时的用户交互（重命名中
-        /// 不抢焦），不适用于「呼出即打字」场景——残留让位会让输入框永远拿不到光标。
-        /// 抽屉展开期间不发布的例外在 AIWindowManager 发布侧把关
-        /// （MainActor 上下文读 ChatInteractionCenter 抽屉态）。
+        /// AI 窗呼出/引用注入后的强制聚焦与激活光标：
+        /// 无条件接管第一响应者，并将选区光标置于文本末尾，确保护航「呼出即打字」与「引用即打字」体验。
         @objc private func forceFocusInputRequested(_ note: Notification) {
-            guard let textView, let window = textView.window,
-                  note.object as? NSWindow === window else { return }
+            guard let textView, let window = textView.window else { return }
+            if let targetWindow = note.object as? NSWindow, targetWindow !== window {
+                return
+            }
             window.makeFirstResponder(textView)
+            let length = (textView.string as NSString).length
+            textView.setSelectedRange(NSRange(location: length, length: 0))
         }
     }
 }

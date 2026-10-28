@@ -373,6 +373,12 @@ struct SessionMessageList: View {
                 if !compacting, isActive, isPinned { scrollToBottom(proxy, animated: true) }
             }
             // 活跃态切换：失活保存快照；激活时按当前几何位置刷新导航显隐镜像。
+            .onReceive(NotificationCenter.default.publisher(for: .aiChatScrollToMessage)) { note in
+                guard isActive, let targetId = note.userInfo?["messageId"] as? UUID else { return }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(targetId, anchor: .center)
+                }
+            }
             // 常驻视图的 NSScrollView 偏移天然保留；激活时无条件 restoreScroll 是唯一破坏源
             // （会把用户强制拉走）。位置恢复只发生在挂载/LRU 重挂载的 onAppear。
             // pinned 会话若在隐藏期间并行生成，coordinator 的 frame 路径持续贴底。

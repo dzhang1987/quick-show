@@ -8,9 +8,10 @@ extension AIChatState {
 
     /// 生成中插入（Steering）收口：把指定输入或当前输入（含图片）作为插入指令入当前会话队列。
     /// UI 层负责清空输入框，此处只入队、不消费输入态。
-    func enqueueSteering(text: String? = nil, images: [ChatImageAttachment]? = nil) {
+    func enqueueSteering(text: String? = nil, images: [ChatImageAttachment]? = nil, quote: ChatQuoteContext? = nil) {
         let userInput = (text ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
         let inputImages = images ?? imageAttachments
+        let inputQuote = quote ?? activeQuote
         guard !userInput.isEmpty || !inputImages.isEmpty else { return }
         guard let sessionId = currentSessionId else { return }
         var content = userInput
@@ -38,7 +39,7 @@ extension AIChatState {
         }
 
         pendingQueues[sessionId, default: []].append(
-            QueuedChatInput(id: UUID(), kind: .steering, text: content, images: inputImages)
+            QueuedChatInput(id: UUID(), kind: .steering, text: content, images: inputImages, quote: inputQuote)
         )
     }
 
@@ -67,7 +68,8 @@ extension AIChatState {
             content: item.text,
             state: .done,
             images: item.images,
-            isSteered: item.kind == .steering ? true : nil
+            isSteered: item.kind == .steering ? true : nil,
+            quote: item.quote
         )
         store.appendMessage(userMessage, to: sessionId, persist: true)
 
@@ -92,12 +94,13 @@ extension AIChatState {
 
     /// 生成中入当前会话追加（follow-up）队列（仅生成中有意义；无生成时由 UI 走普通发送）。
     /// 空文本且无图片时不入队。
-    func enqueueFollowUp(text: String, images: [ChatImageAttachment]) {
+    func enqueueFollowUp(text: String, images: [ChatImageAttachment], quote: ChatQuoteContext? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return }
         guard let sessionId = currentSessionId, isStreaming else { return }
+        let inputQuote = quote ?? activeQuote
         pendingQueues[sessionId, default: []].append(
-            QueuedChatInput(id: UUID(), kind: .followUp, text: trimmed, images: images)
+            QueuedChatInput(id: UUID(), kind: .followUp, text: trimmed, images: images, quote: inputQuote)
         )
     }
 
