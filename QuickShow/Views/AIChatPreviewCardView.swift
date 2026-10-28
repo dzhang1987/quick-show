@@ -9,11 +9,11 @@ import UniformTypeIdentifiers
 // 内嵌系统 QuickLook 的 QLPreviewView，原生渲染图片 / PDF / 文本 / 音视频等任意可预览文件，
 // 无需为每种格式手写渲染器。
 //
-// 视觉原则（与 AIChatMapCardView 机械一致）：
-// - 卡片容器 = 助手气泡同款（chatAssistantBubble 底 + cardStroke 0.5pt 描边 + Radius.groupCard），
-//   宽度 maxWidth .infinity，与正文 / 工具卡共用同一可用宽度
-// - 结构两段：头部信息条（文件名 + 类型 kind，Theme 设计令牌）→ 预览区（文档族
-//   文本 / PDF 520pt / 媒体类 300pt，按 kind 自适应；insetCard 圆角裁剪 + chatStrokeStrong 0.5pt 描边，与地图卡同语言）
+// 视觉原则（与 MarkdownCodeBlock / AIChatMapCardView 质感同源）：
+// - 卡片容器 = 通透微质感底（surfaceTrack 底 + chatStrokeStrong 0.5pt 描边 + Radius.groupCard），
+//   宽度 maxWidth .infinity，与正文 / 工具卡共用同一可用宽度，彻底消灭不透明死白底，融入毛玻璃窗体
+// - 结构两段：头部信息条（文件名 + 类型规格，Theme 设计令牌）→ 预览区（文档族
+//   文本 / PDF 460pt / 媒体类按比例自适应；chatStrokeStrong 0.5pt 分割线）
 // - 本文件严禁新增设计令牌，全部走 DesignTokens 既有值
 
 // MARK: - 数据契约
@@ -49,12 +49,14 @@ enum PreviewCardProvider: RichCardProvider {
 
 struct AIChatPreviewCardView: View {
     let payload: PreviewCardPayload
+    @State private var copied = false
+    @State private var isHovered = false
+    @State private var isZoomed = false
+    @State private var isContentHovered = false
+    @State private var loadedImage: NSImage?
 
-    /// 文档族（文本 / 表格 / PDF）预览区高度：300pt 下长文档看不到完整语义单元
-    /// （.md 表格约 5.5 行且末行截断、PDF 页底被裁），520pt 约一屏可读。
-    private static let documentPreviewHeight: CGFloat = 520
-    /// 媒体类（图片 / 音视频 / 未知类型）预览区高度：内容按比例自适应，300pt 已足够。
-    private static let mediaPreviewHeight: CGFloat = 300
+    /// 文档族（文本 / 表格 / PDF）预览区高度
+    private static let documentPreviewHeight: CGFloat = 460
 
     /// UTI 判不出文本族时的扩展名兜底集合（不含点、小写比较）。
     private static let textExtensions: Set<String> = [
@@ -63,11 +65,62 @@ struct AIChatPreviewCardView: View {
         "java", "rs", "go", "rb", "sql"
     ]
 
+    /// 是否为本地图片（支持常见位图与矢量图扩展名，或 UTI conforms to public.image）。
+    private var isImageFile: Bool {
+        let imageExtensions: Set<String> = [
+            "png", "jpg", "jpeg", "avif", "webp", "heic", "gif", "tiff", "bmp", "ico", "svg"
+        ]
+        let ext = URL(fileURLWithPath: payload.path).pathExtension.lowercased()
+        if imageExtensions.contains(ext) { return true }
+        if let type = UTType(payload.kind), type.conforms(to: .image) { return true }
+        return false
+    }
+
+    /// 人性化文件类型描述（告别裸露的 public.png / public.avif 底层代号）。
+    private var humanReadableKind: String {
+        let ext = URL(fileURLWithPath: payload.path).pathExtension.uppercased()
+        if !ext.isEmpty {
+            return ext
+        }
+        if let type = UTType(payload.kind) {
+            return type.localizedDescription ?? type.preferredFilenameExtension?.uppercased() ?? "文件"
+        }
+        return "文件"
+    }
+
+    /// 规格元数据，如 "PNG · 1920 × 1080 · 2.4 MB" 或 "PDF · 3.2 MB"
+    private var fileMetaText: String {
+        var parts: [String] = [humanReadableKind]
+
+        // 若为图片，尝试提取分辨率
+        if isImageFile, let imgRep = NSImageRep(contentsOfFile: payload.path) {
+            let pxWidth = imgRep.pixelsWide > 0 ? imgRep.pixelsWide : Int(imgRep.size.width)
+            let pxHeight = imgRep.pixelsHigh > 0 ? imgRep.pixelsHigh : Int(imgRep.size.height)
+            if pxWidth > 0 && pxHeight > 0 {
+                parts.append("\(pxWidth) × \(pxHeight)")
+            }
+        }
+
+        // 文件大小
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: payload.path),
+           let fileSize = attributes[.size] as? Int64, fileSize > 0 {
+            let formattedSize = ByteCountFormatter.string(fromByteCount: fileSize, countStyle: .file)
+            parts.append(formattedSize)
+        }
+
+        return parts.joined(separator: " · ")
+    }
+
+    /// Header 左侧小图标
+    private var fileIconName: String {
+        if isImageFile { return "photo" }
+        if let type = UTType(payload.kind), type.conforms(to: .pdf) || payload.path.lowercased().hasSuffix(".pdf") {
+            return "doc.text.fill"
+        }
+        return "doc.text"
+    }
+
     /// 预览区高度：按类型自适应。
-    /// 优先走系统 UTI 体系（kind 多为 typeIdentifier，如 net.daringfireball.markdown）：
-    /// `conforms(to: .text)` 覆盖 plain-text / source-code / markdown / json / csv 等文本族，
-    /// `conforms(to: .pdf)` 覆盖 PDF（同为竖版文档，矮了页底被裁）；
-    /// UTI 构造失败或 kind 为扩展名回退值时，用扩展名集合兜底。
     private var previewHeight: CGFloat {
         if let type = UTType(payload.kind),
            type.conforms(to: .text) || type.conforms(to: .pdf) {
@@ -77,7 +130,7 @@ struct AIChatPreviewCardView: View {
         if !ext.isEmpty, Self.textExtensions.contains(ext) || ext == "pdf" {
             return Self.documentPreviewHeight
         }
-        return Self.mediaPreviewHeight
+        return Self.documentPreviewHeight
     }
 
     /// 渲染期文件是否仍存在：历史回放时文件可能已被清理，此处仅做只读探测。
@@ -88,42 +141,133 @@ struct AIChatPreviewCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+            if fileExists {
+                Rectangle()
+                    .fill(Theme.Colors.chatStrokeStrong)
+                    .frame(height: 0.5)
+            }
             content
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.chatAssistantBubble)
+                .fill(Theme.Colors.surfaceTrack)
         )
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
+                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.15)) {
+                isHovered = hovering
+            }
+        }
+        .sheet(isPresented: $isZoomed) {
+            UniversalFileZoomSheet(
+                payload: payload,
+                image: loadedImage,
+                isImage: isImageFile,
+                onDismiss: { isZoomed = false }
+            )
+        }
     }
 
-    // MARK: 头部信息条（文件名 + 类型 kind）
+    // MARK: 头部信息条（文件名 + 类型规格 + 动作胶囊）
 
     private var header: some View {
-        HStack(spacing: Theme.Spacing.lg) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(Theme.Typography.text(Theme.Typography.iconLarge))
+        HStack(alignment: .top, spacing: Theme.Spacing.md) {
+            Image(systemName: fileIconName)
+                .font(Theme.Typography.text(13.5, .medium))
                 .foregroundColor(Theme.Colors.accent)
-            VStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                .padding(.top, 1.5)
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text(payload.fileName)
-                    .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
+                    .font(Theme.Typography.text(12.5, .medium))
                     .foregroundColor(Theme.Colors.contentPrimary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(payload.kind)
-                    .font(Theme.Typography.text(Theme.Typography.footnote))
+                Text(fileMetaText)
+                    .font(Theme.Typography.text(10.5, .regular))
                     .foregroundColor(Theme.Colors.contentTertiary)
                     .lineLimit(1)
             }
-            Spacer(minLength: 0)
+
+            Spacer(minLength: Theme.Spacing.md)
+
+            HStack(spacing: Theme.Spacing.xs) {
+                revealButton
+                copyButton
+            }
+            .opacity((isHovered || copied) ? 1 : 0)
+            .allowsHitTesting(isHovered || copied)
+            .accessibilityHidden(!isHovered && !copied)
         }
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.top, Theme.Spacing.xl)
-        .padding(.bottom, Theme.Spacing.lg)
+        .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+        .padding(.vertical, 9)
+    }
+
+    private var revealButton: some View {
+        Button(action: revealInFinder) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: "folder")
+                    .font(Theme.Typography.text(9.5, .medium))
+                Text(String(localized: "在访达中显示"))
+                    .font(Theme.Typography.text(9.5, .medium))
+            }
+            .foregroundColor(Theme.Colors.contentTertiary)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.surfaceButton)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(String(localized: "在访达中定位此文件"))
+    }
+
+    private var copyButton: some View {
+        Button(action: copyPath) {
+            HStack(spacing: Theme.Spacing.xs) {
+                Image(systemName: copied ? "checkmark" : "square.on.square")
+                    .font(Theme.Typography.text(9.5, .medium))
+                Text(copied ? String(localized: "已复制") : String(localized: "复制路径"))
+                    .font(Theme.Typography.text(9.5, .medium))
+            }
+            .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.surfaceButton)
+            )
+        }
+        .buttonStyle(.plain)
+        .help(payload.path)
+    }
+
+    private func revealInFinder() {
+        let fileURL = URL(fileURLWithPath: payload.path)
+        if FileManager.default.fileExists(atPath: payload.path) {
+            NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+        } else {
+            let dirURL = fileURL.deletingLastPathComponent()
+            if FileManager.default.fileExists(atPath: dirURL.path) {
+                NSWorkspace.shared.open(dirURL)
+            }
+        }
+    }
+
+    private func copyPath() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(payload.path, forType: .string)
+        copied = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) {
+            copied = false
+        }
     }
 
     // MARK: 预览区
@@ -131,20 +275,82 @@ struct AIChatPreviewCardView: View {
     @ViewBuilder
     private var content: some View {
         if fileExists {
-            QuickLookPreviewContainer(
-                url: URL(fileURLWithPath: payload.path),
-                title: payload.fileName
-            )
-            .frame(height: previewHeight)
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                    .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
-            )
-            .padding(.horizontal, Theme.Spacing.xxl)
-            .padding(.bottom, Theme.Spacing.lg)
+            ZStack(alignment: .bottomTrailing) {
+                if isImageFile {
+                    imageContent
+                } else {
+                    documentContent
+                }
+
+                if isContentHovered {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(Theme.Typography.text(9.5, .medium))
+                        Text(String(localized: "点击放大"))
+                            .font(Theme.Typography.text(9.5, .medium))
+                    }
+                    .foregroundColor(.white.opacity(0.92))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule().fill(Color.black.opacity(0.65))
+                    )
+                    .padding(Theme.Spacing.md)
+                    .transition(.opacity)
+                }
+            }
+            .contentShape(Rectangle())
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.12)) {
+                    isContentHovered = hovering
+                }
+            }
+            .onTapGesture {
+                isZoomed = true
+            }
         } else {
             missingState
+        }
+    }
+
+    @ViewBuilder
+    private var imageContent: some View {
+        if let img = loadedImage {
+            Image(nsImage: img)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(maxWidth: .infinity)
+                .frame(maxHeight: 520)
+        } else {
+            RoundedRectangle(cornerRadius: 0)
+                .fill(Theme.Colors.surfaceTrack)
+                .frame(maxWidth: .infinity)
+                .frame(height: 240)
+                .overlay(ProgressView().controlSize(.small))
+                .task {
+                    await loadImageAsync()
+                }
+        }
+    }
+
+    @ViewBuilder
+    private var documentContent: some View {
+        QuickLookPreviewContainer(
+            url: URL(fileURLWithPath: payload.path),
+            title: payload.fileName
+        )
+        .frame(height: previewHeight)
+    }
+
+    @MainActor
+    private func loadImageAsync() async {
+        guard loadedImage == nil else { return }
+        let path = payload.path
+        let img = await Task.detached(priority: .userInitiated) {
+            NSImage(contentsOfFile: path)
+        }.value
+        if let img {
+            self.loadedImage = img
         }
     }
 
@@ -156,7 +362,7 @@ struct AIChatPreviewCardView: View {
                 .font(Theme.Typography.text(16))
                 .foregroundColor(Theme.Colors.idleText)
             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                Text("文件不存在或已被移动")
+                Text(String(localized: "文件不存在或已被移动"))
                     .font(Theme.Typography.text(Theme.Typography.footnote))
                     .foregroundColor(Theme.Colors.contentTertiary)
                 Text(payload.path)
@@ -167,8 +373,98 @@ struct AIChatPreviewCardView: View {
             }
         }
         .frame(maxWidth: .infinity, minHeight: 96, alignment: .center)
-        .padding(.horizontal, Theme.Spacing.xxl)
-        .padding(.bottom, Theme.Spacing.xl)
+        .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
+        .padding(.vertical, Theme.Spacing.xl)
+    }
+}
+
+// MARK: - 全文件通用沉浸式放大预览 Sheet
+
+struct UniversalFileZoomSheet: View {
+    let payload: PreviewCardPayload
+    let image: NSImage?
+    let isImage: Bool
+    let onDismiss: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // 顶栏控制条
+            topBar
+                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.vertical, Theme.Spacing.md)
+                .background(Theme.Colors.chatNavFloatFill)
+
+            Rectangle()
+                .fill(Theme.Colors.chatStrokeStrong)
+                .frame(height: 0.5)
+
+            // 主展示区
+            mainContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(isImage ? Color.black.opacity(0.92) : Color(.windowBackgroundColor))
+        }
+        .frame(minWidth: 720, idealWidth: 860, maxWidth: 1280, minHeight: 520, idealHeight: 640, maxHeight: 960)
+    }
+
+    private var topBar: some View {
+        HStack(spacing: Theme.Spacing.md) {
+            Image(systemName: isImage ? "photo" : "doc.text")
+                .font(Theme.Typography.text(14, .medium))
+                .foregroundColor(Theme.Colors.accent)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(payload.fileName)
+                    .font(Theme.Typography.text(13, .semibold))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            HStack(spacing: Theme.Spacing.md) {
+                Button {
+                    NSWorkspace.shared.open(URL(fileURLWithPath: payload.path))
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.up.forward.app")
+                            .font(Theme.Typography.text(10, .medium))
+                        Text(String(localized: "系统应用打开"))
+                            .font(Theme.Typography.text(11, .medium))
+                    }
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4.5)
+                    .background(RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous).fill(Theme.Colors.surfaceButton))
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "用系统默认应用打开该文件"))
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Theme.Typography.text(16))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                .help(String(localized: "关闭 (ESC)"))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
+        if isImage, let img = image ?? NSImage(contentsOfFile: payload.path) {
+            Image(nsImage: img)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding(Theme.Spacing.xl)
+                .shadow(color: .black.opacity(0.4), radius: 24, y: 8)
+        } else {
+            QuickLookPreviewContainer(
+                url: URL(fileURLWithPath: payload.path),
+                title: payload.fileName
+            )
+        }
     }
 }
 
@@ -198,11 +494,11 @@ private struct PreviewCardErrorView: View {
         .padding(.vertical, Theme.Spacing.xl)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .fill(Theme.Colors.chatAssistantBubble)
+                .fill(Theme.Colors.surfaceTrack)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
-                .stroke(Theme.Colors.cardStroke, lineWidth: 0.5)
+                .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
     }
 }

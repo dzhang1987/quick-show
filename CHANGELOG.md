@@ -47,6 +47,18 @@
 
 ### Changed
 
+- **文件预览卡片通透微质感与沉浸式全屏放大预览升级（`AIChatPreviewCardView.swift`）**：
+  - **彻底消灭不透明死白底**：将文件预览卡片背景从 90% 不透明纯白的 `chatAssistantBubble` 全面收敛至与代码块统一的 `Theme.Colors.surfaceTrack`（6% 微透底）+ `Theme.Colors.chatStrokeStrong`（0.5pt 细描边），与主窗体半透明毛玻璃自然融合，根除浅色模式下死白实心硬块的视觉割裂；
+  - **画幅比例自适应与沉浸式放大（`UniversalFileZoomSheet`）**：图片类文件采用原生宽高比（`contentMode: .fit`）自适应充满宽度并限制最大高度，告别固定粗暴裁切；支持点击内容区直接唤起全屏沉浸式放大预览 Sheet，支持高保真原图查看、文档 QuickLook 预览及一键调用系统默认应用打开；
+  - **交互降噪与顶栏克制**：卡片 Header 移除重复的「放大预览」胶囊，仅克制保留「在访达中显示」与「复制路径」两项系统级操作；内容区悬停自然浮现「点击放大」微胶囊提示；
+  - **规格元数据人性化展示**：告别底层裸露的 UTI 字符串（如 `public.heic` / `public.png`），自动提炼为人性化的大写文件类型标签、图片分辨率（如 `6016 × 6016`）及格式化文件大小。
+
+- **Markdown 任务列表、多层编号及无序标记系统性视觉重塑（`MarkdownListRenderer.swift` / `AIChatMessageRow.swift` / `MarkdownImageView.swift`）**：
+  - **任务列表（Task List）现代化重构**：废除模糊圆圈，未完成项使用高保真空心方框（`square`），已完成项使用主题强调色填充方框打勾（`checkmark.square.fill`），底层为 `TaskCheckboxAttachment` 重写 `isEqual` 与 `hash` 注入强类型值语义判等防线；
+  - **多层级有序列表继承式标号（Hierarchical Numbering）**：一级列表呈现 `1.`，嵌套子级自动继承为 `1.1`、`1.2`（末尾不加点），三级递进为 `1.1.1`，悬挂缩进和制表位动态平滑跟随计算；
+  - **无序列表多层级标记演进**：一级使用饱满实心圆点（`•`），二级使用纤细空心圈（`◦`），三级升级为极简轻巧短横（`–`）；嵌套缩进收紧为 16pt，消灭大滑坡式右移，子级标记严格对齐父级文字正下方；
+  - **图片不存在/加载失败微卡片化（`MarkdownImageView.swift`）**：废除 100% 满宽大黑灰条，自适应收敛为紧凑微卡片，隐藏冗长长 URL，优雅展示 `alt` 标题、目标域名与「打开源链接 ↗」胶囊。
+
 - **抽屉操作按钮规范化与高危权限确认抽屉交互升级（`DrawerWidgets.swift` / `ToolConfirmationDrawer.swift`）**：
   - **紧凑轻盈原生操作按钮（`DrawerActionButton`）**：重构抽屉操作按钮，支持微文字快捷键随行角标，严格统一使用系统设计令牌 `actionButtonForeground` 规范实心强调色按钮纯白文字，彻底消除蓝底深色字的高对比度不适感；
   - **权限抽屉单键盲操与代码排版优化（`ToolConfirmationDrawer`）**：按钮操作栏附带 `⏎`、`⌘⏎`、`ESC` 快捷键标注；新增支持单键快捷响应（按 `Y` 执行、`A` 始终允许、`N` 拒绝）；优化命令与参数预览区域内边距与排版布局。

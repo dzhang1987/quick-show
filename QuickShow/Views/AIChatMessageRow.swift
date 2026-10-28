@@ -470,11 +470,38 @@ struct ReasoningListView: View {
     let items: [MarkdownListItem]
     let ordered: Bool
     var depth: Int = 0
+    var parentPrefix: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                ReasoningListItemRow(item: item, ordered: ordered, depth: depth)
+            ForEach(Array(items.enumerated()), id: \.offset) { idx, item in
+                let currentNum = item.number ?? (idx + 1)
+                let numberLabel: String? = {
+                    guard ordered else { return nil }
+                    if let parent = parentPrefix, !parent.isEmpty {
+                        let cleanParent = parent.hasSuffix(".") ? String(parent.dropLast()) : parent
+                        return "\(cleanParent).\(currentNum)"
+                    } else {
+                        return "\(currentNum)."
+                    }
+                }()
+                let childPrefix: String? = {
+                    guard ordered else { return nil }
+                    if let parent = parentPrefix, !parent.isEmpty {
+                        let cleanParent = parent.hasSuffix(".") ? String(parent.dropLast()) : parent
+                        return "\(cleanParent).\(currentNum)"
+                    } else {
+                        return "\(currentNum)"
+                    }
+                }()
+
+                ReasoningListItemRow(
+                    item: item,
+                    ordered: ordered,
+                    depth: depth,
+                    numberLabel: numberLabel,
+                    childPrefix: childPrefix
+                )
             }
         }
     }
@@ -484,6 +511,8 @@ struct ReasoningListItemRow: View {
     let item: MarkdownListItem
     let ordered: Bool
     var depth: Int = 0
+    var numberLabel: String? = nil
+    var childPrefix: String? = nil
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.md) {
@@ -492,11 +521,20 @@ struct ReasoningListItemRow: View {
                 ForEach(Array(item.blocks.enumerated()), id: \.offset) { _, block in
                     switch block {
                     case let .orderedList(subItems):
-                        ReasoningListView(items: subItems, ordered: true, depth: depth + 1)
-                            .padding(.leading, 16)
+                        ReasoningListView(
+                            items: subItems,
+                            ordered: true,
+                            depth: depth + 1,
+                            parentPrefix: (ordered && item.taskState == nil) ? childPrefix : nil
+                        )
+                        .padding(.leading, 16)
                     case let .unorderedList(subItems):
-                        ReasoningListView(items: subItems, ordered: false, depth: depth + 1)
-                            .padding(.leading, 16)
+                        ReasoningListView(
+                            items: subItems,
+                            ordered: false,
+                            depth: depth + 1
+                        )
+                        .padding(.leading, 16)
                     default:
                         ReasoningBlockView(block: block)
                     }
@@ -510,19 +548,26 @@ struct ReasoningListItemRow: View {
     @ViewBuilder
     private var marker: some View {
         if let state = item.taskState {
-            Image(systemName: state ? "checkmark.circle.fill" : "circle")
+            Image(systemName: state ? "checkmark.square.fill" : "square")
                 .font(Theme.Typography.text(11, .medium))
                 .foregroundColor(state ? Theme.Colors.accent : Theme.Colors.contentTertiary)
                 .frame(minWidth: 12, alignment: .trailing)
         } else if ordered {
-            Text("\(item.number ?? 1).")
+            Text(numberLabel ?? "\(item.number ?? 1).")
                 .font(Theme.Typography.mono(10.5))
                 .foregroundColor(Theme.Colors.contentTertiary)
                 .frame(minWidth: 12, alignment: .trailing)
         } else {
-            Text(depth == 0 ? "•" : "◦")
-                .font(Theme.Typography.text(11, .medium))
-                .foregroundColor(Theme.Colors.contentTertiary)
+            let (symbol, fontSize, fontWeight, opacity): (String, CGFloat, Font.Weight, Double) = {
+                switch depth {
+                case 0: return ("•", 12.0, .semibold, 0.70)
+                case 1: return ("◦", 9.5, .regular, 0.55)
+                default: return ("–", 10.0, .medium, 0.45)
+                }
+            }()
+            Text(symbol)
+                .font(Theme.Typography.text(fontSize, fontWeight))
+                .foregroundColor(Theme.Colors.contentPrimary.opacity(opacity))
                 .frame(minWidth: 12, alignment: .trailing)
         }
     }

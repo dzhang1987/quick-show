@@ -174,50 +174,65 @@ struct MarkdownImageView: View {
         }
     }
 
-    /// 失败：弱化色圆角块内显示破损图示 + alt 文本 + url 小字链接，自适应尺寸克制排版。
+    /// 失败：紧凑自适应微卡片内显示破损图示 + alt 文本 + 优雅域名与外链，自适应尺寸克制排版。
     private var failureView: some View {
-        HStack(alignment: .top, spacing: Theme.Spacing.md) {
-            Image(systemName: "photo")
-                .font(Theme.Typography.text(13))
-                .foregroundColor(Theme.Colors.contentTertiary)
-                .padding(.top, 1)
+        let parsedURL = URL(string: url)
+        let hostName = parsedURL?.host
+        let isHttp = parsedURL?.scheme?.lowercased() == "http" || parsedURL?.scheme?.lowercased() == "https"
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(alt.isEmpty ? String(localized: "图片无法加载") : alt)
+        return HStack(alignment: .center, spacing: Theme.Spacing.md) {
+            Image(systemName: "photo.badge.exclamationmark")
+                .font(Theme.Typography.text(14, .regular))
+                .foregroundColor(Theme.Colors.contentTertiary)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(alt.isEmpty ? String(localized: "图片无法访问") : alt)
                     .font(Theme.Typography.text(12, .medium))
                     .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
 
-                if let linkURL = URL(string: url),
-                   let scheme = linkURL.scheme?.lowercased(),
-                   scheme == "http" || scheme == "https" {
-                    Link(destination: linkURL) {
-                        Text(url)
-                            .font(Theme.Typography.mono(10))
-                            .foregroundColor(Theme.Colors.accent)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                } else {
-                    Text(url)
+                if let host = hostName, !host.isEmpty {
+                    Text(host)
                         .font(Theme.Typography.mono(10))
                         .foregroundColor(Theme.Colors.contentTertiary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
                 }
             }
+
+            if let targetURL = parsedURL, isHttp {
+                Spacer(minLength: Theme.Spacing.sm)
+
+                Button {
+                    NSWorkspace.shared.open(targetURL)
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(String(localized: "打开源链接"))
+                            .font(Theme.Typography.text(10, .medium))
+                        Image(systemName: "arrow.up.right")
+                            .font(Theme.Typography.text(9, .semibold))
+                    }
+                    .foregroundColor(Theme.Colors.accent)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .background(Theme.Colors.accent.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .help(url)
+            }
         }
-        .padding(.horizontal, Theme.Spacing.xl)
-        .padding(.vertical, Theme.Spacing.md)
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.vertical, 8)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                .fill(Theme.Colors.surfaceTrack)
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(Theme.Colors.surfaceBadge)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                 .stroke(Theme.Colors.chatStrokeStrong, lineWidth: 0.5)
         )
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: 380, alignment: .leading)
     }
 
     // MARK: 加载
