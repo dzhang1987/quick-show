@@ -80,6 +80,11 @@
 
 ### Fixed
 
+- **会话向上滚动卡顿跳跃根治与虚拟化双阈值磁滞重构（`AIChatMessageList.swift` / `MarkdownTableView.swift`）**：
+  - **短会话全量实渲染豁免**：针对消息数 ≤ 25 条的会话全量常驻实渲染，彻底消灭短会话在【实渲染 ↔ 占位】之间不必要的卸载与高度抖动；
+  - **大会话双阈值“磁滞回差窗口”（Hysteresis Deadband）**：将虚拟化进入（±2.5 屏）与退出（±5.0 屏）门槛分离，构建宽达 2.5 屏的滞后安全死区，彻底消灭超长消息在单像素边界上的高频进出振荡循环；
+  - **Markdown 表格固有高度重构**：移除导致二段式异步测高与首帧高度突变的 `AdaptiveScrollBox`，≤10 行表格纯自适应同步撑开，>10 行大表锁定 380pt 内部滚动，彻底终结表格挂载引发的整屏坐标下推抖动。
+
 - **后台生成中惰性新建会话被误锁为生成态导致消息蒸发与无法创建会话根治（`AIChatState.swift` / `AIChatState+Streaming.swift` / `AIChatInputDock.swift` / `ChatSessionStore.swift` / `AIChatKeyMonitor.swift` / `AIChatView.swift` / `LaunchSubagentsTool.swift` / `SendMessageTool.swift`）**：
   - **Combine `@Published willSet` 时序穿透根治**：修复 `store.currentSessionId = nil` 进入惰性草稿待命态时，`$currentSessionId.sink` 响应由于 `@Published` 提前发射导致计算属性读取到底层旧会话 ID、进而误把后台会话的生成状态赋给全局 `isStreaming` 的严重缺陷；在 `syncStreamingState(targetSessionId:)` 增加显式目标会话参数，闭包直接消费新值，并在 `newSession()` 中显式锁定为 `false`；
   - **草稿待命态输入坞与发送动作绝对隔离**：在 `AIChatInputDock` 中引入 `isCurrentSessionStreaming` 严守逻辑，草稿待命态下发送按钮恒为向上箭头（↑），敲回车绝不误触发 steering/follow-up 插入指令，杜绝草稿在 `enqueueSteering` 处因 `currentSessionId == nil` 被静默丢弃并被 UI 层提前清空的恶性输入丢失 Bug；

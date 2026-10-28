@@ -105,11 +105,14 @@ struct SessionMessageList: View {
         self.scrollCoordinator = scrollCoordinator
         self.dockTotalHeight = dockTotalHeight
 
-        // 预置虚拟化窗口种子：首帧实渲染可见行，杜绝首帧全行占位白屏
+        // 预置虚拟化窗口种子：首帧实渲染可见行，杜绝首帧全行占位白屏；
+        // 消息数 ≤ 25 时全量预置实渲染，杜绝短会话一切占位切换开销。
         let initialWindow: Set<UUID>
         let snapshot = scrollSnapshots.wrappedValue[sessionId]
         let pinned = snapshot?.isPinned ?? true
-        if !pinned,
+        if messages.count <= 25 {
+            initialWindow = Set(messages.map(\.id))
+        } else if !pinned,
            let anchor = snapshot?.topVisibleMessageID,
            let idx = messages.firstIndex(where: { $0.id == anchor }) {
             let lo = max(0, idx - 7)
@@ -120,8 +123,14 @@ struct SessionMessageList: View {
         }
         self._virtualWindowIds = State(initialValue: initialWindow)
     }
-    /// 虚拟化窗口半径（屏数）：视口上方 2 屏 + 下方 2 屏——滚动惯性预热带。
-    private let virtualWindowScreens: CGFloat = 2
+    /// 虚拟化进入窗口半径（屏数）：视口上方 2.5 屏 + 下方 2.5 屏——滚动惯性预热带。
+    private let virtualWindowEnterScreens: CGFloat = 2.5
+    /// 虚拟化保持窗口半径（屏数）：视口上方 5.0 屏 + 下方 5.0 屏——滞后死区带（Hysteresis Deadband）。
+    /// 关键防线：保持退出门槛远宽于进入门槛，为子组件渲染、折行测量与图片加载留足整整 2.5 屏安全缓冲，
+    /// 彻底杜绝超长消息在单像素边界上【实渲染 ↔ 占位】反复横跳的恶性震荡循环。
+    private let virtualWindowExitScreens: CGFloat = 5.0
+    /// 虚拟化最小消息量门槛：小于等于此数量的短会话无需开启虚拟化，直接全量实渲染，消除占位抖动。
+    private let virtualizationThresholdCount: Int = 25
     /// 底部容差区高度（pt）：与 ChatScrollCoordinator.bottomTolerance 同源——容差哨兵
     /// 嵌在坞区留白内部，置于真正底部上方此距离。
     private let bottomTolerance: CGFloat = 18
@@ -434,6 +443,10 @@ struct SessionMessageList: View {
     /// 在 1-2 帧后收敛，但预置可让 frame 1 直接命中视口行、减少可见闪烁。
     private func seedVirtualWindowIfNeeded() {
         guard virtualWindowIds.isEmpty, !messages.isEmpty else { return }
+        if messages.count <= virtualizationThresholdCount {
+            virtualWindowIds = Set(messages.map(\.id))
+            return
+        }
         let snapshot = scrollSnapshots[sessionId]
         let pinned = snapshot?.isPinned ?? true
         if !pinned,
@@ -512,23 +525,49 @@ struct SessionMessageList: View {
         let resolved = bestID ?? frames.max(by: { $0.value.maxY < $1.value.maxY })?.key
         if resolved != topVisibleMessageID { topVisibleMessageID = resolved }
 
-        // 虚拟化窗口：视口 ±N 屏（滚动惯性预热带）。
-        let lowerBound = -virtualWindowScreens * viewportHeight
-        let upperBound = (1 + virtualWindowScreens) * viewportHeight
-        var ids: Set<UUID> = []
-        ids.reserveCapacity(frames.count)
-        for (id, frame) in frames where frame.maxY >= lowerBound && frame.minY <= upperBound {
-            ids.insert(id)
-            if abs((rowHeights[id] ?? -1) - frame.height) >= 1.5 {
-                rowHeights[id] = frame.height
+        // 会话消息量较少时（≤25 条）：全量保持实渲染，彻底杜绝小会话在占位与实测之间不必要的抖动
+        if messages.count <= virtualizationThresholdCount {
+            let allIds = Set(messages.map(\.id))
+            if virtualWindowIds != allIds {
+                virtualWindowIds = allIds
+            }
+            for (id, frame) in frames {
+                if abs((rowHeights[id] ?? -1) - frame.height) >= 1.5 {
+                    rowHeights[id] = frame.height
+                }
+            }
+            return
+        }
+
+        // 大会话采用双阈值磁滞窗口（Hysteresis Deadband）：
+        // - 进入条件（shouldEnter）：未在窗口内的行，进入视口 ±2.5 屏预热带时实渲染；
+        // - 保持条件（shouldStay）：已在窗口内的行，只有在完全超出视口 ±5.0 屏时才允许退回占位；
+        // 2.5 屏与 5.0 屏之间拥有巨大的滞后安全死区，彻底消灭临界跳跃。
+        let enterLower = -virtualWindowEnterScreens * viewportHeight
+        let enterUpper = (1 + virtualWindowEnterScreens) * viewportHeight
+        let exitLower = -virtualWindowExitScreens * viewportHeight
+        let exitUpper = (1 + virtualWindowExitScreens) * viewportHeight
+
+        var nextIds: Set<UUID> = []
+        nextIds.reserveCapacity(frames.count)
+
+        for (id, frame) in frames {
+            let currentlyIn = virtualWindowIds.contains(id)
+            let shouldStay = currentlyIn && (frame.maxY >= exitLower && frame.minY <= exitUpper)
+            let shouldEnter = !currentlyIn && (frame.maxY >= enterLower && frame.minY <= enterUpper)
+            if shouldStay || shouldEnter {
+                nextIds.insert(id)
+                if abs((rowHeights[id] ?? -1) - frame.height) >= 1.5 {
+                    rowHeights[id] = frame.height
+                }
             }
         }
         // 防白屏核心安全守卫：
         // 若当前会话存在消息，但本帧计算出的可见行集合异常为空（通常由于窗口 resize、
         // 侧栏展开/收拢时坐标空间瞬态注销导致），绝对不可将 virtualWindowIds 抹空导致整屏白屏！
         // 守卫策略：保持上一帧的有效可见集合；若历史集合亦为空，则预置激活兜底。
-        if !ids.isEmpty {
-            if ids != virtualWindowIds { virtualWindowIds = ids }
+        if !nextIds.isEmpty {
+            if nextIds != virtualWindowIds { virtualWindowIds = nextIds }
         } else if virtualWindowIds.isEmpty && !messages.isEmpty {
             seedVirtualWindowIfNeeded()
         }
