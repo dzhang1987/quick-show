@@ -4,7 +4,7 @@ import SwiftUI
 
 /// 选项胶囊：视觉沿用坞内微胶囊语言（surfaceTrack 底 + chatCapsuleRim 0.5pt 描边），
 /// 选中态换 accent 档（0.12 底 + 0.45 描边 + ✓，与状态徽标同一克制语言）；
-/// hover 提亮。选项说明文字经 tooltip 展示（胶囊保持单行紧凑）。
+/// 选中态依然保留 prefixNumber（如 ✓ 4 一直问下去），确保 1-9 盲操按键记忆永远清晰。
 struct DrawerOptionCapsule: View {
     let option: UserQuestionOption
     var prefixNumber: Int? = nil
@@ -19,10 +19,11 @@ struct DrawerOptionCapsule: View {
                 if selected {
                     Image(systemName: "checkmark")
                         .font(Theme.Typography.text(Theme.Typography.micro, .bold))
-                } else if let prefixNumber {
+                }
+                if let prefixNumber {
                     Text("\(prefixNumber)")
-                        .font(Theme.Typography.mono(Theme.Typography.micro, .medium))
-                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .font(Theme.Typography.mono(Theme.Typography.micro, selected ? .bold : .medium))
+                        .foregroundColor(selected ? Theme.Colors.accent : Theme.Colors.contentTertiary)
                 }
                 Text(option.label)
                     .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
@@ -58,6 +59,163 @@ struct DrawerOptionCapsule: View {
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
         }
         .help(option.description.map { "\(option.label)\n\($0)" } ?? option.label)
+    }
+}
+
+// MARK: - 自定义答案行内胶囊
+
+/// 自定义答案行内胶囊：完全融入选项流（高度与常规胶囊一致），消除外凸大长框。
+/// 编辑态（isEditing）：原地自适应展开为输入胶囊，直接打字；
+/// 已输入态（hasContent）：呈高亮选中态（✓ 5 ✏️ 预览文本 ✕）；
+/// 未输入态：虚线微弱胶囊（5 ✏️ 自定义…）。
+struct DrawerCustomOptionCapsule: View {
+    var prefixNumber: Int? = nil
+    @Binding var customText: String
+    let isEditing: Bool
+    @FocusState.Binding var isFocused: Bool
+    let onStartEditing: () -> Void
+    let onClear: () -> Void
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+
+    @State private var hovered = false
+
+    private var hasContent: Bool {
+        !customText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        Group {
+            if isEditing {
+                editingCapsule
+            } else {
+                normalButtonCapsule
+            }
+        }
+        .animation(.easeOut(duration: Theme.Motion.contentFade), value: isEditing)
+        .animation(.easeOut(duration: Theme.Motion.contentFade), value: hasContent)
+    }
+
+    // MARK: - 编辑中行内胶囊
+
+    private var editingCapsule: some View {
+        HStack(spacing: Theme.Spacing.xs) {
+            if let prefixNumber {
+                Text("\(prefixNumber)")
+                    .font(Theme.Typography.mono(Theme.Typography.micro, .bold))
+                    .foregroundColor(Theme.Colors.accent)
+            }
+
+            Image(systemName: "pencil")
+                .font(Theme.Typography.text(Theme.Typography.micro, .bold))
+                .foregroundColor(Theme.Colors.accent)
+
+            TextField(String(localized: "输入自定义答案…"), text: $customText)
+                .textFieldStyle(.plain)
+                .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                .foregroundColor(Theme.Colors.contentPrimary)
+                .focused($isFocused)
+                .frame(minWidth: 120, maxWidth: 200)
+                .onSubmit {
+                    onSubmit()
+                }
+                .onExitCommand {
+                    onCancel()
+                }
+
+            if hasContent {
+                Button(action: onClear) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(Theme.Typography.text(Theme.Typography.micro))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                }
+                .buttonStyle(.plain)
+                .help(String(localized: "清空"))
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.md)
+        .background(
+            Capsule(style: .continuous)
+                .fill(Theme.Colors.surfaceCard)
+        )
+        .overlay(
+            Capsule(style: .continuous)
+                .strokeBorder(Theme.Colors.accent.opacity(0.6), lineWidth: 1.0)
+        )
+    }
+
+    // MARK: - 常规/有内容胶囊
+
+    private var normalButtonCapsule: some View {
+        Button(action: onStartEditing) {
+            HStack(spacing: Theme.Spacing.xs) {
+                if hasContent {
+                    Image(systemName: "checkmark")
+                        .font(Theme.Typography.text(Theme.Typography.micro, .bold))
+                }
+                if let prefixNumber {
+                    Text("\(prefixNumber)")
+                        .font(Theme.Typography.mono(Theme.Typography.micro, hasContent ? .bold : .medium))
+                        .foregroundColor(hasContent ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+                }
+
+                Image(systemName: "pencil")
+                    .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+
+                Text(hasContent ? customPreviewText : String(localized: "自定义…"))
+                    .font(Theme.Typography.text(Theme.Typography.footnote, .medium))
+                    .lineLimit(1)
+
+                if hasContent {
+                    Button(action: onClear) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(Theme.Typography.text(Theme.Typography.micro))
+                            .foregroundColor(Theme.Colors.contentTertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "清空自定义回答"))
+                }
+            }
+            .foregroundColor(
+                hasContent
+                    ? Theme.Colors.accent
+                    : (hovered ? Theme.Colors.iconHover : Theme.Colors.contentSecondaryStrong)
+            )
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.md)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(
+                        hasContent
+                            ? Theme.Colors.accent.opacity(0.12)
+                            : (hovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceTrack)
+                    )
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        hasContent
+                            ? Theme.Colors.accent.opacity(0.45)
+                            : (hovered ? Theme.Colors.accent.opacity(0.25) : Theme.Colors.chatCapsuleRim),
+                        style: StrokeStyle(lineWidth: 0.5, dash: hasContent ? [] : [3, 3])
+                    )
+            )
+            .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
+        .help(hasContent ? customText : String(localized: "输入自定义答案"))
+    }
+
+    private var customPreviewText: String {
+        let trimmed = customText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.count > 10 {
+            return "\(trimmed.prefix(10))…"
+        }
+        return trimmed
     }
 }
 

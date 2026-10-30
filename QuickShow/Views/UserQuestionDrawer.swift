@@ -6,27 +6,31 @@ extension Notification.Name {
     static let quickShowSubmitUserQuestions = Notification.Name("quickShowSubmitUserQuestions")
     static let quickShowSelectQuestionOption = Notification.Name("quickShowSelectQuestionOption")
     static let quickShowNavigateQuestion = Notification.Name("quickShowNavigateQuestion")
+    static let quickShowDefocusQuestionCustomInput = Notification.Name("quickShowDefocusQuestionCustomInput")
 }
 
 // MARK: - 用户提问抽屉
 
-/// AI 提问面板：每题 = header 短标签 + 问题文本 + 选项胶囊组（单选互斥 / 多选开关态）；
-/// 底部统一输入条（自由答案，⏎ 只换行不提交，提交统一走按钮）+ 取消/提交按钮。
-/// 提交校验：至少一题有选中项、或统一输入条非空，才可提交。
+/// AI 提问面板：每题 = header 短标签 + 问题文本 + 选项胶囊组（末尾内嵌自定义行内胶囊）；
+/// 题目区高度最高限制为视口 80%，未超出自适应紧凑包裹，底线附带充裕呼吸感；
+/// 单选题严格互斥（选预选项即清空自定义，选自定义即清空预选项）；
+/// 自定义输入为空时按 ESC 自动恢复原选中项，无缝退回选择题模式；
+/// 数字键在打字模式下 100% 放行，绝不误触选项。
 struct UserQuestionDrawerContent: View {
     let request: UserQuestionRequest
 
     /// 各题选中态（question.id → 选中 option id 集合）。
     @State private var selections: [UUID: Set<UUID>] = [:]
+    /// 单选题进入自定义前的历史选项记忆（用于取消自定义时秒级恢复，防漏选空提交）。
+    @State private var previousSelectionsBeforeCustom: [UUID: Set<UUID>] = [:]
+    /// 各题自定义自由文本（question.id → 自定义文本）。
+    @State private var customTexts: [UUID: String] = [:]
+    /// 当前正在行内编辑自定义的问题 ID（nil 表示无编辑态）。
+    @State private var editingQuestionID: UUID? = nil
     /// 当前聚焦的题目索引（用于多题场景下的键盘焦点与数字键 1-9 路由）。
     @State private var focusedQuestionIndex: Int = 0
-    /// 自由输入框是否获得焦点（防止进入抽屉时自动抢占光标）
-    @FocusState private var isCustomInputFocused: Bool
-    /// 底部统一输入条的自由文本。
-    /// 语义决定：提交时同一段文本写入**每一题**的 customText——
-    /// 单题场景即该题自定义答案（直觉正确）；多题场景视为对整组提问的整体补充，
-    /// 模型按题阅读答案时每题都能读到（信息冗余优于丢失）。
-    @State private var customText = ""
+    /// 行内输入框激活状态。
+    @FocusState private var focusedInputIsActive: Bool
     /// 题目区自然高度测量（用于自适应，消除多余空白）
     @State private var questionsContentHeight: CGFloat = 0
 
@@ -43,10 +47,25 @@ struct UserQuestionDrawerContent: View {
         _focusedQuestionIndex = State(initialValue: 0)
     }
 
-    /// 可提交判据：任一题有选中项，或统一输入条有非空白内容。
+    /// 题目区最大允许高度（最高为窗口高度的 80%，动态自适应，兜底 420pt）
+    private var maxQuestionsHeight: CGFloat {
+        if let windowHeight = NSApp.keyWindow?.contentView?.bounds.height, windowHeight > 200 {
+            return windowHeight * 0.8
+        }
+        return 420
+    }
+
+    /// 题目区实际自适应高度（未超自然紧凑，超出锁在 80% 并滚动）
+    private var effectiveQuestionsHeight: CGFloat? {
+        guard questionsContentHeight > 0 else { return nil }
+        return min(questionsContentHeight, maxQuestionsHeight)
+    }
+
+    /// 可提交判据：任一题有选中项，或任一题有非空白自定义内容。
     private var canSubmit: Bool {
         let hasSelection = selections.values.contains { !$0.isEmpty }
-        return hasSelection || !customText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasCustom = customTexts.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return hasSelection || hasCustom
     }
 
     var body: some View {
@@ -67,10 +86,8 @@ struct UserQuestionDrawerContent: View {
                 }
             }
 
-            // 题目区：自适应内容高度；超出最大高度时启用内部滚动，未超出时紧凑包裹，消除虚空
+            // 题目区：最高 80% 视口，自适应内容高度，底线保留呼吸感
             questionsSection
-
-            freeInputBar
 
             // 按钮行：消极在左、积极在右
             HStack(spacing: Theme.Spacing.lg) {
@@ -86,15 +103,30 @@ struct UserQuestionDrawerContent: View {
         .padding(.horizontal, Theme.Spacing.section)
         .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xl)
+        .escapeResponder(
+            id: "question_custom_input",
+            isActive: editingQuestionID != nil
+        ) {
+            cancelEditingIfEmpty()
+            return true
+        }
         .onPreferenceChange(DrawerQuestionsHeightPreferenceKey.self) { height in
             questionsContentHeight = height
         }
         .onAppear {
             // 抽屉展开时默认不让输入框持焦，确保进入时属于纯键盘盲操模式
-            isCustomInputFocused = false
+            focusedInputIsActive = false
+            editingQuestionID = nil
+            ChatInteractionCenter.shared.isQuestionInlineEditing = false
             DispatchQueue.main.async {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
+        }
+        .onDisappear {
+            ChatInteractionCenter.shared.isQuestionInlineEditing = false
+        }
+        .onChange(of: editingQuestionID) { newID in
+            ChatInteractionCenter.shared.isQuestionInlineEditing = (newID != nil)
         }
         .onReceive(NotificationCenter.default.publisher(for: .quickShowSubmitUserQuestions)) { _ in
             if canSubmit {
@@ -105,17 +137,27 @@ struct UserQuestionDrawerContent: View {
             guard let step = note.userInfo?["step"] as? Int, !request.questions.isEmpty else { return }
             let total = request.questions.count
             let nextIndex = (focusedQuestionIndex + step + total) % total
+            cancelEditingIfEmpty()
             withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                 focusedQuestionIndex = nextIndex
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .quickShowDefocusQuestionCustomInput)) { _ in
+            cancelEditingIfEmpty()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .quickShowSelectQuestionOption)) { note in
+            // 如果当前正处于行内打字编辑状态，坚决放行打字，不响应数字切换
+            guard editingQuestionID == nil else { return }
+
             guard let index = note.userInfo?["index"] as? Int,
                   focusedQuestionIndex >= 0 && focusedQuestionIndex < request.questions.count else { return }
             let currentQuestion = request.questions[focusedQuestionIndex]
             if index >= 0 && index < currentQuestion.options.count {
                 let targetOption = currentQuestion.options[index]
-                toggleOption(targetOption.id, for: currentQuestion)
+                selectOption(targetOption.id, for: currentQuestion)
+            } else if index == currentQuestion.options.count {
+                // 命中了末尾自定义胶囊（第 N+1 项）
+                startEditingCustom(for: currentQuestion, index: focusedQuestionIndex)
             }
         }
     }
@@ -142,36 +184,28 @@ struct UserQuestionDrawerContent: View {
 
     @ViewBuilder
     private var questionsSection: some View {
-        Group {
-            if questionsContentHeight > AIChatDrawerMetrics.questionsMaxHeight {
-                ScrollViewReader { scrollProxy in
-                    ScrollView(.vertical, showsIndicators: false) {
-                        questionsContent
-                    }
-                    .frame(height: AIChatDrawerMetrics.questionsMaxHeight)
-                    .onChange(of: focusedQuestionIndex) { newIndex in
-                        guard newIndex >= 0 && newIndex < request.questions.count else { return }
-                        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                            scrollProxy.scrollTo(request.questions[newIndex].id, anchor: .center)
-                        }
-                    }
-                }
-            } else {
+        ScrollViewReader { scrollProxy in
+            ScrollView(.vertical, showsIndicators: questionsContentHeight > maxQuestionsHeight) {
                 questionsContent
+                    .padding(.bottom, Theme.Spacing.xl) // 保留底线充裕内边距与呼吸感
+            }
+            .frame(height: effectiveQuestionsHeight)
+            .onChange(of: focusedQuestionIndex) { newIndex in
+                guard newIndex >= 0 && newIndex < request.questions.count else { return }
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    scrollProxy.scrollTo(request.questions[newIndex].id, anchor: .center)
+                }
             }
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            // 点击题目区空白处：退出底部输入框焦点，切回选择题盲操模式
-            isCustomInputFocused = false
-            NSApp.keyWindow?.makeFirstResponder(nil)
+            cancelEditingIfEmpty()
         }
     }
 
     // MARK: 单题区块
 
-    /// 单题：header 短标签（弱化小字 + 单选/多选提示）+ 问题文本 + 选项胶囊流式组。
-    /// 多题模式下包裹聚焦容器卡片，未聚焦时去除选项数字标号，聚焦时高亮并显示 1-9 快捷标号。
+    /// 单题：header 短标签（弱化小字 + 单选/多选提示）+ 问题文本 + 选项胶囊流式组（含行内自定义胶囊）。
     private func questionBlock(_ question: UserQuestion, index: Int) -> some View {
         let isMultiQuestion = request.questions.count > 1
         let isFocused = (index == focusedQuestionIndex)
@@ -216,17 +250,34 @@ struct UserQuestionDrawerContent: View {
                         prefixNumber: (!isMultiQuestion || isFocused) ? (optIndex + 1) : nil,
                         selected: selections[question.id]?.contains(option.id) == true
                     ) {
-                        // 点击选项胶囊：如果输入框持焦则立即释放焦点
-                        isCustomInputFocused = false
-                        NSApp.keyWindow?.makeFirstResponder(nil)
-                        if isMultiQuestion && focusedQuestionIndex != index {
-                            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                                focusedQuestionIndex = index
-                            }
-                        }
-                        toggleOption(option.id, for: question)
+                        selectOption(option.id, for: question)
                     }
                 }
+
+                // 末尾自定义行内胶囊（第 N+1 项，高度与常规胶囊一致，零垂直膨胀）
+                DrawerCustomOptionCapsule(
+                    prefixNumber: (!isMultiQuestion || isFocused) ? (question.options.count + 1) : nil,
+                    customText: Binding(
+                        get: { customTexts[question.id] ?? "" },
+                        set: { customTexts[question.id] = $0 }
+                    ),
+                    isEditing: editingQuestionID == question.id,
+                    isFocused: $focusedInputIsActive,
+                    onStartEditing: {
+                        startEditingCustom(for: question, index: index)
+                    },
+                    onClear: {
+                        clearCustomInput(for: question)
+                    },
+                    onSubmit: {
+                        if canSubmit {
+                            submit()
+                        }
+                    },
+                    onCancel: {
+                        cancelEditingIfEmpty()
+                    }
+                )
             }
         }
         .padding(isMultiQuestion ? Theme.Spacing.lg : 0)
@@ -251,8 +302,7 @@ struct UserQuestionDrawerContent: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            isCustomInputFocused = false
-            NSApp.keyWindow?.makeFirstResponder(nil)
+            cancelEditingIfEmpty()
             if isMultiQuestion && focusedQuestionIndex != index {
                 withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
                     focusedQuestionIndex = index
@@ -261,8 +311,21 @@ struct UserQuestionDrawerContent: View {
         }
     }
 
-    /// 选项开关：多选 = toggle；单选 = 互斥替换（再点已选中项可取消，留出「纯自定义答案」通路）。
-    private func toggleOption(_ optionID: UUID, for question: UserQuestion) {
+    // MARK: - 交互与互斥逻辑
+
+    /// 选择常规选项：
+    /// 单选下：互斥清空自定义回答与编辑态；
+    /// 多选下：toggle 开关态，不影响自定义。
+    private func selectOption(_ optionID: UUID, for question: UserQuestion) {
+        cancelEditingIfEmpty()
+
+        if let idx = request.questions.firstIndex(where: { $0.id == question.id }),
+           request.questions.count > 1 && focusedQuestionIndex != idx {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                focusedQuestionIndex = idx
+            }
+        }
+
         var current = selections[question.id] ?? []
         if question.multiple {
             if current.contains(optionID) {
@@ -271,58 +334,103 @@ struct UserQuestionDrawerContent: View {
                 current.insert(optionID)
             }
         } else {
-            current = current.contains(optionID) ? [] : [optionID]
+            // 单选严格互斥：选中目标选项，同时彻底清空自定义答案
+            current = [optionID]
+            customTexts[question.id] = ""
+            if editingQuestionID == question.id {
+                editingQuestionID = nil
+            }
         }
         selections[question.id] = current
     }
 
-    // MARK: 统一输入条与提交
-
-    /// 底部统一输入条：自由答案入口（与已选项一并提交）。固定 2 行高度，超出内部滚动。
-    /// ⏎ 只换行不提交（TextEditor 默认行为），提交统一走按钮。
-    private var freeInputBar: some View {
-        ZStack(alignment: .topLeading) {
-            TextEditor(text: $customText)
-                .focused($isCustomInputFocused)
-                .scrollContentBackground(.hidden)
-                // 隐藏垂直滚动条：超出 2 行的内容仍可滚轮内部滚动
-                .scrollIndicators(.never)
-                .font(Theme.Typography.text(Theme.Typography.body))
-                .foregroundColor(Theme.Colors.contentPrimary)
-                .frame(height: AIChatDrawerMetrics.freeInputHeight)
-            if customText.isEmpty {
-                Text("输入自定义答案…")
-                    .font(Theme.Typography.text(Theme.Typography.body))
-                    .foregroundColor(Theme.Colors.idleText)
-                    // 补偿 TextEditor 默认文本内边距，placeholder 与光标对齐
-                    .padding(.leading, Theme.Spacing.chip)
-                    .padding(.top, Theme.Spacing.xxs)
-                    .allowsHitTesting(false)
+    /// 激活自定义输入：
+    /// 单选下：清空所有预选选项（严格互斥），并记忆当前选项用于取消时恢复；
+    /// 多选下：保留已有选项。
+    private func startEditingCustom(for question: UserQuestion, index: Int) {
+        if request.questions.count > 1 && focusedQuestionIndex != index {
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                focusedQuestionIndex = index
             }
         }
-        .padding(.horizontal, Theme.Spacing.xl)
-        .padding(.vertical, Theme.Spacing.md)
-        .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                .fill(isCustomInputFocused ? Theme.Colors.surfaceCard : Theme.Colors.surfaceInset)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                .stroke(
-                    isCustomInputFocused ? Theme.Colors.accent.opacity(0.4) : Theme.Colors.cardStroke,
-                    lineWidth: isCustomInputFocused ? 1.0 : 0.5
-                )
-        )
+
+        // 单选严格互斥：激活自定义即取消所有预选项，同时记忆先前选项以便 ESC 取消时秒级恢复
+        if !question.multiple {
+            if let current = selections[question.id], !current.isEmpty {
+                previousSelectionsBeforeCustom[question.id] = current
+            } else if let first = question.options.first {
+                previousSelectionsBeforeCustom[question.id] = [first.id]
+            }
+            selections[question.id] = []
+        }
+
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+            editingQuestionID = question.id
+        }
+        ChatInteractionCenter.shared.isQuestionInlineEditing = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            focusedInputIsActive = true
+        }
     }
 
-    /// 提交：按题组装答案集（选中项 + 统一自由文本），唤醒逻辑层挂起。
+    /// 清空某题自定义输入并收起，单选题自动恢复先前的选项
+    private func clearCustomInput(for question: UserQuestion) {
+        customTexts[question.id] = ""
+        ChatInteractionCenter.shared.isQuestionInlineEditing = false
+        withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+            if editingQuestionID == question.id {
+                editingQuestionID = nil
+            }
+            if !question.multiple {
+                if let prev = previousSelectionsBeforeCustom[question.id], !prev.isEmpty {
+                    selections[question.id] = prev
+                } else if let first = question.options.first {
+                    selections[question.id] = [first.id]
+                }
+            }
+        }
+        focusedInputIsActive = false
+        NSApp.keyWindow?.makeFirstResponder(nil)
+    }
+
+    /// 若当前编辑框为空，失焦收起并恢复单选题先前选中的选项；已有内容时收拢为胶囊态
+    private func cancelEditingIfEmpty() {
+        focusedInputIsActive = false
+        ChatInteractionCenter.shared.isQuestionInlineEditing = false
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        if let editingID = editingQuestionID {
+            let text = customTexts[editingID] ?? ""
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    editingQuestionID = nil
+                    // 恢复该单选题进入自定义前选中的选项（如推荐项 1），防漏选空提交
+                    if let question = request.questions.first(where: { $0.id == editingID }), !question.multiple {
+                        if let prev = previousSelectionsBeforeCustom[editingID], !prev.isEmpty {
+                            selections[editingID] = prev
+                        } else if let first = question.options.first {
+                            selections[editingID] = [first.id]
+                        }
+                    }
+                }
+            } else {
+                // 已有非空内容：按 ESC 退出光标并收拢为选中胶囊态，保持盲操
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    editingQuestionID = nil
+                }
+            }
+        }
+    }
+
+    // MARK: 提交
+
+    /// 提交：按题组装答案集（选中项 + 各题专属自由文本），唤醒逻辑层挂起。
     private func submit() {
-        let trimmed = customText.trimmingCharacters(in: .whitespacesAndNewlines)
         var answers: [UUID: QuestionAnswer] = [:]
         for question in request.questions {
+            let custom = (customTexts[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             answers[question.id] = QuestionAnswer(
                 selectedOptionIDs: selections[question.id] ?? [],
-                customText: trimmed
+                customText: custom
             )
         }
         ChatInteractionCenter.shared.submitQuestions(

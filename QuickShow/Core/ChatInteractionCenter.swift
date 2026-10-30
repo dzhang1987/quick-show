@@ -111,6 +111,9 @@ final class ChatInteractionCenter: ObservableObject {
     /// 当前挂起的抽屉请求；nil = 无请求。UI 观察此属性渲染抽屉。
     @Published private(set) var request: ChatDrawerRequest?
 
+    /// 提问抽屉当前是否处于自定义行内打字编辑状态（供按键调度器做确定性状态路由，消灭全局 firstResponder 猜测）
+    @Published var isQuestionInlineEditing: Bool = false
+
     // MARK: - 私有状态
 
     /// UI 是否在场（onAppear/onDisappear 经 markUIActive 维护）
@@ -240,6 +243,7 @@ final class ChatInteractionCenter: ObservableObject {
               let continuation = questionContinuation else {
             return
         }
+        isQuestionInlineEditing = false
         clearPendingNotification()
         questionContinuation = nil
         request = nil
@@ -251,6 +255,7 @@ final class ChatInteractionCenter: ObservableObject {
         guard case .userQuestions? = request, let continuation = questionContinuation else {
             return
         }
+        isQuestionInlineEditing = false
         clearPendingNotification()
         questionContinuation = nil
         request = nil

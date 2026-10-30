@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **AI 提问抽屉自定义答案行内胶囊化与全键盘盲操状态机重构（`UserQuestionDrawer.swift` / `DrawerWidgets.swift` / `AIChatKeyMonitor.swift` / `ChatInteractionCenter.swift` / `AIChatDrawerPanel.swift` / `ToolConfirmationDrawer.swift`）**：
+  - **每题独立自定义与行内展开胶囊（Inline Expanding Capsule）**：彻底移除了原先抽屉底部全局统占的大文本框，在每个问题选项流末尾内嵌轻量级自定义行内胶囊（`[5 ✏️ 自定义…]`），高度与普通胶囊一致（28pt），完全不占用额外垂直空间，彻底根除多题问卷选项被撑爆截断的问题；
+  - **单选互斥严格契约与历史选项记忆**：单选题模式下，选择自定义时自动清空预选选项；选择常规选项时自动清空自定义并折叠收起；记忆进入自定义前的选项，若未打字按 Esc 失焦时自动秒级恢复原预选（如推荐选项 1），杜绝漏选空提交；
+  - **确定性双模状态机（彻底根治数字与方向键冲突）**：废弃对全局 `firstResponder` 的脆弱猜测，由 `ChatInteractionCenter.isQuestionInlineEditing` 显式驱动状态机——纯盲操模式下数字键 `1-9` 100% 精准选择选项、`↑ / ↓` 100% 切换聚焦题目、`Enter` 秒级提交答案；行内打字模式下数字键 100% 放行文本输入（支持输入“10个月”、“1年”等数字开头文本）、方向键移动光标；
+  - **两段式 Esc 与回车秒级提交**：打字模式下按 Esc 仅退出编辑并恢复预选选项（抽屉绝不误关），打字完成后或盲操模式下敲 Enter 秒级触发整单提交；选项胶囊即使在选中态依然保留数字标号（如 `✓ 4 一直问下去`），盲操记忆不中断；
+  - **视口自适应 80% 弹性限高与抽屉呼吸感**：题目区最大高度改为视口 80% 动态自适应，滚动区域底部追加充裕内边距；同步优化权限申请抽屉（`ToolConfirmationDrawer`）底部呼吸边距，彻底消灭贴边压迫感。
+
 ### Added
 
 - **AI 工具调用动作意图透明化与权限确认决策降维（`AIToolRegistry.swift` / `ToolHelpers.swift` / `ToolConfirmationDrawer.swift` / `AIToolCardView.swift` / `AgentProcessDisclosureView.swift` / `AIChatService+RequestEncoding.swift` / `AntigravityCloudCodeAdapter.swift` / `QoderProvider.swift`）**：

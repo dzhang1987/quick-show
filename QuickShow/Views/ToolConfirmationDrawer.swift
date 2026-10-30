@@ -66,15 +66,15 @@ struct ToolConfirmationDrawerContent: View {
 
             // 终端风格代码卡片（自带独立顶栏，绝无按钮遮挡代码）
             commandOrArgumentsBlock
-                .padding(.bottom, !request.riskLevel.isDestructive ? Theme.Spacing.lg : Theme.Spacing.xl)
+                .padding(.bottom, !request.riskLevel.isDestructive ? Theme.Spacing.lg : Theme.Spacing.xxl)
 
             // 记忆放行规则微胶囊条
             if !request.riskLevel.isDestructive {
                 rememberRuleToggle
-                    .padding(.bottom, Theme.Spacing.xl)
+                    .padding(.bottom, Theme.Spacing.xxl)
             }
 
-            // 底部操作按钮行：严格与 ask_user 保持一致（左退右进，紧凑轻盈）
+            // 底部操作按钮行：严格与 ask_user 保持一致（左退右进，紧凑轻盈，上方保留充裕呼吸边距）
             actionButtonsRow
         }
         .padding(.horizontal, Theme.Spacing.section)
@@ -271,8 +271,9 @@ struct ToolConfirmationDrawerContent: View {
     private var normalArgumentsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
             if argumentsContentHeight > AIChatDrawerMetrics.argumentsMaxHeight {
-                ScrollView(.vertical, showsIndicators: false) {
+                ScrollView(.vertical, showsIndicators: true) {
                     argumentsContent
+                        .padding(.bottom, Theme.Spacing.md)
                 }
                 .frame(height: AIChatDrawerMetrics.argumentsMaxHeight, alignment: .top)
             } else {

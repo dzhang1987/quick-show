@@ -89,25 +89,11 @@ final class AIChatKeyMonitor {
             }
         }
 
-        // ESC：优先交给 EscapePolicyCenter 策略化调度中心自顶向下消费
+        // ESC：统一交由 EscapePolicyCenter 策略化调度中心按 LIFO 栈自顶向下消费与防穿透
         if event.keyCode == KeyEquivalentCode.escape.rawValue {
             // P0: 优先放行系统输入法 marked text 组字，让 IME 取消拼音
             if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
                 return event
-            }
-            // 提问抽屉在场特化：若用户焦点停留在自由输入框，ESC 优先退出输入状态，切回选择题盲操模式
-            let handledDrawerDefocus = MainActor.assumeIsolated { () -> Bool in
-                guard let req = ChatInteractionCenter.shared.request, case .userQuestions = req else {
-                    return false
-                }
-                if event.window?.firstResponder is NSTextView {
-                    event.window?.makeFirstResponder(nil)
-                    return true
-                }
-                return false
-            }
-            if handledDrawerDefocus {
-                return nil
             }
             let handled = MainActor.assumeIsolated {
                 EscapePolicyCenter.shared.handleEscape()
@@ -145,17 +131,9 @@ final class AIChatKeyMonitor {
                         return true
                     }
                 case .userQuestions:
-                    if cleanFlags == [.command] {
-                        NotificationCenter.default.post(name: .quickShowSubmitUserQuestions, object: nil)
-                        return true
-                    } else if cleanFlags.isEmpty {
-                        // 焦点在文本输入区时普通回车用于换行，未在文本框输入时直接回车提交默认选项
-                        if let textView = event.window?.firstResponder as? NSTextView, !textView.string.isEmpty {
-                            return false
-                        }
-                        NotificationCenter.default.post(name: .quickShowSubmitUserQuestions, object: nil)
-                        return true
-                    }
+                    // 提问抽屉在场时：回车统一作为提交主动作（与按钮「提交答案 ⏎」语义严格一致）
+                    NotificationCenter.default.post(name: .quickShowSubmitUserQuestions, object: nil)
+                    return true
                 }
                 return false
             }
@@ -165,15 +143,12 @@ final class AIChatKeyMonitor {
         }
 
         // 提问抽屉在场时的键盘盲操：Tab / ↑ / ↓ 切换题目焦点，数字键 1-9 切换选项
-        // Tab / Shift+Tab：切换题目焦点（提问抽屉在场时，无论是否在输入框，Tab 均用于切题并释放输入焦点）
+        // Tab / Shift+Tab：切换题目焦点（提问抽屉在场时，Tab 均用于切题）
         if event.keyCode == KeyEquivalentCode.tab.rawValue {
             let step = cleanFlags.contains(.shift) ? -1 : 1
             let handledTab = MainActor.assumeIsolated { () -> Bool in
                 guard let req = ChatInteractionCenter.shared.request,
                       case .userQuestions(let userQuestionsReq) = req else { return false }
-                if event.window?.firstResponder is NSTextView {
-                    event.window?.makeFirstResponder(nil)
-                }
                 if userQuestionsReq.questions.count > 1 {
                     NotificationCenter.default.post(
                         name: .quickShowNavigateQuestion,
@@ -193,13 +168,9 @@ final class AIChatKeyMonitor {
                 guard let req = ChatInteractionCenter.shared.request,
                       case .userQuestions(let userQuestionsReq) = req,
                       userQuestionsReq.questions.count > 1 else { return false }
-                if let tv = event.window?.firstResponder as? NSTextView {
-                    // 输入框为空时（通常为自动持焦），按 ↑/↓ 脱离输入框并切题；已有内容时保留光标移动
-                    if tv.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        event.window?.makeFirstResponder(nil)
-                    } else {
-                        return false
-                    }
+                // 若当前正处于行内自定义打字编辑态，方向键保留给文本输入光标移动
+                if ChatInteractionCenter.shared.isQuestionInlineEditing {
+                    return false
                 }
                 NotificationCenter.default.post(
                     name: .quickShowNavigateQuestion,
@@ -238,13 +209,9 @@ final class AIChatKeyMonitor {
                     guard let req = ChatInteractionCenter.shared.request, case .userQuestions = req else {
                         return false
                     }
-                    if let tv = event.window?.firstResponder as? NSTextView {
-                        // 兜底：若输入框为空（未输入任何内容），按 1-9 直接脱离输入框并选中选项
-                        if tv.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            event.window?.makeFirstResponder(nil)
-                        } else {
-                            return false // 输入框已有文本时放行打字输入
-                        }
+                    // 状态机核心：若处于行内打字编辑态，数字键 1-9 100% 原生放行打字输入！
+                    if ChatInteractionCenter.shared.isQuestionInlineEditing {
+                        return false
                     }
                     NotificationCenter.default.post(
                         name: .quickShowSelectQuestionOption,
