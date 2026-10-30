@@ -124,26 +124,47 @@ struct ToolCallRow: View {
         AIToolRegistry.shared.tool(named: record.name)?.displayName ?? record.name
     }
 
+    /// 动作意图（Action Intent，提取自参数中的 description/title/intent 或智能语义）
+    private var actionIntent: String? {
+        ToolIntentExtractor.extractIntent(from: record.arguments, fallbackToolName: nil)
+    }
+
     private var header: some View {
         Button {
             setExpanded(!expanded)
         } label: {
             HStack(spacing: Theme.Spacing.md) {
-                // 主标题：中文展示名（正文常规字族，字号与色阶更克制）
-                Text(displayName)
-                    .font(Theme.Typography.text(11.5, .medium))
-                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                // 左侧主标题：强左对齐，优先展示核心动作意图；若无意图则降级展示工具名
+                if let intent = actionIntent {
+                    Text(intent)
+                        .font(Theme.Typography.text(11.5, .medium))
+                        .foregroundColor(Theme.Colors.contentPrimary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                } else {
+                    Text(displayName)
+                        .font(Theme.Typography.text(11.5, .medium))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 Spacer(minLength: 0)
-                // 蛇形名降为次要等宽小字：与协议层 / 日志对照用；
-                // 主标题已是蛇形名（降级路径）时不重复展示
-                if displayName != record.name {
+
+                // 右侧次要信息：若已有意图为主标题，工具名在此作为轻量辅助信息展示，不抢注意力
+                if actionIntent != nil {
+                    Text(displayName)
+                        .font(Theme.Typography.text(10, .regular))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+                        .lineLimit(1)
+                } else if displayName != record.name {
+                    // 无意图且主标题为中文名时，右侧显示蛇形名对照
                     Text(record.name)
                         .font(Theme.Typography.mono(10))
                         .foregroundColor(Theme.Colors.contentTertiary)
                         .lineLimit(1)
                 }
+
                 if let taskId = extractTaskId(from: record), let uuid = UUID(uuidString: taskId) {
                     Button {
                         ChatSessionStore.shared.currentSessionId = uuid

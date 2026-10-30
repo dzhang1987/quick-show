@@ -6,6 +6,12 @@
 
 ### Added
 
+- **AI 工具调用动作意图透明化与权限确认决策降维（`AIToolRegistry.swift` / `ToolHelpers.swift` / `ToolConfirmationDrawer.swift` / `AIToolCardView.swift` / `AgentProcessDisclosureView.swift` / `AIChatService+RequestEncoding.swift` / `AntigravityCloudCodeAdapter.swift` / `QoderProvider.swift`）**：
+  - **Schema 统一混入意图参数（OCP 开闭原则）**：在 `AITool` 协议扩展中引入 `effectiveParametersSchema`，自动为全部内置工具透明混入必填的 `description` 动作意图入参（10~30 字中文说明），引导模型在调用工具时显式声明“要做什么/为什么做”，各工具业务实现零感知零散弹式污染；
+  - **意图提取与自然语义解析（`ToolIntentExtractor`）**：统一从调用参数中提取 `description` / `title` / `intent`，并结合参数上下文提供智能语义兜底解析（如命令/文件路径提取），杜绝生硬 JSON 截断；
+  - **权限确认抽屉意图置顶决策降维（`ToolConfirmationDrawerContent`）**：重塑危险工具拦截抽屉标题行，大号字直接呈现动作意图（如“拉取 Git 远程仓库最新变更以排查冲突”），底层工具名降为辅助微标签，彻底消除用户充当“代码安全审计员”的人肉反推成本；
+  - **工具卡片与过程流意图强对齐（`AIToolCardView` / `AgentProcessDisclosureView`）**：折叠卡片行左侧主文本强左对齐展示动作意图，消灭徽标长短不一的视觉杂乱；底层工具名移至右侧次级位置弱化展示；智能体执行状态栏实时展示当前正在执行的具体意图。
+
 - **对话历史 `@` 快捷引用与跨块划词即时引用体系（`AtMentionQuotePopupView.swift` / `ChatSelectionQuoteCoordinator` / `AIChatInputFields.swift` / `AIChatState.swift` / `NativeTextFlowView.swift`）**：
   - **`@` 快捷引用候选浮层**：在输入框内键入 `@` 符号即刻在输入坞正上方弹出历史消息候选菜单，支持键盘方向键导航与快捷回车注入，所选历史内容以引用片段胶囊形式精准挂载在待发送区域；
   - **划词即刻引用调度中心（`ChatSelectionQuoteCoordinator`）**：在助手的原生连续文本流（`NativeTextFlowView`）中划选任意文字时，即刻计算字形矩形并弹出微药丸「引用所选内容」，点击无缝转为引用片段并自动聚焦主输入框。

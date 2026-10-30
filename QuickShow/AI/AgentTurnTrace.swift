@@ -75,6 +75,18 @@ struct AgentTurnTrace: Equatable {
         return nil
     }
 
+    /// 当前正在运行的工具动作意图（优先取最新活跃轮次）
+    var runningToolIntent: String? {
+        for step in steps.reversed() {
+            if let running = step.toolCalls.first(where: { $0.status == .running || $0.status == .pending }) {
+                if let intent = ToolIntentExtractor.extractIntent(from: running.arguments, fallbackToolName: nil) {
+                    return intent
+                }
+            }
+        }
+        return nil
+    }
+
     /// 提取最新一段思考摘要（用于折叠态简要呈现）
     var latestReasoningSummary: String {
         for step in steps.reversed() {

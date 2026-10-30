@@ -357,7 +357,7 @@ enum AntigravityCloudCodeAdapter {
                 [
                     "name": tool.name,
                     "description": tool.description,
-                    "parameters": tool.parametersSchema
+                    "parameters": tool.effectiveParametersSchema
                 ]
             }
             geminiTools.append(["function_declarations": declarations])

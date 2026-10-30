@@ -90,7 +90,7 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                             "function": [
                                 "name": tool.name,
                                 "description": tool.description,
-                                "parameters": tool.parametersSchema
+                                "parameters": tool.effectiveParametersSchema
                             ]
                         ])
                     }

@@ -52,17 +52,6 @@ struct ToolConfirmationDrawerContent: View {
         AIToolRegistry.shared.tool(named: request.toolName)?.displayName
     }
 
-    /// 标题主文案（剔除重复冗余）
-    private var headerTitle: String {
-        if request.riskLevel.isDestructive {
-            return String(localized: "高危指令待确认")
-        }
-        if request.toolName == "run_shell" || request.toolName == "shell" {
-            return String(localized: "执行 Shell 命令")
-        }
-        return displayName ?? request.toolName
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // 标题行：精致图标 + 标题；右端轻量提示
@@ -102,14 +91,33 @@ struct ToolConfirmationDrawerContent: View {
     // MARK: - 标题行
 
     private var headerView: some View {
-        HStack(spacing: Theme.Spacing.sm) {
+        HStack(alignment: .top, spacing: Theme.Spacing.sm) {
             Image(systemName: headerIconName)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(headerIconColor)
+                .padding(.top, 2)
 
-            Text(headerTitle)
-                .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
-                .foregroundColor(request.riskLevel.isDestructive ? Color.red.opacity(0.9) : Theme.Colors.contentPrimary)
+            VStack(alignment: .leading, spacing: 3) {
+                // 方案 B：主标题直接呈现核心动作意图，大幅降低决策成本
+                Text(request.actionIntent)
+                    .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
+                    .foregroundColor(request.riskLevel.isDestructive ? Color.red.opacity(0.95) : Theme.Colors.contentPrimary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // 辅助标识栏：标明具体的底层工具（如「终端 Shell (run_shell)」）
+                HStack(spacing: 4) {
+                    Text(displayName ?? request.toolName)
+                        .font(Theme.Typography.text(Theme.Typography.micro, .medium))
+                        .foregroundColor(Theme.Colors.contentTertiary)
+
+                    if let toolName = displayName, toolName != request.toolName {
+                        Text("(\(request.toolName))")
+                            .font(Theme.Typography.mono(Theme.Typography.micro))
+                            .foregroundColor(Theme.Colors.contentTertiary.opacity(0.7))
+                    }
+                }
+            }
 
             Spacer(minLength: 0)
 
@@ -127,6 +135,7 @@ struct ToolConfirmationDrawerContent: View {
                 Text("待确认")
                     .font(Theme.Typography.text(Theme.Typography.caption))
                     .foregroundColor(Theme.Colors.contentTertiary)
+                    .padding(.top, 2)
             }
         }
     }

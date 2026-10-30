@@ -56,6 +56,8 @@ protocol AITool {
     var description: String { get }
     /// OpenAI function calling 的 JSON Schema（object 结构）
     var parametersSchema: [String: Any] { get }
+    /// 包含统一动作意图（description）的完整 JSON Schema（供下发给大模型使用）
+    var effectiveParametersSchema: [String: Any] { get }
     /// 危险工具执行前需用户确认
     var isDangerous: Bool { get }
     /// 执行策略：parallelSafe = 可并行；serial = 必须串行（默认）。
@@ -75,6 +77,25 @@ extension AITool {
     /// 默认非交互：仅需挂起等待用户操作的工具体（如 ask_user）标注 true，
     /// 执行器对其豁免超时（无限静候用户）。
     var isInteractive: Bool { false }
+
+    /// 统一混入动作意图 description 参数的完整 JSON Schema（供下发给大模型使用）
+    var effectiveParametersSchema: [String: Any] {
+        var schema = parametersSchema
+        var properties = (schema["properties"] as? [String: Any]) ?? [:]
+        if properties["description"] == nil {
+            properties["description"] = [
+                "type": "string",
+                "description": "简要描述本次操作的动作意图与目的（10~30字，中文），让用户清晰了解你为什么执行此操作。例如：'检查项目本地编译错误日志'、'备份当前配置文件'、'读取剪贴板链接'"
+            ]
+            schema["properties"] = properties
+            var requiredList = (schema["required"] as? [String]) ?? []
+            if !requiredList.contains("description") {
+                requiredList.append("description")
+                schema["required"] = requiredList
+            }
+        }
+        return schema
+    }
 }
 
 // MARK: - 协议层模型

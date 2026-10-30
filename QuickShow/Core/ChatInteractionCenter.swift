@@ -23,6 +23,8 @@ struct ToolConfirmationRequest: Identifiable {
     let id: UUID
     /// 工具名，如 "run_shell"
     let toolName: String
+    /// 动作意图（由大模型生成或兜底解析）
+    let actionIntent: String
     /// 参数原文（未加工）
     let argumentsJSON: String
     /// 单行摘要（去换行、限 200 字），供 UI 直接展示
@@ -140,9 +142,13 @@ final class ChatInteractionCenter: ObservableObject {
         }
 
         let effectiveRisk = riskLevel ?? .scopedMutation(suggestedScope: .toolName(name: toolName))
+        let intent = ToolIntentExtractor.extractIntent(from: argumentsJSON, fallbackToolName: toolName)
+            ?? ToolIntentExtractor.fallbackIntent(toolName: toolName)
+            ?? toolName
         let req = ToolConfirmationRequest(
             id: UUID(),
             toolName: toolName,
+            actionIntent: intent,
             argumentsJSON: argumentsJSON,
             summary: Self.singleLineSummary(argumentsJSON),
             riskLevel: effectiveRisk,
@@ -279,7 +285,7 @@ final class ChatInteractionCenter: ObservableObject {
             )
         case .toolConfirmation(let req):
             let title = String(localized: "QuickShow AI · 操作授权确认")
-            let body = String(format: String(localized: "请求执行工具「%@」：\n%@"), req.toolName, req.summary)
+            let body = String(format: String(localized: "【%@】%@"), req.toolName, req.actionIntent)
             AICompletionNotifier.shared.notifyInteraction(
                 id: req.id,
                 title: title,

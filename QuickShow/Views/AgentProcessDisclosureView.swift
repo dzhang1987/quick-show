@@ -113,6 +113,12 @@ struct AgentProcessDisclosureView: View {
 
     private var headerTitle: String {
         if trace.isLive {
+            if let intent = trace.runningToolIntent {
+                if trace.roundCount > 1 {
+                    return String(localized: "正在执行：\(intent) · 第 \(trace.roundCount) 轮")
+                }
+                return String(localized: "正在执行：\(intent)")
+            }
             if let running = trace.runningToolDisplayName {
                 if trace.roundCount > 1 {
                     return String(localized: "正在调用 \(running)… · 第 \(trace.roundCount) 轮")

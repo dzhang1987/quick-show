@@ -79,7 +79,7 @@ extension AIChatService {
                 function: ChatToolFunctionDefinition(
                     name: tool.name,
                     description: tool.description,
-                    parameters: JSONValue(tool.parametersSchema)
+                    parameters: JSONValue(tool.effectiveParametersSchema)
                 )
             )
         }
@@ -93,7 +93,7 @@ extension AIChatService {
                 type: "function",
                 name: tool.name,
                 description: tool.description,
-                parameters: JSONValue(tool.parametersSchema)
+                parameters: JSONValue(tool.effectiveParametersSchema)
             )
         }
     }
