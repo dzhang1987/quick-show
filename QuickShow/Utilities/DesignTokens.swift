@@ -470,9 +470,15 @@ enum Theme {
         static let chatTickMaxCount = 72               // 超限时按视口取样（当前锚点前后各半）；密度主由自适应 pitch 承担，取样仅作极端兜底
         static let chatTickPreviewGap: CGFloat = 12    // 预览胶囊与 tick 水平间距
         static let chatTickPreviewMaxWidth: CGFloat = 230 // 预览胶囊单行截断上限
-        static let chatCodeBlockPaddingV: CGFloat = 12 // 代码块上下内边距（对称）
+        static let chatCodeBlockPaddingV: CGFloat = 12 // 代码块上内边距（底部留白改由 scrollerGutter 单一承担）
         static let chatCodeBlockPaddingH: CGFloat = 14 // 代码块左右内边距
         static let chatCodeBlockHeaderGap: CGFloat = 8 // 代码块 header 与代码区间距
+
+        // 滚动条槽：macOS overlay 滚动条浮于内容之上、不占布局空间（≈7pt 胶囊 + 上下留白
+        // ≈ 14pt 带宽），滚动一启动就压住末行内容（代码块横滚最刺眼）。内容侧垫满该带宽，
+        // 滚动条即落在留白里；卡片自身底部内边距随之让位归零，静止观感不变。
+        // 见 ScrollerGutter.swift。
+        static let scrollerGutter: CGFloat = 14
     }
 
     // MARK: - 投影档位（浮起层级的值源：接触影贴身定锚 + 环境影拉开纵深，禁止单层贴身影）

@@ -130,6 +130,7 @@
 		809266C1C45B4248D7842710 /* AIToolCardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D265EF154F546FE21365CDDE /* AIToolCardView.swift */; };
 		80FFA17FD32F15AB85C5BCC3 /* MTMathListDisplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B223DA2D2B28A9E5439782C /* MTMathListDisplay.swift */; };
 		816B8C5D277509C105B0A6F0 /* mermaid_bridge.js in Resources */ = {isa = PBXBuildFile; fileRef = F0B57B22DF1AFA5CCE157534 /* mermaid_bridge.js */; };
+		820E9EF8AAEEDE708C43A15D /* ScrollerGutter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1D35C2A19A0AD0D0A948962 /* ScrollerGutter.swift */; };
 		825D8E0668CA724C6E71CC37 /* SystemMetricsProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E1467F308D8D21AC801C2B0 /* SystemMetricsProvider.swift */; };
 		834BDB7A08B31C0CB997B081 /* highlight.min.js in Resources */ = {isa = PBXBuildFile; fileRef = F42092753AD4E207BC630CA5 /* highlight.min.js */; };
 		83A255FF6287FD1F95E319CF /* MathLatexCollector.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26C699FAD7F797752011F574 /* MathLatexCollector.swift */; };
@@ -413,6 +414,7 @@
 		9DBCD8B7FC49C22DCE98FAEF /* SubagentTaskTray.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubagentTaskTray.swift; sourceTree = "<group>"; };
 		9E541987A420C8F32EF8469D /* AIChatInputFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatInputFields.swift; sourceTree = "<group>"; };
 		A105039D8AD7B43EB86C6A67 /* ChatMessageActionRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMessageActionRow.swift; sourceTree = "<group>"; };
+		A1D35C2A19A0AD0D0A948962 /* ScrollerGutter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollerGutter.swift; sourceTree = "<group>"; };
 		A4AE3E8951DBF8324E5F70FD /* MessageEditBubble.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageEditBubble.swift; sourceTree = "<group>"; };
 		A59C660CFCCD7D0FBCE1F918 /* ChatInputHistoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatInputHistoryTests.swift; sourceTree = "<group>"; };
 		A627A44846B391B85CD009B1 /* MessageListDerivations.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageListDerivations.swift; sourceTree = "<group>"; };
@@ -699,6 +701,7 @@
 				8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */,
 				BC5668F43DA49F7BCE29893E /* PerformanceCard.swift */,
 				2B586F0BF4F4DAF19E416773 /* PomodoroPresetButton.swift */,
+				A1D35C2A19A0AD0D0A948962 /* ScrollerGutter.swift */,
 				FA8FD61001FFBE03FF9530C6 /* SettingsGeneralForms.swift */,
 				6EBB220C3DE2C9A87217EC24 /* SettingsShortcutsForm.swift */,
 				B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */,
@@ -1349,6 +1352,7 @@
 				AE5BB4255439940FC1B24CA2 /* QuickShowApp.swift in Sources */,
 				890BDB806B48148067D0E4F0 /* RichCard.swift in Sources */,
 				5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */,
+				820E9EF8AAEEDE708C43A15D /* ScrollerGutter.swift in Sources */,
 				0AFE02D45382351E3BE2E871 /* SendMessageTool.swift in Sources */,
 				5ED9778EAB65A148653771F9 /* SettingsGeneralForms.swift in Sources */,
 				063D8C81B464D96670DF3D12 /* SettingsShortcutsForm.swift in Sources */,

@@ -27,6 +27,10 @@
 
 ### Fixed
 
+- **代码块滚动条压字根治与滚动条槽单一化（`ScrollerGutter.swift` / `MarkdownCodeBlock.swift` / `AIChatMessageRow.swift` / `DesignTokens.swift`）**：
+  - **滚动条槽（Scroller Gutter）**：macOS 的 overlay 滚动条浮于内容之上、不占布局空间，代码块一横向滚动就压住末行长行；新增 `scrollerGutter(_:)` 把与滚动条带宽等宽的留白垫进滚动内容（水平滚动垫底部、垂直滚动垫右侧），胶囊恒落在留白里，文字永不入轨；
+  - **带宽单源与内边距归一**：留白带宽收敛为 `Theme.Layout.scrollerGutter` 唯一真源；代码块与推理过程块自身底部内边距随之让位归零，静止观感与旧版一致，不白长高度也不破坏上下对称。
+
 - **会话贴底状态解除跟随与向上滚动吸附死锁根治（`ChatScrollCoordinator.swift`）**：
   - **彻底消灭贴底误判与吸底死锁**：重构 `handleBoundsChanged` 中的 `movedUp` 逻辑，消除此前由于将贴底微小触碰（`last.y > maxOffset + 0.5`）误判为弹性越界回弹而导致 `unpin` 被跳过的缺陷；只要用户滚轮驱动视口朝向内容上方移动，即刻解除跟随态（`isPinned = false`），彻底杜绝会话结束时视口卡死在底部无法向上滚动的现象；
   - **输入坞滚轮穿透边界盲区消除**：为悬浮输入坞的物理判定矩形补充上部阴影与呼吸缓冲区（`Theme.Spacing.card`），彻底消除输入坞与正文操作栏之间由于阴影层遮蔽导致的滚轮事件被吞死角。

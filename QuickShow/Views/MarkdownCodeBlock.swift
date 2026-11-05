@@ -76,9 +76,11 @@ struct CodeBlockView: View {
             // 父 body 重算会被 SwiftUI 子视图值 diff 短路，大段高亮文本永不重建。
             CodeBlockText(code: code, language: language)
         }
-        // 2026-10 重设计：上下对称、左右一致（12/14，旧值 10/12 上下失衡、重心悬空）
+        // 2026-10 重设计：左右一致 14，顶部 12；底部留白由滚动条槽单一承担
+        // （`CodeBlockText` 的内容已垫出 `Theme.Layout.scrollerGutter`，见 ScrollerGutter.swift）——
+        // 卡片自身不再叠底内边距，系统滚动条才能落进那条留白里，而不是压住末行代码。
         .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
-        .padding(.vertical, Theme.Layout.chatCodeBlockPaddingV)
+        .padding(.top, Theme.Layout.chatCodeBlockPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
@@ -129,14 +131,15 @@ struct CodeBlockText: View {
             if lineCount <= Self.maxLinesBeforeScroll {
                 // 短代码块（≤18 行）：垂直方向零滚动、纯自适应撑开（首帧同步确定固有高度，
                 // 彻底杜绝异步 preference 测高导致的父级 ChatMessageActionRow 错位与跳动）；
-                // 仅保留水平滚动以承载超长行。
+                // 仅保留水平滚动以承载超长行。内容垫出滚动条槽，横滚时胶囊落在留白里。
                 ScrollView(.horizontal, showsIndicators: true) {
-                    textContent
+                    textContent.scrollerGutter(.horizontal)
                 }
             } else {
                 // 长代码块（>18 行）：高度锁定在 380pt，双向滚动。首帧即确定为 380pt 恒定高度，零布局抖动。
+                // 底部 / 右侧各垫一条滚动条槽，横竖两个方向的系统滚动条都不压住内容。
                 ScrollView([.horizontal, .vertical], showsIndicators: true) {
-                    textContent
+                    textContent.scrollerGutter([.horizontal, .vertical])
                 }
                 .frame(height: Theme.Layout.chatBlockMaxHeight)
             }

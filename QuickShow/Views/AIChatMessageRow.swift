@@ -661,17 +661,19 @@ struct ReasoningCodeBlockView: View {
             }
             .frame(minHeight: 12)
 
-            // 代码等宽横滚
+            // 代码等宽横滚：内容垫出滚动条槽，横滚时系统滚动条落在留白里、不压末行代码
             ScrollView(.horizontal, showsIndicators: true) {
                 Text(code)
                     .font(Theme.Typography.mono(10.5))
                     .foregroundColor(Theme.Colors.contentSecondaryStrong)
                     .lineSpacing(3)
                     .fixedSize(horizontal: true, vertical: false)
+                    .scrollerGutter(.horizontal)
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        // 底部留白由滚动条槽单一承担（gutter 已垫在滚动内容内），卡片自身不再叠底内边距
+        .padding(.top, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 5, style: .continuous)
