@@ -253,6 +253,9 @@ final class AIWindowManager {
 
     /// 当前面板内容宽度（供视图层在侧栏过渡期间计算主列锁定宽度）。
     var contentWidth: CGFloat { panel?.frame.width ?? 0 }
+    /// 当前面板内容高度（供输入坞抽屉按窗口比例计算高度预算）。
+    /// 取 contentView 实测而非窗 frame：面板无 titlebar，但视图侧一律以内容区为布局基准。
+    var contentHeight: CGFloat { panel?.contentView?.bounds.height ?? 0 }
 
     private init() {}
 

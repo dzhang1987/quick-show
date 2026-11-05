@@ -10,13 +10,20 @@ extension Notification.Name {
 // MARK: - 权限确认抽屉内容视图
 
 /// 危险工具权限确认（纯粹 macOS 极客与原生质感）：
-/// 1. 标题行：图标 + 明确问询标题（剔除冗余蛇形名与重复说明）；右端轻量状态指示；
-/// 2. 破坏性操作高危告警提示条（若有）；
-/// 3. 终端代码卡片：自带专属顶栏工具条（微缩三圆点 + sh 标识 + 独立复制按钮），代码主体 100% 独立展示，绝无遮挡；
+/// 1. 标题行：图标 + 明确问询标题（恒常规色，红色只保留给告警横幅一处）；右端轻量状态指示；
+/// 2. 破坏性操作全宽高危告警横幅（若有）：状态标签与原因合一，杜绝徽章/胶囊散落重复；
+/// 3. 终端代码卡片：自带专属顶栏工具条（微缩三圆点 + sh 标识 + 独立复制按钮），
+///    代码主体 100% 独立展示，绝无遮挡；顶栏恒固定，复制按钮永远可达；
 /// 4. 记忆规则胶囊条：微圆点风格 + 细描边轻量底板，单行展开不折行；
 /// 5. 底部双按钮：严格遵循与 ask_user 一致的消极在左、积极在右规范，紧凑比例（24~26pt），材质平衡。
+///
+/// 高度纪律：标题/告警/记忆胶囊/按钮行是恒可见的固定区，只有代码卡正文受
+/// DrawerBodyArea 预算约束（整抽屉 ≤ 窗口 80%）——长 heredoc 命令只在卡内滚动，
+/// 绝不把抽屉顶穿窗口（历史事故：标题与终端顶栏被推到窗外裁掉）。
 struct ToolConfirmationDrawerContent: View {
     let request: ToolConfirmationRequest
+    /// 整抽屉高度预算（窗口内容高度的 80%），由 AIChatDrawerPanel 统一注入
+    let heightBudget: CGFloat
 
     /// 是否勾选本会话记住规则
     @State private var rememberRule: Bool = false
@@ -24,8 +31,12 @@ struct ToolConfirmationDrawerContent: View {
     @State private var hasCopied: Bool = false
     /// 复制按钮 hover 状态
     @State private var hoveredCopy: Bool = false
-    /// 完整参数区自然高度测量（用于自适应，消除多余空白）
-    @State private var argumentsContentHeight: CGFloat = 0
+    /// 顶部固定区（标题行 + 高危告警 + 上留白）实测高度
+    @State private var topChromeHeight: CGFloat = 0
+    /// 底部固定区（记忆胶囊 + 操作按钮 + 下留白）实测高度
+    @State private var bottomChromeHeight: CGFloat = 0
+    /// 终端卡顶栏实测高度（复制按钮所在行，恒固定不滚动）
+    @State private var terminalToolbarHeight: CGFloat = 0
 
     /// 针对终端 Shell 工具提取真实执行命令（直达人类可读意图）
     private var shellCommand: String? {
@@ -54,38 +65,60 @@ struct ToolConfirmationDrawerContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // 标题行：精致图标 + 标题；右端轻量提示
+            // 固定区（顶部）：标题行 + 高危告警（恒可见，绝不随长命令滚出窗外）
+            topChrome
+
+            // 正文区：终端卡 / 参数卡（顶栏固定，代码主体按预算滚动）
+            commandOrArgumentsBlock
+
+            // 固定区（底部）：记忆放行规则 + 操作按钮（恒可见）
+            bottomChrome
+        }
+        .padding(.horizontal, Theme.Spacing.section)
+        .onReceive(NotificationCenter.default.publisher(for: .quickShowExecuteToolConfirmation)) { _ in
+            execute()
+        }
+    }
+
+    // MARK: - 高度预算
+
+    /// 代码主体可用高度 = 整抽屉预算 − 头尾固定区 − 终端卡顶栏；
+    /// 保底 bodyMinHeight：窗口被压到极小（固定区已吃掉大半预算）时仍留几行可读空间。
+    private var bodyAvailableHeight: CGFloat {
+        let chrome = topChromeHeight + bottomChromeHeight + terminalToolbarHeight
+        return max(AIChatDrawerMetrics.bodyMinHeight, heightBudget - chrome)
+    }
+
+    // MARK: - 固定区
+
+    /// 顶部固定区：标题行 + 高危告警 + 上留白（实测高供预算扣减）
+    private var topChrome: some View {
+        VStack(alignment: .leading, spacing: 0) {
             headerView
                 .padding(.bottom, Theme.Spacing.lg)
 
-            // 破坏性操作高危告警提示条
             if case .destructive(let reason) = request.riskLevel {
                 destructiveAlertView(reason: reason)
                     .padding(.bottom, Theme.Spacing.lg)
             }
+        }
+        .padding(.top, Theme.Spacing.xxl)
+        .measureDrawerHeight(into: $topChromeHeight)
+    }
 
-            // 终端风格代码卡片（自带独立顶栏，绝无按钮遮挡代码）
-            commandOrArgumentsBlock
-                .padding(.bottom, !request.riskLevel.isDestructive ? Theme.Spacing.lg : Theme.Spacing.xxl)
-
-            // 记忆放行规则微胶囊条
+    /// 底部固定区：记忆胶囊 + 操作按钮 + 下留白（实测高供预算扣减）。
+    /// 与卡片的呼吸缝沿用原节奏：破坏性操作（无胶囊行）= xxl，常规 = lg。
+    private var bottomChrome: some View {
+        VStack(alignment: .leading, spacing: 0) {
             if !request.riskLevel.isDestructive {
                 rememberRuleToggle
                     .padding(.bottom, Theme.Spacing.xxl)
             }
-
-            // 底部操作按钮行：严格与 ask_user 保持一致（左退右进，紧凑轻盈，上方保留充裕呼吸边距）
             actionButtonsRow
         }
-        .padding(.horizontal, Theme.Spacing.section)
-        .padding(.top, Theme.Spacing.xxl)
+        .padding(.top, request.riskLevel.isDestructive ? Theme.Spacing.xxl : Theme.Spacing.lg)
         .padding(.bottom, Theme.Spacing.xl)
-        .onPreferenceChange(DrawerArgumentsHeightPreferenceKey.self) { height in
-            argumentsContentHeight = height
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .quickShowExecuteToolConfirmation)) { _ in
-            execute()
-        }
+        .measureDrawerHeight(into: $bottomChromeHeight)
     }
 
     // MARK: - 标题行
@@ -101,7 +134,7 @@ struct ToolConfirmationDrawerContent: View {
                 // 方案 B：主标题直接呈现核心动作意图，大幅降低决策成本
                 Text(request.actionIntent)
                     .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
-                    .foregroundColor(request.riskLevel.isDestructive ? Color.red.opacity(0.95) : Theme.Colors.contentPrimary)
+                    .foregroundColor(Theme.Colors.contentPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -121,17 +154,8 @@ struct ToolConfirmationDrawerContent: View {
 
             Spacer(minLength: 0)
 
-            if request.riskLevel.isDestructive {
-                Text("高危操作")
-                    .font(Theme.Typography.mono(Theme.Typography.micro, .bold))
-                    .foregroundColor(Color.red.opacity(0.9))
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(Color.red.opacity(0.12))
-                    )
-            } else {
+            // 高危状态标签已并入告警横幅；此处仅保留常规确认的轻量指示
+            if !request.riskLevel.isDestructive {
                 Text("待确认")
                     .font(Theme.Typography.text(Theme.Typography.caption))
                     .foregroundColor(Theme.Colors.contentTertiary)
@@ -142,7 +166,8 @@ struct ToolConfirmationDrawerContent: View {
 
     private var headerIconName: String {
         if request.riskLevel.isDestructive {
-            return "exclamationmark.triangle.fill"
+            // 危险三角符号唯一保留给下方告警横幅，标题行改用盾牌语义避免图标重复
+            return "exclamationmark.shield.fill"
         }
         if shellCommand != nil {
             return "terminal.fill"
@@ -157,40 +182,64 @@ struct ToolConfirmationDrawerContent: View {
         return Theme.Colors.accent
     }
 
+    /// 全宽高危告警横幅：整抽屉唯一红色警示源（与终端卡同宽同圆角体系）。
+    /// 「高危操作」状态标签 + 竖线分隔 + 破坏性原因一行收敛，替代旧徽章与小胶囊的散落重复。
     private func destructiveAlertView(reason: String) -> some View {
-        HStack(spacing: Theme.Spacing.xs) {
+        HStack(spacing: Theme.Spacing.md) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundColor(Color.red.opacity(0.9))
                 .font(.system(size: 11, weight: .semibold))
+
+            Text("高危操作")
+                .font(Theme.Typography.text(Theme.Typography.caption, .bold))
+                .foregroundColor(Color.red.opacity(0.95))
+
+            Rectangle()
+                .fill(Color.red.opacity(0.28))
+                .frame(width: 1, height: 10)
+
             Text(reason)
                 .font(Theme.Typography.text(Theme.Typography.caption, .medium))
-                .foregroundColor(Color.red.opacity(0.9))
+                .foregroundColor(Color.red.opacity(0.85))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
         }
-        .padding(.horizontal, Theme.Spacing.md)
-        .padding(.vertical, Theme.Spacing.xxs)
+        .padding(.horizontal, Theme.Spacing.xl)
+        .padding(.vertical, Theme.Spacing.md)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                .fill(Color.red.opacity(0.12))
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(Color.red.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .strokeBorder(Color.red.opacity(0.22), lineWidth: 0.5)
         )
     }
 
     // MARK: - 终端代码卡片（集成顶栏，彻底解决遮挡问题）
 
+    /// 上方顶栏恒固定（复制按钮永远可达），下方代码主体按预算滚动。
     private var commandOrArgumentsBlock: some View {
         VStack(spacing: 0) {
             // 终端顶栏（Toolbar）
             terminalHeaderToolbar
+                .measureDrawerHeight(into: $terminalToolbarHeight)
 
             // 0.5pt 细微内分割线
             Rectangle()
                 .fill(Color.white.opacity(0.06))
                 .frame(height: 0.5)
 
-            // 代码主体内容（绝对无悬浮物遮挡）
-            if let cmd = shellCommand {
-                terminalCommandSection(cmd)
-            } else {
-                normalArgumentsSection
+            // 代码主体：自然高度未超预算紧凑包裹，超出锁在预算内滚动（绝无悬浮物遮挡代码）
+            DrawerBodyArea(availableHeight: bodyAvailableHeight) { _ in
+                if let cmd = shellCommand {
+                    terminalCommandSection(cmd)
+                } else {
+                    normalArgumentsSection
+                }
             }
         }
         .background(
@@ -268,20 +317,12 @@ struct ToolConfirmationDrawerContent: View {
         .padding(.vertical, Theme.Spacing.lg)
     }
 
+    /// 参数主体（JSON 格式化原文）：高度统一交给 DrawerBodyArea 预算，
+    /// 不再各自内嵌滚动（双层滚动会让滚轮命中区互相打架）。
     private var normalArgumentsSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-            if argumentsContentHeight > AIChatDrawerMetrics.argumentsMaxHeight {
-                ScrollView(.vertical, showsIndicators: true) {
-                    argumentsContent
-                        .padding(.bottom, Theme.Spacing.md)
-                }
-                .frame(height: AIChatDrawerMetrics.argumentsMaxHeight, alignment: .top)
-            } else {
-                argumentsContent
-            }
-        }
-        .padding(.horizontal, Theme.Spacing.card)
-        .padding(.vertical, Theme.Spacing.lg)
+        argumentsContent
+            .padding(.horizontal, Theme.Spacing.card)
+            .padding(.vertical, Theme.Spacing.lg)
     }
 
     private var argumentsContent: some View {
@@ -292,14 +333,6 @@ struct ToolConfirmationDrawerContent: View {
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
-            .background(
-                GeometryReader { proxy in
-                    Color.clear.preference(
-                        key: DrawerArgumentsHeightPreferenceKey.self,
-                        value: proxy.size.height
-                    )
-                }
-            )
     }
 
     // MARK: - 记忆规则微胶囊条
@@ -395,14 +428,5 @@ struct ToolConfirmationDrawerContent: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             hasCopied = false
         }
-    }
-}
-
-// MARK: - 内部高度测量键
-
-private struct DrawerArgumentsHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }

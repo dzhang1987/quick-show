@@ -6,6 +6,12 @@
 
 ### Changed
 
+- **抽屉高度预算纪律统一与高危确认全宽横幅化（`AIChatDrawerPanel.swift` / `ToolConfirmationDrawer.swift` / `UserQuestionDrawer.swift` / `AIWindowManager.swift`）**：
+  - **整抽屉 ≤ 窗口内容高 80% 预算单源（根治长命令顶穿窗口）**：两类抽屉共享 `DrawerBodyArea` 高度纪律——标题/告警/记忆胶囊/操作按钮等头尾固定区恒可见，仅正文区在预算内滚动；自然高度未超预算时紧凑包裹不出滚动条，超长 heredoc 只在卡内滚，绝不把标题与终端顶栏推到窗外裁掉（历史事故定证）；
+  - **窗口高度测量单源**：`AIWindowManager.contentHeight` 取托管面板 contentView 实测，不依赖 key 状态，设置窗/主面板抢焦点时预算折算也不会取错；
+  - **高危告警四层红色收敛为一条全宽横幅**：红标题 + 右上徽章 + 双三角胶囊四处警示合并为「⚠ 高危操作 ｜ 原因」单条红底横幅，与终端卡同宽同圆角成结构；标题恢复常规色不再像报错文本，三角警示图标唯一保留给横幅、标题行改用盾牌语义；
+  - **终端卡顶栏恒固定**：三色点 + sh 标识 + 复制按钮常驻卡顶，滚动时代码主体 100% 无遮挡、复制永远可达。
+
 - **AI 提问抽屉自定义答案行内胶囊化与全键盘盲操状态机重构（`UserQuestionDrawer.swift` / `DrawerWidgets.swift` / `AIChatKeyMonitor.swift` / `ChatInteractionCenter.swift` / `AIChatDrawerPanel.swift` / `ToolConfirmationDrawer.swift`）**：
   - **每题独立自定义与行内展开胶囊（Inline Expanding Capsule）**：彻底移除了原先抽屉底部全局统占的大文本框，在每个问题选项流末尾内嵌轻量级自定义行内胶囊（`[5 ✏️ 自定义…]`），高度与普通胶囊一致（28pt），完全不占用额外垂直空间，彻底根除多题问卷选项被撑爆截断的问题；
   - **单选互斥严格契约与历史选项记忆**：单选题模式下，选择自定义时自动清空预选选项；选择常规选项时自动清空自定义并折叠收起；记忆进入自定义前的选项，若未打字按 Esc 失焦时自动秒级恢复原预选（如推荐选项 1），杜绝漏选空提交；

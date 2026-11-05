@@ -12,12 +12,15 @@ extension Notification.Name {
 // MARK: - 用户提问抽屉
 
 /// AI 提问面板：每题 = header 短标签 + 问题文本 + 选项胶囊组（末尾内嵌自定义行内胶囊）；
-/// 题目区高度最高限制为视口 80%，未超出自适应紧凑包裹，底线附带充裕呼吸感；
+/// 高度纪律：标题行与操作按钮恒可见，题目区走共享 DrawerBodyArea 预算
+/// （整抽屉 ≤ 窗口 80%，未超出自适应紧凑包裹，超出锁在预算内滚动）；
 /// 单选题严格互斥（选预选项即清空自定义，选自定义即清空预选项）；
 /// 自定义输入为空时按 ESC 自动恢复原选中项，无缝退回选择题模式；
 /// 数字键在打字模式下 100% 放行，绝不误触选项。
 struct UserQuestionDrawerContent: View {
     let request: UserQuestionRequest
+    /// 整抽屉高度预算（窗口内容高度的 80%），由 AIChatDrawerPanel 统一注入
+    let heightBudget: CGFloat
 
     /// 各题选中态（question.id → 选中 option id 集合）。
     @State private var selections: [UUID: Set<UUID>] = [:]
@@ -31,11 +34,14 @@ struct UserQuestionDrawerContent: View {
     @State private var focusedQuestionIndex: Int = 0
     /// 行内输入框激活状态。
     @FocusState private var focusedInputIsActive: Bool
-    /// 题目区自然高度测量（用于自适应，消除多余空白）
-    @State private var questionsContentHeight: CGFloat = 0
+    /// 顶部固定区（标题行 + 上留白）实测高度
+    @State private var topChromeHeight: CGFloat = 0
+    /// 底部固定区（操作按钮 + 下留白）实测高度
+    @State private var bottomChromeHeight: CGFloat = 0
 
-    init(request: UserQuestionRequest) {
+    init(request: UserQuestionRequest, heightBudget: CGFloat) {
         self.request = request
+        self.heightBudget = heightBudget
         // 单选题默认预选第一项（推荐项），使用户可直接敲回车秒级确认
         var initialSelections: [UUID: Set<UUID>] = [:]
         for question in request.questions {
@@ -47,18 +53,10 @@ struct UserQuestionDrawerContent: View {
         _focusedQuestionIndex = State(initialValue: 0)
     }
 
-    /// 题目区最大允许高度（最高为窗口高度的 80%，动态自适应，兜底 420pt）
-    private var maxQuestionsHeight: CGFloat {
-        if let windowHeight = NSApp.keyWindow?.contentView?.bounds.height, windowHeight > 200 {
-            return windowHeight * 0.8
-        }
-        return 420
-    }
-
-    /// 题目区实际自适应高度（未超自然紧凑，超出锁在 80% 并滚动）
-    private var effectiveQuestionsHeight: CGFloat? {
-        guard questionsContentHeight > 0 else { return nil }
-        return min(questionsContentHeight, maxQuestionsHeight)
+    /// 题目区可用高度 = 整抽屉预算 − 头尾固定区；
+    /// 保底 bodyMinHeight：窗口被压到极小时仍留可读空间（固定区已吃掉大半预算的兜底）。
+    private var questionsAvailableHeight: CGFloat {
+        max(AIChatDrawerMetrics.bodyMinHeight, heightBudget - topChromeHeight - bottomChromeHeight)
     }
 
     /// 可提交判据：任一题有选中项，或任一题有非空白自定义内容。
@@ -69,49 +67,29 @@ struct UserQuestionDrawerContent: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
-            // 标题行：弱化小标题 + 多题计数与切换提示（单题不显示计数）
-            HStack(spacing: Theme.Spacing.lg) {
-                Image(systemName: "questionmark.circle")
-                    .font(Theme.Typography.text(Theme.Typography.footnote, .semibold))
-                    .foregroundColor(Theme.Colors.accent)
-                Text("需要你的回答")
-                    .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
-                    .foregroundColor(Theme.Colors.contentPrimary)
-                Spacer(minLength: 0)
-                if request.questions.count > 1 {
-                    Text("第 \(focusedQuestionIndex + 1)/\(request.questions.count) 题 · Tab/↑↓ 切换")
-                        .font(Theme.Typography.text(Theme.Typography.caption))
-                        .foregroundColor(Theme.Colors.contentTertiary)
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            // 固定区（顶部）：标题行恒可见
+            headerRow
+                .padding(.bottom, Theme.Spacing.xl)
+                .padding(.top, Theme.Spacing.xxl)
+                .measureDrawerHeight(into: $topChromeHeight)
 
-            // 题目区：最高 80% 视口，自适应内容高度，底线保留呼吸感
+            // 正文区（题目）：自然高度未超预算紧凑包裹，超出锁在预算内滚动
             questionsSection
 
-            // 按钮行：消极在左、积极在右
-            HStack(spacing: Theme.Spacing.lg) {
-                DrawerActionButton(title: String(localized: "取消"), shortcut: "ESC", style: .secondary) {
-                    ChatInteractionCenter.shared.cancelQuestions()
-                }
-                Spacer(minLength: 0)
-                DrawerActionButton(title: String(localized: "提交答案"), shortcut: "⏎", style: .primary, enabled: canSubmit) {
-                    submit()
-                }
-            }
+            // 固定区（底部）：操作按钮恒可见（消极在左、积极在右）
+            actionButtonsRow
+                .padding(.top, Theme.Spacing.xl)
+                .padding(.bottom, Theme.Spacing.xl)
+                .measureDrawerHeight(into: $bottomChromeHeight)
         }
         .padding(.horizontal, Theme.Spacing.section)
-        .padding(.top, Theme.Spacing.xxl)
-        .padding(.bottom, Theme.Spacing.xl)
         .escapeResponder(
             id: "question_custom_input",
             isActive: editingQuestionID != nil
         ) {
             cancelEditingIfEmpty()
             return true
-        }
-        .onPreferenceChange(DrawerQuestionsHeightPreferenceKey.self) { height in
-            questionsContentHeight = height
         }
         .onAppear {
             // 抽屉展开时默认不让输入框持焦，确保进入时属于纯键盘盲操模式
@@ -162,6 +140,39 @@ struct UserQuestionDrawerContent: View {
         }
     }
 
+    // MARK: 固定区（标题 / 操作）
+
+    /// 标题行：弱化小标题 + 多题计数与切换提示（单题不显示计数）
+    private var headerRow: some View {
+        HStack(spacing: Theme.Spacing.lg) {
+            Image(systemName: "questionmark.circle")
+                .font(Theme.Typography.text(Theme.Typography.footnote, .semibold))
+                .foregroundColor(Theme.Colors.accent)
+            Text("需要你的回答")
+                .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
+                .foregroundColor(Theme.Colors.contentPrimary)
+            Spacer(minLength: 0)
+            if request.questions.count > 1 {
+                Text("第 \(focusedQuestionIndex + 1)/\(request.questions.count) 题 · Tab/↑↓ 切换")
+                    .font(Theme.Typography.text(Theme.Typography.caption))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+            }
+        }
+    }
+
+    /// 操作按钮行：消极在左、积极在右
+    private var actionButtonsRow: some View {
+        HStack(spacing: Theme.Spacing.lg) {
+            DrawerActionButton(title: String(localized: "取消"), shortcut: "ESC", style: .secondary) {
+                ChatInteractionCenter.shared.cancelQuestions()
+            }
+            Spacer(minLength: 0)
+            DrawerActionButton(title: String(localized: "提交答案"), shortcut: "⏎", style: .primary, enabled: canSubmit) {
+                submit()
+            }
+        }
+    }
+
     // MARK: 题目区自适应排版
 
     private var questionsContent: some View {
@@ -172,30 +183,19 @@ struct UserQuestionDrawerContent: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            GeometryReader { proxy in
-                Color.clear.preference(
-                    key: DrawerQuestionsHeightPreferenceKey.self,
-                    value: proxy.size.height
-                )
-            }
-        )
     }
 
-    @ViewBuilder
+    /// 题目区正文：高度预算由共享 DrawerBodyArea 统一裁决；多题切换时滚动定位到当前题
     private var questionsSection: some View {
-        ScrollViewReader { scrollProxy in
-            ScrollView(.vertical, showsIndicators: questionsContentHeight > maxQuestionsHeight) {
-                questionsContent
-                    .padding(.bottom, Theme.Spacing.xl) // 保留底线充裕内边距与呼吸感
-            }
-            .frame(height: effectiveQuestionsHeight)
-            .onChange(of: focusedQuestionIndex) { newIndex in
-                guard newIndex >= 0 && newIndex < request.questions.count else { return }
-                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                    scrollProxy.scrollTo(request.questions[newIndex].id, anchor: .center)
+        DrawerBodyArea(availableHeight: questionsAvailableHeight) { scrollProxy in
+            questionsContent
+                .padding(.bottom, Theme.Spacing.xl) // 保留底线充裕内边距与呼吸感
+                .onChange(of: focusedQuestionIndex) { newIndex in
+                    guard newIndex >= 0 && newIndex < request.questions.count else { return }
+                    withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                        scrollProxy.scrollTo(request.questions[newIndex].id, anchor: .center)
+                    }
                 }
-            }
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -436,14 +436,5 @@ struct UserQuestionDrawerContent: View {
         ChatInteractionCenter.shared.submitQuestions(
             UserQuestionResponse(requestID: request.id, answers: answers)
         )
-    }
-}
-
-// MARK: - 内部高度测量键
-
-private struct DrawerQuestionsHeightPreferenceKey: PreferenceKey {
-    static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
     }
 }
