@@ -218,7 +218,9 @@ enum MarkdownHighlighter {
                 return nil
             }
 
-            let processed = postProcess(raw)
+            // 校正参照 = 「纸面叠在最亮背景上」的合成色（对比度最坏情形）：
+            // 纸面带 12% 底透，用标称纸面做参照会在亮壁纸下漏判
+            let processed = postProcess(raw, paper: Theme.CodePaper.contrastReference(dark: darkMode))
             store(processed, for: key)
             return processed
         }
@@ -259,11 +261,16 @@ enum MarkdownHighlighter {
 
     // MARK: - 后处理
 
-    /// 剥离 token 级背景块并统一字体；前景色保持主题输出（github-dark 已适配深底）。
+    /// 剥离 token 级背景块、统一字体，并把前景色校正到「对代码纸面达标」的对比度。
     ///
-    /// 字体统一时按原有 run 的 traits 映射：保留主题对 bold token（函数名/标题类）的
-    /// 字重层级，仅统一字体族与字号，避免高亮观感被抹平。
-    private static func postProcess(_ raw: NSAttributedString) -> NSAttributedString {
+    /// 两道处理的分工：
+    /// - 字体统一：按原 run 的 traits 映射（保留主题对 bold token（函数名/标题类）的字重
+    ///   层级，只统一字体族与字号，避免高亮观感被抹平）；
+    /// - 对比度校正：主题色板是为各自的主题底色配的，我们画的是自己的代码纸面，
+    ///   两者亮度不同 → 固定色值必然在某个明暗/主题组合下不可读。故以纸面为参照逐 run
+    ///   校正（`ContrastColor.adjusted`，色相不变、只朝黑/白做最小位移），新增主题
+    ///   自动继承这套保障，调用方零改动。
+    private static func postProcess(_ raw: NSAttributedString, paper: ContrastColor) -> NSAttributedString {
         guard raw.length > 0 else { return raw }
 
         let result = NSMutableAttributedString(attributedString: raw)
@@ -276,6 +283,25 @@ enum MarkdownHighlighter {
                 .symbolicTraits
                 .contains(.bold) ?? false
             result.addAttribute(.font, value: isBold ? codeFontBold : codeFont, range: range)
+        }
+
+        // 先收集再写回：enumerate 期间修改被枚举的属性会破坏遍历的区间切片。
+        var corrections: [(range: NSRange, color: NSColor)] = []
+        raw.enumerateAttribute(.foregroundColor, in: fullRange) { value, range, _ in
+            guard let color = value as? NSColor else { return }
+            let alpha = Double(color.alphaComponent)
+            guard let source = ContrastColor(srgb: color) else { return }
+            // 半透明前景按「在纸面上的合成观感」评估，再按同一不透明度写回
+            let observed = source.blended(over: paper, alpha: alpha)
+            let corrected = observed.adjusted(
+                minimumContrast: Theme.Accessibility.minTextContrast,
+                against: paper
+            )
+            guard corrected != observed else { return }
+            corrections.append((range, corrected.nsColor.withAlphaComponent(CGFloat(alpha))))
+        }
+        for correction in corrections {
+            result.addAttribute(.foregroundColor, value: correction.color, range: correction.range)
         }
         return result
     }

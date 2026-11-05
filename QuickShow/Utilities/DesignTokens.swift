@@ -137,6 +137,51 @@ enum Theme {
         }
     }
     
+    // MARK: - 对比度下限（可读性阈值单一来源）
+    // 可读性不是「调色主观题」而是可判定的常量：正文/辅助文字一律按 WCAG AA 正文档裁决，
+    // 代码高亮的自动校正与令牌审计脚本共用同一组阈值，杜绝「这个色应该够了吧」式估算。
+    enum Accessibility {
+        /// 正文级文字（< 18pt 常规字重）WCAG AA 下限
+        static let minTextContrast: Double = 4.5
+        /// 大号文字（≥ 18pt 常规 / ≥ 14pt 粗体）WCAG AA 下限
+        static let minLargeTextContrast: Double = 3.0
+    }
+    
+    // MARK: - 代码块纸面（双模式数值真源）
+    // 代码背景与语法色必须成对治理：主题色板是为「主题自带底色」配的，一旦把底色剥离
+    // 换成浮动的半透明层，色板就与底色脱钩（实测同一套 atom-one-light 在深灰底上
+    // 正文只有 1.0–1.4:1）。故代码块拥有唯一、确定、不透明的纸面，高亮校正以同一
+    // 数值为参照——「画出来的底色」与「校正时参照的底色」物理同源，永不漂移。
+    enum CodePaper {
+        /// 亮色：近白冷灰纸面（比阅读纸面深半档，形成凹陷层次）
+        static let light = ContrastColor(0.957, 0.959, 0.968)
+        /// 暗色：抬升半档的深灰纸面（比阅读纸面亮一档，形成浮起层次）
+        static let dark = ContrastColor(0.153, 0.155, 0.165)
+        
+        static func resolve(dark: Bool) -> ContrastColor { dark ? self.dark : self.light }
+        
+        /// 代码块可见不透明度：留 12% 底透（与阅读纸面同源的玻璃感），
+        /// 高亮校正以「最亮合成底」为参照（白底透出时的合成值 = 对比度最坏情形），
+        /// 因而任何壁纸下校正结论都成立，不会出现「按标称底色校正、实际底更亮」的漏判。
+        static let viewAlpha: Double = 0.88
+        
+        /// 对比度校正的参照底色 = 纸面以 viewAlpha 叠在最亮背景（纯白）上的合成值
+        static func contrastReference(dark: Bool) -> ContrastColor {
+            resolve(dark: dark).blended(over: .white, alpha: viewAlpha)
+        }
+        
+        /// 自绘底色（跟随视图 effectiveAppearance；数值来自上方真源）
+        static var color: Color { Theme.dynamic(dark: dark, light: light, alpha: viewAlpha) }
+    }
+    
+    /// 双模式色构造（数值真源为 ContrastColor，跟随视图 effectiveAppearance 解析）
+    static func dynamic(dark: ContrastColor, light: ContrastColor, alpha: Double = 1) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return (isDark ? dark : light).nsColor.withAlphaComponent(CGFloat(alpha))
+        })
+    }
+    
     // MARK: - 颜色令牌（未来主题变体的核心切换点）
     enum Colors {
         // 内容层级（直接转发系统语义色，随玻璃/材质明暗自动翻转；全主题固定，不被主题洗掉）
@@ -145,7 +190,9 @@ enum Theme {
         // 面板玻璃专用二级文本：系统 secondary 在亮玻璃上实测 ≈3.9:1 不达 WCAG AA 4.5:1，
         // 面板承载的是「一瞥即读」的关键数值（SSID/曲名/卡片副标），自建 0.65 下限（亮 ≈7:1 / 暗 ≈8.8:1）；
         // 设置窗口（非玻璃、系统表单材质）仍用系统 secondary，此处不动
-        static let contentSecondaryStrong = Color.primary.opacity(0.65)
+        // 0.65 → 0.72：阅读纸面留 20% 底透后，最坏壁纸下 0.65 在暗色底只到 4.3:1（不达 AA），
+        // 0.72 双模式均 ≥5:1 且仍与主文本拉开层级
+        static let contentSecondaryStrong = Color.primary.opacity(0.72)
         
         // 结构性元素（亮玻璃对比度下限保护：黑色低 alpha 是"阴影"型弱对比，需高于暗色白线的发光感）
         static let dividerOpacity: Double = 0.25          // 分割线中段峰值
@@ -182,7 +229,9 @@ enum Theme {
         static let presetText = Color.primary.opacity(0.55)      // 番茄预设未选中
         // 三级说明文本（替代系统 .tertiary：亮色模式系统三级 ≈2.3:1 远低于 WCAG AA 4.5:1，
         // 0.55 不透明度双模式实测 ≈4.7:1 达标；用于农历小字/说明/时间戳等辅助文本）
-        static let contentTertiary = Color.primary.opacity(0.55)
+        // 0.55 → 0.64：同上，纸面留底后 0.55 在最坏壁纸暗色底掉到 3.8:1；
+        // 0.64 双模式 ≥4.5:1，仍弱于 contentSecondaryStrong(0.72)，三级层级不塌
+        static let contentTertiary = Color.primary.opacity(0.64)
         
         // 实心翻转按钮（播放钮：底随明暗翻转，文字取窗口背景反色保证双模式对比）
         static let solidButtonFill = Color.primary.opacity(0.92)
@@ -205,16 +254,29 @@ enum Theme {
         static var secondsGradientTop: Color { Theme.palette.secondsGradientTop }
         static var secondsGradientBottom: Color { Theme.palette.secondsGradientBottom }
 
-        // MARK: AI 对话窗专用（2026-10 视觉层次专项）
-        // 设计逻辑：≥90% 不透明度底板稳定阅读区（玻璃穿透曾致文字对比度随位置波动、
-        // 侧栏出现模糊残影），半透明只留给窗体外缘；层级靠「底板深浅差 + 0.5pt 描边」
-        // 而非透明度叠加；全部随明暗模式自适应、与主题变体正交（不被琥珀/黑曜石洗掉）。
-        /// 主区底板：暗色近黑 94% / 亮色近白 95%
+        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治）
+        // 设计逻辑：内容层必须有「确定底色」——玻璃透壁纸会把文字对比度变成环境的函数
+        // （动态壁纸下正文对比度实测可在 1.0–11:1 之间漂移，代码块深底时正文近乎消失）。
+        // 故内容区铺 92% 不透明阅读纸面：壁纸亮度只贡献 ≤8% 的合成量，正文 ≥13:1、
+        // 辅助文字 ≥4.5:1 成为设计常量（0.88 是辅助文字破 AA 的临界，故 0.92 是下限+余量）；
+        // 玻璃质感由「内容纸面内缩留出的玻璃带 + 顶栏玻璃 + 功能层玻璃」承担，
+        // 采样对象从「桌面壁纸」变成「稳定内容」，观感可控且不牺牲可读性。
+        /// 内容层阅读纸面（顶栏以下整块纸面：消息流 + 侧栏）
+        /// 0.80 = 质感与可读性的临界：壁纸仍有 20% 透出（模糊/色彩流动可见，
+        /// 玻璃窗的「活」还在），同时最坏壁纸下正文 12.8:1、辅助字按次级透明度仍达 AA。
+        /// 降到 0.75 需要辅助字提到 0.69、0.70 需要 0.78——层级会被压平，故 0.80 是下限。
+        static let chatReadingSurface = Theme.dynamic(
+            dark: ContrastColor(0.113, 0.113, 0.124),
+            light: ContrastColor(0.988, 0.988, 0.992),
+            alpha: 0.80
+        )
+        /// 代码块纸面（不透明：高亮色板的对比度基准，见 Theme.CodePaper）
+        static var chatCodeBlockPaper: Color { Theme.CodePaper.color }
+        /// 主区底板的通用别名（浮层/胶囊在其上再叠加时使用，语义等同阅读纸面）
         static let chatBase = aiAdaptive(dark: (0.115, 0.115, 0.125, 0.94), light: (0.99, 0.99, 0.99, 0.95))
-        /// 侧栏底板：比主区深半档的轻纱层（层级分区靠深浅差而非实色）——整窗真玻璃后
-        /// 透明度 0.95→0.35，玻璃折射/透底从侧栏穿出（旧实色是「整窗无玻璃」时代的
-        /// 压底设计，真玻璃上即窗中窗割裂）
-        static let chatSidebarBase = aiAdaptive(dark: (0.085, 0.085, 0.095, 0.35), light: (0.955, 0.955, 0.96, 0.35))
+        /// 侧栏分层 shade：在阅读纸面上压半档暗调（不另铺不透明底，避免把玻璃带整块吃掉）——
+        /// 亮色 0.988→0.943 / 暗色 0.113→0.093，与主列的「深浅半档」层级关系保持原设计意图
+        static let chatSidebarShade = aiAdaptive(dark: (0, 0, 0, 0.18), light: (0, 0, 0, 0.045))
         /// 助手消息气泡：比主区亮一档的低对比底板（亮色近纯白靠描边出层级）
         static let chatAssistantBubble = aiAdaptive(dark: (1, 1, 1, 0.065), light: (1, 1, 1, 0.90))
         /// 输入卡底板：操作焦点再亮半档，与主区明确拉开

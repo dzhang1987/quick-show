@@ -82,9 +82,11 @@ struct CodeBlockView: View {
         .padding(.horizontal, Theme.Layout.chatCodeBlockPaddingH)
         .padding(.top, Theme.Layout.chatCodeBlockPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
+        // 代码块底色 = 不透明确定纸面（Theme.CodePaper）：既是视觉上的「嵌入式纸卡」，
+        // 也是高亮色板的对比度参照基准——底色与校正基准同源，任何主题/明暗下文字都可读。
         .background(
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                .fill(Theme.Colors.surfaceTrack)
+                .fill(Theme.Colors.chatCodeBlockPaper)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)

@@ -200,9 +200,18 @@ struct AIChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .clipped()
-        // 内容层背景：26+ 整窗真玻璃透出（内容「印」在玻璃上，系统 Spotlight 语义）；
-        // <26 降级铺 ultraThinMaterial。两窗共用 LiquidPanelBackground。
-        .liquidPanelBackground()
+        // 内容层底（2026-11 可读性根治 + 玻璃带）：
+        // 纸面不再铺满整窗，而是「顶栏以下 + 四周内缩」的一整块阅读纸面——
+        // 窗口顶栏与四缘留出可见的原生 Liquid Glass 带（玻璃质感由它承担），
+        // 纸面（92% 不透明）保证正文/辅助文字/代码块对比度是设计常量，
+        // 不随壁纸颜色、身后窗口或明暗切换波动。内缩只作用于背景绘制，不动布局。
+        .background {
+            // 纸面铺满整窗（含顶栏）：恢复「根部材质一铺到窗口圆角」的一体观感，
+            // 不再有独立「帽子」横带。玻璃质感由纸面自身的 20% 底透 + 输入坞/抽屉/浮层的
+            // 原生 Liquid Glass 共同承担——文字对比度则因纸面托底而成为设计常量。
+            Rectangle()
+                .fill(Theme.Colors.chatReadingSurface)
+        }
         // 窗口边缘 rim light（方向性内描边：顶 ~70% 白 → 侧 ~15% → 底 ~5%，另底缘 1pt 黑 8% 重边）
         // 仅 <26 降级路径需要：26+ 整窗 NSGlassEffectView 自带 specular rim（受光方向 + 断面
         // 折光），手绘描边叠加会出双边缘。写在放大层之前：放大覆盖层激活时盖住 rim；
@@ -491,6 +500,10 @@ struct AIChatView: View {
                         .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     }
                 }
+                // 消息流止于输入坞下缘：坞体自身留有 Spacing.xxl 底缝，若不收这 12pt，
+                // 滚动内容会从坞底缝隙里漏出半行字（肉眼即「内容破框」）
+                .padding(.bottom, Theme.Spacing.xxl)
+
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         // 输入坞浮岛化：overlay 悬浮于消息列表之上（不再与列表上下拼接）。

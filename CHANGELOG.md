@@ -27,6 +27,13 @@
 
 ### Fixed
 
+- **AI 对话窗文字可读性根治：对比度从「壁纸的函数」变成「设计常量」（`ColorContrast.swift` / `DesignTokens.swift` / `MarkdownHighlighter.swift` / `MarkdownCodeBlock.swift` / `AIChatView.swift` / `AIChatSidebarView.swift`）**：
+  - **根因定位**：内容层没有稳定底色——文字直接压在整窗 Liquid Glass 实时采样的桌面壁纸上，`Color.primary` 走 SwiftUI 语义色而非 vibrancy 文字，系统不会替它做玻璃自适应，实测正文对比度随壁纸在 1.0–11:1 之间漂移；代码块底色是 6% 半透明叠加，而语法色板来自第三方主题 CSS（为它自己的底色调校），剥离主题底色后与真实底色脱钩（atom-one-light 在深灰底上正文仅 1.0:1、字符串 1.4:1）；
+  - **对比度数学单源（`ContrastColor`）**：WCAG 2.1 相对亮度/对比度、半透明前景在给定底色上的合成、以及「保持色相、朝黑/白做最小感知位移」的二分校正，纯函数可在高亮后台队列调用；
+  - **内容纸面 + 保留 20% 底透**：`chatReadingSurface` 收敛为 0.80 不透明整窗纸面（壁纸仍透 20%，模糊与色彩流动可感），最坏壁纸下正文 12.8:1；配套上调 `contentSecondaryStrong` 0.65→0.72、`contentTertiary` 0.55→0.64，使二级/三级文字在留底后同样满足 WCAG AA；
+  - **代码块确定纸面 + 语法色自动校正**：代码块改用 0.88 不透明纸面，校正参照取「纸面叠在最亮背景」的最坏合成；高亮后逐 run 校正至 ≥4.5:1（达标色原样保留，新增主题自动继承），主题切换/明暗切换不再产生不可读 token；
+  - **可复跑审计**：新增 `scripts/audit_code_contrast.swift`，直接解析主题 CSS 与纸面数值真源并调用真实校正实现，当前 52 个色值全部达标，作为后续新增主题的可读性回归防线。
+
 - **代码块滚动条压字根治与滚动条槽单一化（`ScrollerGutter.swift` / `MarkdownCodeBlock.swift` / `AIChatMessageRow.swift` / `DesignTokens.swift`）**：
   - **滚动条槽（Scroller Gutter）**：macOS 的 overlay 滚动条浮于内容之上、不占布局空间，代码块一横向滚动就压住末行长行；新增 `scrollerGutter(_:)` 把与滚动条带宽等宽的留白垫进滚动内容（水平滚动垫底部、垂直滚动垫右侧），胶囊恒落在留白里，文字永不入轨；
   - **带宽单源与内边距归一**：留白带宽收敛为 `Theme.Layout.scrollerGutter` 唯一真源；代码块与推理过程块自身底部内边距随之让位归零，静止观感与旧版一致，不白长高度也不破坏上下对称。

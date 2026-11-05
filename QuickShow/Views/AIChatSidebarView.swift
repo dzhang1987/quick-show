@@ -118,9 +118,10 @@ struct AIChatSidebarView: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        // 侧栏底板：比主区深半档的轻纱层（低透明度令整窗玻璃折射从侧栏透出，分区
-        // 靠深浅差；选中/hover 语言在玻璃上同样成立，见 SessionRowView）
-        .background(Theme.Colors.chatSidebarBase)
+        // 侧栏分层 shade：压在阅读纸面上的半档暗调（不另铺不透明底）——
+        // 纸面已保证对比度确定，这里的 shade 只负责「比主区深半档」的层级差，
+        // 因此仍是半透明，玻璃带不会被整块吃掉（颜色见 Theme.Colors.chatSidebarShade）
+        .background(Theme.Colors.chatSidebarShade)
         .onAppear {
             lastGroupedIDSequence = groupedIDSequence
         }
