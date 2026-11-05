@@ -419,6 +419,8 @@ struct AIChatInputDock: View {
                         Text("• " + String(localized: "目录写入：") + URL(fileURLWithPath: path).lastPathComponent)
                     case .tool(let name):
                         Text("• " + String(localized: "工具：") + name)
+                    case .devCommands:
+                        Text("• " + String(localized: "构建/测试命令信任"))
                     }
                 }
                 Divider()

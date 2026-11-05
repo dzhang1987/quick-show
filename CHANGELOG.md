@@ -15,6 +15,12 @@
 
 ### Added
 
+- **AI 权限判定语义化重构：命令级解析、构建/测试命令信任与智能免审分级（`ShellCommandParser.swift` / `ShellCommandRiskAnalyzer.swift` / `DevCommandCatalog.swift` / `ToolRisk.swift` / `AIToolShadowGuard.swift` / `ToolRiskTests.swift`）**：
+  - **结构化语义解析（根治误拦）**：新增引号感知的 Shell 词法器与结构化风险分析器，只读判定从字符串正则匹配升级为命令单元语义——管道/`&&` 复合命令逐单元判定、引号内文本不再被误判为危险指令（`git commit -m "修复 rm -rf 误删"` 类命令不再误弹高危）、环境变量前缀 / `xargs` / 绝对路径正确穿透；破坏性判定同步结构化（`rm` 递归按短选项逐字符解析、`git branch -D` 大小写敏感、敏感路径重定向与 `cp/mv/tee` 目标逐级校验）；
+  - **灾难命令字面兜底扫描**：对去引号文本以预编译正则兜底扫描 `rm -rf` / `sudo` / `dd of=/dev/` 等灾难形态，`$(...)` 嵌套命令即使被引号包裹也逃不过降级；破坏性红条依旧是唯一不可绕过红线，会话规则与智能免审均不能放行；
+  - **会话级构建/测试命令信任（`devCommands` 权限范围）**：新增精选 `DevCommandCatalog`（swift / xcodebuild / pnpm / npm / cargo / go / gradle / mvn / pytest 等常见构建、测试、lint 子命令白名单），权限抽屉一次勾选即信任整类命令；复合命令（`cd web && pnpm build`）按单元命中放行，改参数、换子目录不再重复弹窗；目录仅收录安全子命令形态，安装类命令（`pnpm install lodash`）与任意脚本执行仍需审批；
+  - **智能免审分级（ShadowGuard）**：LLM 旁路审计升级为三档判定（readonly / lowRiskMutation / needsApproval），低风险变更命令（mkdir、touch、非敏感路径写入）也纳入自动放行；审计结果按会话缓存，同一命令第二次瞬时放行；支持配置轻量模型（`ai.security.shadowGuard.modelId`）、超时与开关，判定失败或超时回落人工抽屉，绝不静默放行。
+
 - **AI 工具调用动作意图透明化与权限确认决策降维（`AIToolRegistry.swift` / `ToolHelpers.swift` / `ToolConfirmationDrawer.swift` / `AIToolCardView.swift` / `AgentProcessDisclosureView.swift` / `AIChatService+RequestEncoding.swift` / `AntigravityCloudCodeAdapter.swift` / `QoderProvider.swift`）**：
   - **Schema 统一混入意图参数（OCP 开闭原则）**：在 `AITool` 协议扩展中引入 `effectiveParametersSchema`，自动为全部内置工具透明混入必填的 `description` 动作意图入参（10~30 字中文说明），引导模型在调用工具时显式声明“要做什么/为什么做”，各工具业务实现零感知零散弹式污染；
   - **意图提取与自然语义解析（`ToolIntentExtractor`）**：统一从调用参数中提取 `description` / `title` / `intent`，并结合参数上下文提供智能语义兜底解析（如命令/文件路径提取），杜绝生硬 JSON 截断；

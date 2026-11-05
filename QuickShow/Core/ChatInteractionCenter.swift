@@ -340,6 +340,7 @@ final class ChatInteractionCenter: ObservableObject {
     func resetSessionMemory() {
         sessionAllowedKeys.removeAll()
         ToolPermissionPolicyEngine.shared.resetRules()
+        AIToolShadowGuard.shared.resetSessionCache()
     }
 
     // MARK: - 私有辅助

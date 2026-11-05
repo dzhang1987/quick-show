@@ -8,6 +8,8 @@ enum PermissionScopeSuggestion: Equatable, Hashable, Sendable {
     case shellPrefix(prefix: String)
     /// 建议放行特定工作区目录（如当前工程根目录）
     case directoryPath(path: String)
+    /// 建议放行策展目录内的常见构建/测试/检查命令（swift build、pnpm test 等）
+    case devCommands
     /// 常规工具级放行
     case toolName(name: String)
 
@@ -19,8 +21,10 @@ enum PermissionScopeSuggestion: Equatable, Hashable, Sendable {
         case .directoryPath(let path):
             let folderName = URL(fileURLWithPath: path).lastPathComponent
             return String(localized: "允许目录 \"\(folderName)\" 本会话写入")
+        case .devCommands:
+            return String(localized: "本会话信任常见构建/测试命令")
         case .toolName(let name):
-            return String(localized: "本会话总是允许")
+            return String(localized: "本会话总是允许 \"\(name)\"")
         }
     }
 }
@@ -55,10 +59,12 @@ enum ToolRiskLevel: Equatable, Sendable {
 enum PermissionRule: Hashable, Sendable {
     /// 本会话允许特定工具全量执行
     case tool(name: String)
-    /// 本会话允许特定 Shell 命令前缀（如 "git", "pnpm"）
+    /// 本会话允许特定 Shell 命令前缀（如 "git", "pnpm"；匹配经词法解析后的每个命令单元执行词）
     case shellPrefix(prefix: String)
     /// 本会话允许特定根目录下的写入操作
     case directory(path: String)
+    /// 本会话信任策展目录内的常见构建/测试/检查命令
+    case devCommands
 }
 
 // MARK: - 风险评估器协议（OCP 开闭原则）
@@ -73,7 +79,9 @@ protocol ToolRiskEvaluator: Sendable {
 
 // MARK: - Shell 命令语义风险评估器
 
-/// 针对 run_shell 的语义分词与风险评估策略
+/// 针对 run_shell 的语义风险评估策略。
+/// 基于 ShellCommandParser 的引号感知词法解析与 ShellCommandRiskAnalyzer 的结构化语义分析，
+/// 只读直通、破坏性硬门禁、受控变更作用域建议三者均以命令单元为单位判定。
 final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
     func canEvaluate(toolName: String) -> Bool {
         toolName == "run_shell"
@@ -89,193 +97,36 @@ final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
             return .readOnly
         }
 
-        // 1. 破坏性硬门禁检查（全局命中即拦截）
-        if let destructiveReason = checkDestructivePattern(command: trimmed) {
-            return .destructive(reason: destructiveReason)
-        }
-
-        // 2. 检查多子命令链（如 ; && || |）
-        let subCommands = splitCommands(trimmed)
-        if subCommands.isEmpty {
+        let units = ShellCommandParser.parseUnits(trimmed)
+        guard !units.isEmpty else {
             return .readOnly
         }
 
-        // 3. 校验所有子命令是否均属于只读安全命令
-        let allReadOnly = subCommands.allSatisfy { isSubCommandReadOnly($0) }
-        if allReadOnly {
+        // 1. 破坏性硬门禁：任一命令单元命中，或未引用区域出现灾难字面量（$() 内嵌），整条拦截
+        for unit in units {
+            if let reason = ShellCommandRiskAnalyzer.destructiveReason(for: unit) {
+                return .destructive(reason: reason)
+            }
+        }
+        if let reason = ShellCommandRiskAnalyzer.catastrophicLiteralReason(in: trimmed) {
+            return .destructive(reason: reason)
+        }
+
+        // 2. 所有命令单元均为只读 → 免审直通
+        let unitReadonlyStates = units.map { ShellCommandRiskAnalyzer.isUnitReadOnly($0) }
+        if unitReadonlyStates.allSatisfy({ $0 }) {
             return .readOnly
         }
 
-        // 4. 提取首个有意义的主命令词作为建议前缀
-        let prefix = extractPrimaryCommand(from: subCommands.first ?? trimmed)
-        return .scopedMutation(suggestedScope: .shellPrefix(prefix: prefix))
-    }
-
-    // MARK: - 私有辅助解析
-
-    /// 破坏性高危命令特征检测
-    private func checkDestructivePattern(command: String) -> String? {
-        let lower = command.lowercased()
-
-        // 危险删除与擦除
-        if lower.contains("rm -rf") || lower.contains("rm -fr") || lower.contains("rm -r") || lower.contains("srm ") {
-            return String(localized: "包含递归强力删除文件指令 (rm -r)")
+        // 3. 受控变更：以首个非只读单元推导建议作用域
+        guard let mutatingUnit = zip(units, unitReadonlyStates).first(where: { !$0.1 })?.0 else {
+            return .scopedMutation(suggestedScope: .shellPrefix(prefix: "shell"))
         }
-        if lower.contains("mkfs") || lower.contains("diskutil erase") || lower.contains("diskutil partition") || lower.contains("dd if=") {
-            return String(localized: "包含底层磁盘格式化或直写指令")
+        if DevCommandCatalog.isTrusted(unit: mutatingUnit) {
+            return .scopedMutation(suggestedScope: .devCommands)
         }
-
-        // 提权与身份切换
-        if lower.contains("sudo ") || lower.contains("su -") || lower.contains("doas ") {
-            return String(localized: "包含超级用户提权指令 (sudo)")
-        }
-
-        // 破坏性 Git 操作
-        if lower.contains("git reset --hard") || lower.contains("git clean -f") || lower.contains("git clean -df") || lower.contains("git clean -fd") {
-            return String(localized: "包含破坏性 Git 重置或清除工作区指令")
-        }
-        if lower.contains("git push") && (lower.contains("--force") || lower.contains(" -f ") || lower.hasSuffix(" -f")) {
-            return String(localized: "包含 Git 强行覆盖远程分支指令 (push --force)")
-        }
-        if lower.contains("git branch -d") || lower.contains("git branch -d") {
-            return String(localized: "包含强行删除 Git 分支指令")
-        }
-
-        // 危险系统配置篡改
-        let sensitiveFiles = ["/etc/", "/system/", "/library/", "~/.zshrc", "~/.bash_profile", "~/.bashrc", "~/.ssh", ".git/config"]
-        for sensitive in sensitiveFiles {
-            if lower.contains(sensitive) && (lower.contains(">") || lower.contains("cp ") || lower.contains("mv ") || lower.contains("tee ")) {
-                return String(localized: "尝试修改系统关键配置文件或目录")
-            }
-        }
-
-        // 关机重启
-        if lower.contains("reboot") || lower.contains("shutdown") || lower.contains("halt") || lower.contains("init 0") {
-            return String(localized: "包含系统重启或关机指令")
-        }
-
-        return nil
-    }
-
-    /// 拆分复合命令语句（兼容 ; && || | 管道符）
-    private func splitCommands(_ raw: String) -> [String] {
-        let pattern = #";|&&|\|\||\|"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else {
-            return [raw]
-        }
-        let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
-        let modified = regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "\n")
-        return modified
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-    }
-
-    /// 检查命令是否包含真实的文件重定向写操作
-    /// 忽略无害的标准流丢弃与流合并（如 >/dev/null, 2>/dev/null, &>/dev/null, 2>&1 等）
-    private func hasFileWritingRedirection(_ cmd: String) -> Bool {
-        guard cmd.contains(">") else { return false }
-
-        var stripped = cmd
-        let safePatterns = [
-            #"(?:>>|>|1>|2>|&>)\s*/dev/null"#,
-            #"(?:2>&1|1>&2|>&1|>&2)"#
-        ]
-        for pattern in safePatterns {
-            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) {
-                let range = NSRange(stripped.startIndex..<stripped.endIndex, in: stripped)
-                stripped = regex.stringByReplacingMatches(in: stripped, range: range, withTemplate: " ")
-            }
-        }
-
-        return stripped.contains(">")
-    }
-
-    /// 单个子命令是否为只读安全命令
-    private func isSubCommandReadOnly(_ cmd: String) -> Bool {
-        // 1. 若命令包含针对真实文件的重定向写入（排除 /dev/null 与流合并），直接拒绝只读直通
-        if hasFileWritingRedirection(cmd) {
-            return false
-        }
-
-        let tokens = cmd.split(separator: " ").map(String.init)
-        guard let first = tokens.first?.lowercased() else { return true }
-
-        // sysctl 默认只读读取内核硬件配置；但如果带有 -w 或 = 则属于写操作
-        if first == "sysctl" {
-            return !tokens.contains("-w") && !cmd.contains("=")
-        }
-
-        // pmset -g 为系统电源/电池状态查询；其余参数为配置修改
-        if first == "pmset" {
-            return tokens.contains("-g")
-        }
-
-        // defaults read 为 macOS 偏好只读读取
-        if first == "defaults" {
-            return tokens.contains("read")
-        }
-
-        // 基础只读系统环境探测与监控命令
-        let safeBasicCommands: Set<String> = [
-            "pwd", "ls", "which", "whereis", "whoami", "uname", "date",
-            "echo", "cat", "head", "tail", "grep", "egrep", "fgrep",
-            "wc", "stat", "file", "find", "diff", "sw_vers", "system_profiler",
-            "ps", "df", "du", "uptime", "basename", "dirname", "env", "printenv",
-            "arch", "hostname", "id", "readlink", "realpath", "printf",
-            "vm_stat", "ioreg", "netstat"
-        ]
-        if safeBasicCommands.contains(first) {
-            return true
-        }
-
-        // Git 只读子命令
-        if first == "git" && tokens.count >= 2 {
-            let sub = tokens[1].lowercased()
-            let safeGitSub: Set<String> = [
-                "status", "diff", "log", "show", "branch", "tag", "remote",
-                "rev-parse", "describe", "config", "stash"
-            ]
-            if safeGitSub.contains(sub) {
-                // 如果是 git config，只允许读（不带赋值）
-                if sub == "config" {
-                    return !cmd.contains("=") && (cmd.contains("--get") || cmd.contains("-l") || cmd.contains("--list"))
-                }
-                // 如果是 git stash，只允许 list / show
-                if sub == "stash" {
-                    return tokens.contains("list") || tokens.contains("show")
-                }
-                return true
-            }
-        }
-
-        // 包管理、编译器与常用 Shell 只读版本/列表查询
-        let safeVersionCheckers: Set<String> = [
-            "node", "npm", "pnpm", "yarn", "bun", "cargo", "rustc",
-            "swift", "xcodebuild", "python", "python3", "ruby", "go",
-            "zsh", "bash", "sh"
-        ]
-        if safeVersionCheckers.contains(first) {
-            if tokens.contains("-v") || tokens.contains("--version") || tokens.contains("version") {
-                return true
-            }
-            if (first == "pnpm" || first == "npm" || first == "yarn") && (tokens.contains("list") || tokens.contains("ls") || tokens.contains("outdated")) {
-                return true
-            }
-            if first == "cargo" && (tokens.contains("check") || tokens.contains("clippy")) {
-                return true
-            }
-        }
-
-        return false
-    }
-
-    /// 提取主命令名作为建议的前缀
-    private func extractPrimaryCommand(from cmd: String) -> String {
-        let tokens = cmd.split(separator: " ").map(String.init)
-        guard let first = tokens.first else { return "shell" }
-        let clean = first.replacingOccurrences(of: "./", with: "")
-        return clean.components(separatedBy: "/").last ?? clean
+        let word = mutatingUnit.forwardingAnalysis.word
+        return .scopedMutation(suggestedScope: .shellPrefix(prefix: word.isEmpty ? "shell" : word))
     }
 }
 
@@ -358,7 +209,9 @@ final class ToolRiskClassifier: @unchecked Sendable {
 
 // MARK: - 会话权限规则引擎（ToolPermissionPolicyEngine）
 
-/// 管理会话临时放行规则并执行快速策略裁决
+/// 管理会话临时放行规则并执行快速策略裁决。
+/// run_shell 的规则匹配基于词法解析后的命令单元：复合命令（含 cd/管道串联）逐单元判定，
+/// 每个非只读单元的执行词命中前缀规则、或命中 devCommands 策展目录，整条命令才放行。
 final class ToolPermissionPolicyEngine: @unchecked Sendable {
     static let shared = ToolPermissionPolicyEngine()
 
@@ -388,16 +241,24 @@ final class ToolPermissionPolicyEngine: @unchecked Sendable {
             return true
         }
 
-        // 4. 检查 Shell 前缀规则
+        // 4. Shell 命令：逐命令单元匹配（引号感知，复合命令不再只看首个 token）
         if tool.name == "run_shell", let command = arguments["command"] as? String {
-            let tokens = command.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ").map(String.init)
-            if let first = tokens.first {
-                let clean = first.replacingOccurrences(of: "./", with: "")
-                let prefix = clean.components(separatedBy: "/").last ?? clean
-                if sessionRules.contains(.shellPrefix(prefix: prefix)) {
-                    return true
-                }
+            var prefixRules: Set<String> = []
+            for case .shellPrefix(let prefix) in sessionRules {
+                prefixRules.insert(prefix)
             }
+            let trustsDevCommands = sessionRules.contains(.devCommands)
+
+            for unit in ShellCommandParser.parseUnits(command) {
+                if ShellCommandRiskAnalyzer.isUnitReadOnly(unit) { continue }
+                let word = unit.forwardingAnalysis.word
+                // 执行词为空的写语义单元（纯重定向）无法被任何规则覆盖
+                guard !word.isEmpty else { return false }
+                if prefixRules.contains(word) { continue }
+                if trustsDevCommands && DevCommandCatalog.isTrusted(unit: unit) { continue }
+                return false
+            }
+            return true
         }
 
         // 5. 检查目录作用域规则
@@ -429,6 +290,8 @@ final class ToolPermissionPolicyEngine: @unchecked Sendable {
             recordRule(.shellPrefix(prefix: prefix))
         case .directoryPath(let path):
             recordRule(.directory(path: path))
+        case .devCommands:
+            recordRule(.devCommands)
         case .toolName(let name):
             recordRule(.tool(name: name))
         }
