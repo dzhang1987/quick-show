@@ -39,6 +39,13 @@
 
 ### Fixed
 
+- **对话窗质感分区：顶栏玻璃轻纱带恢复主浮窗同款 Liquid Glass 活感（`DesignTokens.swift` / `AIChatView.swift` / `AIChatSidebarView.swift`）**：
+  - **纸面杀质感的根因**：两窗底层玻璃机制完全相同（同款 `NSGlassEffectView`），主浮窗质感好的唯一原因是内容层透明、玻璃全透出；可读性根治铺的 0.80 纸面把玻璃压到只剩 20% 底透，实测窗内明度方差为零、原生 specular rim 只剩 1-2px 残影（44/255），整窗读作一块纯平板；
+  - **顶栏轻纱带**：顶栏 36pt 带改为同色相 52% 轻纱渐变（顶 0.52 → 带底 0.80），与正文纸面是同一条渐变的两个端点、在带底自然连续无接缝；原生 rim 透纱实测回到 100/255，窗口重新有玻璃制品的受光边缘；色相单一来源收敛为 `ChatSurface`（纸面与纱共用，仅不透明度不同）；
+  - **对比度分区标准**：小字 4.5:1 归纸面，大字/图标 3:1 归轻纱——顶栏标题提级 11pt→14pt semibold（新增 `chatBarTitle` 令牌）进入 WCAG large-text 档，层级由 accent 图标与字重承担不再用次级透明度；顶栏图标 rest 色提到 `chatVeilIconRest`（0.85）保住纱下 3:1；最亮玻璃输出下纱面合成底 ≈0.27，全主色大字仍有余量；
+  - **子代理导航回纸面**：子代理会话顶栏是 9~11pt 小字，出现时轻纱带整体回纸面（渐变端点动画过渡）——模式切换即表面切换，小字恒有 4.5:1 托底；
+  - **侧栏 shade 让出顶带**：侧栏半档暗调从顶栏下沿才开始（`padding(.top, chatTopBarHeight)`），顶部玻璃带跨窗连续（toolbar 语义）。
+
 - **流式渲染尾包补偿与贴底落定兜底（`AIChatMessageRow.swift` / `AssistantMarkdownView.swift` / `ChatScrollCoordinator.swift`）**：
   - **尾包补偿（Trailing Flush）**：流式 Markdown 重解析节流升级为 200ms 时间门控 + 窗口期最新增量延迟补齐，根治高速流骤停或慢速收尾期最后数百字滞后不露出；节流严密防 AST 重析风暴压死主线程的同时，收尾帧不再丢失；
   - **贴底幂等兜底**：流式高频排版在 frame 通知同 runloop 后仍可能继续 TextKit 微调与尾部留白撑开，下一 runloop 闲时补一次幂等贴底，消除底部悬半行残影；

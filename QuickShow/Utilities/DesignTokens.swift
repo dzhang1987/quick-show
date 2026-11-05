@@ -254,22 +254,38 @@ enum Theme {
         static var secondsGradientTop: Color { Theme.palette.secondsGradientTop }
         static var secondsGradientBottom: Color { Theme.palette.secondsGradientBottom }
 
-        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治）
+        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治 + 质感分区）
         // 设计逻辑：内容层必须有「确定底色」——玻璃透壁纸会把文字对比度变成环境的函数
         // （动态壁纸下正文对比度实测可在 1.0–11:1 之间漂移，代码块深底时正文近乎消失）。
-        // 故内容区铺 92% 不透明阅读纸面：壁纸亮度只贡献 ≤8% 的合成量，正文 ≥13:1、
-        // 辅助文字 ≥4.5:1 成为设计常量（0.88 是辅助文字破 AA 的临界，故 0.92 是下限+余量）；
-        // 玻璃质感由「内容纸面内缩留出的玻璃带 + 顶栏玻璃 + 功能层玻璃」承担，
-        // 采样对象从「桌面壁纸」变成「稳定内容」，观感可控且不牺牲可读性。
+        // 故分区处理：正文区铺 80% 不透明阅读纸面（对比度设计常量），顶栏带走同色相
+        // 52% 轻纱（原生 Liquid Glass 透出，主浮窗同款活感）——小字 4.5:1 归纸面，
+        // 大字/图标 3:1 归轻纱，两个标准各自落在确定的结构上。
+        /// 阅读面基色（单一来源）：纸面与顶栏轻纱同色相，仅不透明度不同
+        private enum ChatSurface {
+            static let dark = ContrastColor(0.113, 0.113, 0.124)
+            static let light = ContrastColor(0.988, 0.988, 0.992)
+        }
         /// 内容层阅读纸面（顶栏以下整块纸面：消息流 + 侧栏）
         /// 0.80 = 质感与可读性的临界：壁纸仍有 20% 透出（模糊/色彩流动可见，
         /// 玻璃窗的「活」还在），同时最坏壁纸下正文 12.8:1、辅助字按次级透明度仍达 AA。
         /// 降到 0.75 需要辅助字提到 0.69、0.70 需要 0.78——层级会被压平，故 0.80 是下限。
         static let chatReadingSurface = Theme.dynamic(
-            dark: ContrastColor(0.113, 0.113, 0.124),
-            light: ContrastColor(0.988, 0.988, 0.992),
+            dark: ChatSurface.dark,
+            light: ChatSurface.light,
             alpha: 0.80
         )
+        /// 顶栏轻纱带（窗口顶部 chatTopBarHeight 高）：同色相半透明，原生 Liquid Glass
+        /// 在此透出。仅承载大字（14pt semibold，WCAG large-text 3:1 档）与图标；
+        /// 小字功能区（子代理导航条）出现时该带整体回纸面（AIChatView 条件切换）。
+        /// 0.52 下最亮玻璃输出（实测 ≈0.6 亮度）合成底 ≈0.27，全主色大字 ≥3:1 成立。
+        static let chatReadingVeilTop = Theme.dynamic(
+            dark: ChatSurface.dark,
+            light: ChatSurface.light,
+            alpha: 0.52
+        )
+        /// 顶栏（轻纱带）图标静止色：纱下合成底随壁纸浮动（暗壁纸近黑、亮端 ≈0.27），
+        /// iconRest(0.60) 在亮端不足 3:1，rest 提到 0.85（hover 仍走 iconHover 0.95）
+        static let chatVeilIconRest = Color.primary.opacity(0.85)
         /// 代码块纸面（不透明：高亮色板的对比度基准，见 Theme.CodePaper）
         static var chatCodeBlockPaper: Color { Theme.CodePaper.color }
         /// 主区底板的通用别名（浮层/胶囊在其上再叠加时使用，语义等同阅读纸面）
@@ -368,6 +384,7 @@ enum Theme {
         static let label: CGFloat = 11.5     // 标签（CPU 负载/系统磁盘）
         static let body: CGFloat = 12        // 正文/状态栏图标/描述
         static let callout: CGFloat = 12.5   // 卡片标题/状态数值
+        static let chatBarTitle: CGFloat = 14 // 对话窗顶栏标题（玻璃纱带大字档：WCAG large-text 3:1）
         static let iconLarge: CGFloat = 13   // 电池图标（视觉偏小需加大一档）
         static let toast: CGFloat = 13.5     // toast 文字
         static let badge: CGFloat = 14       // 日期徽章/CheatSheet 标题

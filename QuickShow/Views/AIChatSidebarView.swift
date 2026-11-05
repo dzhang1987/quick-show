@@ -120,8 +120,13 @@ struct AIChatSidebarView: View {
         .frame(maxHeight: .infinity)
         // 侧栏分层 shade：压在阅读纸面上的半档暗调（不另铺不透明底）——
         // 纸面已保证对比度确定，这里的 shade 只负责「比主区深半档」的层级差，
-        // 因此仍是半透明，玻璃带不会被整块吃掉（颜色见 Theme.Colors.chatSidebarShade）
-        .background(Theme.Colors.chatSidebarShade)
+        // 因此仍是半透明，玻璃带不会被整块吃掉（颜色见 Theme.Colors.chatSidebarShade）。
+        // 顶栏轻纱带内不吃 shade：顶部玻璃带跨窗连续（toolbar 语义），shade 从顶栏下沿开始。
+        .background {
+            Rectangle()
+                .fill(Theme.Colors.chatSidebarShade)
+                .padding(.top, Theme.Layout.chatTopBarHeight)
+        }
         .onAppear {
             lastGroupedIDSequence = groupedIDSequence
         }
@@ -160,7 +165,7 @@ struct AIChatSidebarView: View {
         } label: {
             Image(systemName: "sidebar.leading")
                 .font(Theme.Typography.text(Theme.Typography.callout, .medium))
-                .foregroundColor(sidebarToggleHovered ? Theme.Colors.iconHover : Theme.Colors.iconRest)
+                .foregroundColor(sidebarToggleHovered ? Theme.Colors.iconHover : Theme.Colors.chatVeilIconRest)
                 .frame(width: Theme.Layout.iconButtonSize, height: Theme.Layout.iconButtonSize)
                 .background(
                     Circle().fill(sidebarToggleHovered ? Theme.Colors.iconHoverBg : Color.clear)
