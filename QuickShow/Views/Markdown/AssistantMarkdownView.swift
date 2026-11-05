@@ -68,33 +68,8 @@ struct AssistantMarkdownView: View, Equatable {
         return (main, footnotes)
     }
 
-    // MARK: - 单条消息内渐进渲染（首帧视口自适应）
-
-    private static let estimatedBlockHeight: CGFloat = 72
-    private static let minInitialBlocks = 8
-    private static let maxInitialBlocks = 16
-    private static let blockBatchSize = 12
-
-    @State private var visibleBlockCount = -1
-    @Environment(\.chatViewportHeight) private var viewportHeight
-
     static func == (lhs: AssistantMarkdownView, rhs: AssistantMarkdownView) -> Bool {
         lhs.content == rhs.content && lhs.useCache == rhs.useCache
-    }
-
-    private static func initialBlockCount(viewportHeight: CGFloat, total: Int) -> Int {
-        let byViewport = Int((max(viewportHeight, 1) / estimatedBlockHeight).rounded(.up))
-        return min(total, max(minInitialBlocks, min(byViewport, maxInitialBlocks)))
-    }
-
-    private func effectiveVisibleCount(seededInitial: Int, total: Int) -> Int {
-        if useCache { return total }
-        let base = visibleBlockCount < 0 ? seededInitial : visibleBlockCount
-        return min(base, total)
-    }
-
-    private func advanceVisibleCount(to value: Int) {
-        visibleBlockCount = value
     }
 
     var body: some View {
@@ -102,11 +77,8 @@ struct AssistantMarkdownView: View, Equatable {
         let split = Self.splitFootnotes(allBlocks)
         let blocks = split.main
         let footnotes = split.footnotes
-        let seededInitial = Self.initialBlockCount(viewportHeight: viewportHeight, total: blocks.count)
-        let visibleCount = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
-        let visibleBlocks = Array(blocks.prefix(visibleCount))
-        let cacheKey = useCache && visibleCount == blocks.count ? content : nil
-        let segments = MarkdownBlockSegmenter.segment(visibleBlocks, cacheKey: cacheKey)
+        let cacheKey = useCache ? content : nil
+        let segments = MarkdownBlockSegmenter.segment(blocks, cacheKey: cacheKey)
 
         VStack(alignment: .leading, spacing: 0) {
             ForEach(Array(segments.enumerated()), id: \.element.id) { index, segment in
@@ -124,33 +96,12 @@ struct AssistantMarkdownView: View, Equatable {
                 }
             }
 
-            // 分批哨兵
-            if visibleCount < blocks.count {
-                Color.clear
-                    .frame(width: 0, height: 0)
-                    .id(visibleCount)
-                    .onAppear {
-                        DispatchQueue.main.async {
-                            let current = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
-                            advanceVisibleCount(to: min(current + Self.blockBatchSize, blocks.count))
-                        }
-                    }
-            }
-
             // 脚注区
-            if visibleCount >= blocks.count, !footnotes.isEmpty {
+            if !footnotes.isEmpty {
                 MarkdownFootnoteSection(footnotes: footnotes)
                     .padding(.top, Theme.Spacing.divider)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .task(id: visibleCount) {
-            let current = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
-            guard current < blocks.count else { return }
-            try? await Task.sleep(nanoseconds: 16_000_000)
-            let after = effectiveVisibleCount(seededInitial: seededInitial, total: blocks.count)
-            guard !Task.isCancelled, after < blocks.count else { return }
-            advanceVisibleCount(to: min(after + Self.blockBatchSize, blocks.count))
-        }
     }
 }

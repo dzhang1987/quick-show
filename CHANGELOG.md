@@ -39,6 +39,11 @@
 
 ### Fixed
 
+- **流式渲染尾包补偿与贴底落定兜底（`AIChatMessageRow.swift` / `AssistantMarkdownView.swift` / `ChatScrollCoordinator.swift`）**：
+  - **尾包补偿（Trailing Flush）**：流式 Markdown 重解析节流升级为 200ms 时间门控 + 窗口期最新增量延迟补齐，根治高速流骤停或慢速收尾期最后数百字滞后不露出；节流严密防 AST 重析风暴压死主线程的同时，收尾帧不再丢失；
+  - **贴底幂等兜底**：流式高频排版在 frame 通知同 runloop 后仍可能继续 TextKit 微调与尾部留白撑开，下一 runloop 闲时补一次幂等贴底，消除底部悬半行残影；
+  - **移除单条消息内渐进渲染**：废弃首帧视口估块（`visibleBlockCount` 分批）路径，渲染完整性交回节流 + 缓存单一链路，杜绝估高误差导致的块缺失观感。
+
 - **AI 对话窗文字可读性根治：对比度从「壁纸的函数」变成「设计常量」（`ColorContrast.swift` / `DesignTokens.swift` / `MarkdownHighlighter.swift` / `MarkdownCodeBlock.swift` / `AIChatView.swift` / `AIChatSidebarView.swift`）**：
   - **根因定位**：内容层没有稳定底色——文字直接压在整窗 Liquid Glass 实时采样的桌面壁纸上，`Color.primary` 走 SwiftUI 语义色而非 vibrancy 文字，系统不会替它做玻璃自适应，实测正文对比度随壁纸在 1.0–11:1 之间漂移；代码块底色是 6% 半透明叠加，而语法色板来自第三方主题 CSS（为它自己的底色调校），剥离主题底色后与真实底色脱钩（atom-one-light 在深灰底上正文仅 1.0:1、字符串 1.4:1）；
   - **对比度数学单源（`ContrastColor`）**：WCAG 2.1 相对亮度/对比度、半透明前景在给定底色上的合成、以及「保持色相、朝黑/白做最小感知位移」的二分校正，纯函数可在高亮后台队列调用；

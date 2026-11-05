@@ -417,6 +417,12 @@ final class ChatScrollCoordinator {
         let pinned = isPinned(sessionId)
         if pinned {
             scrollPinnedToBottom(sessionId: sessionId, animated: false)
+            // 流式高频排版落定兜底：SwiftUI HostingView 在 frame 通知发出后同个 runloop
+            // 可能继续执行 TextKit 文本微调与尾部留白撑开，下一 runloop 闲时补一次幂等贴底。
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.isPinned(sessionId) else { return }
+                self.scrollPinnedToBottom(sessionId: sessionId, animated: false)
+            }
         } else if delta < 0 {
             // 塌缩：程序化执行 clamp 等价（同步作用域遮蔽），视觉与 AppKit 自然行为一致。
             // 额外保留 0.15s 时间窗：AppKit 在布局 pass 的后续自然 clamp（若发生）不在

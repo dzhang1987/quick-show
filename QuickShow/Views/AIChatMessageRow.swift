@@ -818,15 +818,19 @@ struct CompactionBoundaryCard: View {
     }
 }
 
-/// 流式 Markdown 增量渲染：把高频 token 触发的重解析节流到 ≤4Hz（250ms 时间门控）。
-/// - rendered 仅在距上次渲染 ≥250ms 时更新；被跳过的中间帧不补渲染。
-/// - 收尾帧完整性由 streaming→done/aborted 后切换的 AssistantMarkdownView 全量渲染保证。
+/// 流式 Markdown 增量渲染：把高频 token 触发的重解析节流到 ~5Hz（200ms 时间门控 + 尾包补偿）。
+/// - 节流门控：高频打字下最多每 200ms 刷新一次，严密防止 Markdown AST 重析风暴压死主线程；
+/// - 尾包补偿（Trailing Flush）：窗口期内未达间隔的最新增量由延迟 Task 补齐刷新，
+///   彻底解决高速流式骤停或慢速收尾期最后数百字滞后不露出的缺陷；
 /// - 未闭合 `$$`/`**` 短暂显示源码属预期，不做特殊处理。
 struct StreamingMarkdownContentView: View {
     let content: String
 
     @State private var rendered: String = ""
     @State private var lastRenderAt: Date = .distantPast
+    @State private var trailingTask: Task<Void, Never>?
+
+    private static let throttleInterval: TimeInterval = 0.20
 
     var body: some View {
         AssistantMarkdownView(content: rendered, useCache: false)
@@ -836,9 +840,26 @@ struct StreamingMarkdownContentView: View {
             }
             .onChange(of: content) { newValue in
                 let now = Date()
-                guard now.timeIntervalSince(lastRenderAt) >= 0.25 else { return }
-                lastRenderAt = now
-                rendered = newValue
+                let elapsed = now.timeIntervalSince(lastRenderAt)
+                if elapsed >= Self.throttleInterval {
+                    trailingTask?.cancel()
+                    trailingTask = nil
+                    lastRenderAt = now
+                    rendered = newValue
+                } else {
+                    trailingTask?.cancel()
+                    let delay = Self.throttleInterval - elapsed
+                    trailingTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                        guard !Task.isCancelled else { return }
+                        lastRenderAt = Date()
+                        rendered = newValue
+                    }
+                }
+            }
+            .onDisappear {
+                trailingTask?.cancel()
+                trailingTask = nil
             }
     }
 }
