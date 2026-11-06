@@ -465,12 +465,20 @@ final class ChatToolCallAccumulator {
         var didDispatchStarted: Bool = false
     }
 
+    /// 单次 ingest 的产出：新派发的调用（首帧捕获工具名）+ 已派发调用的参数增量。
+    /// 参数增量仅对已确定稳定 callID（已派发）的调用产出，早于工具名到达的参数分片
+    /// 只参与内部累积，不外抛（无稳定 id 可寻址，流尾仍随 completed 整块上交）。
+    struct IngestResult {
+        var newStarts: [(id: String, name: String)] = []
+        var argumentDeltas: [(id: String, delta: String)] = []
+    }
+
     private var byIndex: [Int: Partial] = [:]
 
-    /// 消费增量分片，并在首次捕获到有效工具名称时即时返回 (id, name)（用于流式首帧预显）
+    /// 消费增量分片：首片捕获工具名时产出预显派发信号，后续参数分片产出参数增量。
     @discardableResult
-    func ingest(_ deltas: [DeltaToolCall]) -> [(id: String, name: String)] {
-        var newStarts: [(id: String, name: String)] = []
+    func ingest(_ deltas: [DeltaToolCall]) -> IngestResult {
+        var result = IngestResult()
         for delta in deltas {
             let index = delta.index ?? 0
             var partial = byIndex[index] ?? Partial()
@@ -479,18 +487,27 @@ final class ChatToolCallAccumulator {
                 // name 一般整块到达；若端点分片则拼接，保证不丢内容。
                 partial.name = (partial.name ?? "") + name
             }
-            if let args = delta.function?.arguments { partial.arguments += args }
 
+            // 先判定派发（确定稳定 callID），再处理参数：派发片自带的参数首段
+            // 才能作为参数增量按 callID 上抛（流式意图预显不丢首段）。
             if !partial.didDispatchStarted, let name = partial.name, !name.isEmpty {
                 partial.didDispatchStarted = true
                 let callId = partial.id ?? "call_\(index)_\(UUID().uuidString.prefix(6))"
                 partial.id = callId
-                newStarts.append((id: callId, name: name))
+                result.newStarts.append((id: callId, name: name))
+            }
+
+            if let args = delta.function?.arguments {
+                partial.arguments += args
+                // 已派发的调用拥有稳定 callID，参数增量可安全寻址上抛。
+                if partial.didDispatchStarted, let callId = partial.id {
+                    result.argumentDeltas.append((id: callId, delta: args))
+                }
             }
 
             byIndex[index] = partial
         }
-        return newStarts
+        return result
     }
 
     var isEmpty: Bool { byIndex.isEmpty }
@@ -604,10 +621,13 @@ final class ResponsesToolCallAccumulator {
         return newlyDispatched
     }
 
-    func appendArguments(key: String, delta: String) {
+    /// 追加参数增量；该调用已派发（callID 已确定）时返回 callID 供参数增量上抛，否则返回 nil。
+    @discardableResult
+    func appendArguments(key: String, delta: String) -> String? {
         var partial = ensure(key)
         partial.arguments += delta
         byKey[key] = partial
+        return partial.didDispatchStarted ? partial.callId : nil
     }
 
     var isEmpty: Bool { byKey.isEmpty }

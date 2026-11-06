@@ -98,6 +98,9 @@ enum AIStreamEvent {
     case reasoning(String)
     /// 工具调用发起感知（流式首帧捕获到工具名时即时派发，驱动 UI 预显工具卡片消除假死感）。
     case toolCallDispatched(id: String, name: String)
+    /// 工具调用参数增量（arguments 逐片累积期间实时派发，驱动占位卡参数与意图标题流式预显）。
+    /// 仅对已派发（toolCallDispatched 之后）的调用产出；完整参数仍以流尾的 toolCalls 为准。
+    case toolCallArgumentsDelta(id: String, delta: String)
     case toolCalls([CompletedToolCall])
     /// 本轮真实 prompt token 用量（由服务端 usage 上报，端点在末片/完成事件携带）。
     case usage(promptTokens: Int)

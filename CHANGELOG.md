@@ -6,6 +6,12 @@
 
 ### Changed
 
+- **工具调用参数流式增量预显：意图标题随参数生成实时呈现（`AIChatService.swift` / `AIChatWireModels.swift` / `OpenAIProvider.swift` / `QoderProvider.swift` / `AntigravityCloudCodeAdapter.swift` / `AIChatState.swift` / `AIChatState+Streaming.swift` / `AgentCoordinator.swift` / `ToolHelpers.swift` / `AgentFunctionalTests.swift`）**：
+  - **参数增量事件契约（`.toolCallArgumentsDelta`）**：流式事件新增工具参数增量通道——工具名到达即派发、参数逐片实时上抛（OpenAI 兼容双协议与 Qoder 逐片、Antigravity 函数调用整块随派发上抛），不再等流尾一次性交付；累积器改为"先派发定稳定 callID、再上抛增量"，派发片自带的首段参数不丢失，早于工具名到达的孤儿分片只累积不上抛；
+  - **意图标题流式预显（`PartialJSONFieldScanner`）**：参数 JSON 尚未闭合时即可提取已完整到达的顶层 `description` / `title` / `intent` 字段——只认 depth-1 顶层字段（嵌套结构同名不误读）、字符串未闭合绝不拼接半截内容、转义按 JSON 标准语义解码（含 `\uXXXX` 与代理对）；工具卡片标题与折叠栏状态在参数生成期即实时亮出动作意图，彻底消除"执行完了才显示标题描述"的滞后观感；
+  - **合帧消费零额外渲染开销**：参数增量复用既有 ~50ms 合帧缓冲与定时器批量写入 store，不逐片扇出；流尾仍以完整参数整块替换占位记录兜底，个别分片异常不影响最终正确性；
+  - **子智能体托盘同步升级**：子会话工具卡片参数实时生长，托盘动作文案由"正在调用 工具名"升级为"正在执行：动作意图"（带逐片去重）。
+
 - **抽屉高度预算纪律统一与高危确认全宽横幅化（`AIChatDrawerPanel.swift` / `ToolConfirmationDrawer.swift` / `UserQuestionDrawer.swift` / `AIWindowManager.swift`）**：
   - **整抽屉 ≤ 窗口内容高 80% 预算单源（根治长命令顶穿窗口）**：两类抽屉共享 `DrawerBodyArea` 高度纪律——标题/告警/记忆胶囊/操作按钮等头尾固定区恒可见，仅正文区在预算内滚动；自然高度未超预算时紧凑包裹不出滚动条，超长 heredoc 只在卡内滚，绝不把标题与终端顶栏推到窗外裁掉（历史事故定证）；
   - **窗口高度测量单源**：`AIWindowManager.contentHeight` 取托管面板 contentView 实测，不依赖 key 状态，设置窗/主面板抢焦点时预算折算也不会取错；

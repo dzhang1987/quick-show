@@ -626,6 +626,8 @@ enum AntigravityCloudCodeAdapter {
                                             logger.info("[AntigravityDirect] 收到首个直连数据块 (FunctionCall: \(name))")
                                         }
                                         continuation.yield(.toolCallDispatched(id: callId, name: name))
+                                        // 函数调用整块到达：参数随派发一次性上抛，占位卡即刻具备完整意图标题
+                                        continuation.yield(.toolCallArgumentsDelta(id: callId, delta: argsString))
                                         completedCalls.append(CompletedToolCall(id: callId, name: name, arguments: argsString, thoughtSignature: thoughtSig))
                                     }
 

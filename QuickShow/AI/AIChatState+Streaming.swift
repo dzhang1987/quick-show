@@ -232,6 +232,9 @@ extension AIChatState {
                             // 流式首帧捕获到工具名：立即冲刷打字机尾部并挂载预备卡片，杜绝参数生成期的假死感
                             self.forceFlushPendingTokens(in: sessionId)
                             self.prepareStreamingToolCall(assistantID, callID: callId, name: name, in: sessionId)
+                        case let .toolCallArgumentsDelta(callId, delta):
+                            // 参数增量实时累积：占位卡参数与意图标题随流式渐次呈现
+                            self.appendToolArguments(delta, to: callId, on: assistantID, in: sessionId)
                         case let .toolCalls(calls):
                             completedCalls = calls
                         case let .usage(promptTokens):
@@ -623,6 +626,16 @@ extension AIChatState {
         scheduleFlushIfNeeded(for: sessionId)
     }
 
+    /// 工具参数增量：与正文/思考共用同一合帧缓冲区与定时器，按 callID 归并追加。
+    /// 流尾 attachToolCalls 会以完整参数整体替换占位记录，此处追加仅为流式预显，
+    /// 即使个别分片丢失也不影响最终正确性。
+    private func appendToolArguments(_ delta: String, to callID: String, on id: UUID, in sessionId: UUID) {
+        guard let ctx = streamContexts[sessionId] else { return }
+        ctx.pendingToolArguments[callID, default: ""] += delta
+        ctx.pendingMessageID = id
+        scheduleFlushIfNeeded(for: sessionId)
+    }
+
     /// 若该会话无挂起冲刷，启动一个 ~50ms 的合帧定时任务（per-session 独立节拍）。
     private func scheduleFlushIfNeeded(for sessionId: UUID) {
         guard let ctx = streamContexts[sessionId], ctx.flushTask == nil else { return }
@@ -642,10 +655,12 @@ extension AIChatState {
 
         let contentChunk = ctx.pendingTokens
         let reasoningChunk = ctx.pendingReasoning
-        guard !contentChunk.isEmpty || !reasoningChunk.isEmpty else { return }
+        let toolArgumentsChunks = ctx.pendingToolArguments
+        guard !contentChunk.isEmpty || !reasoningChunk.isEmpty || !toolArgumentsChunks.isEmpty else { return }
 
         ctx.pendingTokens = ""
         ctx.pendingReasoning = ""
+        ctx.pendingToolArguments = [:]
         store.updateMessage(id: id, in: sessionId) { message in
             // reasoning 累积不改消息 id、不触碰其他字段，保持 ChatMessage Equatable 合成语义，
             // UI 侧 .equatable() 仍可对其余未变行跳过重建。
@@ -657,6 +672,18 @@ extension AIChatState {
             }
             if !contentChunk.isEmpty {
                 message.content += contentChunk
+                if message.state == .sending {
+                    message.state = .streaming
+                }
+            }
+            // 工具参数增量：按 callID 追加到占位卡记录（记录不存在则忽略，等流尾整块挂载兜底）
+            if !toolArgumentsChunks.isEmpty {
+                var calls = message.toolCalls ?? []
+                for (callID, chunk) in toolArgumentsChunks {
+                    guard let index = calls.firstIndex(where: { $0.id == callID }) else { continue }
+                    calls[index].arguments += chunk
+                }
+                message.toolCalls = calls
                 if message.state == .sending {
                     message.state = .streaming
                 }

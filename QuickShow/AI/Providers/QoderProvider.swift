@@ -253,9 +253,12 @@ final class QoderProvider: LLMProvider, @unchecked Sendable {
                                     continuation.yield(.text(text))
                                 }
                                 if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
-                                    let newStarts = chatAccumulator.ingest(toolCalls)
-                                    for item in newStarts {
+                                    let ingestResult = chatAccumulator.ingest(toolCalls)
+                                    for item in ingestResult.newStarts {
                                         continuation.yield(.toolCallDispatched(id: item.id, name: item.name))
+                                    }
+                                    for delta in ingestResult.argumentDeltas {
+                                        continuation.yield(.toolCallArgumentsDelta(id: delta.id, delta: delta.delta))
                                     }
                                 }
                             }

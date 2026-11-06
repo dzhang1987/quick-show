@@ -299,6 +299,8 @@ final class AIChatState: ObservableObject {
         var pendingTokens = ""
         /// 累积待写入的思考过程增量（与正文共用合帧定时器）。
         var pendingReasoning = ""
+        /// 累积待写入的工具参数增量（callID → 待追加片段；与正文共用合帧定时器，流式预显意图标题）。
+        var pendingToolArguments: [String: String] = [:]
         /// 合帧缓冲区对应的助手消息 id。
         var pendingMessageID: UUID?
         /// 合帧冲刷定时任务（~50ms）；nil 表示当前无挂起冲刷。

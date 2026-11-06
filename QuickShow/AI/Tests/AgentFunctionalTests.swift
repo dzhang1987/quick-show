@@ -30,6 +30,7 @@ enum AgentFunctionalTests {
         testToolRegistryAndFiltering()
         await testLaunchSubagentsToolSpec()
         testWireModelsAndToolCallAccumulator()
+        testToolIntentPartialExtraction()
         testRequestEncodingForAgents()
         testTaskRegistryAndInputRouting()
         testAntigravityToolsAndThoughtSignature()
@@ -206,7 +207,17 @@ enum AgentFunctionalTests {
         )
         let dispatched1 = accumulator.ingest([delta1])
         assertTest(!accumulator.isEmpty, "注入首片后累积器不为空")
-        assertTest(dispatched1.count == 1 && dispatched1.first?.name == "launch_subagents", "首片捕获到工具名并成功产出即时预显派发信号")
+        assertTest(
+            dispatched1.newStarts.count == 1 && dispatched1.newStarts.first?.name == "launch_subagents",
+            "首片捕获到工具名并成功产出即时预显派发信号"
+        )
+        // 首片同时携带参数首段：派发后参数增量必须同步产出（流式意图预显数据源）
+        assertTest(
+            dispatched1.argumentDeltas.count == 1
+                && dispatched1.argumentDeltas.first?.id == "call_abc"
+                && dispatched1.argumentDeltas.first?.delta == "{\"tasks\":[",
+            "派发片携带的参数增量按稳定 callID 产出"
+        )
 
         // 模拟第 2 片（参数尾段，id/name 为 nil）
         let delta2 = DeltaToolCall(
@@ -216,10 +227,25 @@ enum AgentFunctionalTests {
             function: DeltaToolCall.DeltaFunction(name: nil, arguments: "{\"agent_id\":\"coder\",\"task\":\"test\"}]}")
         )
         let dispatched2 = accumulator.ingest([delta2])
-        assertTest(dispatched2.isEmpty, "后续参数增量分片不重复产出预显派发信号")
+        assertTest(dispatched2.newStarts.isEmpty, "后续参数增量分片不重复产出预显派发信号")
+        assertTest(
+            dispatched2.argumentDeltas.count == 1
+                && dispatched2.argumentDeltas.first?.delta == "{\"agent_id\":\"coder\",\"task\":\"test\"}]}",
+            "后续参数增量分片按 callID 持续产出"
+        )
+
+        // 模拟早于工具名到达的参数分片（无 name/index-only）：只累积不外抛增量
+        let earlyArgs = DeltaToolCall(
+            index: 1,
+            id: nil,
+            type: nil,
+            function: DeltaToolCall.DeltaFunction(name: nil, arguments: "{\"x\":1")
+        )
+        let earlyResult = accumulator.ingest([earlyArgs])
+        assertTest(earlyResult.newStarts.isEmpty && earlyResult.argumentDeltas.isEmpty, "未派发调用的参数分片不产出增量（无稳定 callID）")
 
         let completed = accumulator.completed
-        assertTest(completed.count == 1, "流结束时成功归并产出 1 个完整工具调用")
+        assertTest(completed.count == 1, "流结束时产出 1 个完整工具调用（无 name 的孤儿分片按既有语义跳过）")
         let firstCall = completed.first
         assertTest(firstCall?.id == "call_abc", "合并后的 callID 正确")
         assertTest(firstCall?.name == "launch_subagents", "合并后的 name 正确")
@@ -227,6 +253,67 @@ enum AgentFunctionalTests {
 
         accumulator.clear()
         assertTest(accumulator.isEmpty, "调用 clear 后累积器清空")
+    }
+
+    // MARK: - 4.5 流式部分 JSON 意图预显测试（ToolIntentExtractor + PartialJSONFieldScanner）
+    private static func testToolIntentPartialExtraction() {
+        print("\n[Suite 4.5] 流式部分 JSON 意图预显测试...")
+
+        // 完整 JSON：走 JSONSerialization 正常路径（回归保障）
+        let fullJSON = "{\"description\":\"检查项目本地编译错误日志\",\"command\":\"xcodebuild\"}"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: fullJSON, fallbackToolName: nil) == "检查项目本地编译错误日志",
+            "完整 JSON 经标准解析提取意图"
+        )
+
+        // 截断 JSON：description 已闭合 → 流式期间即可预显
+        let partialWithDescription = "{\"description\":\"检查项目本地编译错误日志\",\"command\":\"xcodeb"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: partialWithDescription, fallbackToolName: nil) == "检查项目本地编译错误日志",
+            "截断 JSON 中已闭合的 description 可提前提取（意图标题流式预显）"
+        )
+
+        // 截断 JSON：description 尚未闭合 → 不拼接半截内容
+        let partialOpenString = "{\"description\":\"检查编"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: partialOpenString, fallbackToolName: nil) == nil,
+            "未闭合字符串绝不返回半截内容"
+        )
+
+        // 截断 JSON：description 尚未到达（前序字段截断）→ 无意图可提取
+        let partialBeforeIntent = "{\"command\":\"xcodebuild -scheme Qui"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: partialBeforeIntent, fallbackToolName: nil) == nil,
+            "意图字段未到达时返回 nil（回落工具名展示）"
+        )
+
+        // 转义解码：引号与换行
+        let escaped = "{\"description\":\"执行 \\\"git status\\\" 命令\",\"co"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: escaped, fallbackToolName: nil) == "执行 \"git status\" 命令",
+            "部分 JSON 字符串按 JSON 转义语义解码（引号）"
+        )
+
+        // 嵌套对象内的同名字段不误读（只认顶层 depth-1 字段）
+        let nested = "{\"tasks\":[{\"description\":\"嵌套意图不应被提取\"}],\"description\":\"顶层意图\",\"x"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: nested, fallbackToolName: nil) == "顶层意图",
+            "嵌套结构中的同名字段不污染顶层意图提取"
+        )
+
+        // \uXXXX 转义（含中文 BMP 标量）与字段优先级（description > title > intent）
+        let unicodeEscaped = "{\"title\":\"标题字段\",\"description\":\"\\u6d4b\\u8bd5\\u610f\\u56fe\",\"y"
+        assertTest(
+            ToolIntentExtractor.extractIntent(from: unicodeEscaped, fallbackToolName: nil) == "测试意图",
+            "\\uXXXX 转义按标量语义解码且 description 优先于 title"
+        )
+
+        // 空输入与非对象输入的容错
+        assertTest(ToolIntentExtractor.extractIntent(from: "", fallbackToolName: nil) == nil, "空输入返回 nil")
+        assertTest(
+            PartialJSONFieldScanner.firstStringValue(in: "not json at all", keys: ["description"]) == nil,
+            "非对象文本扫描安全返回 nil"
+        )
     }
 
     // MARK: - 5. 请求体动态工具 Schema 过滤测试

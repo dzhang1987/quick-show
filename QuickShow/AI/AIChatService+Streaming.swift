@@ -182,7 +182,7 @@ extension AIChatService {
                     isSubstantialContent = !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 case .reasoning(let r):
                     isSubstantialContent = !r.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                case .toolCallDispatched, .toolCalls:
+                case .toolCallDispatched, .toolCallArgumentsDelta, .toolCalls:
                     isSubstantialContent = true
                 case .usage:
                     isSubstantialContent = false

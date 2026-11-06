@@ -145,7 +145,9 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                             case "response.function_call_arguments.delta":
                                 guard let delta = event.delta, !delta.isEmpty else { continue }
                                 let key = event.itemId ?? "index-\(event.outputIndex ?? 0)"
-                                responsesAccumulator.appendArguments(key: key, delta: delta)
+                                if let callId = responsesAccumulator.appendArguments(key: key, delta: delta) {
+                                    continuation.yield(.toolCallArgumentsDelta(id: callId, delta: delta))
+                                }
                             case "response.function_call_arguments.done":
                                 guard let itemID = event.itemId else { continue }
                                 if let newly = responsesAccumulator.register(
@@ -191,9 +193,12 @@ final class OpenAIProvider: LLMProvider, @unchecked Sendable {
                                 continuation.yield(.reasoning(reasoning))
                             }
                             if let toolCalls = delta.toolCalls, !toolCalls.isEmpty {
-                                let newStarts = chatAccumulator.ingest(toolCalls)
-                                for item in newStarts {
+                                let ingestResult = chatAccumulator.ingest(toolCalls)
+                                for item in ingestResult.newStarts {
                                     continuation.yield(.toolCallDispatched(id: item.id, name: item.name))
+                                }
+                                for delta in ingestResult.argumentDeltas {
+                                    continuation.yield(.toolCallArgumentsDelta(id: delta.id, delta: delta.delta))
                                 }
                             }
                         }

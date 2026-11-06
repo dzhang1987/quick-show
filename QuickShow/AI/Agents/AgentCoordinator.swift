@@ -170,6 +170,8 @@ final class AgentCoordinator {
             var accumulatedFinalText = ""
             var toolRounds = 0
             let maxToolRounds = 3
+            /// 最近一次上报托盘的工具意图（逐片参数增量去重，避免重复 updateTaskAction）
+            var lastReportedToolIntent: String?
 
             subagentLoop: while toolRounds < maxToolRounds {
                 if Task.isCancelled { break subagentLoop }
@@ -222,6 +224,28 @@ final class AgentCoordinator {
                                     calls.append(ToolCallRecord(id: callId, name: name, arguments: "", result: nil, status: .pending))
                                     msg.toolCalls = calls
                                 }
+                            }
+                        case .toolCallArgumentsDelta(let callId, let delta):
+                            // 参数增量实时追加到占位卡：意图标题随流式渐次呈现
+                            var updatedArguments: String?
+                            ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
+                                var calls = msg.toolCalls ?? []
+                                if let index = calls.firstIndex(where: { $0.id == callId }) {
+                                    calls[index].arguments += delta
+                                    updatedArguments = calls[index].arguments
+                                    msg.toolCalls = calls
+                                }
+                            }
+                            // 意图可解析时升级托盘动作文案（工具名 → 动作意图；去重避免逐片重复上报）
+                            if let args = updatedArguments,
+                               let intent = ToolIntentExtractor.extractIntent(from: args, fallbackToolName: nil),
+                               intent != lastReportedToolIntent {
+                                lastReportedToolIntent = intent
+                                AgentTaskRegistry.shared.updateTaskAction(
+                                    id: persistentTaskId,
+                                    action: "正在执行：\(intent)",
+                                    status: .toolExecuting
+                                )
                             }
                         case .toolCalls(let calls):
                             completedCalls = calls
@@ -364,7 +388,7 @@ final class AgentCoordinator {
                             ChatSessionStore.shared.appendStreamToken(chunk, to: currentAssistantId, in: childId)
                         case .reasoning(let reasoningChunk):
                             ChatSessionStore.shared.appendReasoningToken(reasoningChunk, to: currentAssistantId, in: childId)
-                        case .usage, .toolCallDispatched, .toolCalls:
+                        case .usage, .toolCallDispatched, .toolCallArgumentsDelta, .toolCalls:
                             break
                         }
                     }
