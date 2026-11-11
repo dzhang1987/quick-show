@@ -6,6 +6,12 @@
 
 ### Changed
 
+- **模型候选列表行内重设计：整行添加、hover 高亮、滚动槽让位（`AIServiceSettingsForm.swift` / `DesignTokens.swift`）**：
+  - **整行可点 + 悬浮高亮**：候选行由「裸 `plus.circle` 贴右缘」重做为整行可点按钮，hover 整行高亮（`iconHoverBg` 档）+「＋ 添加」标签胶囊变强调色，明确指向当前行；已添加行降为「✓ 已添加」不可点确认态；
+  - **滚动条不再压按钮**：候选滚动内容复用 `scrollerGutter(.vertical)` 垫出 14pt 滚动槽，overlay 滚动条恒落留白；视口高度收敛为 `Theme.Layout.modelCandidateViewportHeight`（120→168pt，约 6 行）；
+  - **搜索与清空收拾**：搜索域改放大镜 + 内嵌输入 + 一键清除 + 聚焦强调环（替代系统粗蓝框），无匹配空态提示；「清空」收进候选标题行右上角；手动「添加模型」后自动展开新行编辑抽屉；
+  - **模型卡片 hover 层次统一**：卡片 hover 底色由 0.04 提档至 `iconHoverBg`，与候选行同一 hover 语言。
+
 - **工具分段执行升级为「参数粒度」动态并行资格（`AIToolRegistry.swift` / `BuiltInTools.swift` / `AIChatState+Streaming.swift` / `AgentFunctionalTests.swift`）**：
   - **协议新增 `isParallelExecutionSafe(arguments:)`（OCP 开闭）**：默认实现回落静态 `executionPolicy`，具备运行时风险判定能力的工具自行覆写；`run_shell` 覆写为「仅结构化风险判定为纯只读、自动免审、不触达审批抽屉」的命令可入并行批；
   - **混合序列天然保序**：分批循环由 `executionPolicy(name:)` 改为按单次调用参数判定，首个非并行调用处切分串行段，变更/破坏性命令与审批抽屉保持单飞；工具结果与协议消息仍按 `completedCalls` 原始顺序落定；
@@ -31,6 +37,12 @@
   - **视口自适应 80% 弹性限高与抽屉呼吸感**：题目区最大高度改为视口 80% 动态自适应，滚动区域底部追加充裕内边距；同步优化权限申请抽屉（`ToolConfirmationDrawer`）底部呼吸边距，彻底消灭贴边压迫感。
 
 ### Added
+
+- **SettingsField 设置页统一输入组件：原生内核根治空格不实时与右对齐（`SettingsField.swift` / `AIServiceSettingsForm.swift` / `AISettingsSections.swift` / `AntigravityOAuthSettingsSection.swift`）**：
+  - **根因**：SwiftUI TextField 在 macOS 每次键入把 binding 写回底层控件，写回重置 field editor 尾随空格排版（空格不实时渲染）；Form 值列默认右对齐是旧系统偏好遗留；系统 `roundedBorder` 与自定义搜索域两套视觉分裂；
+  - **原生内核**：单行/密码输入改 NSViewRepresentable 包装 NSTextField/NSSecureTextField，编辑期间绝不写回 stringValue（仅非编辑态同步外部值），空格/光标/中文 IME 组字走 AppKit 标准行为；显式左对齐；
+  - **视觉单一来源**：`surfaceField` 底 + `groupCardStroke` 细描边 + 聚焦 `accentSoftStroke` 强调环，容器外观经 `settingsFieldContainer` 共享给多行人设输入（多行保留 SwiftUI 内核，统一外观与左对齐）；等宽/密码变体保留原语义；
+  - **全量替换**：设置页 3 个文件 22 处输入点（含 4 个密码框、搜索域重组）统一接入，Form 行标签以 `LabeledContent` 保持左标签布局，全部 binding 与业务逻辑零改动。
 
 - **AI 权限判定语义化重构：命令级解析、构建/测试命令信任与智能免审分级（`ShellCommandParser.swift` / `ShellCommandRiskAnalyzer.swift` / `DevCommandCatalog.swift` / `ToolRisk.swift` / `AIToolShadowGuard.swift` / `ToolRiskTests.swift`）**：
   - **结构化语义解析（根治误拦）**：新增引号感知的 Shell 词法器与结构化风险分析器，只读判定从字符串正则匹配升级为命令单元语义——管道/`&&` 复合命令逐单元判定、引号内文本不再被误判为危险指令（`git commit -m "修复 rm -rf 误删"` 类命令不再误弹高危）、环境变量前缀 / `xargs` / 绝对路径正确穿透；破坏性判定同步结构化（`rm` 递归按短选项逐字符解析、`git branch -D` 大小写敏感、敏感路径重定向与 `cp/mv/tee` 目标逐级校验）；

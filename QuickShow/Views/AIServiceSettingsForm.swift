@@ -65,6 +65,9 @@ struct AIServiceSettingsForm: View {
     // 候选模型池搜索过滤
     @State private var availableModels: [String] = []
     @State private var modelFilter: String = ""
+    @State private var hoveredCandidateId: String? = nil
+    @FocusState private var isSinglePromptFocused: Bool
+    @FocusState private var isExpertPromptFocused: Bool
 
     // 模型列表行内编辑与悬停状态
     @State private var editingModelId: String? = nil
@@ -268,8 +271,9 @@ struct AIServiceSettingsForm: View {
         if let provider = currentProvider {
             // 基本参数与端点
             Section {
-                TextField("显示名称", text: providerNameBinding(for: provider.id))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("显示名称") {
+                    SettingsField(placeholder: "", text: providerNameBinding(for: provider.id))
+                }
 
                 if isPresetProvider(provider) || provider.type == .qoderNative || provider.type == .antigravityNative {
                     HStack {
@@ -295,8 +299,9 @@ struct AIServiceSettingsForm: View {
                     }
                 }
 
-                TextField("端点 Base URL", text: providerBaseURLBinding(for: provider.id), prompt: Text(providerURLPlaceholder(for: provider.type)))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("端点 Base URL") {
+                    SettingsField(placeholder: providerURLPlaceholder(for: provider.type), text: providerBaseURLBinding(for: provider.id))
+                }
 
                 Toggle("启用此服务商", isOn: providerEnabledBinding(for: provider.id))
             } header: {
@@ -315,11 +320,9 @@ struct AIServiceSettingsForm: View {
                 } else {
                     ForEach(Array(headers.enumerated()), id: \.element.id) { index, _ in
                         HStack(spacing: 8) {
-                            TextField("Header 名（如 User-Agent）", text: headerKeyBinding(for: provider.id, at: index))
-                                .textFieldStyle(.roundedBorder)
+                            SettingsField(placeholder: "Header 名（如 User-Agent）", text: headerKeyBinding(for: provider.id, at: index))
                                 .frame(width: 160)
-                            TextField("Header 值", text: headerValueBinding(for: provider.id, at: index))
-                                .textFieldStyle(.roundedBorder)
+                            SettingsField(placeholder: "Header 值", text: headerValueBinding(for: provider.id, at: index))
                             Button {
                                 removeHeader(for: provider.id, at: index)
                             } label: {
@@ -516,8 +519,7 @@ struct AIServiceSettingsForm: View {
                 if let keyMethod = primaryAPIKeyMethod {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
-                            SecureField(storedKey.isEmpty ? keyMethod.placeholder : "输入新的 API Key 以替换现有凭据", text: $apiKeyInput)
-                                .textFieldStyle(.roundedBorder)
+                            SettingsField(placeholder: storedKey.isEmpty ? keyMethod.placeholder : "输入新的 API Key 以替换现有凭据", text: $apiKeyInput, isSecure: true)
 
                             let trimmedKey = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
                             Button("保存凭据") {
@@ -629,40 +631,45 @@ struct AIServiceSettingsForm: View {
                     }
 
                     if !availableModels.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            TextField("在拉取的候选中搜索并快速添加...", text: $modelFilter)
-                                .textFieldStyle(.roundedBorder)
+                        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+                            HStack(spacing: Theme.Spacing.lg) {
+                                Text("拉取的候选 (\(availableModels.count))")
+                                    .font(.system(size: Theme.Typography.footnote, weight: .medium))
+                                    .foregroundColor(.secondary)
+
+                                Spacer()
+
+                                Button("清空") {
+                                    availableModels = []
+                                    modelFilter = ""
+                                }
+                                .font(.system(size: Theme.Typography.micro))
+                                .buttonStyle(.borderless)
+                                .foregroundColor(.secondary)
+                                .help("清空本次拉取的模型候选列表")
+                            }
+
+                            candidateSearchField
 
                             ScrollView(.vertical) {
-                                LazyVStack(alignment: .leading, spacing: 2) {
-                                    ForEach(filteredAvailableModels, id: \.self) { mid in
-                                        HStack {
-                                            Text(mid)
-                                                .font(.system(size: Theme.Typography.footnote, design: .monospaced))
-                                            Spacer()
-                                            if provider.models.contains(where: { $0.id == mid }) {
-                                                Text("已添加").font(.system(size: Theme.Typography.micro)).foregroundColor(.secondary)
-                                            } else {
-                                                Button {
-                                                    addModelFromAvailable(providerId: provider.id, modelId: mid)
-                                                } label: {
-                                                    Image(systemName: "plus.circle")
-                                                }
-                                                .buttonStyle(.borderless)
-                                            }
+                                LazyVStack(alignment: .leading, spacing: Theme.Spacing.xxs) {
+                                    if filteredAvailableModels.isEmpty {
+                                        Text("没有匹配搜索的候选模型")
+                                            .font(.system(size: Theme.Typography.footnote))
+                                            .foregroundColor(.secondary)
+                                            .frame(maxWidth: .infinity, alignment: .center)
+                                            .padding(.vertical, Theme.Spacing.xl)
+                                    } else {
+                                        ForEach(filteredAvailableModels, id: \.self) { mid in
+                                            candidateRowView(provider: provider, modelId: mid)
                                         }
-                                        .padding(.vertical, 2)
                                     }
                                 }
+                                .scrollerGutter(.vertical)
                             }
-                            .frame(height: 120)
-
-                            Button("清空拉取的候选列表") {
-                                availableModels = []
-                            }
-                            .font(.system(size: Theme.Typography.micro))
+                            .frame(height: Theme.Layout.modelCandidateViewportHeight)
                         }
-                        .padding(.top, 4)
+                        .padding(.top, Theme.Spacing.sm)
                     }
                 }
                 .padding(.vertical, 4)
@@ -736,8 +743,9 @@ struct AIServiceSettingsForm: View {
     private var singleAgentFormContent: some View {
         if let agent = currentAgent {
             Section {
-                TextField("助手显示名称", text: agentNameBinding(for: agent.id))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("助手显示名称") {
+                    SettingsField(placeholder: "", text: agentNameBinding(for: agent.id))
+                }
 
                 HStack(spacing: 8) {
                     Text("助手图标:")
@@ -762,13 +770,13 @@ struct AIServiceSettingsForm: View {
                         .buttonStyle(.borderless)
                     }
 
-                    TextField("SF Symbol 名", text: agentIconBinding(for: agent.id))
-                        .textFieldStyle(.roundedBorder)
+                    SettingsField(placeholder: "SF Symbol 名", text: agentIconBinding(for: agent.id))
                         .frame(maxWidth: 140)
                 }
 
-                TextField("助手职责简介", text: agentDescBinding(for: agent.id))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("助手职责简介") {
+                    SettingsField(placeholder: "", text: agentDescBinding(for: agent.id))
+                }
             } header: {
                 Text("助手档案")
             }
@@ -815,9 +823,15 @@ struct AIServiceSettingsForm: View {
             }
 
             Section {
-                TextField("定制人设提示词，留空则使用内置全局通用设定", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(4...8)
+                VStack(alignment: .leading, spacing: 0) {
+                    TextField("定制人设提示词，留空则使用内置全局通用设定", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: Theme.Typography.body))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(4...8)
+                        .focused($isSinglePromptFocused)
+                        .settingsFieldContainer(focused: isSinglePromptFocused)
+                }
 
                 HStack {
                     Spacer()
@@ -875,11 +889,13 @@ struct AIServiceSettingsForm: View {
 
         if let agent = currentAgent {
             Section {
-                TextField("智能体名称", text: agentNameBinding(for: agent.id))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("智能体名称") {
+                    SettingsField(placeholder: "", text: agentNameBinding(for: agent.id))
+                }
 
-                TextField("职责描述", text: agentDescBinding(for: agent.id))
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("职责描述") {
+                    SettingsField(placeholder: "", text: agentDescBinding(for: agent.id))
+                }
 
                 Toggle("启用此智能体", isOn: agentEnabledBinding(for: agent.id))
                 Toggle("设为全局视觉分析担当 (Visual Observer)", isOn: agentVisualDelegateBinding(for: agent.id))
@@ -960,9 +976,15 @@ struct AIServiceSettingsForm: View {
             }
 
             Section {
-                TextField("定制专家专属提示词", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(4...8)
+                VStack(alignment: .leading, spacing: 0) {
+                    TextField("定制专家专属提示词", text: agentSystemPromptBinding(for: agent.id), axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: Theme.Typography.body))
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(4...8)
+                        .focused($isExpertPromptFocused)
+                        .settingsFieldContainer(focused: isExpertPromptFocused)
+                }
             } header: {
                 Text("专家专属提示词 (System Prompt)")
             }
@@ -1183,7 +1205,7 @@ struct AIServiceSettingsForm: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(isEditing ? Color.accentColor.opacity(0.06) : (isHovered ? Color.primary.opacity(0.04) : Color.primary.opacity(0.02)))
+                    .fill(isEditing ? Color.accentColor.opacity(0.06) : (isHovered ? Theme.Colors.iconHoverBg : Theme.Colors.surfaceInset))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
@@ -1203,16 +1225,14 @@ struct AIServiceSettingsForm: View {
                             Text("显示名称")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
-                            TextField("显示名", text: modelNameBinding(providerId: provider.id, modelId: model.id))
-                                .textFieldStyle(.roundedBorder)
+                            SettingsField(placeholder: "显示名", text: modelNameBinding(providerId: provider.id, modelId: model.id))
                         }
 
                         VStack(alignment: .leading, spacing: 3) {
                             Text("模型标识 (Model ID)")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
-                            TextField("模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
-                                .textFieldStyle(.roundedBorder)
+                            SettingsField(placeholder: "模型 ID", text: modelIdBinding(providerId: provider.id, modelId: model.id))
                         }
                     }
 
@@ -1221,8 +1241,7 @@ struct AIServiceSettingsForm: View {
                             Text("上下文长度 (Tokens)")
                                 .font(.system(size: 11, weight: .medium))
                                 .foregroundColor(.secondary)
-                            TextField("上下文", text: modelContextBinding(providerId: provider.id, modelId: model.id))
-                                .textFieldStyle(.roundedBorder)
+                            SettingsField(placeholder: "上下文", text: modelContextBinding(providerId: provider.id, modelId: model.id))
                                 .frame(maxWidth: 180)
                         }
 
@@ -1249,6 +1268,91 @@ struct AIServiceSettingsForm: View {
                 )
                 .padding(.horizontal, 4)
                 .padding(.top, 4)
+            }
+        }
+    }
+
+    // MARK: - 候选模型搜索域与候选行
+
+    /// 搜索域：统一输入组件 + 放大镜 + 一键清除，容器外观与全页输入框同源。
+    private var candidateSearchField: some View {
+        SettingsField(
+            placeholder: "搜索候选模型…",
+            text: $modelFilter,
+            leading: {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: Theme.Typography.footnote))
+                    .foregroundColor(.secondary)
+            },
+            trailing: {
+                if !modelFilter.isEmpty {
+                    Button {
+                        modelFilter = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: Theme.Typography.footnote))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("清除搜索")
+                }
+            }
+        )
+    }
+
+    /// 候选行：整行可点添加，hover 整行高亮 + 胶囊强调，明确「添加的是哪一行」；
+    /// 已添加行降为不可点的确认态。右侧留白由 scrollerGutter 承担，滚动条不再压按钮。
+    private func candidateRowView(provider: AIProvider, modelId: String) -> some View {
+        let isAdded = provider.models.contains(where: { $0.id == modelId })
+        let isHovered = (hoveredCandidateId == modelId) && !isAdded
+
+        return Button {
+            addModelFromAvailable(providerId: provider.id, modelId: modelId)
+        } label: {
+            HStack(spacing: Theme.Spacing.lg) {
+                Text(modelId)
+                    .font(Theme.Typography.mono(Theme.Typography.footnote))
+                    .foregroundColor(isAdded ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+
+                Spacer(minLength: Theme.Spacing.lg)
+
+                if isAdded {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Image(systemName: "checkmark")
+                        Text("已添加")
+                    }
+                    .font(.system(size: Theme.Typography.micro, weight: .medium))
+                    .foregroundColor(.secondary)
+                } else {
+                    HStack(spacing: Theme.Spacing.xs) {
+                        Image(systemName: "plus")
+                        Text("添加")
+                    }
+                    .font(.system(size: Theme.Typography.micro, weight: .semibold))
+                    .foregroundColor(isHovered ? Color.accentColor : .secondary)
+                    .padding(.horizontal, Theme.Spacing.mdlg)
+                    .padding(.vertical, Theme.Spacing.xs)
+                    .background(
+                        Capsule().fill(isHovered ? Theme.Colors.accentSoftFill : Theme.Colors.surfaceButton)
+                    )
+                }
+            }
+            .padding(.horizontal, Theme.Spacing.lg)
+            .padding(.vertical, Theme.Spacing.sm)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap)
+                    .fill(isHovered ? Theme.Colors.iconHoverBg : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isAdded)
+        .help(isAdded ? "该模型已在能力池中" : "将 \(modelId) 添加到能力池")
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.chatTickHoverFade)) {
+                hoveredCandidateId = hovering ? modelId : nil
             }
         }
     }
@@ -1550,6 +1654,10 @@ struct AIServiceSettingsForm: View {
         let newModelId = "model-\(UUID().uuidString.prefix(4).lowercased())"
         p.models.append(AIModelSpec(id: newModelId, name: "新模型", contextWindow: 524288, supportsVision: false, supportsThinking: false))
         providerStore.saveProvider(p)
+        // 新行立即展开编辑抽屉，用户可直接填写名称与 ID，无需再找编辑按钮
+        withAnimation(.easeInOut(duration: Theme.Motion.contentFade)) {
+            editingModelId = newModelId
+        }
     }
 
     private func addModelFromAvailable(providerId: String, modelId: String) {

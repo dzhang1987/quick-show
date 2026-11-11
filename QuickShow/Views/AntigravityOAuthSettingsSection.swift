@@ -19,16 +19,14 @@ struct AntigravityOAuthSettingsSection: View {
                     Text("Client ID")
                         .font(.system(size: Theme.Typography.footnote, weight: .medium))
                         .frame(width: 90, alignment: .leading)
-                    TextField("xxx.apps.googleusercontent.com", text: $clientIdInput)
-                        .textFieldStyle(.roundedBorder)
+                    SettingsField(placeholder: "xxx.apps.googleusercontent.com", text: $clientIdInput)
                 }
 
                 HStack {
                     Text("Client Secret")
                         .font(.system(size: Theme.Typography.footnote, weight: .medium))
                         .frame(width: 90, alignment: .leading)
-                    SecureField("输入 Client Secret", text: $clientSecretInput)
-                        .textFieldStyle(.roundedBorder)
+                    SettingsField(placeholder: "输入 Client Secret", text: $clientSecretInput, isSecure: true)
                 }
 
                 HStack {

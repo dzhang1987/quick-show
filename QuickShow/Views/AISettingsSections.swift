@@ -261,13 +261,9 @@ struct AIEnvVarsSettingsSection: View {
             } else {
                 ForEach($entries) { $entry in
                     HStack(spacing: 8) {
-                        TextField("变量名", text: $entry.key)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: Theme.Typography.body, design: .monospaced))
+                        SettingsField(placeholder: "变量名", text: $entry.key, monospaced: true)
                             .frame(maxWidth: 180)
-                        TextField("值", text: $entry.value)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: Theme.Typography.body, design: .monospaced))
+                        SettingsField(placeholder: "值", text: $entry.value, monospaced: true)
                         Button(role: .destructive) {
                             removeEntry(id: entry.id)
                         } label: {
@@ -333,8 +329,9 @@ struct AIWebSearchSettingsSection: View {
     var body: some View {
         Section {
             if storedKey.isEmpty {
-                SecureField("输入 Tavily API Key", text: $keyInput)
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("输入 Tavily API Key") {
+                    SettingsField(placeholder: "", text: $keyInput, isSecure: true)
+                }
             } else {
                 HStack {
                     Text("已存储 ····\(String(storedKey.suffix(4)))")
@@ -344,8 +341,9 @@ struct AIWebSearchSettingsSection: View {
                     Button("清除") { clearKey() }
                         .font(.system(size: Theme.Typography.body))
                 }
-                SecureField("输入新的 Key 以替换", text: $keyInput)
-                    .textFieldStyle(.roundedBorder)
+                LabeledContent("输入新的 Key 以替换") {
+                    SettingsField(placeholder: "", text: $keyInput, isSecure: true)
+                }
             }
 
             if !trimmedInput.isEmpty {

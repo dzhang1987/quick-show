@@ -216,6 +216,7 @@
 		CA0D6647F82669AE53BB7812 /* MTUnicode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E1362BEB3DC49FF20A811F5 /* MTUnicode.swift */; };
 		CC3AB6CA4C2BBEA09EDD2AF8 /* OpenAIAuthMethods.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0714F0338DCDD2208184A7BD /* OpenAIAuthMethods.swift */; };
 		CD98E403CE783DC04BADF1C4 /* DevCommandCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20D32826DD5E9863D9E7F20 /* DevCommandCatalog.swift */; };
+		CF97C74B0E2C2703F4EA431B /* SettingsField.swift in Sources */ = {isa = PBXBuildFile; fileRef = F24F5C2AF4FC6F0AB6E059CB /* SettingsField.swift */; };
 		D4DDA7D49359D19DCFD193FF /* MarkdownParser+Inline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 23D650ABEA4166AB38A3C706 /* MarkdownParser+Inline.swift */; };
 		D54069715E1809D6A244C74B /* MarkdownParser+Links.swift in Sources */ = {isa = PBXBuildFile; fileRef = E875F86A971A55306BDB653B /* MarkdownParser+Links.swift */; };
 		DA4C6170D2969158BA1E3B38 /* MathFont.swift in Sources */ = {isa = PBXBuildFile; fileRef = D11F7A6D46279250D573223B /* MathFont.swift */; };
@@ -498,6 +499,7 @@
 		F0B57B22DF1AFA5CCE157534 /* mermaid_bridge.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = mermaid_bridge.js; sourceTree = "<group>"; };
 		F0C6C3784ACB8FAC5B4F0D4B /* AIAuthMethod.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIAuthMethod.swift; sourceTree = "<group>"; };
 		F20AF867571D5BCBBE336B6E /* QoderProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderProvider.swift; sourceTree = "<group>"; };
+		F24F5C2AF4FC6F0AB6E059CB /* SettingsField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsField.swift; sourceTree = "<group>"; };
 		F29D2A7DA65EFB27452D51FD /* MTFontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTFontManager.swift; sourceTree = "<group>"; };
 		F2A3B0D346751AEDEDF6F425 /* MathSyntaxSanitizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MathSyntaxSanitizer.swift; sourceTree = "<group>"; };
 		F2AF20CBDE803B2DBE7B286F /* MarkdownParser+HTML.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MarkdownParser+HTML.swift"; sourceTree = "<group>"; };
@@ -714,6 +716,7 @@
 				BC5668F43DA49F7BCE29893E /* PerformanceCard.swift */,
 				2B586F0BF4F4DAF19E416773 /* PomodoroPresetButton.swift */,
 				A1D35C2A19A0AD0D0A948962 /* ScrollerGutter.swift */,
+				F24F5C2AF4FC6F0AB6E059CB /* SettingsField.swift */,
 				FA8FD61001FFBE03FF9530C6 /* SettingsGeneralForms.swift */,
 				6EBB220C3DE2C9A87217EC24 /* SettingsShortcutsForm.swift */,
 				B6E97F9FE6F6637A5F39A803 /* SettingsView.swift */,
@@ -1380,6 +1383,7 @@
 				5BDA48B3BFAE35BC6548EAF2 /* ScreenHelper.swift in Sources */,
 				820E9EF8AAEEDE708C43A15D /* ScrollerGutter.swift in Sources */,
 				0AFE02D45382351E3BE2E871 /* SendMessageTool.swift in Sources */,
+				CF97C74B0E2C2703F4EA431B /* SettingsField.swift in Sources */,
 				5ED9778EAB65A148653771F9 /* SettingsGeneralForms.swift in Sources */,
 				063D8C81B464D96670DF3D12 /* SettingsShortcutsForm.swift in Sources */,
 				B90F4DF6126D82E466037781 /* SettingsStore.swift in Sources */,

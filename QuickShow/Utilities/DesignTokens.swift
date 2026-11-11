@@ -223,6 +223,9 @@ enum Theme {
         static let iconRest = Color.primary.opacity(0.60)        // 图钉/箭头静止态（可读下限）
         static let iconHover = Color.primary.opacity(0.95)       // hover 增强
         static let iconHoverBg = Color.primary.opacity(0.10)     // hover 圆底
+        static let surfaceField = Color.primary.opacity(0.04)    // 搜索/输入域容器底（弱于按钮底，不抢焦点）
+        static let accentSoftFill = Color.accentColor.opacity(0.15)  // hover 胶囊/选中态强调柔底
+        static let accentSoftStroke = Color.accentColor.opacity(0.40) // 聚焦/选中态强调环
         static let closeIcon = Color.primary.opacity(0.55)       // CheatSheet 关闭钮
         static let wifiOff = Color.primary.opacity(0.55)         // WiFi 断连弱化（亮色对比度下限 0.55）
         static let idleText = Color.primary.opacity(0.45)        // "就绪"等弱化文字（亮色 ≈3.5:1 装饰下限）
@@ -558,6 +561,9 @@ enum Theme {
         // 滚动条即落在留白里；卡片自身底部内边距随之让位归零，静止观感不变。
         // 见 ScrollerGutter.swift。
         static let scrollerGutter: CGFloat = 14
+        // 候选模型滚动视口（AI 服务设置）：约 6 行候选行（行高 ≈24pt + 行距 2pt），
+        // 视口高度单一来源，行结构见 AIServiceSettingsForm.candidateRowView
+        static let modelCandidateViewportHeight: CGFloat = 168
     }
 
     // MARK: - 投影档位（浮起层级的值源：接触影贴身定锚 + 环境影拉开纵深，禁止单层贴身影）
