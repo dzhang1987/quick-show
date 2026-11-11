@@ -229,14 +229,14 @@ struct AIChatInputDock: View {
             // （glass-on-glass），一律纯灰图标 hover 出圆底（与图钉同一克制语言）。
             // <26 降级描边随安静/激活换档：安静态降到 cardStroke(0.09) 近无感，激活态回 0.14。
             .modifier(GlassSurface(
-                shape: RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous),
-                strokeColor: dockQuiet ? Theme.Colors.cardStroke : Theme.Colors.chatStrokeStrong
+                shape: RoundedRectangle(cornerRadius: Theme.Radius.chatDock, style: .continuous),
+                strokeColor: dockQuiet ? Theme.Colors.chatDockRestRim : Theme.Colors.chatStrokeStrong
             ))
             // 激活态 rim：坞体激活（悬停/输入/附件/生成中/抽屉在场）且窗口 key 时叠加
             // accent 低透明度环，材质对状态有响应；安静态零描边。
             // allowsHitTesting(false) 防描边层吞掉坞内控件点击
             .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.groupCard, style: .continuous)
+                RoundedRectangle(cornerRadius: Theme.Radius.chatDock, style: .continuous)
                     .strokeBorder(
                         Theme.Colors.accent.opacity(dockRimActive ? Theme.Colors.dockFocusRimOpacity : 0),
                         lineWidth: 1
@@ -831,19 +831,20 @@ struct AIChatInputDock: View {
         state.imageAttachments = []
     }
 
-    /// 发送键底：可用 = 实心操作色（亮暗双模式自适应：琥珀暖金/科技青，全图最强图底反转——强调只在可发送瞬间登场），
-    /// 流式 = 警告红；空态/禁用 = 无底（透明），杜绝空态下高亮实心色块抢夺视觉重心。
+    /// 发送键底：可用 = 实心操作色（亮暗双模式自适应，全图最强图底反转——强调只在可发送瞬间登场），
+    /// 流式 = 警告红；空态/禁用 = 幽灵 accent 圆底（光与纸：品牌色 affordance 常驻在场但安静，
+    /// 低透明度不抢视觉重心，替代旧版完全透明导致的「发送钮隐形」）。
     private var sendButtonFill: Color {
         if isCurrentSessionStreaming { return Theme.Colors.statusWarning.opacity(0.9) }
-        return canSend ? Theme.Colors.actionButtonFill : Color.clear
+        return canSend ? Theme.Colors.actionButtonFill : Theme.Colors.chatSendIdleFill
     }
 
-    /// 发送键图标：实心强调色底上自适应高对比前景色（亮暗双模式自适应：琥珀暖色亮色纯白/暗色深褐黑，对比度均 > 4.5:1），
-    /// 流式红底用白色；禁用态 contentTertiary（≈4.7:1，灰箭头静止可读但不抢眼）。
+    /// 发送键图标：实心强调色底上自适应高对比前景色（亮暗双模式自适应，对比度均 > 4.5:1），
+    /// 流式红底用白色；空态/禁用 = 幽灵 accent 图标（弱于实心强调，静止可读且不抢眼）。
     private var sendButtonForeground: Color {
         if isCurrentSessionStreaming { return .white }
         if canSend { return Theme.Colors.actionButtonForeground }
-        return Theme.Colors.contentTertiary
+        return Theme.Colors.chatSendIdleForeground
     }
 
     /// 从剪贴板导入图片附件。

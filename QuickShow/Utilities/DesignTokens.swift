@@ -69,6 +69,7 @@ struct ThemePalette {
     let clockGradientBottom: Color  // 主时钟渐变底
     let secondsGradientTop: Color   // 秒数渐变顶
     let secondsGradientBottom: Color// 秒数渐变底
+    let ambientSecondary: Color     // 极光氛围副色（与 accent 组成双色环境光，参考 ArcZip/Raycast 彩色光晕）
     
     // 亮暗双模式自适应构造（RGB 三元组）
     private static func adaptive(dark: (Double, Double, Double), light: (Double, Double, Double)) -> Color {
@@ -99,7 +100,9 @@ struct ThemePalette {
         clockGradientTop: Color.primary,
         clockGradientBottom: Color.primary.opacity(0.92),
         secondsGradientTop: Color.primary.opacity(0.85),
-        secondsGradientBottom: Color.primary.opacity(0.65)
+        secondsGradientBottom: Color.primary.opacity(0.65),
+        // 极光副色：冷紫（与极光蓝主色组成 ArcZip 式双色环境光）
+        ambientSecondary: adaptive(dark: (0.55, 0.36, 0.96), light: (0.48, 0.32, 0.86))
     )
     
     /// 琥珀暖色（香槟暖金）：提亮暗阶的高光香槟金，复古温润仪表质感，暖金微透气泡
@@ -113,7 +116,9 @@ struct ThemePalette {
         clockGradientTop: adaptive(dark: (0.99, 0.90, 0.71), light: (0.55, 0.32, 0.05)),
         clockGradientBottom: adaptive(dark: (0.94, 0.66, 0.24), light: (0.76, 0.45, 0.06)),
         secondsGradientTop: adaptive(dark: (0.99, 0.90, 0.71), light: (0.55, 0.32, 0.05)).opacity(0.85),
-        secondsGradientBottom: adaptive(dark: (0.94, 0.66, 0.24), light: (0.76, 0.45, 0.06)).opacity(0.65)
+        secondsGradientBottom: adaptive(dark: (0.94, 0.66, 0.24), light: (0.76, 0.45, 0.06)).opacity(0.65),
+        // 极光副色：暖橙红（与香槟金主色组成 Raycast 式暖光晕）
+        ambientSecondary: adaptive(dark: (0.96, 0.45, 0.22), light: (0.86, 0.40, 0.12))
     )
 }
 
@@ -256,6 +261,7 @@ enum Theme {
         static var clockGradientBottom: Color { Theme.palette.clockGradientBottom }
         static var secondsGradientTop: Color { Theme.palette.secondsGradientTop }
         static var secondsGradientBottom: Color { Theme.palette.secondsGradientBottom }
+        static var ambientSecondary: Color { Theme.palette.ambientSecondary }
 
         // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治 + 质感分区）
         // 设计逻辑：内容层必须有「确定底色」——玻璃透壁纸会把文字对比度变成环境的函数
@@ -345,7 +351,59 @@ enum Theme {
         static let rimBottomOpacity: Double = 0.05   // 底缘白
         static let rimDarkEdgeOpacity: Double = 0.08 // 底缘内侧 1pt 黑色重边（与窗影衔接）
         /// 输入卡聚焦态 rim：窗口 key 时叠加的 accent 低透明度环（材质对状态有响应）
-        static let dockFocusRimOpacity: Double = 0.35
+        /// 光与纸：0.35 → 0.45，聚焦态品牌色响应更可辨（仍克制，不喧宾夺主）
+        static let dockFocusRimOpacity: Double = 0.45
+
+        // MARK: 光与纸质感重塑（2026-11）
+        // 在可读性纸面之上重建「光、色、节奏」：纸面获得受光垂直渐变、顶部极淡品牌色氛围光、
+        // agent 获得渐变徽标身份、输入坞浮起为视觉焦点。
+        // 对比度纪律：纸面渐变顶端与 chatReadingSurface 完全一致（零回归），底端只更暗更不透明
+        // （白字对比只升不降）；氛围光是集中在顶部区域的极淡装饰光层，不参与正文对比度预算。
+
+        /// 纸面渐变顶端（与 chatReadingSurface 同值：顶部对比度零回归）
+        static let chatPaperTop = Theme.dynamic(
+            dark: ChatSurface.dark,
+            light: ChatSurface.light,
+            alpha: 0.80
+        )
+        /// 纸面渐变底端（更暗 + 更不透明：光向下衰减形成可感知的「顶部受光」纵深，对比度只升不降）
+        /// 推一档：0.096→0.082 / 0.85→0.88，加大顶底落差让「光」可读
+        static let chatPaperBottom = Theme.dynamic(
+            dark: ContrastColor(0.082, 0.082, 0.092),
+            light: ContrastColor(0.962, 0.962, 0.968),
+            alpha: 0.88
+        )
+        /// 游走光团主色 hue（accent；透明度/半径由动画实时随机调制，见 ChatAuroraView）
+        static var auroraBlobPrimary: Color { Theme.palette.accent }
+        /// 游走光团副色 hue（ambientSecondary；与主色光团交叠出色彩流动）
+        static var auroraBlobSecondary: Color { Theme.palette.ambientSecondary }
+        /// 光团峰值不透明度（随机呼吸上限；克制以护住正文小字对比度）
+        static let auroraBlobPeakOpacity: Double = 0.16
+        /// 光团基础半径占窗口短边比例（distinct「一团光」而非满幅线性 wash）
+        static let auroraBlobRadiusRatio: CGFloat = 0.30
+        /// 光团纵向游走边界占窗口高度比例（光偏顶部游走，下方正文保持确定纸面）
+        static let auroraVerticalBias: CGFloat = 0.62
+        /// 光团柔化模糊半径（ glow 边缘羽化）
+        static let auroraBlobBlur: CGFloat = 26
+        /// 功能面品牌微染（表格头等：3% accent wash，不破坏小字对比度）
+        static var chatAccentWash: Color { Theme.palette.accent.opacity(0.03) }
+        /// 输入坞安静态品牌 rim（替代纯灰描边：常驻一丝品牌色边缘，聚焦态再升档）
+        static var chatDockRestRim: Color { Theme.palette.accent.opacity(0.12) }
+
+        /// Agent 渐变徽标顶部光泽（白光叠加：在 accent 实底上形成「顶部受光」渐变）
+        static let agentMarkSheenTop = Color.white.opacity(0.28)
+        static let agentMarkSheenBottom = Color.white.opacity(0.0)
+        /// Agent 徽标受光 rim（0.5pt 精细高光）
+        static let agentMarkRim = Color.white.opacity(0.30)
+        /// Agent 徽标图标前景（accent 实底上高对比，复用实心操作钮前景通道）
+        static var agentMarkForeground: Color { Theme.palette.actionButtonForeground }
+        /// Agent 徽标氛围光阴影不透明度（大尺寸如欢迎页柔光；小尺寸默认关闭避免噪声）
+        static let agentMarkGlowOpacity: Double = 0.35
+
+        /// 输入坞空态发送钮幽灵 accent 底（在场但安静：品牌色 affordance，不抢视觉重心）
+        static var chatSendIdleFill: Color { Theme.palette.accent.opacity(0.16) }
+        /// 输入坞空态发送钮幽灵 accent 图标（弱于实心强调，静止可读）
+        static var chatSendIdleForeground: Color { Theme.palette.accent.opacity(0.60) }
 
         /// AI 窗专用自适应色构造（rgba 四元组，解析跟随视图 effectiveAppearance）
         private static func aiAdaptive(
@@ -388,6 +446,11 @@ enum Theme {
         static let body: CGFloat = 12        // 正文/状态栏图标/描述
         static let callout: CGFloat = 12.5   // 卡片标题/状态数值
         static let chatBarTitle: CGFloat = 14 // 对话窗顶栏标题（玻璃纱带大字档：WCAG large-text 3:1）
+        // 光与纸：欢迎页品牌时刻 + 助手回合身份锚点
+        static let welcomeHeadline: CGFloat = 17   // 欢迎页问候大标题（agent 身份锚点）
+        static let welcomeSubtitle: CGFloat = 12   // 欢迎页引导副标
+        static let welcomeSuggestion: CGFloat = 12 // 欢迎页灵感提示 chip 文字
+        static let chatTurnAnchorName: CGFloat = 11 // 助手回合锚点 agent 名（弱存在小字）
         static let iconLarge: CGFloat = 13   // 电池图标（视觉偏小需加大一档）
         static let toast: CGFloat = 13.5     // toast 文字
         static let badge: CGFloat = 14       // 日期徽章/CheatSheet 标题
@@ -435,6 +498,7 @@ enum Theme {
         static let insetCard: CGFloat = 8   // 内层卡（番茄钟台/日历卡）
         static let keyCap: CGFloat = 5      // 快捷键键帽
         static let userBubble: CGFloat = 14 // 用户消息气泡（保持对话气泡圆润感）
+        static let chatDock: CGFloat = 16   // 光与纸：输入坞浮岛圆角（10→16，更圆润连续曲率，浮起焦点）
         static let previewCapsule: CGFloat = 8 // 刻度轨预览胶囊（2026-10 重设计）
         static let inlineCode: CGFloat = 3.5 // 行内代码/微徽章圆角（方案 A 胶囊质感）
     }
@@ -527,6 +591,12 @@ enum Theme {
 
         // —— 2026-10 AI 窗视觉重设计 ——
         static let chatTopBarHeight: CGFloat = 36      // 顶栏高（28→36，图钉归入顶栏节奏）
+        // 光与纸：agent 渐变徽标三档尺寸 + 欢迎页灵感提示列宽
+        static let chatTopBarMarkSize: CGFloat = 18    // 顶栏 agent 身份徽标
+        static let chatTurnAnchorMarkSize: CGFloat = 16 // 助手回合身份锚点徽标
+        static let welcomeMarkSize: CGFloat = 46       // 欢迎页品牌大徽标（带氛围柔光）
+        static let welcomeSuggestionWidth: CGFloat = 320 // 欢迎页灵感提示列限宽（居中阅读列）
+
         static let chatInputHeight: CGFloat = 72       // 输入框固定高（44→72 常驻 3 行：3×13pt 行高≈16 + 垂直内边距 12×2；超出内部滚动、滚动条隐藏）
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
         static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
@@ -571,10 +641,10 @@ enum Theme {
         // 输入坞双层阴影（SwiftUI shadow radius ≈ blur/2，两次 .shadow 叠加）
         static let dockContactRadius: CGFloat = 3    // 接触影 blur 6
         static let dockContactY: CGFloat = 2
-        static let dockContactOpacity: Double = 0.12
-        static let dockAmbientRadius: CGFloat = 16   // 环境影 blur 32
+        static let dockContactOpacity: Double = 0.16 // 光与纸：0.12→0.16，贴身定锚更实
+        static let dockAmbientRadius: CGFloat = 18   // 环境影 blur 36（光与纸：16→18 拉开纵深）
         static let dockAmbientY: CGFloat = 12
-        static let dockAmbientOpacity: Double = 0.08
+        static let dockAmbientOpacity: Double = 0.12 // 光与纸：0.08→0.12，浮岛感更强
         // 浏览导航浮层（预览胶囊 / 回底圆钮）：单层轻影，不抢坞的纵深
         static let navFloatRadius: CGFloat = 7       // blur 14
         static let navFloatY: CGFloat = 2
@@ -599,5 +669,8 @@ enum Theme {
         static let chatTickMagnifyIn: Double = 0.12   // 刻度轨放大渐入（光标进入通道）
         static let chatTickMagnifyOut: Double = 0.24  // 刻度轨收拢回弹（光标离开通道，easeOut）
         static let chatTickHoverFade: Double = 0.15   // tick 提亮 / 预览胶囊显隐
+        // 光与纸·动态极光：游走光团（TimelineView 驱动，有机 wander + 随机呼吸；尊重减弱动态）
+        static let auroraFrameInterval: Double = 1.0 / 30.0 // 30fps 上限（性能与流畅平衡）
+        static let auroraTimeScale: Double = 1.0            // 游走/呼吸整体速度倍率
     }
 }

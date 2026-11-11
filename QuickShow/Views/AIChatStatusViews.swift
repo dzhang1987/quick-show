@@ -311,18 +311,93 @@ struct QueuedInputCapsule: View {
 
 // MARK: - 空态欢迎页（已配置、无消息）
 
+/// 空态欢迎页（光与纸 · 品牌时刻）：agent 渐变徽标 + 问候 + 可点击灵感提示。
+/// 把用户第一眼看到的最弱画面升级为身份与邀请——徽标带氛围柔光，灵感 chip 点击即发送。
 struct WelcomeView: View {
+    let agent: AIAgent
+    /// 点击灵感提示：回填输入框并发送（由 AIChatView 注入 state 接线）。
+    let onSuggestion: (String) -> Void
+
     var body: some View {
-        VStack(spacing: Theme.Spacing.xl) {
-            Image(systemName: "sparkles")
-                .font(.system(size: Theme.Typography.settingsIcon, weight: .regular))
-                .foregroundColor(Theme.Colors.accent)
-            Text("有什么想问的？")
-                .font(Theme.Typography.text(Theme.Typography.toast, .medium))
-                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+        VStack(spacing: Theme.Spacing.xxl) {
+            AgentIdentityMark(iconName: agent.iconName, size: Theme.Layout.welcomeMarkSize, showsGlow: true)
+
+            VStack(spacing: Theme.Spacing.sm) {
+                Text("你好，我是\(agent.name)")
+                    .font(Theme.Typography.text(Theme.Typography.welcomeHeadline, .semibold))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                Text("描述你的问题，或从下面的灵感开始")
+                    .font(Theme.Typography.text(Theme.Typography.welcomeSubtitle))
+                    .foregroundColor(Theme.Colors.contentTertiary)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: Theme.Spacing.lg) {
+                ForEach(suggestions, id: \.self) { prompt in
+                    WelcomeSuggestionChip(text: prompt) { onSuggestion(prompt) }
+                }
+            }
         }
         .padding(Theme.Spacing.panel)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// 灵感提示：按 agent 角色给专属起点，未收录角色回退通用三问。
+    private var suggestions: [String] {
+        Self.suggestionMap[agent.id] ?? Self.defaultSuggestions
+    }
+
+    private static let defaultSuggestions = [
+        "用第一性原理帮我拆解一个复杂问题",
+        "把一段长文总结成清晰的要点",
+        "帮我起草一封得体专业的邮件"
+    ]
+
+    private static let suggestionMap: [String: [String]] = [
+        "coder": ["帮我审查这段代码的设计问题", "解释一个我看不懂的报错", "给这个功能写一个实现方案"],
+        "observer": ["分析这张截图里的界面结构", "提取图片中的文字与表格", "描述这张图的布局与配色"],
+        "oracle": ["从第一性原理推演一个决策", "帮我论证一个方案的利弊", "一步步推导这个逻辑问题"],
+        "librarian": ["检索一个话题的最新进展", "帮我查一份公开资料并总结", "对比几个方案的优劣"],
+        "concierge": ["看看我 Mac 当前的系统状态", "帮我整理剪贴板里的内容", "规划一个专注工作时段"]
+    ]
+}
+
+/// 欢迎页灵感提示 chip：弱底 + 细描边 + 品牌色引导图标，hover 提亮出强调柔底。
+private struct WelcomeSuggestionChip: View {
+    let text: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Spacing.md) {
+                Image(systemName: "sparkle")
+                    .font(Theme.Typography.text(Theme.Typography.welcomeSuggestion, .medium))
+                    .foregroundColor(Theme.Colors.accent)
+                Text(text)
+                    .font(Theme.Typography.text(Theme.Typography.welcomeSuggestion))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, Theme.Spacing.xl)
+            .padding(.vertical, Theme.Spacing.lg)
+            .frame(maxWidth: Theme.Layout.welcomeSuggestionWidth)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .fill(hovered ? Theme.Colors.accentSoftFill : Theme.Colors.surfaceButton)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
+                    .stroke(hovered ? Theme.Colors.accentSoftStroke : Theme.Colors.cardStroke, lineWidth: 0.5)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) { hovered = hovering }
+        }
     }
 }
 

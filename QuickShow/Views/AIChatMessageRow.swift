@@ -389,7 +389,8 @@ struct BlinkingCaret: View {
     var body: some View {
         Text("▌")
             .font(Theme.Typography.text(Theme.Typography.body))
-            .foregroundColor(Theme.Colors.contentSecondaryStrong)
+            // 光与纸：流式光标 accent 化——生成中的「活性」带上品牌色，与徽标/发送钮同一色彩身份
+            .foregroundColor(Theme.Colors.accent)
             .opacity(lit ? 1 : 0)
             .onAppear {
                 withAnimation(.linear(duration: Theme.Motion.caretBlink).repeatForever(autoreverses: true)) {

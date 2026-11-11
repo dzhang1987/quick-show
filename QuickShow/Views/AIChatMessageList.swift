@@ -137,6 +137,12 @@ struct SessionMessageList: View {
 
     private var isStreamingSession: Bool { isStreaming }
 
+    /// 本会话生效的 agent（会话绑定优先，缺省跟随全局激活）：助手回合身份锚点用。
+    private var sessionAgent: AIAgent {
+        let agentId = state.store.session(id: sessionId)?.agentId
+        return AIAgentStore.shared.agent(for: agentId ?? "") ?? AIAgentStore.shared.activeAgent
+    }
+
     // ⚠️ 刻意移除「首帧骨架 → 下一 runloop 再建真实内容」的两段式切换。
     // 原因：骨架把真实内容推迟到一个独立的 CA 事务，与历史冷启动白屏同源——
     // 内容首建提交若落在窗口级淡入/NSGlassEffectView 隐式动画窗口内，内容层会卡在
@@ -171,6 +177,11 @@ struct SessionMessageList: View {
                         let allGroupToolCalls = isAssistantGroup ? group.messages.flatMap { $0.toolCalls ?? [] } : []
 
                         VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                            // 光与纸：助手回合起始身份锚点（小徽标 + agent 名），
+                            // 给裸排文字一个「谁在说话」的结构锚点；每回合一条，弱存在感。
+                            if isAssistantGroup {
+                                AssistantTurnAnchor(agent: sessionAgent)
+                            }
                             ForEach(group.messages) { message in
                                 let isLastInGroup = (message.id == group.messages.last?.id)
                                 // 回合级聚合：多轮智能体调用中的中间纯过程消息（无正文）统一由末条聚合呈现，此处静默跳过消除千层饼

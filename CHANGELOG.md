@@ -6,6 +6,14 @@
 
 ### Changed
 
+- **AI 对话窗「光与纸」质感重塑：游走光团动态极光 + 身份色 + 浮岛输入坞（`DesignTokens.swift` / `ChatAuroraView.swift` / `AgentIdentityMark.swift` / `AIChatView.swift` / `AIChatMessageList.swift` / `AIChatMessageRow.swift` / `AIChatInputDock.swift` / `AIChatStatusViews.swift` / `MarkdownTableView.swift`）**：
+  - **阅读纸面受光渐变**：正文区由死平灰板升级为垂直渐变纸面（顶端与原纸面同值零回归、底端只更暗更不透明，白字对比只升不降），重建「顶部受光」纵深；
+  - **游走光团动态极光**：新增 `ChatAuroraView`（Canvas + TimelineView，30fps 上限），3 团 distinct 光斑（主色×2 + 副色×1）以不可通约频率正弦叠加做有机 wander 与半径/亮度随机呼吸，光团交叠处色彩流动；尊重系统「减弱动态」静止渲染；峰值透明度克制、纵向偏顶部，正文小字仍落确定纸面；
+  - **极光副色通道**：色板新增 `ambientSecondary`（黑曜=极光蓝+冷紫、琥珀=香槟金+暖橙红），对齐 ArcZip/Raycast 式彩色环境光；
+  - **Agent 渐变身份徽标**：新增可复用 `AgentIdentityMark`（accent 实底+顶部光泽+0.5pt 受光 rim），用于欢迎页大徽标（带氛围柔光）与助手回合起始锚点（小徽标+名字，裸排文字获得「谁在说话」结构锚点）；顶栏保持原生轻纱裸单色图标以与玻璃融合；
+  - **空态欢迎页品牌时刻**：重做为「渐变徽标 + 问候 + 按角色定制的灵感提示 chip」，点击 chip 即回填并发送，把最弱首屏升级为身份与邀请；
+  - **输入坞浮岛升级**：圆角 10→16、双层阴影加强、安静态品牌 rim、聚焦 rim 提档；发送钮空态由完全透明改为幽灵 accent 圆底（在场但安静）；流式光标 accent 化；表格头品牌微染（3% wash，不破坏小字对比）。
+
 - **模型候选列表行内重设计：整行添加、hover 高亮、滚动槽让位（`AIServiceSettingsForm.swift` / `DesignTokens.swift`）**：
   - **整行可点 + 悬浮高亮**：候选行由「裸 `plus.circle` 贴右缘」重做为整行可点按钮，hover 整行高亮（`iconHoverBg` 档）+「＋ 添加」标签胶囊变强调色，明确指向当前行；已添加行降为「✓ 已添加」不可点确认态；
   - **滚动条不再压按钮**：候选滚动内容复用 `scrollerGutter(.vertical)` 垫出 14pt 滚动槽，overlay 滚动条恒落留白；视口高度收敛为 `Theme.Layout.modelCandidateViewportHeight`（120→168pt，约 6 行）；

@@ -207,23 +207,37 @@ struct AIChatView: View {
         // 子代理导航条（9~11pt 小字）出现时顶带回纸面：小字按 4.5:1 需要纸面托底，
         // 模式切换即表面切换（渐变端点动画过渡）。
         .background {
-            ZStack(alignment: .top) {
-                Rectangle()
-                    .fill(Theme.Colors.chatReadingSurface)
-                Rectangle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                isSubagentSession ? Theme.Colors.chatReadingSurface : Theme.Colors.chatReadingVeilTop,
-                                Theme.Colors.chatReadingSurface
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
+            // 光与纸：纸面从「死平灰板」升级为「顶部受光的垂直渐变」+ 极淡品牌色氛围光。
+            // 渐变顶端 = 原阅读纸面（对比度零回归），底端略暗略更不透明（白字对比只升不降）；
+            // 氛围光为径向装饰光层，仅渲染顶部区域，不进入正文对比度预算。
+            GeometryReader { geo in
+                ZStack(alignment: .top) {
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [Theme.Colors.chatPaperTop, Theme.Colors.chatPaperBottom],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
-                    )
-                    .frame(height: Theme.Layout.chatTopBarHeight)
+                    // 光与纸·动态极光：游走光团 + 随机呼吸（见 ChatAuroraView，尊重减弱动态）
+                    ChatAuroraView(windowWidth: geo.size.width, windowHeight: geo.size.height)
+                    // 顶栏轻纱带（保留）：原生 Liquid Glass 在此透出
+                    Rectangle()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    isSubagentSession ? Theme.Colors.chatReadingSurface : Theme.Colors.chatReadingVeilTop,
+                                    Theme.Colors.chatReadingSurface
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .frame(height: Theme.Layout.chatTopBarHeight)
+                }
+                .animation(.easeInOut(duration: Theme.Motion.contentFade), value: isSubagentSession)
             }
-            .animation(.easeInOut(duration: Theme.Motion.contentFade), value: isSubagentSession)
         }
         // 窗口边缘 rim light（方向性内描边：顶 ~70% 白 → 侧 ~15% → 底 ~5%，另底缘 1pt 黑 8% 重边）
         // 仅 <26 降级路径需要：26+ 整窗 NSGlassEffectView 自带 specular rim（受光方向 + 断面
@@ -508,7 +522,10 @@ struct AIChatView: View {
                             .padding(.bottom, effectiveDockHeight)
                             .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     } else if activeSessionMessagesEmpty {
-                        WelcomeView()
+                        WelcomeView(agent: sessionAgent) { text in
+                            state.inputText = text
+                            state.send()
+                        }
                         .padding(.bottom, effectiveDockHeight)
                         .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     }
@@ -662,13 +679,20 @@ struct AIChatView: View {
 
     // MARK: - 主 Agent 会话标题（居中展示：Agent 身份 + 会话主题，拖拽完全穿透）
 
+    /// 当前会话生效的 agent（会话绑定优先，缺省跟随全局激活）：
+    /// 顶栏身份徽标与欢迎页品牌时刻共用同一解析，避免两处漂移。
+    private var sessionAgent: AIAgent {
+        let agentId = store.currentSession?.agentId ?? agentStore.activeAgentId
+        return agentStore.agent(for: agentId) ?? agentStore.activeAgent
+    }
+
     private var mainSessionTitleView: some View {
-        let currentSession = store.currentSession
-        let agentId = currentSession?.agentId ?? agentStore.activeAgentId
-        let agent = agentStore.agent(for: agentId) ?? agentStore.activeAgent
-        let sessionTitle = currentSession?.title ?? String(localized: "新会话")
+        let agent = sessionAgent
+        let sessionTitle = store.currentSession?.title ?? String(localized: "新会话")
 
         return HStack(spacing: Theme.Spacing.chip) {
+            // 顶栏回归原生轻纱语言：裸单色 accent 图标（与玻璃融合，不贴实心徽标块）。
+            // 渐变身份徽标只保留在欢迎页/助手回合锚点等需要身份锚点处。
             Image(systemName: agent.iconName)
                 .font(Theme.Typography.text(Theme.Typography.callout, .medium))
                 .foregroundColor(Theme.Colors.accent)

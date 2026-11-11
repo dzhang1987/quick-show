@@ -39,6 +39,8 @@ struct MarkdownTableView: View {
             .padding(.horizontal, Theme.Spacing.xl)
             .padding(.vertical, Theme.Spacing.lg)
             .background(Theme.Colors.chatTableHeader)
+            // 光与纸·推一档：表头品牌微染（3% accent wash，不破坏小字对比度）
+            .background(Theme.Colors.chatAccentWash)
 
             // 表头下实线（提亮档，确保在斑马纹前清晰可辨）
             Rectangle()
