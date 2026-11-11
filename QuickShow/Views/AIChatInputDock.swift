@@ -643,7 +643,8 @@ struct AIChatInputDock: View {
             let attr = makeSymbolTitle(iconName: agent.iconName, name: agent.name)
             addItem(agent.name, attributedTitle: attr, isOn: isCurrent) { [state] in
                 state.setSessionAgent(agent.id)
-                state.setSessionModel(agent.modelId)
+                // 智能体自带服务商绑定：模型身份是二元组，必须一起写入
+                state.setSessionModel(agent.modelId, providerId: agent.providerId)
             }
         }
         menu.addItem(.separator())
@@ -652,31 +653,23 @@ struct AIChatInputDock: View {
         addHeader(String(localized: "模型"))
         let enabledProviders = AIProviderStore.shared.providers.filter { $0.isEnabled && !$0.models.isEmpty }
 
-        // 查找当前生效模型归属的 Provider
-        let currentModelProviderId: String? = {
-            for p in enabledProviders {
-                if p.models.contains(where: { $0.id == effectiveModelId }) {
-                    return p.id
-                }
-            }
-            return currentAgent.providerId
-        }()
-
         if !enabledProviders.isEmpty {
             for provider in enabledProviders {
                 let providerItem = NSMenuItem(title: provider.name, action: nil, keyEquivalent: "")
                 providerItem.attributedTitle = makeSymbolTitle(iconName: provider.iconName, name: provider.name)
-                // 若当前生效模型归属于该服务商，第一级项显示原生勾选态
-                providerItem.state = (provider.id == currentModelProviderId) ? .on : .off
+                // 勾选按 (providerId, modelId) 二元组判定：只有真正绑定的服务商打勾，
+                // 不同服务商提供同名模型时不会同时勾选多个一级项
+                providerItem.state = (provider.id == effectiveProviderId) ? .on : .off
 
                 // 第二级子菜单：该服务商下的所有模型
                 let subMenu = NSMenu()
                 subMenu.autoenablesItems = false
                 for model in provider.models {
-                    let isCurrentModel = (model.id == effectiveModelId)
+                    let isCurrentModel = (model.id == effectiveModelId && provider.id == effectiveProviderId)
                     let modelAttr = makeModelTitle(name: model.name, supportsVision: model.supportsVision)
                     let modelAction = GenerationMenuAction { [state] in
-                        state.setSessionModel(model.id)
+                        // 选中即绑定「该服务商下的该模型」：只写 modelId 会让发送时路由到别的服务商
+                        state.setSessionModel(model.id, providerId: provider.id)
                     }
                     GenerationMenuCoordinator.shared.retain(modelAction)
                     let subItem = NSMenuItem(title: model.name, action: #selector(GenerationMenuAction.invoke), keyEquivalent: "")
@@ -725,11 +718,25 @@ struct AIChatInputDock: View {
         state.currentSessionModelId ?? currentAgent.modelId
     }
 
+    /// 当前生效服务商 id：模型身份二元组的另一半。
+    /// 直接取解析结果而非「会话绑定 ?? 智能体绑定」：旧会话没有绑定服务商时，
+    /// 只有解析器才知道该模型此刻真正归属谁，勾选态才不会挂错服务商。
+    private var effectiveProviderId: String? {
+        AIProviderStore.shared.resolveProvider(
+            forModelId: effectiveModelId,
+            providerId: state.currentSessionProviderId,
+            agentProviderId: currentAgent.providerId
+        )?.id
+    }
+
     private var currentModelName: String {
-        for provider in AIProviderStore.shared.providers {
-            if let match = provider.model(for: effectiveModelId) {
-                return match.name
-            }
+        // 按 (providerId, modelId) 二元组取显示名：同名模型在不同服务商下名字/能力可能不同
+        if let spec = AIProviderStore.shared.resolvedModelSpec(
+            forModelId: effectiveModelId,
+            providerId: state.currentSessionProviderId,
+            agentProviderId: currentAgent.providerId
+        ) {
+            return spec.name
         }
         if let matched = modelList.first(where: { $0.modelId == effectiveModelId }) {
             return matched.name

@@ -208,7 +208,12 @@ final class AIChatState: ObservableObject {
         let effectiveModel = session?.modelId ?? currentAgent.modelId
 
         // 1. 若当前生效模型明确属于某个已配置 Provider，优先判定
-        if let matchedProvider = AIProviderStore.shared.providers.first(where: { $0.models.contains(where: { $0.id == effectiveModel }) }) {
+        //    （按会话绑定的 (providerId, modelId) 二元组解析，避免同名模型落到别的服务商）
+        if let matchedProvider = AIProviderStore.shared.resolveProvider(
+            forModelId: effectiveModel,
+            providerId: session?.providerId,
+            agentProviderId: currentAgent.providerId
+        ) {
             let key = AIProviderStore.shared.apiKey(for: matchedProvider.id) ?? ""
             if !matchedProvider.baseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !key.isEmpty {
                 return true
@@ -253,6 +258,8 @@ final class AIChatState: ObservableObject {
     @Published var draftAgentId: String? = nil
     /// 新会话草稿态暂存绑定的模型 ID（nil 则跟随当前 Agent 默认）
     @Published var draftModelId: String? = nil
+    /// 新会话草稿态暂存绑定的服务商 ID（模型身份二元组的另一半，nil 则按推断链回退）
+    @Published var draftProviderId: String? = nil
     /// 新会话草稿态暂存绑定的思考档位（nil 则跟随模型默认）
     @Published var draftThinkingLevel: ThinkingLevel? = nil
 
@@ -451,6 +458,11 @@ final class AIChatState: ObservableObject {
         store.currentSession?.modelId ?? draftModelId
     }
 
+    /// 当前会话绑定的服务商 id（模型身份二元组的另一半）；nil = 按推断链回退。
+    var currentSessionProviderId: String? {
+        store.currentSession?.providerId ?? draftProviderId
+    }
+
     /// 当前会话思考档位；nil = 跟随模型默认（新会话草稿态回退至草稿暂存）。
     var currentThinkingLevel: ThinkingLevel? {
         store.currentSession?.thinkingLevel ?? draftThinkingLevel
@@ -463,14 +475,17 @@ final class AIChatState: ObservableObject {
         store.currentSession.flatMap { watermark(for: $0) }
     }
 
-    /// 绑定当前会话模型（空串视为跟随全局默认）；只影响后续请求。
-    func setSessionModel(_ modelId: String) {
+    /// 绑定当前会话模型与服务商（空串视为跟随全局默认）；只影响后续请求。
+    /// providerId 是模型身份的另一半：必须与 modelId 同时写入，否则同名模型会被路由到别的服务商。
+    func setSessionModel(_ modelId: String, providerId: String? = nil) {
         let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = trimmed.isEmpty ? nil : trimmed
+        let resolvedProvider = (resolved == nil) ? nil : providerId
         if let sessionId = currentSessionId {
-            store.setSessionModel(id: sessionId, modelId: resolved)
+            store.setSessionModel(id: sessionId, modelId: resolved, providerId: resolvedProvider)
         } else {
             draftModelId = resolved
+            draftProviderId = resolvedProvider
         }
         objectWillChange.send()
     }
@@ -505,14 +520,19 @@ final class AIChatState: ObservableObject {
         messages.reduce(0) { $0 + $1.content.count } / charsPerToken
     }
 
-    /// 服务层请求选项：会话绑定智能体、模型与思考档位（nil 交给服务层回落全局默认）。
+    /// 服务层请求选项：会话绑定智能体、模型、服务商与思考档位（nil 交给服务层回落全局默认）。
     func requestOptions(for sessionId: UUID) -> AIChatRequestOptions {
         let session = store.session(id: sessionId)
         let agentId = session?.agentId ?? effectiveAgentId
         let agent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
         let effectiveModel = session?.modelId ?? agent.modelId
         let effectiveThinking = session?.thinkingLevel ?? agent.thinkingLevel
-        return AIChatRequestOptions(modelId: effectiveModel, thinkingLevel: effectiveThinking, agentId: agentId)
+        return AIChatRequestOptions(
+            modelId: effectiveModel,
+            providerId: session?.providerId,
+            thinkingLevel: effectiveThinking,
+            agentId: agentId
+        )
     }
 
     /// 压缩执行计划：待纳入摘要的消息 id（前缀语义）与消息本体。
@@ -664,6 +684,7 @@ final class AIChatState: ObservableObject {
     func newSession() {
         draftAgentId = nil
         draftModelId = nil
+        draftProviderId = nil
         draftThinkingLevel = nil
 
         // 若当前已经处于草稿待命态，直接复用当前界面并重新聚焦
@@ -693,6 +714,7 @@ final class AIChatState: ObservableObject {
         guard store.session(id: id) != nil else { return }
         draftAgentId = nil
         draftModelId = nil
+        draftProviderId = nil
         draftThinkingLevel = nil
         // 切走前立即落盘旧会话草稿（不等防抖），随后订阅以 switchDraft 载入新会话草稿。
         flushDraft()

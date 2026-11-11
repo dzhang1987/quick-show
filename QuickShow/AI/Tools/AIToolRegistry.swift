@@ -62,6 +62,11 @@ protocol AITool {
     var isDangerous: Bool { get }
     /// 执行策略：parallelSafe = 可并行；serial = 必须串行（默认）。
     var executionPolicy: ToolExecutionPolicy { get }
+    /// 动态并行资格（参数粒度）：默认回落静态 executionPolicy；具备运行时风险判定能力的
+    /// 工具（如 run_shell 的只读命令）可覆写，按单次调用参数判定是否可并入并行批。
+    /// 返回 true 的语义契约：该调用零副作用、与本轮其他并行调用无共享可变状态、
+    /// 且全程不触达审批抽屉（自动免审）。
+    func isParallelExecutionSafe(arguments: [String: Any]) -> Bool
     /// 是否交互工具：需挂起等待用户操作（如 ask_user）。经协议要求声明以获得动态派发，
     /// 执行器对 true 的工具豁免超时（无限静候用户）。
     var isInteractive: Bool { get }
@@ -74,6 +79,10 @@ extension AITool {
     var isDangerous: Bool { false }
     /// 默认串行：未明确标注为并行安全的工具一律保守串行，避免并发副作用。
     var executionPolicy: ToolExecutionPolicy { .serial }
+    /// 默认动态并行资格回落静态策略：无参数粒度判定能力的工具不覆写。
+    func isParallelExecutionSafe(arguments: [String: Any]) -> Bool {
+        executionPolicy == .parallelSafe
+    }
     /// 默认非交互：仅需挂起等待用户操作的工具体（如 ask_user）标注 true，
     /// 执行器对其豁免超时（无限静候用户）。
     var isInteractive: Bool { false }
@@ -244,6 +253,22 @@ final class AIToolRegistry {
     /// 查询指定工具名的执行策略；未知工具名返回 .serial（保守处理）。
     func executionPolicy(for toolName: String) -> ToolExecutionPolicy {
         tool(named: toolName)?.executionPolicy ?? .serial
+    }
+
+    /// 按单次调用动态判定并行资格（参数粒度）：静态 parallelSafe 直接放行；
+    /// 其余工具（如 run_shell）由工具体按参数风险覆写判定。参数不可解析或
+    /// 工具未知时保守返回 false（串行）。
+    /// 供工具分批执行逻辑使用：返回 true 的调用可与相邻同资格调用并发执行。
+    func isParallelExecutionSafe(name toolName: String, argumentsJSON: String) -> Bool {
+        guard let tool = tool(named: toolName) else { return false }
+        if tool.executionPolicy == .parallelSafe { return true }
+        let trimmed = argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty,
+              let data = trimmed.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            return false
+        }
+        return tool.isParallelExecutionSafe(arguments: object)
     }
 
     /// 全部工具按分类分组：固定组序（ToolCategory.allCases），组内保持注册顺序；

@@ -141,6 +141,52 @@ enum AgentFunctionalTests {
         // 验证 nil 回退为全局工具
         let globalTools = registry.tools(for: nil, mode: .multi)
         assertTest(globalTools.count == registry.enabledTools().count, "传入 nil 时应安全回退为全局启用的工具全集")
+
+        // 验证动态并行资格（参数粒度）：只读 shell 可并行，变更/破坏性 shell 保持串行
+        assertTest(
+            registry.isParallelExecutionSafe(name: "read_file", argumentsJSON: "{\"path\":\"/tmp/a.txt\"}"),
+            "静态 parallelSafe 工具（read_file）动态判定恒为可并行"
+        )
+        assertTest(
+            registry.isParallelExecutionSafe(
+                name: "run_shell",
+                argumentsJSON: "{\"description\":\"查看仓库状态\",\"command\":\"git status\"}"
+            ),
+            "只读 shell 命令（git status）动态判定为可并行"
+        )
+        assertTest(
+            registry.isParallelExecutionSafe(
+                name: "run_shell",
+                argumentsJSON: "{\"description\":\"查看磁盘占用\",\"command\":\"df -h | grep disk\"}"
+            ),
+            "只读管道复合命令（df -h | grep）动态判定为可并行"
+        )
+        assertTest(
+            !registry.isParallelExecutionSafe(
+                name: "run_shell",
+                argumentsJSON: "{\"description\":\"清理构建产物\",\"command\":\"rm -rf build\"}"
+            ),
+            "破坏性 shell 命令（rm -rf）不得并行（硬门禁串行）"
+        )
+        assertTest(
+            !registry.isParallelExecutionSafe(
+                name: "run_shell",
+                argumentsJSON: "{\"description\":\"写标记文件\",\"command\":\"touch /tmp/marker\"}"
+            ),
+            "变更类 shell 命令（touch）不得并行（顺序敏感 + 审批抽屉单飞）"
+        )
+        assertTest(
+            !registry.isParallelExecutionSafe(name: "write_file", argumentsJSON: "{\"path\":\"/tmp/a\",\"content\":\"x\"}"),
+            "静态 serial 工具（write_file）动态判定恒为串行"
+        )
+        assertTest(
+            !registry.isParallelExecutionSafe(name: "run_shell", argumentsJSON: "not-json"),
+            "参数不可解析时保守串行"
+        )
+        assertTest(
+            !registry.isParallelExecutionSafe(name: "no_such_tool", argumentsJSON: "{}"),
+            "未知工具保守串行"
+        )
     }
 
     // MARK: - 3. launch_subagents 规格与参数解析测试

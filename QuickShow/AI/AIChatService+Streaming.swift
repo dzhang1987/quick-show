@@ -119,21 +119,18 @@ extension AIChatService {
         }
         guard !resolvedModelId.isEmpty else { throw AIChatError.missingModel }
 
-        // 优先根据模型归属匹配 Provider（避免在会话中切换 Qoder / Gemini 等模型时误派发给 Alibaba 导致报错）
-        var provider = AIProviderStore.shared.providers.first(where: { p in
-            p.models.contains(where: { $0.id == resolvedModelId })
-        })
-        if provider == nil && resolvedModelId.hasPrefix("qoder/") {
-            provider = AIProviderStore.shared.provider(for: "qoder")
-        } else if provider == nil && (resolvedModelId.hasPrefix("gemini-") || resolvedModelId.hasPrefix("antigravity/")) {
-            provider = AIProviderStore.shared.provider(for: "antigravity")
-        }
-        if provider == nil {
-            provider = AIProviderStore.shared.provider(for: agent.providerId)
-                ?? AIProviderStore.shared.selectedProvider
-                ?? AIProvider.alibabaPreset()
-        }
-        guard let effectiveProvider = provider else { throw AIChatError.missingModel }
+        // 按 (providerId, modelId) 二元组解析归属服务商：会话绑定的服务商优先，
+        // 其次智能体绑定，最后才按「谁持有该模型 id」推断。
+        // 不同服务商可能提供同名模型 id（如百炼主账号与 Token Plan），只按 id 猜会静默打错端点与 Key。
+        let resolvedProvider = AIProviderStore.shared.resolveProvider(
+            forModelId: resolvedModelId,
+            providerId: options.providerId,
+            agentProviderId: agent.providerId
+        ) ?? AIProvider.alibabaPreset()
+        let effectiveProvider = resolvedProvider
+
+        // 路由可观测：同名模型跨服务商撞车时，唯一能直接看出「这次实际打到谁」的地方。
+        qsDebugLog("AI 路由 → provider=\(effectiveProvider.id) [\(effectiveProvider.name)] model=\(resolvedModelId) endpoint=\(effectiveProvider.baseURL)")
 
         let key = AIProviderStore.shared.apiKey(for: effectiveProvider.id) ?? apiKey ?? ""
         let modelSpec = effectiveProvider.model(for: resolvedModelId) ?? AIModelSpec(id: resolvedModelId, name: resolvedModelId)

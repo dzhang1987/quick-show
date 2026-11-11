@@ -6,6 +6,11 @@
 
 ### Changed
 
+- **工具分段执行升级为「参数粒度」动态并行资格（`AIToolRegistry.swift` / `BuiltInTools.swift` / `AIChatState+Streaming.swift` / `AgentFunctionalTests.swift`）**：
+  - **协议新增 `isParallelExecutionSafe(arguments:)`（OCP 开闭）**：默认实现回落静态 `executionPolicy`，具备运行时风险判定能力的工具自行覆写；`run_shell` 覆写为「仅结构化风险判定为纯只读、自动免审、不触达审批抽屉」的命令可入并行批；
+  - **混合序列天然保序**：分批循环由 `executionPolicy(name:)` 改为按单次调用参数判定，首个非并行调用处切分串行段，变更/破坏性命令与审批抽屉保持单飞；工具结果与协议消息仍按 `completedCalls` 原始顺序落定；
+  - **保守兜底**：参数不可解析、工具未知、非免审一律串行，零副作用才允许并发（新增 8 项断言覆盖 `git status` / 只读管道 / `rm -rf` / `touch` / 静态 serial 工具 / 坏 JSON / 未知工具）。
+
 - **工具调用参数流式增量预显：意图标题随参数生成实时呈现（`AIChatService.swift` / `AIChatWireModels.swift` / `OpenAIProvider.swift` / `QoderProvider.swift` / `AntigravityCloudCodeAdapter.swift` / `AIChatState.swift` / `AIChatState+Streaming.swift` / `AgentCoordinator.swift` / `ToolHelpers.swift` / `AgentFunctionalTests.swift`）**：
   - **参数增量事件契约（`.toolCallArgumentsDelta`）**：流式事件新增工具参数增量通道——工具名到达即派发、参数逐片实时上抛（OpenAI 兼容双协议与 Qoder 逐片、Antigravity 函数调用整块随派发上抛），不再等流尾一次性交付；累积器改为"先派发定稳定 callID、再上抛增量"，派发片自带的首段参数不丢失，早于工具名到达的孤儿分片只累积不上抛；
   - **意图标题流式预显（`PartialJSONFieldScanner`）**：参数 JSON 尚未闭合时即可提取已完整到达的顶层 `description` / `title` / `intent` 字段——只认 depth-1 顶层字段（嵌套结构同名不误读）、字符串未闭合绝不拼接半截内容、转义按 JSON 标准语义解码（含 `\uXXXX` 与代理对）；工具卡片标题与折叠栏状态在参数生成期即实时亮出动作意图，彻底消除"执行完了才显示标题描述"的滞后观感；
@@ -44,6 +49,12 @@
   - **划词即刻引用调度中心（`ChatSelectionQuoteCoordinator`）**：在助手的原生连续文本流（`NativeTextFlowView`）中划选任意文字时，即刻计算字形矩形并弹出微药丸「引用所选内容」，点击无缝转为引用片段并自动聚焦主输入框。
 
 ### Fixed
+
+- **模型身份补全为 (providerId, modelId) 二元组，根治同名模型跨服务商错路由（`AIProviderStore.swift` / `ChatModels.swift` / `ChatSessionStore.swift` / `AIChatService.swift` / `AIChatService+Streaming.swift` / `AIChatService+Completion.swift` / `AIProviderService.swift` / `AIModelAdapter.swift` / `AIChatState.swift` / `AIChatState+Streaming.swift` / `AIChatState+Compaction.swift` / `AIChatState+RequestAssembly.swift` / `BuiltInTools.swift` / `AIChatInputDock.swift` / `ModelBindingTests.swift`）**：
+  - **现象与根因**：在「Alibaba Token Plan」子菜单里选中 `DeepSeek v4.1 Flash` 后，请求实际发往「阿里云百炼 (DashScope)」端点并用百炼 Key（Key 存在故静默成功不报错），一级服务商勾选也挂在百炼上；根因是模型身份被压成裸 `modelId` 字符串——点击只写 `model.id` 丢弃 `provider.id`，而发送路由、勾选态、上下文窗口、视觉判定、思考协议各自写了一遍「扫第一个持有该 id 的服务商」，当两个服务商都挂了同一 id（`deepseek-v4.1-flash-1017`）时全部命中配置数组里排前面的那个；
+  - **单一解析入口（消除散弹式重复）**：`AIProviderStore.resolveProvider(forModelId:providerId:agentProviderId:)` 统一优先级——显式绑定服务商（仍持有该模型）→ 智能体绑定（仍持有）→ 首个持有者（旧数据兼容）→ 显式绑定容错（模型被移出模型池）→ 协议前缀兜底（Qoder / Gemini 原生）→ 全局选中服务商；八处各自的扫描逻辑全部改走该入口；
+  - **二元组持久化**：`ChatSession` 新增 `providerId`（旧 JSON 缺键解码为 nil，向后兼容），会话/草稿/请求选项（`AIChatRequestOptions.providerId`）全链路携带，草稿转正同步落定；解绑模型时服务商一并清空，杜绝残留错配；
+  - **菜单勾选与服务链对齐**：点击即绑定「该服务商下的该模型」，一级/二级勾选按二元组精确判定（同名模型不再两边同时打勾），模型 chip 显示名取绑定服务商条目；新增 `--test-model-binding` 定向回归（17 项，含真实配置的同名模型场景与旧会话兼容）。
 
 - **对话窗质感分区：顶栏玻璃轻纱带恢复主浮窗同款 Liquid Glass 活感（`DesignTokens.swift` / `AIChatView.swift` / `AIChatSidebarView.swift`）**：
   - **纸面杀质感的根因**：两窗底层玻璃机制完全相同（同款 `NSGlassEffectView`），主浮窗质感好的唯一原因是内容层透明、玻璃全透出；可读性根治铺的 0.80 纸面把玻璃压到只剩 20% 底透，实测窗内明度方差为零、原生 specular rim 只剩 1-2px 残影（44/255），整窗读作一块纯平板；

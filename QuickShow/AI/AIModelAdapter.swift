@@ -39,23 +39,24 @@ enum AIModelAdapter {
     /// - .low/.medium/.high → 发 `reasoning_effort`：glm-5.3 实测只接受 low/high/max 三个值，
     ///   故中档映射 high、高档映射 max；其他模型实测接受 low/medium/high，直接透传档位名。
     @MainActor
-    static func thinkingFields(for modelId: String, level: ThinkingLevel?) -> [String: Any] {
+    static func thinkingFields(for modelId: String, level: ThinkingLevel?, providerId: String? = nil) -> [String: Any] {
         guard let level else { return [:] }
-        let provider = AIProviderStore.shared.providers.first { $0.model(for: modelId) != nil } ?? AIProviderStore.shared.selectedProvider
+        // 思考字段的协议差异挂在服务商类型上：按 (providerId, modelId) 二元组解析，避免同名模型取错协议分支
+        let provider = AIProviderStore.shared.resolveProvider(forModelId: modelId, providerId: providerId)
+            ?? AIProviderStore.shared.selectedProvider
         let type = provider?.type ?? .openAICompatible
         let llmProvider = LLMProviderRegistry.shared.provider(for: type)
         return llmProvider.thinkingFields(for: modelId, level: level)
     }
 
-    /// 当前生效模型的上下文窗口（tokens）：从 modelList 中查该模型的 contextWindow 字段，
-    /// 查不到或非法时回退默认 524288。
+    /// 当前生效模型的上下文窗口（tokens）：按 (providerId, modelId) 二元组取该服务商条目的
+    /// contextWindow；查不到或非法时回退 modelList，最后回退默认 524288。
     @MainActor
-    static func contextWindow(for modelId: String?) -> Int {
+    static func contextWindow(for modelId: String?, providerId: String? = nil) -> Int {
         guard let modelId, !modelId.isEmpty else { return defaultContextWindow }
-        for provider in AIProviderStore.shared.providers {
-            if let spec = provider.model(for: modelId), spec.contextWindow > 0 {
-                return spec.contextWindow
-            }
+        if let spec = AIProviderStore.shared.resolvedModelSpec(forModelId: modelId, providerId: providerId),
+           spec.contextWindow > 0 {
+            return spec.contextWindow
         }
         if let match = AIChatService.shared.modelList.first(where: { $0.modelId == modelId }),
            let window = match.contextWindow, window > 0 {

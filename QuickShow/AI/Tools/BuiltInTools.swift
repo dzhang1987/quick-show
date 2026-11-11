@@ -499,9 +499,12 @@ final class QuickShowStateTool: AITool {
                 return AIChatService.shared.selectedModel
             }()
 
-            // 查找生效模型归属的 Provider
-            let matchedProvider = AIProviderStore.shared.providers.first(where: { $0.models.contains(where: { $0.id == effectiveModel }) })
-                ?? AIProviderStore.shared.provider(for: currentAgent.providerId)
+            // 查找生效模型归属的 Provider（按会话绑定的 (providerId, modelId) 二元组解析）
+            let matchedProvider = AIProviderStore.shared.resolveProvider(
+                forModelId: effectiveModel,
+                providerId: session?.providerId,
+                agentProviderId: currentAgent.providerId
+            )
 
             let proto = matchedProvider?.apiProtocol.rawValue
                 ?? defaults.string(forKey: "ai.apiProtocol")
@@ -557,6 +560,14 @@ final class RunShellTool: AITool {
     }
 
     let isDangerous = true
+
+    /// 动态并行资格：仅结构化风险判定为纯只读（零副作用、自动免审、不触达审批抽屉）的
+    /// 命令可与相邻只读命令并发执行；变更/破坏性命令保持串行（同轮命令间顺序敏感，
+    /// 且审批抽屉单飞，并发确认会被防御性拒绝）。
+    func isParallelExecutionSafe(arguments: [String: Any]) -> Bool {
+        guard let command = arguments["command"] as? String, !command.isEmpty else { return false }
+        return ToolRiskClassifier.shared.evaluateRisk(tool: self, arguments: arguments).isAutoApproved
+    }
 
     private static let timeout: TimeInterval = 30
     private static let maxOutputBytes = 32 * 1024

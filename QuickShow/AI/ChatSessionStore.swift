@@ -220,9 +220,14 @@ final class ChatSessionStore: ObservableObject {
         mutate(id, touch: false) { $0.agentId = agentId }
     }
 
-    /// 绑定会话模型（nil = 跟随全局默认）。不 touch updatedAt，只影响后续请求。
-    func setSessionModel(id: UUID, modelId: String?) {
-        mutate(id, touch: false) { $0.modelId = modelId }
+    /// 绑定会话模型与服务商（nil = 跟随全局默认）。不 touch updatedAt，只影响后续请求。
+    /// 模型身份是 (providerId, modelId) 二元组：不同服务商可能提供同名模型 id，
+    /// 只存 modelId 会在发送时把请求路由到错误端点与错误 Key，故二者必须同写同清。
+    func setSessionModel(id: UUID, modelId: String?, providerId: String? = nil) {
+        mutate(id, touch: false) { session in
+            session.modelId = modelId
+            session.providerId = (modelId == nil) ? nil : providerId
+        }
     }
 
     /// 设置会话思考档位（nil = 跟随模型默认）。不 touch updatedAt，只影响后续请求。

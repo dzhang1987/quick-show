@@ -34,17 +34,12 @@ extension AIChatService {
         }
         guard !resolvedModel.isEmpty else { throw AIChatError.missingModel }
 
-        var provider = AIProviderStore.shared.providers.first(where: { p in
-            p.models.contains(where: { $0.id == resolvedModel })
-        })
-        if provider == nil && resolvedModel.hasPrefix("qoder/") {
-            provider = AIProviderStore.shared.provider(for: "qoder")
-        } else if provider == nil && (resolvedModel.hasPrefix("gemini-") || resolvedModel.hasPrefix("antigravity/")) {
-            provider = AIProviderStore.shared.provider(for: "antigravity")
-        }
-        if provider == nil {
-            provider = AIProviderStore.shared.provider(for: agent.providerId)
-        }
+        // 按 (providerId, modelId) 二元组解析归属服务商，与流式主链路共用同一套优先级
+        let provider = AIProviderStore.shared.resolveProvider(
+            forModelId: resolvedModel,
+            providerId: options.providerId,
+            agentProviderId: agent.providerId
+        )
 
         // 非 OpenAI 兼容服务商（如 Qoder 原生或 Gemini 原生）通过统一流式调度收集纯文本
         if let p = provider, p.type != .openAICompatible {
@@ -91,7 +86,11 @@ extension AIChatService {
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.applyCustomHeaders(from: provider)
         // 非流式补全用于标题摘要 / 上下文压缩等轻量后台请求：不带工具，避免误触发工具调用。
-        let thinkingFields = AIModelAdapter.thinkingFields(for: resolvedModel, level: options.thinkingLevel)
+        let thinkingFields = AIModelAdapter.thinkingFields(
+            for: resolvedModel,
+            level: options.thinkingLevel,
+            providerId: provider?.id
+        )
         request.httpBody = try encodeRequestBody(
             proto: proto,
             model: resolvedModel,

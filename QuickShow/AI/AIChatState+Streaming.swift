@@ -72,8 +72,10 @@ extension AIChatState {
                 draftAgentId = nil
             }
             if let modelId = draftModelId {
-                store.setSessionModel(id: sessionId, modelId: modelId)
+                // 草稿转正：模型与服务商二元组必须一起落到会话，否则同名模型会被路由到别的服务商
+                store.setSessionModel(id: sessionId, modelId: modelId, providerId: draftProviderId)
                 draftModelId = nil
+                draftProviderId = nil
             }
             if let thinking = draftThinkingLevel {
                 store.setThinkingLevel(id: sessionId, level: thinking)
@@ -178,8 +180,12 @@ extension AIChatState {
             let agentId = session?.agentId ?? self.effectiveAgentId
             let activeAgent = AIAgentStore.shared.agent(for: agentId) ?? AIAgentStore.shared.activeAgent
             let effectiveModel = session?.modelId ?? activeAgent.modelId
-            let modelSpec = AIProviderStore.shared.modelSpec(providerId: activeAgent.providerId, modelId: effectiveModel)
-                ?? AIProviderStore.shared.modelSpec(for: effectiveModel)
+            // 视觉能力判定必须按 (providerId, modelId) 二元组取：同名模型在不同服务商下能力可能不同
+            let modelSpec = AIProviderStore.shared.resolvedModelSpec(
+                forModelId: effectiveModel,
+                providerId: session?.providerId,
+                agentProviderId: activeAgent.providerId
+            )
             let supportsVision = modelSpec?.supportsVision ?? false
 
             let lastUserMsg = session?.messages.last(where: { $0.role == .user })
@@ -285,7 +291,9 @@ extension AIChatState {
                         toolCallId: nil
                     ))
 
-                    // 工具分段执行：连续的 parallelSafe 工具聚成一批并发执行，serial 工具逐个串行执行。
+                    // 工具分段执行：连续的「可并行」调用聚成一批并发执行——静态 parallelSafe 工具
+                    // （读文件/系统状态等）与动态资格调用（如只读 shell 命令）均可入批；首个非并行
+                    // 调用处切分串行执行（保序 + 审批抽屉单飞）。
                     // 无论并行与否，updateToolCallResult 与 wireMessages.append 严格按 completedCalls
                     // 原始顺序落定，保证工具结果顺序与协议消息顺序不变。
                     let registry = AIToolRegistry.shared
@@ -299,7 +307,7 @@ extension AIChatState {
                         }
 
                         let call = completedCalls[callIndex]
-                        guard registry.executionPolicy(for: call.name) == .parallelSafe else {
+                        guard registry.isParallelExecutionSafe(name: call.name, argumentsJSON: call.arguments) else {
                             // serial：保持旧逻辑（执行 → 落定 → 回传 → 下一段顶部再查中止）。
                             self.updateToolCallStatus(assistantID, callID: call.id, in: sessionId, status: .running)
                             let request = ToolCallRequest(id: call.id, name: call.name, argumentsJSON: call.arguments)
@@ -318,11 +326,15 @@ extension AIChatState {
                             continue
                         }
 
-                        // 收集连续的一段 parallelSafe 调用。
+                        // 收集连续的一段可并行调用（静态 parallelSafe 工具 + 只读 shell 等动态资格）。
+                        // 在首个非并行调用处切分：混合序列天然保序（前面的串行落定后才进入后续段）。
                         let batchStart = callIndex
                         var batch: [CompletedToolCall] = []
                         while callIndex < completedCalls.count,
-                              registry.executionPolicy(for: completedCalls[callIndex].name) == .parallelSafe {
+                              registry.isParallelExecutionSafe(
+                                name: completedCalls[callIndex].name,
+                                argumentsJSON: completedCalls[callIndex].arguments
+                              ) {
                             batch.append(completedCalls[callIndex])
                             callIndex += 1
                         }

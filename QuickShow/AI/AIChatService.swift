@@ -127,11 +127,14 @@ struct AIModel: Identifiable, Codable, Equatable {
     }
 }
 
-/// 一次流式请求的会话级选项：会话绑定模型与思考档位。
-/// 两者均可为 nil，表示交给服务层回落到全局默认模型 / 模型默认思考行为。
+/// 一次请求的会话级选项：会话绑定模型、服务商与思考档位。
+/// 三者均可为 nil，表示交给服务层回落到全局默认模型 / 推断服务商 / 模型默认思考行为。
 struct AIChatRequestOptions {
     /// 会话绑定模型 id（nil = 使用全局 selectedModel）。
     var modelId: String?
+    /// 会话绑定的服务商 id（模型身份二元组的另一半；nil = 按推断链回退）。
+    /// 不同服务商可能提供同名模型 id，缺这一半会把请求打向别的服务商端点与 Key。
+    var providerId: String?
     /// 会话思考档位（nil = 不发送思考字段，跟随模型默认）。
     var thinkingLevel: ThinkingLevel?
     /// 会话绑定智能体 id（nil = 使用全局激活智能体）。
@@ -139,8 +142,15 @@ struct AIChatRequestOptions {
     /// 是否强制禁用工具声明（常用于收敛总结阶段）
     var disableTools: Bool
 
-    init(modelId: String? = nil, thinkingLevel: ThinkingLevel? = nil, agentId: String? = nil, disableTools: Bool = false) {
+    init(
+        modelId: String? = nil,
+        providerId: String? = nil,
+        thinkingLevel: ThinkingLevel? = nil,
+        agentId: String? = nil,
+        disableTools: Bool = false
+    ) {
         self.modelId = modelId
+        self.providerId = providerId
         self.thinkingLevel = thinkingLevel
         self.agentId = agentId
         self.disableTools = disableTools

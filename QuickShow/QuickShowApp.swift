@@ -17,6 +17,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // 定向回归：模型身份 (providerId, modelId) 解析与持久化契约（无需启动 UI，避免跑全量套件）
+        if CommandLine.arguments.contains("--test-model-binding") {
+            Task { @MainActor in
+                await ModelBindingTests.run()
+            }
+            CFRunLoopRun()
+            return
+        }
+
         let app = NSApplication.shared
         if SingleInstanceGuard.shared.tryAcquirePrimaryLock() {
             let delegate = AppDelegate()

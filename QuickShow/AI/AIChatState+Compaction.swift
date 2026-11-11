@@ -47,7 +47,7 @@ extension AIChatState {
     /// 计算任意会话的水位（contextWatermark 与会话级触发共用）。
     func watermark(for session: ChatSession) -> ContextWatermark? {
         let effectiveModelId = session.modelId ?? service.selectedModel
-        let window = AIModelAdapter.contextWindow(for: effectiveModelId)
+        let window = AIModelAdapter.contextWindow(for: effectiveModelId, providerId: session.providerId)
         let used: Int
         if let real = session.contextTokens {
             used = real + pendingEstimateTokens(in: session)
@@ -157,7 +157,7 @@ extension AIChatState {
         let requested = session.modelId?.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolved = (requested?.isEmpty == false ? requested : nil) ?? service.selectedModel
         let level: ThinkingLevel? = AIModelAdapter.canDisableThinking(for: resolved) ? .off : nil
-        return AIChatRequestOptions(modelId: session.modelId, thinkingLevel: level)
+        return AIChatRequestOptions(modelId: session.modelId, providerId: session.providerId, thinkingLevel: level)
     }
 
     /// 构造压缩提示词：中文、要求合并为单份紧凑摘要（关键事实/决定/待办/代码上下文/未解决问题）。

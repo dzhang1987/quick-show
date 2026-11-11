@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 54;
+	objectVersion = 77;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -146,6 +146,7 @@
 		88D107F260F069314667B3BB /* QoderProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20AF867571D5BCBBE336B6E /* QoderProvider.swift */; };
 		890BDB806B48148067D0E4F0 /* RichCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E97C435AE3528691A109E6D1 /* RichCard.swift */; };
 		89E86B2C72B6EFB972DD2085 /* AntigravityOAuthSettingsSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BAA5448CC407DCD8747C7E9 /* AntigravityOAuthSettingsSection.swift */; };
+		8AE064A4B54E0CCA72A3D6D8 /* ModelBindingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A64BAA9078D764D82CD671C /* ModelBindingTests.swift */; };
 		8AFCBE0A50A37C12A7ECC685 /* ToolRisk.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14DCDB9EEF3F06AD6DBAB1C9 /* ToolRisk.swift */; };
 		8BC416244B1AE4F712EFFAC4 /* MarkdownDefinitionListRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0523C433963BF4C1F733A515 /* MarkdownDefinitionListRenderer.swift */; };
 		8CCF8BF71812D3A221D8CF4F /* LunarCalendar.swift in Sources */ = {isa = PBXBuildFile; fileRef = D63AB70CD13631A39A802994 /* LunarCalendar.swift */; };
@@ -415,6 +416,7 @@
 		97D5B500F6579D728562FD78 /* SystemStatusModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemStatusModels.swift; sourceTree = "<group>"; };
 		986674F8B92A8BD54E3441A6 /* MarkdownBlockquoteRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockquoteRenderer.swift; sourceTree = "<group>"; };
 		9979D59CD3CF1794FBDCF514 /* MTBezierPath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MTBezierPath.swift; sourceTree = "<group>"; };
+		9A64BAA9078D764D82CD671C /* ModelBindingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelBindingTests.swift; sourceTree = "<group>"; };
 		9BC88919D5EAE9E17E6C437E /* AIChatMessageList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIChatMessageList.swift; sourceTree = "<group>"; };
 		9CF6526B000F9BC2507AB13C /* QoderNativeSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QoderNativeSigner.swift; sourceTree = "<group>"; };
 		9D051C96C18F1878137BCF0B /* AIChatService+RequestEncoding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+RequestEncoding.swift"; sourceTree = "<group>"; };
@@ -660,6 +662,7 @@
 			children = (
 				1FAF4965E4EFCA8D7A7E7630 /* AgentFunctionalTests.swift */,
 				A59C660CFCCD7D0FBCE1F918 /* ChatInputHistoryTests.swift */,
+				9A64BAA9078D764D82CD671C /* ModelBindingTests.swift */,
 				65B2BAA9BAA86D8772E7C017 /* ToolRiskTests.swift */,
 			);
 			path = Tests;
@@ -1038,6 +1041,8 @@
 			dependencies = (
 			);
 			name = SwiftMath;
+			packageProductDependencies = (
+			);
 			productName = SwiftMath;
 			productReference = 0E743B480470624A4287B53E /* libSwiftMath.a */;
 			productType = "com.apple.product-type.library.static";
@@ -1054,6 +1059,8 @@
 			dependencies = (
 			);
 			name = HighlightrKit;
+			packageProductDependencies = (
+			);
 			productName = HighlightrKit;
 			productReference = 11C47863F2E3FDEDECD77402 /* libHighlightrKit.a */;
 			productType = "com.apple.product-type.library.static";
@@ -1073,6 +1080,8 @@
 				135C32D5292F69C79A3C1477 /* PBXTargetDependency */,
 			);
 			name = QuickShow;
+			packageProductDependencies = (
+			);
 			productName = QuickShow;
 			productReference = 2708792B4D8EF72329E95098 /* QuickShow.app */;
 			productType = "com.apple.product-type.application";
@@ -1099,7 +1108,6 @@
 				};
 			};
 			buildConfigurationList = BFD76B360F8AB050F8C5560F /* Build configuration list for PBXProject "QuickShow" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = "zh-Hans";
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -1108,12 +1116,15 @@
 				"zh-Hans",
 			);
 			mainGroup = 5213C295391011042FC7DFE5;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9B0F05138AE231E7D18DDCA2 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				4F132D0BA874392D3236B272 /* HighlightrKit */,
 				993125575F008F2721CCD60C /* QuickShow */,
 				254399A8D21441251C531DE5 /* SwiftMath */,
+				4F132D0BA874392D3236B272 /* HighlightrKit */,
 			);
 		};
 /* End PBXProject section */
@@ -1345,6 +1356,7 @@
 				52D662616D1B8849F6650A7C /* MermaidWebView.swift in Sources */,
 				6DC5496F0EF6AD735B7128EE /* MessageEditBubble.swift in Sources */,
 				F1CC8043549224D923958A86 /* MessageListDerivations.swift in Sources */,
+				8AE064A4B54E0CCA72A3D6D8 /* ModelBindingTests.swift in Sources */,
 				10488C80962AE90C51DE8943 /* MonitoringStore.swift in Sources */,
 				A75BFBFB6A010F7CFF636EC4 /* MyLocationTool.swift in Sources */,
 				C43EB29A8A51BC2C7F36C849 /* NativeTextFlowView.swift in Sources */,

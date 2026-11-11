@@ -46,10 +46,62 @@ final class AIProviderStore: ObservableObject {
     }
 
     func modelSpec(for modelId: String) -> AIModelSpec? {
-        for p in providers {
-            if let m = p.model(for: modelId) { return m }
+        resolveProvider(forModelId: modelId)?.model(for: modelId)
+    }
+
+    /// 解析模型归属服务商：模型身份 = (providerId, modelId) 二元组，绝不能只按模型 id 猜。
+    ///
+    /// 为何必须收敛成单一入口：不同服务商完全可能提供同名 model id（例如百炼主账号与
+    /// Token Plan 都挂了 `deepseek-v4.1-flash-1017`），按 id 裸扫「第一个持有者」会把
+    /// 二元组压成一维，静默路由到配置数组里排前面的服务商——请求打到错的端点与错的 Key，
+    /// 勾选态、上下文窗口、视觉与思考能力判定也会一并错位。
+    ///
+    /// 优先级：显式绑定的服务商（仍持有该模型）→ 智能体绑定的服务商（仍持有）→
+    /// 首个持有该模型的服务商（旧数据无绑定时的兼容回退）→ 显式绑定的服务商（模型被移出模型池时的容错）→
+    /// 协议前缀兜底（Qoder / Gemini 原生）→ 全局选中服务商。
+    func resolveProvider(
+        forModelId modelId: String,
+        providerId: String? = nil,
+        agentProviderId: String? = nil
+    ) -> AIProvider? {
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let explicitId = providerId?.trimmedNonEmpty
+        let agentOwnerId = agentProviderId?.trimmedNonEmpty
+
+        // 1. 显式绑定：该服务商仍持有此模型，直接采信（唯一可信的用户意图）
+        if let explicitId, let pinned = provider(for: explicitId), pinned.model(for: trimmed) != nil {
+            return pinned
         }
-        return nil
+        // 2. 智能体绑定：服务商默认模型归属，同样只在持有该模型时采信
+        if let agentOwnerId, let owner = provider(for: agentOwnerId), owner.model(for: trimmed) != nil {
+            return owner
+        }
+        // 3. 按持有者推断：多持有者时沿用配置顺序首个（仅旧数据无绑定时才会走到这里）
+        if let firstOwner = providers.first(where: { $0.model(for: trimmed) != nil }) {
+            return firstOwner
+        }
+        // 4. 模型已被移出模型池：仍回到显式绑定的服务商，避免静默换端点换 Key
+        if let explicitId, let pinned = provider(for: explicitId) {
+            return pinned
+        }
+        // 5. 协议前缀兜底：服务商列表里可能尚未登记，但原生协议有固定归属
+        if trimmed.hasPrefix("qoder/") { return provider(for: "qoder") }
+        if trimmed.hasPrefix("gemini-") || trimmed.hasPrefix("antigravity/") { return provider(for: "antigravity") }
+        // 6. 全局选中服务商
+        return selectedProvider
+    }
+
+    /// 解析模型规格（窗口 / 视觉 / 思考能力都挂在具体服务商的条目上，必须按绑定取）。
+    func resolvedModelSpec(
+        forModelId modelId: String,
+        providerId: String? = nil,
+        agentProviderId: String? = nil
+    ) -> AIModelSpec? {
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return resolveProvider(forModelId: trimmed, providerId: providerId, agentProviderId: agentProviderId)?
+            .model(for: trimmed)
     }
 
     // MARK: - 增删改
@@ -295,5 +347,15 @@ final class AIProviderStore: ObservableObject {
         self.providers = seeded
         self.selectedProviderId = "alibaba"
         saveProviders()
+    }
+}
+
+// MARK: - 空串归一
+
+private extension String {
+    /// 裁剪空白后的自身；全空视为「未绑定」（nil）。
+    var trimmedNonEmpty: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }

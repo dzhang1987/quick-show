@@ -24,6 +24,8 @@ final class AIProviderService {
         let effectiveThinking = thinkingLevel ?? agent.thinkingLevel
         let options = AIChatRequestOptions(
             modelId: effectiveModel,
+            // 智能体绑定的服务商是模型身份的另一半：显式传入，避免同名模型路由到别的端点
+            providerId: agent.providerId,
             thinkingLevel: effectiveThinking,
             agentId: agent.id,
             disableTools: disableTools

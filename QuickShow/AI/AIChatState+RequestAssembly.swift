@@ -213,7 +213,7 @@ extension AIChatState {
 
         // token 预算：当前生效模型（会话绑定优先）的窗口 × 80%，扣除摘要占用。
         let effectiveModelId = session?.modelId ?? service.selectedModel
-        let window = AIModelAdapter.contextWindow(for: effectiveModelId)
+        let window = AIModelAdapter.contextWindow(for: effectiveModelId, providerId: session?.providerId)
         let summaryTokens = (session?.contextSummary?.count ?? 0) / charsPerToken
         let tokenBudget = max(0, Int(Double(window) * contextWindowUsageRatio) - summaryTokens)
 

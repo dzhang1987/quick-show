@@ -320,6 +320,9 @@ struct ChatSession: Identifiable, Equatable, Codable {
     var agentId: String?
     /// 会话绑定的模型 id（nil = 跟随全局默认模型）。
     var modelId: String?
+    /// 会话绑定的服务商 id：模型身份 = (providerId, modelId) 二元组。
+    /// 缺失（旧会话）即 nil，按历史推断链回退；不同服务商可能提供同名模型 id，不能只靠 modelId 定位端点与 Key。
+    var providerId: String?
     /// 会话思考档位（nil = 跟随模型默认）。
     var thinkingLevel: ThinkingLevel?
     /// 最近一次请求的真实 prompt token 用量（上下文水位真源；旧会话缺失即 nil）。
@@ -345,6 +348,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         messages: [ChatMessage] = [],
         agentId: String? = nil,
         modelId: String? = nil,
+        providerId: String? = nil,
         thinkingLevel: ThinkingLevel? = nil,
         contextTokens: Int? = nil,
         contextSummary: String? = nil,
@@ -362,6 +366,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         self.messages = messages
         self.agentId = agentId
         self.modelId = modelId
+        self.providerId = providerId
         self.thinkingLevel = thinkingLevel
         self.contextTokens = contextTokens
         self.contextSummary = contextSummary
@@ -373,7 +378,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, createdAt, updatedAt, pinned, titleNeedsSummary, messages
-        case agentId, modelId, thinkingLevel, contextTokens, contextSummary, summarizedMessageIDs
+        case agentId, modelId, providerId, thinkingLevel, contextTokens, contextSummary, summarizedMessageIDs
         case parentSessionId, taskStatus, taskSummary
     }
 
@@ -390,6 +395,7 @@ struct ChatSession: Identifiable, Equatable, Codable {
         // 旧 JSON 无这些字段：decodeIfPresent 保证解码不失败。
         agentId = try container.decodeIfPresent(String.self, forKey: .agentId)
         modelId = try container.decodeIfPresent(String.self, forKey: .modelId)
+        providerId = try container.decodeIfPresent(String.self, forKey: .providerId)
         thinkingLevel = try container.decodeIfPresent(ThinkingLevel.self, forKey: .thinkingLevel)
         contextTokens = try container.decodeIfPresent(Int.self, forKey: .contextTokens)
         contextSummary = try container.decodeIfPresent(String.self, forKey: .contextSummary)
