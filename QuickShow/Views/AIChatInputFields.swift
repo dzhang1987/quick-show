@@ -32,6 +32,9 @@ struct ChatInputTextView: NSViewRepresentable {
     var onHistoryDown: (() -> Bool)? = nil
     /// 用户手动编辑内容通知（用于脱离历史浏览态）。
     var onTextEdited: (() -> Void)? = nil
+    /// 内容夹取后高度上报（2026-11 自动增高）：[chatInputHeight, 行高×chatInputMaxLines+内边距]，
+    /// 由调用方驱动 .frame(height:)；变化 <0.5pt 不上报，防微抖重渲染。
+    var onContentHeightChange: ((CGFloat) -> Void)? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -57,6 +60,10 @@ struct ChatInputTextView: NSViewRepresentable {
         textView.onContentStateChanged = { [weak coordinator = context.coordinator] in
             guard let coordinator, let tv = coordinator.textView else { return }
             coordinator.syncInputState(tv)
+        }
+        // 宽度变化（窗口缩放 / 侧栏开合）触发重折行 → 重测内容高度
+        textView.onWidthChanged = { [weak coordinator = context.coordinator] in
+            coordinator?.remeasureContentHeight()
         }
         textView.isRichText = false
         textView.allowsUndo = true
@@ -94,20 +101,21 @@ struct ChatInputTextView: NSViewRepresentable {
         scrollView.documentView = textView
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        // 无垂直滚动条：输入框固定 3 行（72pt），超出内容滚轮/光标内部滚动照旧，
-        // 只是不显示滚动条（autohidesScrollers/scrollerStyle 随之失去意义，一并移除）
+        // 垂直滚动条默认隐藏：内容未超上限时坞体随内容自动增高（remeasureContentHeight）；
+        // 触及 10 行上限转内部滚动时才浮现 overlay 滚动条（诚实 affordance）
         scrollView.hasVerticalScroller = false
 
         context.coordinator.textView = textView
         context.coordinator.startObservingWindow()
         // 首帧若窗口已就绪则聚焦；窗口后续成为 key 时由观察者兜底聚焦。
         // 若此刻其他 NSTextView（如侧栏重命名 field editor）已持焦点则让位（一致性保险）。
-        DispatchQueue.main.async { [weak textView] in
+        DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
             guard let textView, let window = textView.window else { return }
             if let responder = window.firstResponder as? NSTextView, responder !== textView {
                 return
             }
             window.makeFirstResponder(textView)
+            coordinator?.remeasureContentHeight()
         }
         return scrollView
     }
@@ -127,6 +135,8 @@ struct ChatInputTextView: NSViewRepresentable {
             let end = (text as NSString).length
             textView.setSelectedRange(NSRange(location: end, length: 0))
         }
+        // 程序化回写（发送清空 / ⌘K / 草稿恢复 / 重试）后重测高度，坞体随之收缩/生长
+        context.coordinator.remeasureContentHeight()
     }
 
     static func dismantleNSView(_ nsView: NSScrollView, coordinator: Coordinator) {
@@ -137,6 +147,8 @@ struct ChatInputTextView: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: ChatInputTextView
         weak var textView: ChatInputNSTextView?
+        /// 上次上报的夹取后高度（去抖基准，防微抖重渲染与上报回路）。
+        private var lastReportedHeight: CGFloat = 0
 
         init(_ parent: ChatInputTextView) {
             self.parent = parent
@@ -148,6 +160,32 @@ struct ChatInputTextView: NSViewRepresentable {
             syncInputState(tv)
             checkAtMentionTrigger(tv)
             parent.onTextEdited?()
+        }
+
+        /// 内容高度测量与上报（2026-11 自动增高）：
+        /// 实需高 = layoutManager 已用高 + 上下内边距；夹取到 [最小 3 行, 10 行上限]。
+        /// 触发源四路：textDidChange / IME 组字（syncInputState）/ 程序化回写（updateNSView）/
+        /// 宽度变化重折行（onWidthChanged）。超上限时浮现 overlay 滚动条转内部滚动。
+        /// 上报经 lastReportedHeight 去抖：同值不写，绝不与 dock 的 frame 形成反馈环。
+        func remeasureContentHeight() {
+            guard let tv = textView, let lm = tv.layoutManager, let tc = tv.textContainer else { return }
+            lm.ensureLayout(for: tc)
+            let inset = tv.textContainerInset.height * 2
+            let needed = lm.usedRect(for: tc).height + inset
+            let font = tv.font ?? NSFont.systemFont(ofSize: 13)
+            let maxHeight = (lm.defaultLineHeight(for: font) * CGFloat(Theme.Layout.chatInputMaxLines)).rounded(.up) + inset
+            let clamped = min(max(needed, Theme.Layout.chatInputHeight), maxHeight)
+            if let scroll = tv.enclosingScrollView {
+                let overflow = needed > maxHeight + 0.5
+                if scroll.hasVerticalScroller != overflow {
+                    scroll.hasVerticalScroller = overflow
+                    scroll.scrollerStyle = .overlay
+                    scroll.autohidesScrollers = true
+                }
+            }
+            guard abs(clamped - lastReportedHeight) > 0.5 else { return }
+            lastReportedHeight = clamped
+            parent.onContentHeightChange?(clamped)
         }
 
         /// 同步输入状态（供 textDidChange 与 IME setMarkedText/unmarkText 回调共用）：
@@ -163,6 +201,8 @@ struct ChatInputTextView: NSViewRepresentable {
             if parent.isInputEmpty != empty {
                 parent.isInputEmpty = empty
             }
+            // IME 组字期间 textDidChange 不触发：组字文本同样驱动高度生长
+            remeasureContentHeight()
         }
 
         /// 检测光标前是否存在 @token 并驱动 state 的 @ 菜单展开与过滤
@@ -311,6 +351,7 @@ struct ChatInputTextView: NSViewRepresentable {
             textView.setSelectedRange(NSRange(location: end, length: 0))
             parent.isInputEmpty = newText.isEmpty
             textView.scrollRangeToVisible(NSRange(location: end, length: 0))
+            remeasureContentHeight()
         }
 
         /// 监听窗口成为 key：保证 AI 窗每次唤出时输入框拿到第一响应者。
@@ -405,6 +446,15 @@ final class ChatInputNSTextView: NSTextView {
     var onCommandReturn: (() -> Void)?
     /// 内容状态变化回调（IME 组字/取消组字时 textDidChange 不触发，需单独通知 placeholder）。
     var onContentStateChanged: (() -> Void)?
+    /// 宽度变化回调（重折行后需重测内容高度；仅主输入框挂载，就地编辑框留 nil）。
+    var onWidthChanged: (() -> Void)?
+
+    /// 宽度变化（窗口缩放 / 侧栏开合 / 首帧定宽）→ 通知重测高度；高度变化不触发（防回路）。
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(newSize.width - frame.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged { onWidthChanged?() }
+    }
 
     /// IME 组字更新：marked text 变化不触发 textDidChange，这里主动通知空态变化。
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {

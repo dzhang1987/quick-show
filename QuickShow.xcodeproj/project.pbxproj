@@ -119,6 +119,7 @@
 		729CCA3F9CB91922110686EE /* ToolRiskTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65B2BAA9BAA86D8772E7C017 /* ToolRiskTests.swift */; };
 		7325565C24EBC2891BB84D17 /* PanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CB3F9819E7541B279D9C3FB /* PanelManager.swift */; };
 		73C4F5FD7250B1905670B6FD /* atom-one-light.min.css in Resources */ = {isa = PBXBuildFile; fileRef = 5822253DCCE3035ACFC217BB /* atom-one-light.min.css */; };
+		740C08B1A77EA5E472354764 /* MarkdownTableLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7EBDF5DF1167C836A1777E3 /* MarkdownTableLayout.swift */; };
 		746EABDB5EEEC16FF3EA7C7B /* ChatAuroraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6287219F2C3F98E90BA12B33 /* ChatAuroraView.swift */; };
 		753DAC8192ADA968147DC4AF /* PanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A8DDB1826EFEF6B7CB94BC3 /* PanelView.swift */; };
 		754567983E3DCF2AF85DA4FE /* AskUserToolViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EBFCA705B22FA81D696553E /* AskUserToolViews.swift */; };
@@ -487,6 +488,7 @@
 		D68032BC793ACA6923E904D1 /* AICompletionNotifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AICompletionNotifier.swift; sourceTree = "<group>"; };
 		D7695F4FF6C1E0DD5672E388 /* AIChatService+Streaming.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatService+Streaming.swift"; sourceTree = "<group>"; };
 		D7C7EC4C33CD9AD3C0270AD3 /* RWLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RWLock.swift; sourceTree = "<group>"; };
+		D7EBDF5DF1167C836A1777E3 /* MarkdownTableLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownTableLayout.swift; sourceTree = "<group>"; };
 		D81F82ADD4A7001FC77F83D1 /* MarkdownAST.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownAST.swift; sourceTree = "<group>"; };
 		D85415C102BBD16BC719482A /* MarkdownAlertRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownAlertRenderer.swift; sourceTree = "<group>"; };
 		DB435C852FEF250AC0839469 /* AIChatState+Compaction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AIChatState+Compaction.swift"; sourceTree = "<group>"; };
@@ -899,6 +901,7 @@
 				CC767F1D0494916BA069B3D7 /* MarkdownListRenderer.swift */,
 				8322A730C764D5D83AF6150D /* MarkdownMathRenderer.swift */,
 				F872717476C949C8D8DECC3C /* MarkdownParagraphRenderer.swift */,
+				D7EBDF5DF1167C836A1777E3 /* MarkdownTableLayout.swift */,
 				066E596FA0E17DE77BCD706F /* MarkdownTableRenderer.swift */,
 				AE709674E1C44562DBE0C2BD /* MarkdownTableView.swift */,
 			);
@@ -1358,6 +1361,7 @@
 				BB78F3A31A458B9F6F1696ED /* MarkdownRubyView.swift in Sources */,
 				04EB21B1E9CA6E9C958E87FD /* MarkdownTable+Copy.swift in Sources */,
 				D88F51C5F1F508DA6A337758 /* MarkdownTableCopyTests.swift in Sources */,
+				740C08B1A77EA5E472354764 /* MarkdownTableLayout.swift in Sources */,
 				2D4DEF9BBB116977FA238E52 /* MarkdownTableRenderer.swift in Sources */,
 				F36F9FD69F39A24D5FB0FB38 /* MarkdownTableView.swift in Sources */,
 				39F9006016E24A97ED82F9F8 /* MarkdownTextFlowBuilder.swift in Sources */,

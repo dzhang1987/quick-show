@@ -50,6 +50,11 @@ struct AIChatInputDock: View {
     /// （重启载入 / 程序化填充）时与既有文字重影；派生条件首帧求值即正确，零时序依赖。
     @State private var inputEmpty = true
 
+    /// 输入文本区动态高度（2026-11 自动增高）：ChatInputTextView 实测夹取后上报
+    /// （最小 3 行 72pt ↔ 上限 10 行），坞底对齐 overlay 天然向上生长；
+    /// 坞总高经既有 dockTotalHeight 实测管线自动跟随（尾部留白 / @ 浮层 / toast 零新增联动）。
+    @State private var inputTextHeight: CGFloat = Theme.Layout.chatInputHeight
+
     /// 模型列表（AIChatService 非 @Published，随环境刷新主动拉取；
     /// 当前生效模型改读 state 会话级绑定，此处不再镜像选中态）。
     @State private var modelList: [AIModel] = []
@@ -337,7 +342,10 @@ struct AIChatInputDock: View {
                     onRecallFirst: { state.recallFirstQueuedInput() },
                     onHistoryUp: { state.navigateInputHistoryUp() },
                     onHistoryDown: { state.navigateInputHistoryDown() },
-                    onTextEdited: { state.historyTracker.onUserEdited(newText: state.inputText, newImages: state.imageAttachments) }
+                    onTextEdited: { state.historyTracker.onUserEdited(newText: state.inputText, newImages: state.imageAttachments) },
+                    onContentHeightChange: { height in
+                        if abs(height - inputTextHeight) > 0.5 { inputTextHeight = height }
+                    }
                 )
                 // 双通道与：草稿恢复期 inputEmpty 滞后为 true（@State 初值、首帧无变化事件），
                 // state.inputText 非空即有文字，placeholder 不显示——防重影（见 inputEmpty 声明处注释）。
@@ -345,13 +353,15 @@ struct AIChatInputDock: View {
                     Text(inputPlaceholder)
                         .font(Theme.Typography.text(13))
                         .foregroundColor(Theme.Colors.idleText)
-                        // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 与固定 3 行框（72pt）首行顶对齐
+                        // 与 textContainerInset 同步：光标距卡边 18pt；垂直 12pt 与最小 3 行框（72pt）首行顶对齐
                         .padding(.horizontal, Theme.Spacing.section)
                         .padding(.vertical, Theme.Spacing.xxl)
                         .allowsHitTesting(false)
                 }
             }
-            .frame(height: Theme.Layout.chatInputHeight)
+            // 自动增高：最小 3 行 ↔ 上限 10 行，随内容平滑向上生长（超上限内部滚动）
+            .frame(height: inputTextHeight)
+            .animation(.easeOut(duration: Theme.Motion.contentFade), value: inputTextHeight)
             .contentShape(Rectangle())
             .onTapGesture {
                 NotificationCenter.default.post(name: .aiChatRefocusInput, object: nil)

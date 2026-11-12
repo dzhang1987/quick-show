@@ -6,6 +6,15 @@
 
 ### Changed
 
+- **Markdown 表格宽表横向滚动 + 内容驱动列宽（`MarkdownTableView.swift` / `MarkdownTableLayout.swift` / `MarkdownInlineNS.swift` / `DesignTokens.swift`）**：
+  - **根治宽表硬挤**：旧版等宽列把整表强挤进阅读列（7 列中文逐字折行）；改为每列取全部单元格单行理想宽度最大值，经 AppKit 渲染路径同步测量（字体与渲染严格一致，含行内代码 / 加粗混合字体；公式走占位路径不触发光栅化），夹取 56~300pt（`chatTableMin/MaxColumnWidth`）；
+  - **窄表铺满 / 宽表横滚**：总宽放得下时按理想宽比例拉伸铺满阅读列（窄表观感同旧版），放不下时按夹取宽度排布、整卡横向滚动；表头与数据行同处一个横滚内容水平天然同步，垂直方向保持旧行为（长表 380pt 内滚、表头常驻）；
+  - **交互语言不变**：滚动条槽复用 `scrollerGutter`（overlay 滚动条不压表头 / 末行），复制 / 下载双钮常驻卡右上角不随滚动；网格为参数化子视图，hover 不触发列宽重测；`renderNS` 新增 `mathPlaceholder` 开关全递归透传，既有调用方零修改。
+
+- **输入坞内容自动增高：3 行最小 ↔ 10 行上限（`AIChatInputFields.swift` / `AIChatInputDock.swift` / `DesignTokens.swift`）**：
+  - **固定 72pt 改动态高度**：`layoutManager.usedRect` 实测内容高，四路触发（普通输入 / IME 组字 / 程序化回写 / 宽度变化重折行），夹取 [72pt, 行高×10+内边距]（`chatInputMaxLines`），0.5pt 去抖防上报回路；
+  - **向上生长零新增联动**：坞底对齐 overlay 天然向上生长，0.16s easeOut 过渡；消息列表尾部留白 / @ 浮层 / toast 经既有 `dockTotalHeight` 实测管线自动跟随；超 10 行转内部滚动并仅此时浮现 overlay 滚动条，发送 / 清空后收缩回最小高度。
+
 - **复制控件交互语言抽象：CodeCopyButton 紧凑变体 + 共享胶囊外观 + NSMenu 动作代理共享化（`MarkdownCodeBlock.swift` / `MenuActionProxy.swift` / `AIChatInputDock.swift`）**：
   - `CodeCopyButton` 新增 `iconOnly` / `help` 可选参数（既有调用方零修改），胶囊外观（keyCap 圆角 + surfaceButton 底 + 成功态 accent）抽为共享 `copyControlChrome`，表格下载钮同语言复用；
   - NSMenu 闭包动作代理按「第二次出现」原则抽为共享 `MenuActionProxy` / `MenuActionRetainer`（弱 target 生命周期强持有），输入坞生成菜单私有代理同步迁移，杜绝散弹式重复。

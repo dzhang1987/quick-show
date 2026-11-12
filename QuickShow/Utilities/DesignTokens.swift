@@ -592,7 +592,14 @@ enum Theme {
         static let chatTopBarMarkSize: CGFloat = 18    // 身份徽标默认尺寸
         static let chatTurnAnchorMarkSize: CGFloat = 16 // 助手回合身份锚点徽标
 
-        static let chatInputHeight: CGFloat = 72       // 输入框固定高（44→72 常驻 3 行：3×13pt 行高≈16 + 垂直内边距 12×2；超出内部滚动、滚动条隐藏）
+        static let chatInputHeight: CGFloat = 72       // 输入框最小高（44→72 常驻 3 行：3×13pt 行高≈16 + 垂直内边距 12×2；内容超出向上生长，见 chatInputMaxLines）
+        // 输入框自动增高上限行数（2026-11 用户决策：最多 10 行）：内容高在
+        // [chatInputHeight, 行高×10+内边距] 夹取，超上限内部滚动并浮现 overlay 滚动条
+        static let chatInputMaxLines: Int = 10
+        // Markdown 表格内容驱动列宽夹取（2026-11 横滚重设计）：下限保窄列可读（≈4 个汉字），
+        // 上限防单条长备注无限撑宽表格（超出折行）；总宽超视口即横向滚动
+        static let chatTableMinColumnWidth: CGFloat = 56
+        static let chatTableMaxColumnWidth: CGFloat = 300
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
         static let chatToBottomButtonSize: CGFloat = 28 // 回底圆钮直径
         // 浏览导航（刻度轨/回底钮）离底浮现门槛：上滚一点点（门槛内）滚动跟随照常

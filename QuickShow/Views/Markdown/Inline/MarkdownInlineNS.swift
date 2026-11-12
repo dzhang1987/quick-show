@@ -119,11 +119,14 @@ enum MarkdownInlineNS {
         _accentColor
     }
 
+    /// - mathPlaceholder：true 时公式走等宽占位文本、绝不触发光栅化——
+    ///   供表格列宽测量等「只量宽度、不渲染」路径使用（默认 false 保持既有调用方零修改）。
     static func renderNS(
         _ tokens: [InlineToken],
         baseFont: NSFont,
         baseColor: NSColor,
-        baseSize: CGFloat
+        baseSize: CGFloat,
+        mathPlaceholder: Bool = false
     ) -> InlineMathRender {
         let result = NSMutableAttributedString()
         var pending: [PendingInlineMath] = []
@@ -133,7 +136,8 @@ enum MarkdownInlineNS {
             baseFont: baseFont,
             baseColor: baseColor,
             baseSize: baseSize,
-            pending: &pending
+            pending: &pending,
+            mathPlaceholder: mathPlaceholder
         )
         return InlineMathRender(attributed: result, pendingMath: pending)
     }
@@ -144,7 +148,8 @@ enum MarkdownInlineNS {
         baseFont: NSFont,
         baseColor: NSColor,
         baseSize: CGFloat,
-        pending: inout [PendingInlineMath]
+        pending: inout [PendingInlineMath],
+        mathPlaceholder: Bool = false
     ) {
         for token in tokens {
             switch token {
@@ -194,7 +199,8 @@ enum MarkdownInlineNS {
                     baseFont: boldFont,
                     baseColor: .labelColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
 
             case let .italic(inner):
@@ -205,7 +211,8 @@ enum MarkdownInlineNS {
                     baseFont: italicFont,
                     baseColor: baseColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
 
             case let .link(label, url, _):
@@ -216,7 +223,8 @@ enum MarkdownInlineNS {
                     baseFont: baseFont,
                     baseColor: baseColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
                 applyLinkStyle(to: result, from: start, url: url)
 
@@ -228,7 +236,8 @@ enum MarkdownInlineNS {
                     baseFont: baseFont,
                     baseColor: baseColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
                 applyAttribute(
                     to: result, from: start,
@@ -243,7 +252,8 @@ enum MarkdownInlineNS {
                     baseFont: baseFont,
                     baseColor: baseColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
                 applyAttribute(
                     to: result, from: start,
@@ -258,7 +268,8 @@ enum MarkdownInlineNS {
                     baseFont: baseFont,
                     baseColor: baseColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
                 applyAttribute(to: result, from: start, key: .backgroundColor, value: highlightBackground)
 
@@ -266,14 +277,16 @@ enum MarkdownInlineNS {
                 renderScript(
                     into: result, tokens: inner,
                     baseFont: baseFont, baseColor: baseColor, baseSize: baseSize,
-                    sizeDelta: -2, baselineOffset: -3, pending: &pending
+                    sizeDelta: -2, baselineOffset: -3, pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
 
             case let .superscript(inner):
                 renderScript(
                     into: result, tokens: inner,
                     baseFont: baseFont, baseColor: baseColor, baseSize: baseSize,
-                    sizeDelta: -2, baselineOffset: 3, pending: &pending
+                    sizeDelta: -2, baselineOffset: 3, pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
 
             case let .ruby(base, ruby, position):
@@ -284,7 +297,8 @@ enum MarkdownInlineNS {
                     baseFont: baseFont,
                     baseColor: baseColor,
                     baseSize: baseSize,
-                    pending: &pending
+                    pending: &pending,
+                    mathPlaceholder: mathPlaceholder
                 )
                 let len = result.length - start
                 guard len > 0, !ruby.isEmpty else { break }
@@ -343,7 +357,9 @@ enum MarkdownInlineNS {
                 result.append(piece)
 
             case let .math(latex):
-                if let raster = MathRasterizer.rasterize(latex: latex, pointSize: baseSize, color: baseColor, isDisplay: false) {
+                if mathPlaceholder {
+                    appendMathFallback(into: result, latex: latex, color: baseColor)
+                } else if let raster = MathRasterizer.rasterize(latex: latex, pointSize: baseSize, color: baseColor, isDisplay: false) {
                     result.append(NSAttributedString(attachment: InlineMathAttachment.make(from: raster, latex: latex, pointSize: baseSize, isDisplay: false)))
                 } else {
                     appendMathFallback(into: result, latex: latex, color: baseColor)
@@ -392,7 +408,8 @@ enum MarkdownInlineNS {
         baseSize: CGFloat,
         sizeDelta: CGFloat,
         baselineOffset: CGFloat,
-        pending: inout [PendingInlineMath]
+        pending: inout [PendingInlineMath],
+        mathPlaceholder: Bool = false
     ) {
         let start = result.length
         let scriptSize = max(baseSize + sizeDelta, 1)
@@ -402,7 +419,8 @@ enum MarkdownInlineNS {
             baseFont: derivedFont(from: baseFont, size: scriptSize),
             baseColor: baseColor,
             baseSize: scriptSize,
-            pending: &pending
+            pending: &pending,
+            mathPlaceholder: mathPlaceholder
         )
         applyAttribute(to: result, from: start, key: .baselineOffset, value: baselineOffset)
     }
