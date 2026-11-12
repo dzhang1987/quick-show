@@ -6,6 +6,10 @@
 
 ### Changed
 
+- **复制控件交互语言抽象：CodeCopyButton 紧凑变体 + 共享胶囊外观 + NSMenu 动作代理共享化（`MarkdownCodeBlock.swift` / `MenuActionProxy.swift` / `AIChatInputDock.swift`）**：
+  - `CodeCopyButton` 新增 `iconOnly` / `help` 可选参数（既有调用方零修改），胶囊外观（keyCap 圆角 + surfaceButton 底 + 成功态 accent）抽为共享 `copyControlChrome`，表格下载钮同语言复用；
+  - NSMenu 闭包动作代理按「第二次出现」原则抽为共享 `MenuActionProxy` / `MenuActionRetainer`（弱 target 生命周期强持有），输入坞生成菜单私有代理同步迁移，杜绝散弹式重复。
+
 - **AI 对话窗「光与纸」质感重塑：游走光团动态极光 + 身份色 + 浮岛输入坞（`DesignTokens.swift` / `ChatAuroraView.swift` / `AgentIdentityMark.swift` / `AIChatView.swift` / `AIChatMessageList.swift` / `AIChatMessageRow.swift` / `AIChatInputDock.swift` / `AIChatStatusViews.swift` / `MarkdownTableView.swift`）**：
   - **阅读纸面受光渐变**：正文区由死平灰板升级为垂直渐变纸面（顶端与原纸面同值零回归、底端只更暗更不透明，白字对比只升不降），重建「顶部受光」纵深；
   - **游走光团动态极光**：新增 `ChatAuroraView`（Canvas + TimelineView，30fps 上限），3 团 distinct 光斑（主色×2 + 副色×1）以不可通约频率正弦叠加做有机 wander 与半径/亮度随机呼吸，光团交叠处色彩流动；尊重系统「减弱动态」静止渲染；峰值透明度克制、纵向偏顶部，正文小字仍落确定纸面；
@@ -45,6 +49,12 @@
   - **视口自适应 80% 弹性限高与抽屉呼吸感**：题目区最大高度改为视口 80% 动态自适应，滚动区域底部追加充裕内边距；同步优化权限申请抽屉（`ToolConfirmationDrawer`）底部呼吸边距，彻底消灭贴边压迫感。
 
 ### Added
+
+- **Markdown 表格一键复制 Markdown、三格式下载与单元格划选（`MarkdownTable+Copy.swift` / `MarkdownTableView.swift` / `MarkdownCodeBlock.swift` / `MarkdownTableCopyTests.swift` / `QuickShowApp.swift`）**：
+  - **复制图标钮**：表格 hover 右上角浮现复制图标钮，一键复制 GFM Markdown 源码表（对齐分隔行、单元格竖线转义、硬换行 `<br>`、行内语法重建），成功对勾轻反馈，与代码块同一交互语言；
+  - **下载图标钮**：点击弹 Markdown / TSV / CSV 格式菜单，NSSavePanel 存盘；TSV 粘贴到 Excel / Numbers / 飞书直接落成真正的表格，CSV 遵循 RFC 4180 引号规则与 CRLF 行尾；
+  - **单元格划选**：表头与数据单元格启用文本选区，拖选 + ⌘C 复制部分文字（跨格不连续选区）；
+  - **序列化单源**：`MarkdownTable` 三路径序列化与行内 token 纯文本 / Markdown 双路径收敛于 AST 扩展；新增 `--test-table-copy` 定向回归（8 项断言：结构 / 四档对齐 / 转义 / 引号 / 空表）。
 
 - **SettingsField 设置页统一输入组件：原生内核根治空格不实时与右对齐（`SettingsField.swift` / `AIServiceSettingsForm.swift` / `AISettingsSections.swift` / `AntigravityOAuthSettingsSection.swift`）**：
   - **根因**：SwiftUI TextField 在 macOS 每次键入把 binding 写回底层控件，写回重置 field editor 尾随空格排版（空格不实时渲染）；Form 值列默认右对齐是旧系统偏好遗留；系统 `roundedBorder` 与自定义搜索域两套视觉分裂；

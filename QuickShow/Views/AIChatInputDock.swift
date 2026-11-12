@@ -562,7 +562,7 @@ struct AIChatInputDock: View {
         menu.autoenablesItems = false // 否则 isEnabled=false 的分组标题会被自动启用机制干扰
 
         // 每次弹出前清空动作协调器，构建期间所有动作 proxy 均被强引用持有，彻底杜绝 weak target 提前释放
-        GenerationMenuCoordinator.shared.reset()
+        MenuActionRetainer.shared.reset()
 
         /// 辅助函数：构造带前置单色 SF Symbol 矢量图标的富文本标题（通用：智能体与服务商 Logo，任何 macOS 版本绝不被系统隐藏）
         func makeSymbolTitle(iconName: String, name: String) -> NSAttributedString {
@@ -601,9 +601,9 @@ struct AIChatInputDock: View {
 
         /// 建一个带勾选态的可点 item（动作走 proxy，支持富文本）
         func addItem(_ title: String, attributedTitle: NSAttributedString? = nil, isOn: Bool, handler: @escaping () -> Void) {
-            let action = GenerationMenuAction(handler: handler)
-            GenerationMenuCoordinator.shared.retain(action)
-            let item = NSMenuItem(title: title, action: #selector(GenerationMenuAction.invoke), keyEquivalent: "")
+            let action = MenuActionProxy(handler: handler)
+            MenuActionRetainer.shared.retain(action)
+            let item = NSMenuItem(title: title, action: #selector(MenuActionProxy.invoke), keyEquivalent: "")
             if let attributedTitle {
                 item.attributedTitle = attributedTitle
             }
@@ -667,12 +667,12 @@ struct AIChatInputDock: View {
                 for model in provider.models {
                     let isCurrentModel = (model.id == effectiveModelId && provider.id == effectiveProviderId)
                     let modelAttr = makeModelTitle(name: model.name, supportsVision: model.supportsVision)
-                    let modelAction = GenerationMenuAction { [state] in
+                    let modelAction = MenuActionProxy { [state] in
                         // 选中即绑定「该服务商下的该模型」：只写 modelId 会让发送时路由到别的服务商
                         state.setSessionModel(model.id, providerId: provider.id)
                     }
-                    GenerationMenuCoordinator.shared.retain(modelAction)
-                    let subItem = NSMenuItem(title: model.name, action: #selector(GenerationMenuAction.invoke), keyEquivalent: "")
+                    MenuActionRetainer.shared.retain(modelAction)
+                    let subItem = NSMenuItem(title: model.name, action: #selector(MenuActionProxy.invoke), keyEquivalent: "")
                     subItem.attributedTitle = modelAttr
                     subItem.target = modelAction
                     subItem.state = isCurrentModel ? .on : .off
@@ -941,28 +941,4 @@ private struct ThinkingLevelBars: View {
     }
 }
 
-// MARK: - 生成菜单动作代理与生命周期协调器
 
-/// 生成菜单生命周期协调器：强持有当前弹出菜单中所有 item 的 target proxy，
-/// 杜绝 NSMenuItem.target (weak) 因局部栈变量提前释放而变成 nil 导致的点击丢失。
-@MainActor
-private final class GenerationMenuCoordinator: NSObject {
-    static let shared = GenerationMenuCoordinator()
-    private var activeActions: [GenerationMenuAction] = []
-
-    func retain(_ action: GenerationMenuAction) {
-        activeActions.append(action)
-    }
-
-    func reset() {
-        activeActions.removeAll()
-    }
-}
-
-/// NSMenuItem 动作代理：NSMenuItem.target 是弱引用、action 必须是 @objc 方法，
-/// closure 不能直接做 target——本类持 closure 转发。由 GenerationMenuCoordinator 强持有保证生命周期安全。
-private final class GenerationMenuAction: NSObject {
-    let handler: () -> Void
-    init(handler: @escaping () -> Void) { self.handler = handler }
-    @objc func invoke() { handler() }
-}

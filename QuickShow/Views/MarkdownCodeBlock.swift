@@ -6,9 +6,12 @@ import SwiftUI
 // MARK: - 通用代码复制按钮
 
 /// 代码块 / 结果框内嵌的轻反馈复制按钮：hover 时浮现，点击后变为带强调色的对勾轻反馈，1.2s 后复位。
+/// iconOnly：仅图标（表格等紧凑场景）；help：可选悬浮提示。既有调用方零修改。
 struct CodeCopyButton: View {
     let textToCopy: () -> String
     var isHovered: Bool = true
+    var iconOnly: Bool = false
+    var help: String? = nil
 
     @State private var copied = false
 
@@ -17,22 +20,19 @@ struct CodeCopyButton: View {
             HStack(spacing: Theme.Spacing.xs) {
                 Image(systemName: copied ? "checkmark" : "square.on.square")
                     .font(Theme.Typography.text(9.5, .medium))
-                Text(copied ? String(localized: "已复制") : String(localized: "复制"))
-                    .font(Theme.Typography.text(9.5, .medium))
+                if !iconOnly {
+                    Text(copied ? String(localized: "已复制") : String(localized: "复制"))
+                        .font(Theme.Typography.text(9.5, .medium))
+                }
             }
-            .foregroundColor(copied ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-            .padding(.horizontal, Theme.Spacing.md)
-            .padding(.vertical, Theme.Spacing.xxs)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                    .fill(Theme.Colors.surfaceButton)
-            )
+            .copyControlChrome(highlighted: copied)
         }
         .buttonStyle(.plain)
         .fixedSize()
         .opacity((isHovered || copied) ? 1 : 0)
         .allowsHitTesting(isHovered || copied)
         .accessibilityHidden(!isHovered && !copied)
+        .help(help ?? "")
     }
 
     private func performCopy() {
@@ -43,6 +43,23 @@ struct CodeCopyButton: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + Theme.Motion.transientFeedbackDuration) {
             copied = false
         }
+    }
+}
+
+// MARK: - 复制 / 下载控件共享胶囊外观
+
+/// keyCap 圆角 + surfaceButton 底；成功反馈态前景切 accent。
+/// CodeCopyButton 与表格下载钮共用，保证同一交互语言（第二次出现即抽象）。
+extension View {
+    func copyControlChrome(highlighted: Bool) -> some View {
+        self
+            .foregroundColor(highlighted ? Theme.Colors.accent : Theme.Colors.contentTertiary)
+            .padding(.horizontal, Theme.Spacing.md)
+            .padding(.vertical, Theme.Spacing.xxs)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
+                    .fill(Theme.Colors.surfaceButton)
+            )
     }
 }
 

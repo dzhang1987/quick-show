@@ -26,6 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // 定向回归：表格复制 / 下载序列化（Markdown / TSV / CSV）契约（纯变换，同步跑完即退出）
+        if CommandLine.arguments.contains("--test-table-copy") {
+            MarkdownTableCopyTests.run()
+            return
+        }
+
         let app = NSApplication.shared
         if SingleInstanceGuard.shared.tryAcquirePrimaryLock() {
             let delegate = AppDelegate()
