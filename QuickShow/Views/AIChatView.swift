@@ -35,7 +35,7 @@ struct AIChatView: View {
     @ObservedObject private var interaction = ChatInteractionCenter.shared
     /// 智能体仓库：观察当前激活智能体或角色变更以实时刷新顶栏身份。
     @ObservedObject private var agentStore = AIAgentStore.shared
-    /// 多会话数据层：观察会话列表、当前选中会话及消息变更（确保首条发送时即时移开欢迎页遮罩）。
+    /// 多会话数据层：观察会话列表、当前选中会话及消息变更，保持空态与消息列表同步。
     @ObservedObject private var store = ChatSessionStore.shared
     var onOpenSettings: (() -> Void)?
     var onClose: (() -> Void)?
@@ -511,23 +511,15 @@ struct AIChatView: View {
             windowTopBar
 
             // 消息列表容器常驻（ZStack 多会话树保活，绝不可插拔卸载——否则保活失效）。
-            // 空态（未配置引导 / 欢迎页）以 overlay 盖在其上，视觉布局与原三态分支等价；
-            // 空会话在 ZStack 内渲染 EmptyView，空态由本 overlay 承担。
+            // 已配置的空会话不叠加欢迎内容，中央留白直接呈现背景游走光晕。
+            // 仅未配置服务时保留功能性设置入口。
             messageList
                 .overlay {
-                    // 底部 padding 叠加生长区实测高度：附件草稿可在空态出现（附件条会挡
-                    // 欢迎页/引导页），遮挡带随坞体生长动态抬高
+                    // 引导页随输入坞实测高度让位，避免附件草稿遮挡设置入口。
                     if !configured && activeSessionMessagesEmpty {
                         UnconfiguredGuideView(onOpenSettings: onOpenSettings)
                             .padding(.bottom, effectiveDockHeight)
                             .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
-                    } else if activeSessionMessagesEmpty {
-                        WelcomeView(agent: sessionAgent) { text in
-                            state.inputText = text
-                            state.send()
-                        }
-                        .padding(.bottom, effectiveDockHeight)
-                        .animation(.easeOut(duration: Theme.Motion.contentFade), value: effectiveDockHeight)
                     }
                 }
                 // 消息流止于输入坞下缘：坞体自身留有 Spacing.xxl 底缝，若不收这 12pt，
@@ -680,7 +672,7 @@ struct AIChatView: View {
     // MARK: - 主 Agent 会话标题（居中展示：Agent 身份 + 会话主题，拖拽完全穿透）
 
     /// 当前会话生效的 agent（会话绑定优先，缺省跟随全局激活）：
-    /// 顶栏身份徽标与欢迎页品牌时刻共用同一解析，避免两处漂移。
+    /// 用于顶栏身份展示。
     private var sessionAgent: AIAgent {
         let agentId = store.currentSession?.agentId ?? agentStore.activeAgentId
         return agentStore.agent(for: agentId) ?? agentStore.activeAgent
@@ -692,7 +684,7 @@ struct AIChatView: View {
 
         return HStack(spacing: Theme.Spacing.chip) {
             // 顶栏回归原生轻纱语言：裸单色 accent 图标（与玻璃融合，不贴实心徽标块）。
-            // 渐变身份徽标只保留在欢迎页/助手回合锚点等需要身份锚点处。
+            // 渐变身份徽标保留在助手回合锚点处。
             Image(systemName: agent.iconName)
                 .font(Theme.Typography.text(Theme.Typography.callout, .medium))
                 .foregroundColor(Theme.Colors.accent)
@@ -802,7 +794,7 @@ struct AIChatView: View {
         // 空态布局兜底：常驻会话全空时 SessionMessageList 均为 EmptyView，
         // ZStack 高度塌缩为 0 会令 mainColumn 的 VStack 垂直居中——顶栏（图钉+拖动热区）
         // 整体掉到窗口中部（冷启动全空常驻集合时偶现）。此处令列表容器永远占据
-        // 顶栏以下全部剩余高度，顶栏恒定钉在顶部，空态欢迎页由外层 overlay 承担。
+        // 顶栏以下全部剩余高度，顶栏恒定钉在顶部；已配置空会话保持中央留白。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 

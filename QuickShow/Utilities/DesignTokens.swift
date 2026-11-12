@@ -446,10 +446,7 @@ enum Theme {
         static let body: CGFloat = 12        // 正文/状态栏图标/描述
         static let callout: CGFloat = 12.5   // 卡片标题/状态数值
         static let chatBarTitle: CGFloat = 14 // 对话窗顶栏标题（玻璃纱带大字档：WCAG large-text 3:1）
-        // 光与纸：欢迎页品牌时刻 + 助手回合身份锚点
-        static let welcomeHeadline: CGFloat = 17   // 欢迎页问候大标题（agent 身份锚点）
-        static let welcomeSubtitle: CGFloat = 12   // 欢迎页引导副标
-        static let welcomeSuggestion: CGFloat = 12 // 欢迎页灵感提示 chip 文字
+        // 助手回合身份锚点
         static let chatTurnAnchorName: CGFloat = 11 // 助手回合锚点 agent 名（弱存在小字）
         static let iconLarge: CGFloat = 13   // 电池图标（视觉偏小需加大一档）
         static let toast: CGFloat = 13.5     // toast 文字
@@ -591,11 +588,9 @@ enum Theme {
 
         // —— 2026-10 AI 窗视觉重设计 ——
         static let chatTopBarHeight: CGFloat = 36      // 顶栏高（28→36，图钉归入顶栏节奏）
-        // 光与纸：agent 渐变徽标三档尺寸 + 欢迎页灵感提示列宽
-        static let chatTopBarMarkSize: CGFloat = 18    // 顶栏 agent 身份徽标
+        // Agent 渐变徽标尺寸
+        static let chatTopBarMarkSize: CGFloat = 18    // 身份徽标默认尺寸
         static let chatTurnAnchorMarkSize: CGFloat = 16 // 助手回合身份锚点徽标
-        static let welcomeMarkSize: CGFloat = 46       // 欢迎页品牌大徽标（带氛围柔光）
-        static let welcomeSuggestionWidth: CGFloat = 320 // 欢迎页灵感提示列限宽（居中阅读列）
 
         static let chatInputHeight: CGFloat = 72       // 输入框固定高（44→72 常驻 3 行：3×13pt 行高≈16 + 垂直内边距 12×2；超出内部滚动、滚动条隐藏）
         static let chatNavDockGap: CGFloat = 10        // 回底圆钮与坞顶间距
