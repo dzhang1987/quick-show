@@ -260,6 +260,9 @@ struct SessionMessageList: View {
                                 }
                             }
                         }
+                        // 质感对齐·纸面下沉：助手回合组整体承载阅读纸面卡（含回合锚点），
+                        // 用户回合保持气泡语言不铺卡；窗底留白透出纯玻璃。
+                        .modifier(AssistantTurnCardSurface(active: isAssistantGroup))
                     }
                     // 全量压缩态边界卡：本会话全部历史消息均已压缩（或处于本会话压缩中），
                     // 边界卡置于本会话历史消息末尾（紧邻输入坞上方、后续新对话之前）。
@@ -820,5 +823,44 @@ extension SessionMessageList: Equatable {
             return abs(lhs.dockTotalHeight - rhs.dockTotalHeight) < 0.5
         }
         return true
+    }
+}
+
+// MARK: - 助手回合卡（质感对齐·材质融合）
+
+/// 阅读面从整窗下沉到助手回合组：窗底回主浮窗同款纯玻璃，阅读面只铺在文字模块下。
+/// 卡底用系统标准材质（HIG：内容层必须用标准材质，自定义半透明漆面会切断背景映射，
+/// 观感成「深色板贴在玻璃上」）——regularMaterial 实时采样环境、语义色自动 vibrancy，
+/// 与输入坞/主浮窗同一材质家族；顶部极淡受光 sheen 延续「光」语言，不参与对比度预算。
+/// 行级虚拟化高度测量挂在行自身，组级卡不影响占位恒等；用户回合不铺卡。
+private struct AssistantTurnCardSurface: ViewModifier {
+    let active: Bool
+
+    func body(content: Content) -> some View {
+        if active {
+            content
+                .padding(.horizontal, Theme.Spacing.card)
+                .padding(.vertical, Theme.Spacing.xxl)
+                .background(
+                    ZStack {
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .fill(.regularMaterial)
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(Theme.Colors.chatCardSheenTop), .clear],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                )
+                            )
+                    }
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .strokeBorder(Theme.Colors.cardStroke, lineWidth: 0.5)
+                )
+        } else {
+            content
+        }
     }
 }

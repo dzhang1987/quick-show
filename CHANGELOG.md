@@ -6,6 +6,11 @@
 
 ### Changed
 
+- **AI 对话窗质感对齐主浮窗：窗底纯玻璃 + 阅读面材质化下沉回合卡（`AIChatView.swift` / `AIChatMessageList.swift` / `AIChatSidebarView.swift` / `AIChatMessageRow.swift` / `DesignTokens.swift`）**：
+  - **窗底纯玻璃**：内容层回主浮窗同源 `liquidPanelBackground`（26+ 透明透真玻璃 / <26 ultraThinMaterial），移除整窗 0.80–0.88 不透明阅读纸面；留白 / 空态透出玻璃，极光光团退守空态纯玻璃延续品牌时刻；
+  - **阅读面下沉助手回合卡并改系统标准材质**：回合组（含回合锚点）铺 `regularMaterial` 卡底 + 5% 白顶部受光 sheen + 0.5pt 描边，侧栏自有材质底 + 半档 shade，压缩摘要自铺材质托底——背景映射不断、语义色 vibrancy 自动托底，兼得「小字不随壁纸漂移」与「不切成深色板贴玻璃」；代码块保留确定纸面（第三方语法色板对比度基准，审计 52/52 达标）；
+  - **顶栏轻纱软着陆**：同色相 52% 轻纱 plateau 段承载大字 / 图标，带底渐变透明与玻璃衔接无硬接缝；子代理小字导航出现时顶带仍回纸面托底 4.5:1。
+
 - **Markdown 表格宽表横向滚动 + 内容驱动列宽（`MarkdownTableView.swift` / `MarkdownTableLayout.swift` / `MarkdownInlineNS.swift` / `DesignTokens.swift`）**：
   - **根治宽表硬挤**：旧版等宽列把整表强挤进阅读列（7 列中文逐字折行）；改为每列取全部单元格单行理想宽度最大值，经 AppKit 渲染路径同步测量（字体与渲染严格一致，含行内代码 / 加粗混合字体；公式走占位路径不触发光栅化），夹取 56~300pt（`chatTableMin/MaxColumnWidth`）；
   - **窄表铺满 / 宽表横滚**：总宽放得下时按理想宽比例拉伸铺满阅读列（窄表观感同旧版），放不下时按夹取宽度排布、整卡横向滚动；表头与数据行同处一个横滚内容水平天然同步，垂直方向保持旧行为（长表 380pt 内滚、表头常驻）；

@@ -263,21 +263,21 @@ enum Theme {
         static var secondsGradientBottom: Color { Theme.palette.secondsGradientBottom }
         static var ambientSecondary: Color { Theme.palette.ambientSecondary }
 
-        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治 + 质感分区）
-        // 设计逻辑：内容层必须有「确定底色」——玻璃透壁纸会把文字对比度变成环境的函数
-        // （动态壁纸下正文对比度实测可在 1.0–11:1 之间漂移，代码块深底时正文近乎消失）。
-        // 故分区处理：正文区铺 80% 不透明阅读纸面（对比度设计常量），顶栏带走同色相
-        // 52% 轻纱（原生 Liquid Glass 透出，主浮窗同款活感）——小字 4.5:1 归纸面，
-        // 大字/图标 3:1 归轻纱，两个标准各自落在确定的结构上。
-        /// 阅读面基色（单一来源）：纸面与顶栏轻纱同色相，仅不透明度不同
+        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治 + 质感对齐·材质融合）
+        // 设计逻辑：小字不能直接压在整窗玻璃的实时壁纸采样上（对比度实测 1.0–11:1 漂移），
+        // 但自定义半透明漆面会切断背景映射、观感成「深色板贴玻璃」——两代方案的实测教训。
+        // 终态（HIG 内容层纪律）：窗底纯玻璃与主浮窗同源；阅读面下沉到文字模块并改用
+        // 系统标准材质（regularMaterial：环境映射不断 + 语义色 vibrancy 自动托底）——
+        // 助手回合卡 / 侧栏 / 压缩摘要同家族；代码块保留确定纸面（第三方语法色板基准）。
+        // 顶栏带走同色相 52% 轻纱（plateau 段承载大字/图标，带底软着陆透明）——
+        // 小字 4.5:1 归材质，大字/图标 3:1 归轻纱，两个标准各自落在确定的结构上。
+        /// 轻纱基色（单一来源）：顶栏轻纱与子代理顶带同色相，仅不透明度不同
         private enum ChatSurface {
             static let dark = ContrastColor(0.113, 0.113, 0.124)
             static let light = ContrastColor(0.988, 0.988, 0.992)
         }
-        /// 内容层阅读纸面（顶栏以下整块纸面：消息流 + 侧栏）
-        /// 0.80 = 质感与可读性的临界：壁纸仍有 20% 透出（模糊/色彩流动可见，
-        /// 玻璃窗的「活」还在），同时最坏壁纸下正文 12.8:1、辅助字按次级透明度仍达 AA。
-        /// 降到 0.75 需要辅助字提到 0.69、0.70 需要 0.78——层级会被压平，故 0.80 是下限。
+        /// 子代理顶带纸面（小字导航 4.5:1 托底；常规顶栏走 chatReadingVeilTop 轻纱）
+        /// 0.80 = 可读性临界：最坏壁纸下正文 12.8:1、辅助字按次级透明度仍达 AA。
         static let chatReadingSurface = Theme.dynamic(
             dark: ChatSurface.dark,
             light: ChatSurface.light,
@@ -292,6 +292,10 @@ enum Theme {
             light: ChatSurface.light,
             alpha: 0.52
         )
+        /// 轻纱 plateau 终点位置（0~1）：顶带在此位置前保持满 alpha 承载标题/图标，
+        /// 其后软着陆到透明与下方玻璃衔接——无硬接缝、无独立「帽子」横带。
+        /// 0.65 保证垂直居中的标题/图标（≈0.5 处）落在 plateau 内，对比度预算不变。
+        static let chatVeilPlateau: CGFloat = 0.65
         /// 顶栏（轻纱带）图标静止色：纱下合成底随壁纸浮动（暗壁纸近黑、亮端 ≈0.27），
         /// iconRest(0.60) 在亮端不足 3:1，rest 提到 0.85（hover 仍走 iconHover 0.95）
         static let chatVeilIconRest = Color.primary.opacity(0.85)
@@ -299,8 +303,8 @@ enum Theme {
         static var chatCodeBlockPaper: Color { Theme.CodePaper.color }
         /// 主区底板的通用别名（浮层/胶囊在其上再叠加时使用，语义等同阅读纸面）
         static let chatBase = aiAdaptive(dark: (0.115, 0.115, 0.125, 0.94), light: (0.99, 0.99, 0.99, 0.95))
-        /// 侧栏分层 shade：在阅读纸面上压半档暗调（不另铺不透明底，避免把玻璃带整块吃掉）——
-        /// 亮色 0.988→0.943 / 暗色 0.113→0.093，与主列的「深浅半档」层级关系保持原设计意图
+        /// 侧栏分层 shade：在侧栏标准材质上压半档暗调（不另铺不透明底，避免把玻璃带整块吃掉）——
+        /// 与主列回合卡的「深浅半档」层级关系保持原设计意图
         static let chatSidebarShade = aiAdaptive(dark: (0, 0, 0, 0.18), light: (0, 0, 0, 0.045))
         /// 助手消息气泡：比主区亮一档的低对比底板（亮色近纯白靠描边出层级）
         static let chatAssistantBubble = aiAdaptive(dark: (1, 1, 1, 0.065), light: (1, 1, 1, 0.90))
@@ -355,24 +359,13 @@ enum Theme {
         static let dockFocusRimOpacity: Double = 0.45
 
         // MARK: 光与纸质感重塑（2026-11）
-        // 在可读性纸面之上重建「光、色、节奏」：纸面获得受光垂直渐变、顶部极淡品牌色氛围光、
-        // agent 获得渐变徽标身份、输入坞浮起为视觉焦点。
-        // 对比度纪律：纸面渐变顶端与 chatReadingSurface 完全一致（零回归），底端只更暗更不透明
-        // （白字对比只升不降）；氛围光是集中在顶部区域的极淡装饰光层，不参与正文对比度预算。
+        // 在可读性阅读面之上重建「光、色、节奏」：回合卡顶部极淡受光 sheen、空态品牌色氛围光、
+        // agent 渐变徽标身份、输入坞浮起为视觉焦点。
+        // 质感对齐·材质融合后：阅读面 = 系统标准材质（背景映射不断），sheen 仅 5% 白受光，
+        // 不切断材质透明感；氛围光退守空态纯玻璃。对比度由材质 vibrancy 与代码块纸面分区承担。
 
-        /// 纸面渐变顶端（与 chatReadingSurface 同值：顶部对比度零回归）
-        static let chatPaperTop = Theme.dynamic(
-            dark: ChatSurface.dark,
-            light: ChatSurface.light,
-            alpha: 0.80
-        )
-        /// 纸面渐变底端（更暗 + 更不透明：光向下衰减形成可感知的「顶部受光」纵深，对比度只升不降）
-        /// 推一档：0.096→0.082 / 0.85→0.88，加大顶底落差让「光」可读
-        static let chatPaperBottom = Theme.dynamic(
-            dark: ContrastColor(0.082, 0.082, 0.092),
-            light: ContrastColor(0.962, 0.962, 0.968),
-            alpha: 0.88
-        )
+        /// 回合卡顶部受光 sheen（极淡白渐变顶端；装饰光层，不参与正文对比度预算）
+        static let chatCardSheenTop: Double = 0.05
         /// 游走光团主色 hue（accent；透明度/半径由动画实时随机调制，见 ChatAuroraView）
         static var auroraBlobPrimary: Color { Theme.palette.accent }
         /// 游走光团副色 hue（ambientSecondary；与主色光团交叠出色彩流动）

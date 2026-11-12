@@ -118,14 +118,18 @@ struct AIChatSidebarView: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        // 侧栏分层 shade：压在阅读纸面上的半档暗调（不另铺不透明底）——
-        // 纸面已保证对比度确定，这里的 shade 只负责「比主区深半档」的层级差，
-        // 因此仍是半透明，玻璃带不会被整块吃掉（颜色见 Theme.Colors.chatSidebarShade）。
-        // 顶栏轻纱带内不吃 shade：顶部玻璃带跨窗连续（toolbar 语义），shade 从顶栏下沿开始。
+        // 侧栏自有底（质感对齐·材质融合）：窗底回玻璃后侧栏自铺系统标准材质
+        // （与回合卡同家族，背景映射不断），再压半档 shade 保持「比主区深半档」
+        // 层级差（颜色见 Theme.Colors.chatSidebarShade）。
+        // 顶栏轻纱带跨窗连续（toolbar 语义），自有底与 shade 均从顶栏下沿开始。
         .background {
-            Rectangle()
-                .fill(Theme.Colors.chatSidebarShade)
-                .padding(.top, Theme.Layout.chatTopBarHeight)
+            ZStack {
+                Rectangle()
+                    .fill(.regularMaterial)
+                Rectangle()
+                    .fill(Theme.Colors.chatSidebarShade)
+            }
+            .padding(.top, Theme.Layout.chatTopBarHeight)
         }
         .onAppear {
             lastGroupedIDSequence = groupedIDSequence
