@@ -383,8 +383,10 @@ enum Theme {
         static let auroraBlobRadiusRatio: CGFloat = 0.30
         /// 光团纵向游走边界占窗口高度比例（光偏顶部游走，下方正文保持确定纸面）
         static let auroraVerticalBias: CGFloat = 0.62
-        /// 光团柔化模糊半径（ glow 边缘羽化）
-        static let auroraBlobBlur: CGFloat = 26
+        /// 光团软膝位置（三段径向渐变的中段 stop location；自羽化替代整窗 blur）
+        static let auroraBlobKneeLocation: CGFloat = 0.55
+        /// 光团软膝中段亮度保留比（膝处不透明度 = 峰值 × 此比例，边缘归零）
+        static let auroraBlobKneeOpacityRatio: Double = 0.35
         /// 功能面品牌微染（表格头等：3% accent wash，不破坏小字对比度）
         static var chatAccentWash: Color { Theme.palette.accent.opacity(0.03) }
         /// 输入坞安静态品牌 rim（替代纯灰描边：常驻一丝品牌色边缘，聚焦态再升档）
@@ -671,8 +673,7 @@ enum Theme {
         static let chatTickMagnifyIn: Double = 0.12   // 刻度轨放大渐入（光标进入通道）
         static let chatTickMagnifyOut: Double = 0.24  // 刻度轨收拢回弹（光标离开通道，easeOut）
         static let chatTickHoverFade: Double = 0.15   // tick 提亮 / 预览胶囊显隐
-        // 光与纸·动态极光：游走光团（TimelineView 驱动，有机 wander + 随机呼吸；尊重减弱动态）
-        static let auroraFrameInterval: Double = 1.0 / 30.0 // 30fps 上限（性能与流畅平衡）
-        static let auroraTimeScale: Double = 1.0            // 游走/呼吸整体速度倍率
+        // 光与纸·静态极光：氛围光团定格渲染（ChatAuroraView），无动效时钟——
+        // TimelineView 任何调度都逐帧空转整窗 display cycle（实测 22~32% CPU），故静态化
     }
 }

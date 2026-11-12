@@ -210,7 +210,7 @@ struct AIChatView: View {
             // 光与纸：纸面从「死平灰板」升级为「顶部受光的垂直渐变」+ 极淡品牌色氛围光。
             // 渐变顶端 = 原阅读纸面（对比度零回归），底端略暗略更不透明（白字对比只升不降）；
             // 氛围光为径向装饰光层，仅渲染顶部区域，不进入正文对比度预算。
-            GeometryReader { geo in
+            GeometryReader { _ in
                 ZStack(alignment: .top) {
                     Rectangle()
                         .fill(
@@ -220,8 +220,8 @@ struct AIChatView: View {
                                 endPoint: .bottom
                             )
                         )
-                    // 光与纸·动态极光：游走光团 + 随机呼吸（见 ChatAuroraView，尊重减弱动态）
-                    ChatAuroraView(windowWidth: geo.size.width, windowHeight: geo.size.height)
+                    // 光与纸·静态极光：氛围光团定格渲染（见 ChatAuroraView，零更新源零成本）
+                    ChatAuroraView()
                     // 顶栏轻纱带（保留）：原生 Liquid Glass 在此透出
                     Rectangle()
                         .fill(

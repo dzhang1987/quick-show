@@ -1,47 +1,36 @@
 import SwiftUI
 
-// MARK: - 动态极光·游走光团（光与纸 · 2026-11）
+// MARK: - 静态极光·氛围光团（光与纸 · 2026-11）
 //
-// 用户诉求：不是线性 wash，而是「一团光在背景游走，光晕本身随机变化」。
-// 实现：Canvas + TimelineView 驱动 3 团 distinct 光斑（主色×2 + 副色×1），
-// 每团的位置 / 半径 / 亮度各自用「不可通约频率正弦叠加」做有机 wander 与随机呼吸，
-// 组合后不显周期、不机械；光团交叠处色彩自然流动（mesh 感）。
+// 用户决策（2026-11 CPU 治理）：极光定格为静态氛围光晕，不做动效。
+// 背景（三轮 A/B 实测铁证）：TimelineView 任何调度（.animation / .periodic 皆然）都会让
+// 整窗 NSHostingView 的 display cycle 按屏幕刷新率空转——minimumInterval 只节流内容重绘，
+// 节流不了更新循环（可见态 22~32% CPU，逐帧全窗布局 + AttributeGraph 更新）。
+// 静态化后零更新源、零成本。若未来恢复动效，正确路径是 CAGradientLayer 层树 + 显式低频
+// Timer（与 SwiftUI 视图图解耦），勿回 TimelineView。
 //
-// 性能：30fps 上限；Canvas 每帧仅重绘 3 个径向渐变 + 一次模糊滤镜，GPU 友好。
-// 无障碍：尊重系统「减弱动态」——paused 时静止渲染。
-// 对比度纪律：光团峰值不透明度克制（auroraBlobPeakOpacity），纵向游走偏顶部
-// （auroraVerticalBias），下方正文小字仍落在确定纸面，不进入对比度预算。
-//
-// 色彩 / 半径 / 模糊 / 速度全部走 DesignTokens，本视图不硬编码。
+// 视觉：3 团 distinct 光斑（主色×2 + 副色×1），位置/半径/亮度取 wander 曲线 t=0 的确定帧，
+// 构图跨重启稳定；三段 stop 软膝径向渐变自羽化（不做整窗 blur）。
+// 对比度纪律：光团峰值不透明度克制（auroraBlobPeakOpacity），纵向偏顶部（auroraVerticalBias），
+// 下方正文小字仍落在确定纸面，不进入对比度预算。
+// 色彩 / 半径 / 软膝全部走 DesignTokens，本视图不硬编码。
 
 struct ChatAuroraView: View {
-    let windowWidth: CGFloat
-    let windowHeight: CGFloat
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
     var body: some View {
-        TimelineView(
-            .animation(minimumInterval: Theme.Motion.auroraFrameInterval, paused: reduceMotion)
-        ) { context in
-            let t = context.date.timeIntervalSinceReferenceDate * Theme.Motion.auroraTimeScale
-            Canvas { ctx, size in
-                drawBlobs(ctx: &ctx, size: size, t: t)
-            }
+        // t=0：wander 曲线的确定采样点，静态构图（无时间线、无时钟、无遮挡门控——静止即零成本）
+        Canvas { ctx, size in
+            drawBlobs(ctx: &ctx, size: size, t: 0)
         }
         .allowsHitTesting(false)
     }
 
-    /// 绘制三团游走光斑。
+    /// 绘制三团光斑。
     private func drawBlobs(ctx: inout GraphicsContext, size: CGSize, t: Double) {
-        // 柔化 glow 边缘（一次滤镜作用于后续所有光团）
-        ctx.addFilter(.blur(radius: Theme.Colors.auroraBlobBlur))
-
         let shortSide = min(size.width, size.height)
         let baseRadius = shortSide * Theme.Colors.auroraBlobRadiusRatio
         let verticalBound = size.height * Theme.Colors.auroraVerticalBias
 
-        // 三团：主色 / 副色 / 主色（异 seed → 独立 wander，交叠出色彩流动）
+        // 三团：主色 / 副色 / 主色（异 seed → 独立 wander 采样，交叠出色彩层次）
         let blobs: [(hue: Color, seed: Double, scale: CGFloat)] = [
             (Theme.Colors.auroraBlobPrimary, 1.7, 1.0),
             (Theme.Colors.auroraBlobSecondary, 4.3, 0.85),
@@ -49,18 +38,26 @@ struct ChatAuroraView: View {
         ]
 
         for blob in blobs {
-            // 位置：横向全幅游走，纵向偏顶部游走
+            // 位置：横向全幅游走采样，纵向偏顶部
             let x = size.width * 0.5 + wave(t, blob.seed, 0.11, 0.07, 0.043) * size.width * 0.45
             let y = verticalBound * 0.5 + wave(t, blob.seed + 9.1, 0.09, 0.06, 0.037) * verticalBound * 0.5
-            // 半径随机呼吸（0.7~1.3 倍基础半径）
+            // 半径呼吸采样（0.7~1.3 倍基础半径）
             let radius = baseRadius * blob.scale * (1.0 + 0.3 * wave(t, blob.seed + 3.3, 0.09, 0.05, 0.031))
-            // 亮度随机呼吸（0.5~1.0 倍峰值）
+            // 亮度呼吸采样（0.5~1.0 倍峰值）
             let opacity = Theme.Colors.auroraBlobPeakOpacity * (0.75 + 0.25 * wave(t, blob.seed + 5.7, 0.13, 0.08, 0.047))
 
             let center = CGPoint(x: x, y: y)
             let rect = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+            // 三段 stop 软膝渐变：中段保留部分亮度、边缘归零，自羽化替代整窗 blur
             let shading = GraphicsContext.Shading.radialGradient(
-                Gradient(colors: [blob.hue.opacity(opacity), blob.hue.opacity(0)]),
+                Gradient(stops: [
+                    .init(color: blob.hue.opacity(opacity), location: 0),
+                    .init(
+                        color: blob.hue.opacity(opacity * Theme.Colors.auroraBlobKneeOpacityRatio),
+                        location: Theme.Colors.auroraBlobKneeLocation
+                    ),
+                    .init(color: blob.hue.opacity(0), location: 1)
+                ]),
                 center: center,
                 startRadius: 0,
                 endRadius: radius

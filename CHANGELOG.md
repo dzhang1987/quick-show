@@ -57,6 +57,14 @@
   - **两段式 Esc 与回车秒级提交**：打字模式下按 Esc 仅退出编辑并恢复预选选项（抽屉绝不误关），打字完成后或盲操模式下敲 Enter 秒级触发整单提交；选项胶囊即使在选中态依然保留数字标号（如 `✓ 4 一直问下去`），盲操记忆不中断；
   - **视口自适应 80% 弹性限高与抽屉呼吸感**：题目区最大高度改为视口 80% 动态自适应，滚动区域底部追加充裕内边距；同步优化权限申请抽屉（`ToolConfirmationDrawer`）底部呼吸边距，彻底消灭贴边压迫感。
 
+### Performance
+
+- **AI 对话窗极光静态化：根治静置 CPU 持续占用（`ChatAuroraView.swift` / `DesignTokens.swift` / `AIChatView.swift`）**：
+  - **根因（三轮 A/B 实测）**：`TimelineView` 任何调度（`.animation` / `.periodic` 皆然）都让整窗 `NSHostingView` 的 display cycle 按屏幕刷新率空转——`minimumInterval` 只节流内容重绘、节流不了更新循环（逐帧全窗布局 + AttributeGraph 更新）；面板常驻复用不销毁，窗口隐藏后时间线仍全速运行，静置持续 ~31% CPU；
+  - **静态氛围光晕（用户决策）**：极光定格为 wander 曲线 t=0 的确定帧，Canvas 单帧渲染，零时间线 / 零时钟 / 零更新源；三团光斑软膝径向渐变自羽化保留（三段 stop 替代整窗 blur，省逐帧全画布高斯卷积），峰值透明度克制 / 纵向偏顶部的对比度纪律不变，构图跨重启稳定；
+  - **实测收益**：可见静置 ~31% → 0.0%，隐藏 0.0%；滚动等交互按需渲染、停手即归零；诊断结论与未来动效恢复路径（CAGradientLayer 层树 + 显式低频 Timer，勿回 TimelineView）留档代码注释；
+  - **令牌清理**：退役 `auroraFrameInterval` / `auroraTimeScale` / `auroraBlobBlur`，新增 `auroraBlobKneeLocation` / `auroraBlobKneeOpacityRatio` 软膝令牌；调用点移除从未使用的窗口尺寸死参数。
+
 ### Added
 
 - **Markdown 表格一键复制 Markdown、三格式下载与单元格划选（`MarkdownTable+Copy.swift` / `MarkdownTableView.swift` / `MarkdownCodeBlock.swift` / `MarkdownTableCopyTests.swift` / `QuickShowApp.swift`）**：
