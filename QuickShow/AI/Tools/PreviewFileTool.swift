@@ -16,8 +16,7 @@ final class PreviewFileTool: AITool {
     let name = "preview_file"
     let displayName = String(localized: "预览文件")
     let category: ToolCategory = .files
-    /// 纯读文件元数据 + 交给 QuickLook 渲染，无共享可变状态：并行安全。
-    let executionPolicy: ToolExecutionPolicy = .parallelSafe
+    /// 白名单只限制可访问边界；打开本地内容预览仍需用户逐次确认。
     let description = "在对话中预览一个本地文件（图片、PDF、文本、音视频等），由系统 QuickLook 原生渲染。文件大小上限 50MB。"
 
     var parametersSchema: [String: Any] {

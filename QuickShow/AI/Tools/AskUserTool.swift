@@ -10,6 +10,7 @@ final class AskUserTool: AITool {
     let name = "ask_user"
     let displayName = String(localized: "向用户提问")
     let category: ToolCategory = .interaction
+    let authorizationPolicy: ToolAuthorizationPolicy = .deterministicReadOnly
     /// 交互工具：挂起等待用户操作；默认 serial 执行策略不变。
     let isInteractive = true
 
@@ -67,8 +68,12 @@ final class AskUserTool: AITool {
     func execute(arguments: [String: Any]) async throws -> String {
         let specs = try Self.parseSpecs(arguments)
 
-        // 发布提问请求并挂起等待 UI（注意 MainActor 跳跃）；取消 → nil
-        let exchange = await ChatInteractionCenter.shared.requestUserAnswersReturningQuestions(specs)
+        // 发布提问请求并挂起等待 UI（注意 MainActor 跳跃）；保留真实来源会话，取消 → nil。
+        let sourceSessionID = ToolExecutionContext.currentSessionId
+        let exchange = await ChatInteractionCenter.shared.requestUserAnswersReturningQuestions(
+            specs,
+            sourceSessionID: sourceSessionID
+        )
         guard let response = exchange.response else {
             return AIToolExecutor.encodeJSON(["ok": false, "error": "用户取消了提问"])
         }

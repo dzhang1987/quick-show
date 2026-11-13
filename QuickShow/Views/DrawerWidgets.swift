@@ -255,6 +255,7 @@ struct DrawerActionButton: View {
             }
             .padding(.horizontal, Theme.Spacing.xxl)
             .padding(.vertical, Theme.Spacing.smd)
+            .frame(minHeight: Theme.Layout.drawerActionButtonMinHeight)
             .background(
                 RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
                     .fill(fillColor)

@@ -34,7 +34,7 @@ enum AgentFunctionalTests {
         testRequestEncodingForAgents()
         testTaskRegistryAndInputRouting()
         testAntigravityToolsAndThoughtSignature()
-        ToolRiskTests.run()
+        assertTest(ToolRiskTests.run(), "工具权限安全回归套件通过")
         ChatInputHistoryTests.run()
         await testChaosAndConcurrencyStress()
 
@@ -138,28 +138,28 @@ enum AgentFunctionalTests {
         assertTest(singleToolNames.contains("read_file"), "单 Agent 模式下直挂 read_file")
         assertTest(singleToolNames.contains("get_system_status"), "单 Agent 模式下直挂 get_system_status")
 
-        // 验证 nil 回退为全局工具
-        let globalTools = registry.tools(for: nil, mode: .multi)
-        assertTest(globalTools.count == registry.enabledTools().count, "传入 nil 时应安全回退为全局启用的工具全集")
+        // 多 Agent 模式缺失角色上下文时必须 fail-closed，不能回退全局工具。
+        let unboundTools = registry.tools(for: nil, mode: .multi)
+        assertTest(unboundTools.isEmpty, "多 Agent 缺失角色上下文时不暴露任何工具")
 
-        // 验证动态并行资格（参数粒度）：只读 shell 可并行，变更/破坏性 shell 保持串行
+        // 验证动态并行资格：个人文件读取与所有原始 Shell 均需单次确认并保持串行。
         assertTest(
-            registry.isParallelExecutionSafe(name: "read_file", argumentsJSON: "{\"path\":\"/tmp/a.txt\"}"),
-            "静态 parallelSafe 工具（read_file）动态判定恒为可并行"
+            !registry.isParallelExecutionSafe(name: "read_file", argumentsJSON: "{\"path\":\"/tmp/a.txt\"}"),
+            "文件白名单只限制边界，read_file 仍需逐次确认并串行"
         )
         assertTest(
-            registry.isParallelExecutionSafe(
+            !registry.isParallelExecutionSafe(
                 name: "run_shell",
                 argumentsJSON: "{\"description\":\"查看仓库状态\",\"command\":\"git status\"}"
             ),
-            "只读 shell 命令（git status）动态判定为可并行"
+            "原始 shell 即使看似只读也必须串行确认"
         )
         assertTest(
-            registry.isParallelExecutionSafe(
+            !registry.isParallelExecutionSafe(
                 name: "run_shell",
                 argumentsJSON: "{\"description\":\"查看磁盘占用\",\"command\":\"df -h | grep disk\"}"
             ),
-            "只读管道复合命令（df -h | grep）动态判定为可并行"
+            "原始 shell 管道同样必须串行确认"
         )
         assertTest(
             !registry.isParallelExecutionSafe(

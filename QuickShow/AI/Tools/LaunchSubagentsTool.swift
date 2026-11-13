@@ -8,6 +8,7 @@ final class LaunchSubagentsTool: AITool {
     let name = "launch_subagents"
     let displayName = "并发调度子智能体"
     let category: ToolCategory = .interaction
+    /// 会向其他模型发送任务，且可能携带附件，必须逐次确认。
     let description = """
     向一个或多个专业垂类子智能体派发专项任务。支持同时派发多个任务实现后台真并发执行，系统会自动等待所有子任务完成并汇总返回成果。单任务直接派发，多任务自动并行。
     """

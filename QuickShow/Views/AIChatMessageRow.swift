@@ -789,13 +789,10 @@ struct CompactionBoundaryCard: View {
                         .padding(.vertical, Theme.Spacing.lg)
                     featheredDivider
                 }
-                // 摘要属阅读内容：自铺标准材质托底（全量压缩态边界卡落在玻璃留白上时
-                // 小字有材质 vibrancy 托底；回合卡内则为嵌套材质内卡，层级自然）。
+                // 摘要属阅读内容：自铺官方玻璃托底（与回合卡同家族；全量压缩态边界卡
+                // 落在玻璃留白上时小字有玻璃自适应托底，回合卡内则为嵌套玻璃内卡）。
                 .padding(.horizontal, Theme.Spacing.xxl)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous)
-                        .fill(.regularMaterial)
-                )
+                .glassSurface(RoundedRectangle(cornerRadius: Theme.Radius.insetCard, style: .continuous))
                 .padding(.top, Theme.Spacing.lg)
                 .transition(.opacity)
             }

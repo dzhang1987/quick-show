@@ -19,6 +19,7 @@ extension Notification.Name {
 /// 数字键在打字模式下 100% 放行，绝不误触选项。
 struct UserQuestionDrawerContent: View {
     let request: UserQuestionRequest
+    @ObservedObject private var sessionStore = ChatSessionStore.shared
     /// 整抽屉高度预算（窗口内容高度的 80%），由 AIChatDrawerPanel 统一注入
     let heightBudget: CGFloat
 
@@ -64,6 +65,15 @@ struct UserQuestionDrawerContent: View {
         let hasSelection = selections.values.contains { !$0.isEmpty }
         let hasCustom = customTexts.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
         return hasSelection || hasCustom
+    }
+
+    /// 随当前选中会话动态计算，挂起期间切换会话后仍能正确标注后台来源。
+    private var displayedSourceLabel: String? {
+        ChatInteractionCenter.sourceLabel(
+            sourceSessionID: request.sourceSessionID,
+            currentSessionID: sessionStore.currentSessionId,
+            sessionTitle: request.sourceSessionID.flatMap { sessionStore.session(id: $0)?.title }
+        )
     }
 
     var body: some View {
@@ -148,9 +158,17 @@ struct UserQuestionDrawerContent: View {
             Image(systemName: "questionmark.circle")
                 .font(Theme.Typography.text(Theme.Typography.footnote, .semibold))
                 .foregroundColor(Theme.Colors.accent)
-            Text("需要你的回答")
-                .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
-                .foregroundColor(Theme.Colors.contentPrimary)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("需要你的回答")
+                    .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
+                    .foregroundColor(Theme.Colors.contentPrimary)
+                if let sourceLabel = displayedSourceLabel {
+                    Text(sourceLabel)
+                        .font(Theme.Typography.text(Theme.Typography.caption, .semibold))
+                        .foregroundColor(Theme.Colors.accent)
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 0)
             if request.questions.count > 1 {
                 Text("第 \(focusedQuestionIndex + 1)/\(request.questions.count) 题 · Tab/↑↓ 切换")

@@ -42,6 +42,12 @@ enum ToolCategory: String, CaseIterable {
 
 // MARK: - AI 工具协议
 
+/// 工具的确定性授权策略。默认必须确认；只有实现明确声明的结构化只读工具可以免确认。
+enum ToolAuthorizationPolicy: Sendable {
+    case deterministicReadOnly
+    case requiresConfirmation
+}
+
 /// AI 工具协议：内置工具统一实现，由 AIToolExecutor 调度执行。
 /// displayName / category 仅供 UI 展示，不参与模型调用：发给模型的 name/schema
 /// 与执行链路保持 snake_case 原样，`ai.tools.enabled` 落盘仍是蛇形名数组（存量零迁移）。
@@ -58,12 +64,14 @@ protocol AITool {
     var parametersSchema: [String: Any] { get }
     /// 包含统一动作意图（description）的完整 JSON Schema（供下发给大模型使用）
     var effectiveParametersSchema: [String: Any] { get }
-    /// 危险工具执行前需用户确认
+    /// 确定性授权策略；未声明时默认需要用户逐次确认。
+    var authorizationPolicy: ToolAuthorizationPolicy { get }
+    /// 设置页使用的风险标识，默认由 authorizationPolicy 派生。
     var isDangerous: Bool { get }
     /// 执行策略：parallelSafe = 可并行；serial = 必须串行（默认）。
     var executionPolicy: ToolExecutionPolicy { get }
-    /// 动态并行资格（参数粒度）：默认回落静态 executionPolicy；具备运行时风险判定能力的
-    /// 工具（如 run_shell 的只读命令）可覆写，按单次调用参数判定是否可并入并行批。
+    /// 动态并行资格（参数粒度）：默认同时受 authorizationPolicy 与 executionPolicy 约束；
+    /// 只有显式确定性只读工具可覆写并进一步按参数判定是否可并入并行批。
     /// 返回 true 的语义契约：该调用零副作用、与本轮其他并行调用无共享可变状态、
     /// 且全程不触达审批抽屉（自动免审）。
     func isParallelExecutionSafe(arguments: [String: Any]) -> Bool
@@ -75,13 +83,15 @@ protocol AITool {
 }
 
 extension AITool {
-    /// 默认非危险：仅明确标注的工具需要用户确认
-    var isDangerous: Bool { false }
+    /// 默认 fail-closed：新增工具若未显式声明，只能逐次确认，不能因遗漏标记而静默执行。
+    var authorizationPolicy: ToolAuthorizationPolicy { .requiresConfirmation }
+    var isDangerous: Bool { authorizationPolicy == .requiresConfirmation }
     /// 默认串行：未明确标注为并行安全的工具一律保守串行，避免并发副作用。
     var executionPolicy: ToolExecutionPolicy { .serial }
-    /// 默认动态并行资格回落静态策略：无参数粒度判定能力的工具不覆写。
+    /// 默认动态并行资格必须同时满足“显式确定性只读”和“可并行”。
+    /// 这样新增工具即使误标 parallelSafe，也不会绕过逐次确认进入并行批。
     func isParallelExecutionSafe(arguments: [String: Any]) -> Bool {
-        executionPolicy == .parallelSafe
+        authorizationPolicy == .deterministicReadOnly && executionPolicy == .parallelSafe
     }
     /// 默认非交互：仅需挂起等待用户操作的工具体（如 ask_user）标注 true，
     /// 执行器对其豁免超时（无限静候用户）。
@@ -236,13 +246,16 @@ final class AIToolRegistry {
             return global.filter { !multiAgentInternalTools.contains($0.name) }
         }
 
-        guard let agent = agent else { return global }
+        // 多 Agent 模式必须绑定明确角色并命中显式白名单；缺失角色或空白名单都 fail-closed。
+        guard let agent, agent.isEnabled else { return [] }
         let allowed = Set(agent.resolvedTools)
-        // 若角色的白名单为空，默认返回全局全部已启用工具
-        if allowed.isEmpty {
-            return global
-        }
+        guard !allowed.isEmpty else { return [] }
         return global.filter { allowed.contains($0.name) }
+    }
+
+    /// 执行入口复验：schema 下发与真实执行共用同一角色白名单判定，防止模型伪造未声明 tool call。
+    func isToolAllowed(_ toolName: String, for agent: AIAgent?, mode: AIChatExecutionMode) -> Bool {
+        tools(for: agent, mode: mode).contains { $0.name == toolName }
     }
 
     /// 按名查找（含未启用，用于执行校验时判断“存在但被禁用”）
@@ -255,20 +268,28 @@ final class AIToolRegistry {
         tool(named: toolName)?.executionPolicy ?? .serial
     }
 
-    /// 按单次调用动态判定并行资格（参数粒度）：静态 parallelSafe 直接放行；
-    /// 其余工具（如 run_shell）由工具体按参数风险覆写判定。参数不可解析或
-    /// 工具未知时保守返回 false（串行）。
+    /// 按单次调用判定并行资格：先要求工具显式声明 deterministicReadOnly，
+    /// 再检查静态或参数粒度并行策略。参数不可解析或工具未知时保守返回 false（串行）。
     /// 供工具分批执行逻辑使用：返回 true 的调用可与相邻同资格调用并发执行。
     func isParallelExecutionSafe(name toolName: String, argumentsJSON: String) -> Bool {
-        guard let tool = tool(named: toolName) else { return false }
-        if tool.executionPolicy == .parallelSafe { return true }
-        let trimmed = argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty,
-              let data = trimmed.data(using: .utf8),
-              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        guard let tool = tool(named: toolName),
+              tool.authorizationPolicy == .deterministicReadOnly else {
             return false
         }
-        return tool.isParallelExecutionSafe(arguments: object)
+        // 动态资格统一收口：静态 parallelSafe 工具也须过参数级复验
+        // （如 web_search 携带凭证时不得进入免审并行批）；
+        // 协议默认实现保持「确定性只读 + parallelSafe」原语义。
+        let trimmed = argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        let arguments: [String: Any]
+        if trimmed.isEmpty {
+            arguments = [:]
+        } else if let data = trimmed.data(using: .utf8),
+                  let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+            arguments = object
+        } else {
+            return false
+        }
+        return tool.isParallelExecutionSafe(arguments: arguments)
     }
 
     /// 全部工具按分类分组：固定组序（ToolCategory.allCases），组内保持注册顺序；

@@ -263,14 +263,16 @@ enum Theme {
         static var secondsGradientBottom: Color { Theme.palette.secondsGradientBottom }
         static var ambientSecondary: Color { Theme.palette.ambientSecondary }
 
-        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治 + 质感对齐·材质融合）
+        // MARK: AI 对话窗专用（2026-10 视觉层次专项 / 2026-11 可读性根治 + 质感对齐·玻璃同源）
         // 设计逻辑：小字不能直接压在整窗玻璃的实时壁纸采样上（对比度实测 1.0–11:1 漂移），
-        // 但自定义半透明漆面会切断背景映射、观感成「深色板贴玻璃」——两代方案的实测教训。
-        // 终态（HIG 内容层纪律）：窗底纯玻璃与主浮窗同源；阅读面下沉到文字模块并改用
-        // 系统标准材质（regularMaterial：环境映射不断 + 语义色 vibrancy 自动托底）——
-        // 助手回合卡 / 侧栏 / 压缩摘要同家族；代码块保留确定纸面（第三方语法色板基准）。
+        // 但自定义半透明漆面切断背景映射成「深色板贴玻璃」、regularMaterial 实测为平灰
+        // 磨砂板与玻璃不同家族——三代方案的实拍教训。
+        // 终态（DSH 会话框同构）：窗底纯玻璃与主浮窗同源，AI 回复裸排印在连续玻璃上，
+        // 无包裹卡；整窗一层半档轻纱（chatGlassTint）作小字可读性托底，背景映射保留。
+        // 会话内富卡片（图片附件/文件预览/工具/表格/代码块）保留各自卡壳；
+        // 代码块确定纸面不动（第三方语法色板基准）。
         // 顶栏带走同色相 52% 轻纱（plateau 段承载大字/图标，带底软着陆透明）——
-        // 小字 4.5:1 归材质，大字/图标 3:1 归轻纱，两个标准各自落在确定的结构上。
+        // 小字归轻纱托底，大字/图标 3:1 归顶纱，两个标准各自落在确定的结构上。
         /// 轻纱基色（单一来源）：顶栏轻纱与子代理顶带同色相，仅不透明度不同
         private enum ChatSurface {
             static let dark = ContrastColor(0.113, 0.113, 0.124)
@@ -282,6 +284,14 @@ enum Theme {
             dark: ChatSurface.dark,
             light: ChatSurface.light,
             alpha: 0.80
+        )
+        /// 整窗半档轻纱（裸排玻璃的可读性托底）：50% 背景映射保留玻璃「活」感，
+        /// 同时把最坏壁纸合成底抬到小字可读档；与顶栏轻纱同色相。
+        /// 可读性 ↔ 透明度取舍旋钮：调低更透、调高更稳（裸排无卡壳后的唯一全局托底）。
+        static let chatGlassTint = Theme.dynamic(
+            dark: ChatSurface.dark,
+            light: ChatSurface.light,
+            alpha: 0.50
         )
         /// 顶栏轻纱带（窗口顶部 chatTopBarHeight 高）：同色相半透明，原生 Liquid Glass
         /// 在此透出。仅承载大字（14pt semibold，WCAG large-text 3:1 档）与图标；
@@ -303,7 +313,7 @@ enum Theme {
         static var chatCodeBlockPaper: Color { Theme.CodePaper.color }
         /// 主区底板的通用别名（浮层/胶囊在其上再叠加时使用，语义等同阅读纸面）
         static let chatBase = aiAdaptive(dark: (0.115, 0.115, 0.125, 0.94), light: (0.99, 0.99, 0.99, 0.95))
-        /// 侧栏分层 shade：在侧栏标准材质上压半档暗调（不另铺不透明底，避免把玻璃带整块吃掉）——
+        /// 侧栏分层 shade：在侧栏玻璃面上压半档暗调（不另铺不透明底，避免把玻璃带整块吃掉）——
         /// 与主列回合卡的「深浅半档」层级关系保持原设计意图
         static let chatSidebarShade = aiAdaptive(dark: (0, 0, 0, 0.18), light: (0, 0, 0, 0.045))
         /// 助手消息气泡：比主区亮一档的低对比底板（亮色近纯白靠描边出层级）
@@ -359,13 +369,11 @@ enum Theme {
         static let dockFocusRimOpacity: Double = 0.45
 
         // MARK: 光与纸质感重塑（2026-11）
-        // 在可读性阅读面之上重建「光、色、节奏」：回合卡顶部极淡受光 sheen、空态品牌色氛围光、
-        // agent 渐变徽标身份、输入坞浮起为视觉焦点。
-        // 质感对齐·材质融合后：阅读面 = 系统标准材质（背景映射不断），sheen 仅 5% 白受光，
-        // 不切断材质透明感；氛围光退守空态纯玻璃。对比度由材质 vibrancy 与代码块纸面分区承担。
+        // 在可读性阅读面之上重建「光、色、节奏」：空态品牌色氛围光、agent 渐变徽标身份、
+        // 输入坞浮起为视觉焦点。
+        // 质感对齐·玻璃同源后：阅读面 = 输入坞同款官方玻璃（受光/specular 由系统提供，
+        // 无需手绘 sheen）；氛围光退守空态纯玻璃。对比度由玻璃自适应与代码块纸面分区承担。
 
-        /// 回合卡顶部受光 sheen（极淡白渐变顶端；装饰光层，不参与正文对比度预算）
-        static let chatCardSheenTop: Double = 0.05
         /// 游走光团主色 hue（accent；透明度/半径由动画实时随机调制，见 ChatAuroraView）
         static var auroraBlobPrimary: Color { Theme.palette.accent }
         /// 游走光团副色 hue（ambientSecondary；与主色光团交叠出色彩流动）
@@ -545,6 +553,7 @@ enum Theme {
         static let metricValueWidth: CGFloat = 36    // 百分比数值右对齐宽度
         static let miniButtonSize: CGFloat = 20      // 重置钮
         static let iconButtonSize: CGFloat = 24      // 图钉/箭头按钮
+        static let drawerActionButtonMinHeight: CGFloat = 36 // 权限/提问抽屉操作按钮最小点击高度
         // 番茄行紧凑档的统计小字宽上限：ViewThatFits 第二档（预设转紧凑字距）时，
         // 统计小字让出横向预算给可点的预设胶囊，超出部分尾省略号
         static let pomodoroStatsCompactWidth: CGFloat = 64

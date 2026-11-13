@@ -12,6 +12,11 @@ import AppKit
 /// 行内重命名中 → 取消重命名；图片放大中 → 关闭放大层。
 /// 非隔离类：本地监听恒在主线程事件派发路径触发，回调直接执行，避免 NSEvent 跨隔离域。
 final class AIChatKeyMonitor {
+    /// 键盘防误触策略：抽屉弹出后的布防窗口，吞掉发送键尾随回车。
+    private enum KeyboardPolicy {
+        static let enterArmDelay: TimeInterval = 0.5
+    }
+
     private var monitor: Any?
 
     var isQuickSwitcherOpen: () -> Bool = { false }
@@ -104,7 +109,7 @@ final class AIChatKeyMonitor {
             return event
         }
 
-        // 抽屉在场时的键盘盲操：⏎ 执行/提交，⌘⏎ 允许并记忆/强制提交
+        // 抽屉在场时的回车纪律：⏎ 单次 / ⌘⏎ 会话授权（带防误触窗口），高危必须明确点击；用户提问仍可用回车提交。
         if event.keyCode == KeyEquivalentCode.returnKey.rawValue || event.keyCode == KeyEquivalentCode.keypadEnter.rawValue {
             if let textView = event.window?.firstResponder as? NSTextView, textView.hasMarkedText() {
                 return event
@@ -113,23 +118,30 @@ final class AIChatKeyMonitor {
                 guard let req = ChatInteractionCenter.shared.request else { return false }
                 switch req {
                 case .toolConfirmation(let confirmation):
+                    // 防误触：抽屉刚弹出的布防窗口内吞掉任何回车（精确消除「发送键尾随回车」误批准）；
+                    // 高危操作永远必须明确点击。ESC 仍可安全取消。
+                    if Date().timeIntervalSince(confirmation.presentedAt) < KeyboardPolicy.enterArmDelay
+                        || confirmation.riskLevel.isDestructive {
+                        NSSound.beep()
+                        return true
+                    }
                     if cleanFlags == [.command] {
-                        if !confirmation.riskLevel.isDestructive {
-                            if let scope = confirmation.suggestedScope {
-                                ChatInteractionCenter.shared.resolveConfirmation(.allowSuggestedScope(scope))
-                            } else {
-                                ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
-                            }
+                        // ⌘⏎ = 允许并记忆会话授权（仅请求携带有界作用域时）
+                        if confirmation.suggestedScope != nil {
+                            ChatInteractionCenter.shared.resolveConfirmation(.grantSession)
                             return true
                         }
+                        NSSound.beep()
+                        return true
                     } else if cleanFlags.isEmpty {
-                        // 焦点在文本输入区且已有文字时（用户正在草稿或对话输入），普通回车放行给输入框发送，绝不可被抽屉盲操抢先吞掉
+                        // 焦点在非空输入区（用户正在草稿）时回车放行给输入框发送，绝不被盲操抢先吞掉
                         if let textView = event.window?.firstResponder as? NSTextView, !textView.string.isEmpty {
                             return false
                         }
-                        NotificationCenter.default.post(name: .quickShowExecuteToolConfirmation, object: nil)
+                        ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
                         return true
                     }
+                    return false
                 case .userQuestions:
                     // 提问抽屉在场时：回车统一作为提交主动作（与按钮「提交答案 ⏎」语义严格一致）
                     NotificationCenter.default.post(name: .quickShowSubmitUserQuestions, object: nil)

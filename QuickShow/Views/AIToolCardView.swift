@@ -127,6 +127,7 @@ struct ToolCallRow: View {
     /// 动作意图（Action Intent，提取自参数中的 description/title/intent 或智能语义）
     private var actionIntent: String? {
         ToolIntentExtractor.extractIntent(from: record.arguments, fallbackToolName: nil)
+            .map(SensitiveTextRedactor.redact)
     }
 
     private var header: some View {
@@ -184,7 +185,9 @@ struct ToolCallRow: View {
                     .buttonStyle(.plain)
                     .help("切换到该子智能体的独立会话")
                 }
-                if let undoToken = extractUndoToken(from: record), let uuid = UUID(uuidString: undoToken) {
+                if let undoToken = extractUndoToken(from: record),
+                   let uuid = UUID(uuidString: undoToken),
+                   UndoSnapshotManager.shared.canUndo(token: uuid) {
                     ToolUndoActionButton(token: uuid)
                 }
                 ToolStatusBadge(status: record.status)
@@ -273,7 +276,7 @@ struct ToolCallRow: View {
 
     /// 截断预览：JSON 美化后超长发省略号。
     private func previewText(_ raw: String, limit: Int) -> String {
-        let pretty = ToolJSONText.pretty(raw)
+        let pretty = SensitiveTextRedactor.redact(ToolJSONText.pretty(raw))
         guard pretty.count > limit else { return pretty }
         return String(pretty.prefix(limit)) + " …"
     }
@@ -292,7 +295,7 @@ private struct ToolCallResultBlock: View {
     @State private var hovered = false
 
     /// 美化后的完整结果文本。
-    private var prettyResult: String { ToolJSONText.pretty(result) }
+    private var prettyResult: String { SensitiveTextRedactor.redact(ToolJSONText.pretty(result)) }
     /// 是否超长（需折叠 + 展开入口）。
     private var isTruncatable: Bool { prettyResult.count > truncateLimit }
     /// 当前展示的文本（折叠态只取前 2000 字符）。
@@ -461,11 +464,13 @@ struct ToolStatusBadge: View {
 private struct ToolUndoActionButton: View {
     let token: UUID
     @State private var isUndone: Bool
+    @State private var undoError: String?
     @State private var isHovered = false
 
     init(token: UUID) {
         self.token = token
         _isUndone = State(initialValue: UndoSnapshotManager.shared.isUndone(token: token))
+        _undoError = State(initialValue: nil)
     }
 
     var body: some View {
@@ -474,19 +479,21 @@ private struct ToolUndoActionButton: View {
             do {
                 try UndoSnapshotManager.shared.undo(token: token)
                 withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    undoError = nil
                     isUndone = true
                 }
             } catch {
+                undoError = String(localized: "撤销失败，请检查文件状态后重试")
                 NSLog("[QuickShow] 撤销写入失败：\(error.localizedDescription)")
             }
         } label: {
             HStack(spacing: 3) {
-                Image(systemName: isUndone ? "checkmark" : "arrow.uturn.backward")
+                Image(systemName: isUndone ? "checkmark" : (undoError == nil ? "arrow.uturn.backward" : "exclamationmark.triangle"))
                     .font(Theme.Typography.text(9, .semibold))
-                Text(isUndone ? String(localized: "已还原") : String(localized: "撤销写入"))
+                Text(isUndone ? String(localized: "已还原") : (undoError == nil ? String(localized: "撤销写入") : String(localized: "撤销失败")))
                     .font(Theme.Typography.text(10, .medium))
             }
-            .foregroundColor(isUndone ? Theme.Colors.contentTertiary : Theme.Colors.accent)
+            .foregroundColor(isUndone ? Theme.Colors.contentTertiary : (undoError == nil ? Theme.Colors.accent : Theme.Colors.statusWarning))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(
@@ -497,6 +504,8 @@ private struct ToolUndoActionButton: View {
         .buttonStyle(.plain)
         .disabled(isUndone)
         .onHover { isHovered = $0 }
-        .help(isUndone ? String(localized: "文件已还原为修改前状态") : String(localized: "点击还原此文件修改"))
+        .help(isUndone
+              ? String(localized: "文件已还原为修改前状态")
+              : (undoError ?? String(localized: "点击还原此文件修改")))
     }
 }

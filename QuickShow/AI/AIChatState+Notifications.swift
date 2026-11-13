@@ -46,29 +46,11 @@ extension AIChatState {
         let manager = AIWindowManager.shared
         if manager.isPanelVisible && manager.isPanelKey { return }
 
-        let session = store.session(id: sessionId)
-        let lastAssistant = session?.messages.last(where: { $0.role == .assistant })?.content ?? ""
-        let summary = Self.plainSummary(lastAssistant)
-
-        let sessionTitle = session?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var body = sessionTitle.isEmpty ? String(localized: "回复已完成") : sessionTitle
-        if !summary.isEmpty {
-            body += "\n" + summary
-        }
-        AICompletionNotifier.shared.notify(title: "QuickShow AI", body: body, sessionId: sessionId)
-    }
-
-    /// 通知正文摘要：粗略去 Markdown 标记、折叠空白，截断 ~80 字符。
-    private static func plainSummary(_ text: String) -> String {
-        var result = text
-        for token in ["```", "`", "**", "*", "#", ">", "_", "~"] {
-            result = result.replacingOccurrences(of: token, with: "")
-        }
-        result = result.replacingOccurrences(of: "\n", with: " ")
-        result = result
-            .split(whereSeparator: { $0 == " " || $0 == "\t" })
-            .joined(separator: " ")
-        return String(result.prefix(80))
+        AICompletionNotifier.shared.notify(
+            title: "QuickShow AI",
+            body: String(localized: "回复已完成，请打开 QuickShow 查看。"),
+            sessionId: sessionId
+        )
     }
 
 }

@@ -99,25 +99,31 @@ struct ShellCommandUnit: Equatable, Sendable {
         }
         guard cursor < tokens.count else { return ("", []) }
 
-        // 2. env 透明转发：env [-flags] KEY=V... <真实命令>
-        if tokens[cursor].text == "env", !tokens[cursor].isQuoted {
-            cursor += 1
-            while cursor < tokens.count {
-                let token = tokens[cursor]
-                if token.isFlag || token.isEnvAssignment {
-                    cursor += 1
-                    continue
-                }
-                break
-            }
-        }
-
-        // 3. xargs 透明转发：xargs [-flags] <真实命令> ...
-        if cursor < tokens.count, tokens[cursor].text == "xargs", !tokens[cursor].isQuoted {
-            cursor += 1
-            while cursor < tokens.count, tokens[cursor].isFlag {
+        // 2. 逐层剥离 env / xargs 透明包装器（含绝对路径与占用下一参数的选项）。
+        // 支持 env → xargs → 真实命令等嵌套组合；无法识别的选项停止在保守结果，不推断免审。
+        while cursor < tokens.count, !tokens[cursor].isQuoted {
+            let wrapper = Self.normalize(tokens[cursor].text)
+            if wrapper == "env" {
                 cursor += 1
+                cursor = Self.skipWrapperOptions(
+                    in: tokens,
+                    from: cursor,
+                    optionsWithOperand: Self.envOptionsWithOperand,
+                    alsoSkippingAssignments: true
+                )
+                continue
             }
+            if wrapper == "xargs" {
+                cursor += 1
+                cursor = Self.skipWrapperOptions(
+                    in: tokens,
+                    from: cursor,
+                    optionsWithOperand: Self.xargsOptionsWithOperand,
+                    alsoSkippingAssignments: false
+                )
+                continue
+            }
+            break
         }
 
         guard cursor < tokens.count else { return ("", []) }
@@ -143,6 +149,41 @@ struct ShellCommandUnit: Equatable, Sendable {
     /// 是否含有未被引号包裹、且包含指定子串的词元
     func containsUnquotedToken(where match: (String) -> Bool) -> Bool {
         tokens.contains { !$0.isQuoted && match($0.text) }
+    }
+
+    private static let envOptionsWithOperand: Set<String> = [
+        "-u", "--unset", "-C", "--chdir", "-S", "--split-string"
+    ]
+
+    private static let xargsOptionsWithOperand: Set<String> = [
+        "-E", "--eof", "-I", "--replace", "-L", "--max-lines",
+        "-n", "--max-args", "-P", "--max-procs", "-s", "--max-chars",
+        "-a", "--arg-file", "-d", "--delimiter"
+    ]
+
+    /// 跳过透明包装器的开关、开关操作数，以及 env 的 KEY=VALUE 前缀。
+    /// `--option=value` 与 `-I{}` 已自带操作数，不额外吞掉下一词元。
+    private static func skipWrapperOptions(
+        in tokens: [ShellToken],
+        from start: Int,
+        optionsWithOperand: Set<String>,
+        alsoSkippingAssignments: Bool
+    ) -> Int {
+        var cursor = start
+        while cursor < tokens.count {
+            let token = tokens[cursor]
+            if alsoSkippingAssignments, token.isEnvAssignment {
+                cursor += 1
+                continue
+            }
+            guard token.isFlag else { break }
+            let consumesNext = optionsWithOperand.contains(token.text)
+            cursor += 1
+            if consumesNext, cursor < tokens.count {
+                cursor += 1
+            }
+        }
+        return cursor
     }
 
     private static func normalize(_ raw: String) -> String {

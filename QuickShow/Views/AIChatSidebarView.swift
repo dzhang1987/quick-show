@@ -118,14 +118,15 @@ struct AIChatSidebarView: View {
         }
         .frame(width: width)
         .frame(maxHeight: .infinity)
-        // 侧栏自有底（质感对齐·材质融合）：窗底回玻璃后侧栏自铺系统标准材质
-        // （与回合卡同家族，背景映射不断），再压半档 shade 保持「比主区深半档」
-        // 层级差（颜色见 Theme.Colors.chatSidebarShade）。
+        // 侧栏自有底（质感对齐·玻璃同源）：窗底回玻璃后侧栏自铺输入坞同款官方玻璃
+        // （GlassSurface，背景映射不断；strokeColor 清空避免贴窗缘描边），再压半档 shade
+        // 保持「比主区深半档」层级差（颜色见 Theme.Colors.chatSidebarShade）。
         // 顶栏轻纱带跨窗连续（toolbar 语义），自有底与 shade 均从顶栏下沿开始。
         .background {
             ZStack {
                 Rectangle()
-                    .fill(.regularMaterial)
+                    .fill(.clear)
+                    .modifier(GlassSurface(shape: Rectangle(), strokeColor: .clear))
                 Rectangle()
                     .fill(Theme.Colors.chatSidebarShade)
             }

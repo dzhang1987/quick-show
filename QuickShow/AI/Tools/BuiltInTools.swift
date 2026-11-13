@@ -115,6 +115,7 @@ final class SystemStatusTool: AITool {
     let name = "get_system_status"
     let displayName = String(localized: "系统状态")
     let category: ToolCategory = .system
+    let authorizationPolicy: ToolAuthorizationPolicy = .deterministicReadOnly
     let description = "获取宿主 Mac 的实时系统状态快照，包括 CPU 使用率、内存、电池、网络与磁盘。可用 section 参数只取其中一项。"
     var parametersSchema: [String: Any] {
         [
@@ -284,8 +285,7 @@ final class ReadFileTool: AITool {
     let name = "read_file"
     let displayName = String(localized: "读文件")
     let category: ToolCategory = .files
-    /// 纯读白名单文件，无共享可变状态：并行安全。
-    let executionPolicy: ToolExecutionPolicy = .parallelSafe
+    /// 白名单只限制可访问边界，不等于长期授权；每次读取仍由用户确认。
     let description = "读取白名单目录内的 UTF-8 文本文件，文件大小上限 200KB。"
     var parametersSchema: [String: Any] {
         [
@@ -352,7 +352,7 @@ final class WriteFileTool: AITool {
         let url = try resolveWhitelistedURL(path)
 
         // 写入前快照备份（事后安全网：支持一键撤销还原）
-        let undoToken = UndoSnapshotManager.shared.createSnapshot(path: url.path)
+        let undoToken = try UndoSnapshotManager.shared.createSnapshot(path: url.path)
 
         do {
             try content.write(to: url, atomically: true, encoding: .utf8)
@@ -461,6 +461,7 @@ final class QuickShowStateTool: AITool {
     let name = "get_quickshow_state"
     let displayName = String(localized: "QuickShow 状态")
     let category: ToolCategory = .system
+    let authorizationPolicy: ToolAuthorizationPolicy = .deterministicReadOnly
     /// 纯读宿主状态快照，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "获取 QuickShow 宿主应用的当前状态：面板/AI 窗是否可见、侧栏开关、当前生效模型、服务商、主题与外观等。"
@@ -561,9 +562,7 @@ final class RunShellTool: AITool {
 
     let isDangerous = true
 
-    /// 动态并行资格：仅结构化风险判定为纯只读（零副作用、自动免审、不触达审批抽屉）的
-    /// 命令可与相邻只读命令并发执行；变更/破坏性命令保持串行（同轮命令间顺序敏感，
-    /// 且审批抽屉单飞，并发确认会被防御性拒绝）。
+    /// 原始 Shell 无论表面语义如何都必须逐次确认，并保持串行；审批抽屉只允许单飞。
     func isParallelExecutionSafe(arguments: [String: Any]) -> Bool {
         guard let command = arguments["command"] as? String, !command.isEmpty else { return false }
         return ToolRiskClassifier.shared.evaluateRisk(tool: self, arguments: arguments).isAutoApproved

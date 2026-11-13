@@ -276,7 +276,14 @@ extension AIChatState {
 
                     // 有工具调用：先把记录挂到当前助手消息（状态逐个 pending）。
                     let records = completedCalls.map {
-                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending, thoughtSignature: $0.thoughtSignature)
+                        ToolCallRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            arguments: ToolRecordSanitizer.arguments(toolName: $0.name, json: $0.arguments),
+                            result: nil,
+                            status: .pending,
+                            thoughtSignature: $0.thoughtSignature
+                        )
                     }
                     self.attachToolCalls(assistantID, text: roundText, records: records, in: sessionId)
 
@@ -291,9 +298,9 @@ extension AIChatState {
                         toolCallId: nil
                     ))
 
-                    // 工具分段执行：连续的「可并行」调用聚成一批并发执行——静态 parallelSafe 工具
-                    // （读文件/系统状态等）与动态资格调用（如只读 shell 命令）均可入批；首个非并行
-                    // 调用处切分串行执行（保序 + 审批抽屉单飞）。
+                    // 工具分段执行：连续的「显式确定性只读 + parallelSafe」调用聚成一批并发执行；
+                    // 需要确认的工具（包括所有原始 Shell）在首个调用处切分并串行执行，
+                    // 保证顺序稳定且审批抽屉始终单飞。
                     // 无论并行与否，updateToolCallResult 与 wireMessages.append 严格按 completedCalls
                     // 原始顺序落定，保证工具结果顺序与协议消息顺序不变。
                     let registry = AIToolRegistry.shared
@@ -318,7 +325,7 @@ extension AIChatState {
                                 assistantID,
                                 callID: call.id,
                                 in: sessionId,
-                                result: result.resultJSON,
+                                result: ToolRecordSanitizer.result(toolName: result.name, json: result.resultJSON),
                                 status: result.status
                             )
                             wireMessages.append(ChatCompletionMessage.toolResult(callID: call.id, content: result.resultJSON))
@@ -326,7 +333,7 @@ extension AIChatState {
                             continue
                         }
 
-                        // 收集连续的一段可并行调用（静态 parallelSafe 工具 + 只读 shell 等动态资格）。
+                        // 收集连续的一段显式确定性只读且可并行的调用。
                         // 在首个非并行调用处切分：混合序列天然保序（前面的串行落定后才进入后续段）。
                         let batchStart = callIndex
                         var batch: [CompletedToolCall] = []
@@ -381,7 +388,7 @@ extension AIChatState {
                                 assistantID,
                                 callID: result.callID,
                                 in: sessionId,
-                                result: result.resultJSON,
+                                result: ToolRecordSanitizer.result(toolName: result.name, json: result.resultJSON),
                                 status: result.status
                             )
                             wireMessages.append(ChatCompletionMessage.toolResult(callID: result.callID, content: result.resultJSON))
@@ -673,6 +680,11 @@ extension AIChatState {
         ctx.pendingTokens = ""
         ctx.pendingReasoning = ""
         ctx.pendingToolArguments = [:]
+
+        // 工具参数可能携带凭证。流式分片只保留在内存上下文中，流尾以完整脱敏参数
+        // 覆盖工具记录；绝不把尚未闭合、无法可靠脱敏的分片写入会话持久化。
+        guard !contentChunk.isEmpty || !reasoningChunk.isEmpty else { return }
+
         store.updateMessage(id: id, in: sessionId) { message in
             // reasoning 累积不改消息 id、不触碰其他字段，保持 ChatMessage Equatable 合成语义，
             // UI 侧 .equatable() 仍可对其余未变行跳过重建。
@@ -684,18 +696,6 @@ extension AIChatState {
             }
             if !contentChunk.isEmpty {
                 message.content += contentChunk
-                if message.state == .sending {
-                    message.state = .streaming
-                }
-            }
-            // 工具参数增量：按 callID 追加到占位卡记录（记录不存在则忽略，等流尾整块挂载兜底）
-            if !toolArgumentsChunks.isEmpty {
-                var calls = message.toolCalls ?? []
-                for (callID, chunk) in toolArgumentsChunks {
-                    guard let index = calls.firstIndex(where: { $0.id == callID }) else { continue }
-                    calls[index].arguments += chunk
-                }
-                message.toolCalls = calls
                 if message.state == .sending {
                     message.state = .streaming
                 }

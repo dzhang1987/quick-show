@@ -9,6 +9,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static var shared: AppDelegate?
     
     static func main() {
+        // 权限安全定向回归：不启动 UI，不依赖 Release 下会被优化掉的 assert，
+        // 直接用进程退出码作为自动化门禁。
+        if CommandLine.arguments.contains("--test-tool-risk") {
+            Task { @MainActor in
+                exit(ToolRiskTests.run() ? 0 : 1)
+            }
+            CFRunLoopRun()
+            return
+        }
+
         if CommandLine.arguments.contains("--test-agent-suite") {
             Task { @MainActor in
                 await AgentFunctionalTests.run()

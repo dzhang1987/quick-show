@@ -6,6 +6,15 @@
 
 ### Changed
 
+- **AI 工具权限模型四档重构：授权粒度匹配影响有界性，会话授权可见可撤销（`ToolRisk.swift` / `ToolPermissionGrantStore.swift` / `AIToolExecutor.swift` / `ChatInteractionCenter.swift` / `ToolConfirmationDrawer.swift` / `AIChatKeyMonitor.swift` / `PermissionGrantBadge.swift` / `WebTools.swift` / `AIToolRegistry.swift`）**：
+  - **四档分级**：结构化只读与公开 web 检索/抓取静默免审；有界敏感能力（剪贴板 / 环境变量 / 位置 / 本地文件读取 / 跨 Agent 发送等）能力级会话授权，`write_file` 目录级会话授权（首次问一次、同目录后续静默 + 逐次撤销收据）；原始 Shell 逐次确认、无会话通配；破坏性硬门禁逐次 + 刻意点击；
+  - **会话授权中心**：授权与拒绝均记忆、按发起会话隔离、纯内存随退出清空；顶栏盾牌徽标逐条查看 / 撤销授权 / 恢复询问，授权不做黑箱；拒绝后同作用域静默拒绝，模型自行改道，不反复打扰；
+  - **键盘盲操回归**：`⏎` 允许这一次 / `⌘⏎` 本会话允许 / `ESC` 拒绝；抽屉弹出 0.5s 布防窗口吞掉发送键尾随回车防误批准，焦点在非空输入区回车放行发送；高危回车禁用；
+  - **Web 动态分级与并行批收口**：携带凭证的搜索、本机 / 内网 / 保留地址抓取升级逐次确认；并行资格统一参数级复验，凭证查询不入免审并行批；
+  - **隐私边界收紧**：完成通知不再携带回复摘要；工具记录脱敏、Shell 原文与输出不落会话记录；审批 / 卡片 / 通知全链路凭证遮蔽；
+  - **Gemini 直连失败不再降级本地 agy CLI**：移除本地 Agent 进程兜底路径，失败直接返回错误；
+  - 否决旧版 Shell 前缀 / 只读词法免审与过渡版「全部逐次 + 无记忆 + 回车禁用」；设计文档同步重写（`docs/AI_TOOL_PERMISSION_ARCHITECTURE.md`）；权限回归 149/149、多智能体套件 129/129 通过。
+
 - **AI 对话窗质感对齐主浮窗：窗底纯玻璃 + 阅读面材质化下沉回合卡（`AIChatView.swift` / `AIChatMessageList.swift` / `AIChatSidebarView.swift` / `AIChatMessageRow.swift` / `DesignTokens.swift`）**：
   - **窗底纯玻璃**：内容层回主浮窗同源 `liquidPanelBackground`（26+ 透明透真玻璃 / <26 ultraThinMaterial），移除整窗 0.80–0.88 不透明阅读纸面；留白 / 空态透出玻璃，极光光团退守空态纯玻璃延续品牌时刻；
   - **阅读面下沉助手回合卡并改系统标准材质**：回合组（含回合锚点）铺 `regularMaterial` 卡底 + 5% 白顶部受光 sheen + 0.5pt 描边，侧栏自有材质底 + 半档 shade，压缩摘要自铺材质托底——背景映射不断、语义色 vibrancy 自动托底，兼得「小字不随壁纸漂移」与「不切成深色板贴玻璃」；代码块保留确定纸面（第三方语法色板对比度基准，审计 52/52 达标）；

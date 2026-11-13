@@ -6,8 +6,10 @@ import Foundation
 struct FileSnapshot: Sendable {
     let id: UUID
     let path: String
-    /// 覆盖写入前的原始内容；nil 代表此前该文件不存在（撤销时执行删除新建的文件）
-    let previousContent: String?
+    /// 覆盖前文件是否存在；与 previousData 分离，避免把“读取失败/非 UTF-8”误判成新文件。
+    let fileExisted: Bool
+    /// 原始字节；已有文件必须成功捕获，否则禁止继续覆盖。
+    let previousData: Data?
     let timestamp: Date
     var isUndone: Bool
 }
@@ -23,22 +25,27 @@ final class UndoSnapshotManager: @unchecked Sendable {
 
     private init() {}
 
-    /// 在写文件之前捕获当前文件状态并生成撤销 Token
-    func createSnapshot(path: String) -> UUID {
+    /// 在写文件之前捕获当前文件状态并生成撤销 Token。
+    /// 已有文件若无法完整读取则抛错，调用方不得继续覆盖。
+    func createSnapshot(path: String) throws -> UUID {
         let token = UUID()
-        let previousContent: String?
-        if FileManager.default.fileExists(atPath: path),
-           let data = FileManager.default.contents(atPath: path),
-           let text = String(data: data, encoding: .utf8) {
-            previousContent = text
+        let fileManager = FileManager.default
+        let fileExisted = fileManager.fileExists(atPath: path)
+        let previousData: Data?
+        if fileExisted {
+            guard let data = fileManager.contents(atPath: path) else {
+                throw ToolExecutionError(String(localized: "无法创建安全快照，已取消文件修改"))
+            }
+            previousData = data
         } else {
-            previousContent = nil
+            previousData = nil
         }
 
         let snapshot = FileSnapshot(
             id: token,
             path: path,
-            previousContent: previousContent,
+            fileExisted: fileExisted,
+            previousData: previousData,
             timestamp: Date(),
             isUndone: false
         )
@@ -54,6 +61,7 @@ final class UndoSnapshotManager: @unchecked Sendable {
     func isUndone(token: UUID) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        cleanupExpiredSnapshotsLocked()
         return snapshots[token]?.isUndone ?? false
     }
 
@@ -61,6 +69,7 @@ final class UndoSnapshotManager: @unchecked Sendable {
     func canUndo(token: UUID) -> Bool {
         lock.lock()
         defer { lock.unlock() }
+        cleanupExpiredSnapshotsLocked()
         guard let s = snapshots[token] else { return false }
         return !s.isUndone
     }
@@ -68,6 +77,7 @@ final class UndoSnapshotManager: @unchecked Sendable {
     /// 执行撤销：原子还原旧内容或删除新建的文件
     func undo(token: UUID) throws {
         lock.lock()
+        cleanupExpiredSnapshotsLocked()
         guard var snapshot = snapshots[token] else {
             lock.unlock()
             throw ToolExecutionError(String(localized: "未找到撤销快照或已过期"))
@@ -79,14 +89,14 @@ final class UndoSnapshotManager: @unchecked Sendable {
         lock.unlock()
 
         let fileURL = URL(fileURLWithPath: snapshot.path)
-        if let previous = snapshot.previousContent {
-            // 还原旧内容
-            try previous.write(to: fileURL, atomically: true, encoding: .utf8)
-        } else {
-            // 此前不存在，撤销时将其删除
-            if FileManager.default.fileExists(atPath: snapshot.path) {
-                try FileManager.default.removeItem(at: fileURL)
+        if snapshot.fileExisted {
+            guard let previousData = snapshot.previousData else {
+                throw ToolExecutionError(String(localized: "撤销快照不完整，未修改当前文件"))
             }
+            try previousData.write(to: fileURL, options: .atomic)
+        } else if FileManager.default.fileExists(atPath: snapshot.path) {
+            // 文件原先不存在，撤销时删除本次新建文件。
+            try FileManager.default.removeItem(at: fileURL)
         }
 
         lock.lock()

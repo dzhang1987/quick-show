@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 // MARK: - 工具风险模型与权限策略单元测试
 
@@ -17,93 +18,56 @@ enum ToolRiskTests {
         }
     }
 
-    static func run() {
+    @discardableResult
+    static func run() -> Bool {
         print("==================================================")
         print("🛡️ 开始执行工具风险评估与权限策略规则测试")
         print("==================================================")
         passedCount = 0
         failedCount = 0
 
-        testShellReadOnlyEvaluation()
+        testShellAlwaysRequiresApproval()
         testShellDestructiveEvaluation()
         testShellQuotedSafety()
-        testShellMutationScopeExtraction()
         testFileRiskEvaluation()
-        testPolicyEngineRuleMatching()
-        testPolicyEngineDevCommands()
+        testWebAccessTiering()
+        testSensitiveCapabilitiesSessionGrantable()
+        testFailClosedAuthorizationPolicy()
+        testSessionGrantStore()
         testUndoSnapshotLifecycle()
-        testShadowGuardDecisionParsing()
+        testSensitiveTextRedaction()
+        testOrdinaryUserConfirmationPresentation()
+        testBackgroundSourceAttribution()
 
         print("==================================================")
         print("📊 权限测试完成汇总：通过 \(passedCount) 项，失败 \(failedCount) 项")
         print("==================================================")
-        assert(failedCount == 0, "存在未通过的权限策略测试用例")
+        return failedCount == 0
     }
 
-    // MARK: - 1. 只读 Shell 启发式评估测试
+    // MARK: - 1. 原始 Shell 必须逐次确认
 
-    private static func testShellReadOnlyEvaluation() {
+    private static func testShellAlwaysRequiresApproval() {
         let evaluator = ShellSemanticRiskEvaluator()
         let shellTool = RunShellTool()
-
-        let safeCommands = [
+        let representativeCommands = [
             "pwd",
             "ls -la",
             "cat README.md",
+            "cat ~/.ssh/id_rsa",
             "git status",
-            "git diff HEAD~1",
-            "git log -n 5 --oneline",
-            "git blame -L 1,10 main.swift",
             "pnpm list",
-            "cargo check",
-            "which swift",
-            "sw_vers",
-            "zsh --version",
-            "bash --version",
-            "arch",
-            "hostname",
-            "id",
-            "sysctl -n machdep.cpu.brand_string 2>/dev/null",
-            "uname -m >/dev/null 2>&1",
-            "vm_stat | head -6",
-            "pmset -g batt",
-            "defaults read -g AppleInterfaceStyle",
-            "jq '.name' package.json",
-            "awk '{print $1}' access.log",
-            "sed -n '1,5p' notes.txt",
-            "FOO=1 ls",
-            "/usr/bin/git status",
-            "cd web && git status",
-            "env",
-            "env FOO=1 node --version",
-            "find . | xargs grep TODO",
-            "grep 'sudo' /var/log/system.log",
-            "echo '=== who/where ==='; whoami; pwd; echo; echo '=== macOS ==='; sw_vers; echo; echo '=== arch / chip ==='; uname -m; sysctl -n machdep.cpu.brand_string 2>/dev/null; echo; echo '=== shell ==='; echo $SHELL; zsh --version",
-            "echo '=== uptime ==='; uptime; echo; echo '=== mem (GB) ==='; echo \"total: $(( $(sysctl -n hw.memsize) / 1073741824 )) GB\"; vm_stat | head -6; echo; echo '=== battery ==='; pmset -g batt; echo; echo '=== cpu top5 ==='; ps -Ao %cpu,comm -r | head -6; echo; echo '=== cpu brand/cores ==='; sysctl -n machdep.cpu.brand_string; sysctl -n hw.ncpu hw.perflevel0.physicalcpu hw.perflevel1.physicalcpu 2>/dev/null"
-        ]
-
-        for cmd in safeCommands {
-            let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
-            assertTest(risk == .readOnly, "只读命令判定免审直通：\(cmd)")
-        }
-
-        // 反向校验：包含真实文件写入或危险内核配置修改的不可免审
-        let nonReadOnlyCommands = [
+            "python3 --version",
+            "curl https://example.com",
             "echo 'test' > output.txt",
-            "ls -la >> list.log",
-            "sysctl -w net.inet.ip.forwarding=1",
-            "sysctl debug.test=1",
-            "pmset sleep 0",
-            "defaults write -g Key test",
-            "find . -delete",
-            "sed -i 's/a/b/' file.txt",
-            "git branch -d feature",
-            "git remote add upstream https://example.com/repo.git",
-            "curl https://example.com"
+            "cd web && git status",
+            "",
+            ";;;"
         ]
-        for cmd in nonReadOnlyCommands {
-            let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
-            assertTest(risk != .readOnly, "非只读或修改型命令被成功拦截：\(cmd)")
+
+        for command in representativeCommands {
+            let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": command])
+            assertTest(!risk.isAutoApproved, "原始 Shell 不得免审：\(command)")
         }
     }
 
@@ -116,6 +80,14 @@ enum ToolRiskTests {
         let dangerousCommands = [
             "rm -rf /tmp/foo",
             "rm -r .git",
+            "rm ~/.ssh/id_rsa",
+            "bash -c 'rm -rf ~/.ssh'",
+            "/usr/bin/env bash -c 'rm -rf /tmp/x'",
+            "/usr/bin/env -u HOME bash -c 'rm -rf /tmp/x'",
+            "/usr/bin/xargs rm -rf /tmp/x",
+            "/usr/bin/xargs -I {} bash -c 'rm -rf /tmp/x'",
+            "python3 -c 'import os; os.remove(\"important\")'",
+            "find . -name '*.tmp' -delete",
             "sudo rm -rf /",
             "FOO=1 sudo ls",
             "git reset --hard HEAD~1",
@@ -154,7 +126,7 @@ enum ToolRiskTests {
         let evaluator = ShellSemanticRiskEvaluator()
         let shellTool = RunShellTool()
 
-        // 引号内的危险词不应触发破坏性，也不影响只读判定
+        // 引号内的危险词不应误判为破坏性，但原始 Shell 仍必须逐次确认
         let quotedReadOnlyCommands = [
             "echo 'sudo && reboot 的说明文档'",
             "echo \"rm -rf 只是文档示例\"",
@@ -163,7 +135,7 @@ enum ToolRiskTests {
         ]
         for cmd in quotedReadOnlyCommands {
             let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
-            assertTest(risk == .readOnly, "引号包裹的危险词不改变只读判定：\(cmd)")
+            assertTest(!risk.isDestructive && !risk.isAutoApproved, "引号内容不误判且仍需确认：\(cmd)")
         }
 
         // 引号内的危险词在「变更命令」中同样不误杀（走受控变更而非硬门禁）
@@ -174,59 +146,6 @@ enum ToolRiskTests {
         for cmd in quotedMutationCommands {
             let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
             assertTest(!risk.isDestructive && !risk.isAutoApproved, "引号内危险词不误杀变更命令：\(cmd)")
-        }
-    }
-
-    // MARK: - 4. 受控变更命令与作用域建议测试
-
-    private static func testShellMutationScopeExtraction() {
-        let evaluator = ShellSemanticRiskEvaluator()
-        let shellTool = RunShellTool()
-
-        // 常规前缀建议（非策展目录命令）
-        let prefixCases: [(String, String)] = [
-            ("git commit -m 'feat: update'", "git"),
-            ("npm install lodash", "npm"),
-            ("python script.py", "python"),
-            ("docker build -t app .", "docker")
-        ]
-        for (cmd, expectedPrefix) in prefixCases {
-            let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
-            if case .scopedMutation(let scope) = risk,
-               case .shellPrefix(let prefix) = scope {
-                assertTest(prefix == expectedPrefix, "正确提取前缀 [\(expectedPrefix)]：\(cmd)")
-            } else {
-                assertTest(false, "未能提取受控变更前缀：\(cmd)")
-            }
-        }
-
-        // 复合命令：取首个非只读单元的执行词（cd 等只读单元不再污染前缀建议）
-        let compoundCase = "cd web && pnpm run build"
-        let compoundRisk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": compoundCase])
-        if case .scopedMutation(let scope) = compoundRisk {
-            assertTest(scope == .devCommands || {
-                if case .shellPrefix(let prefix) = scope { return prefix == "pnpm" }
-                return false
-            }(), "复合命令前缀取自首个变更单元：\(compoundCase)")
-        } else {
-            assertTest(false, "复合命令应判为受控变更：\(compoundCase)")
-        }
-
-        // 策展开发命令：建议 devCommands 一键信任作用域
-        let devCommandCases = [
-            "swift build -c release",
-            "pnpm run test",
-            "cargo build",
-            "xcodebuild test -scheme QuickShow",
-            "go test ./..."
-        ]
-        for cmd in devCommandCases {
-            let risk = evaluator.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
-            if case .scopedMutation(let scope) = risk {
-                assertTest(scope == .devCommands, "策展开发命令建议 devCommands 作用域：\(cmd)")
-            } else {
-                assertTest(false, "策展开发命令应为受控变更：\(cmd)")
-            }
         }
     }
 
@@ -249,85 +168,144 @@ enum ToolRiskTests {
             assertTest(risk.isDestructive, "文件高危目标硬拦截：\(path)")
         }
 
-        // 正常工程目录受控写入
+        // 正常工程目录写入归入目录级会话授权档（首次写入问一次，同目录后续静默 + 撤销收据）
         let normalPath = "/Users/admin/Projects/quick-time/Package.swift"
         let normalRisk = evaluator.evaluateRisk(tool: writeTool, arguments: ["path": normalPath, "content": "bar"])
-        if case .scopedMutation(let scope) = normalRisk,
-           case .directoryPath(let dir) = scope {
-            assertTest(dir == "/Users/admin/Projects/quick-time", "正确推导目录作用域：\(normalPath)")
+        assertTest(
+            normalRisk.grantScope == .directory(path: "/Users/admin/Projects/quick-time"),
+            "正常文件写入归入目录级会话授权"
+        )
+        assertTest(!normalRisk.isAutoApproved && !normalRisk.isDestructive, "目录授权档非静默也非硬门禁")
+    }
+
+    // MARK: - 5.5 Web 访问分级：公开只读静默，凭证/内网升级逐次
+
+    private static func testWebAccessTiering() {
+        let classifier = ToolRiskClassifier.shared
+        guard let searchTool = AIToolRegistry.shared.tool(named: "web_search"),
+              let fetchTool = AIToolRegistry.shared.tool(named: "fetch_url") else {
+            assertTest(false, "Web 工具已注册")
+            return
+        }
+
+        let publicSearch = classifier.evaluateRisk(tool: searchTool, arguments: ["query": "OpenAI 官方计费规则"])
+        assertTest(publicSearch.isAutoApproved, "公开信息检索静默免审")
+
+        let secretSearch = classifier.evaluateRisk(
+            tool: searchTool,
+            arguments: ["query": "API_KEY=test-secret-123456789 查询"]
+        )
+        assertTest(!secretSearch.isAutoApproved, "携带凭证的搜索升级逐次确认")
+
+        let publicFetch = classifier.evaluateRisk(tool: fetchTool, arguments: ["url": "https://example.com/docs"])
+        assertTest(publicFetch.isAutoApproved, "公共网页抓取静默免审")
+
+        let intranetTargets = [
+            "http://localhost:8080/admin",
+            "http://127.0.0.1/secret",
+            "http://192.168.1.1/router",
+            "http://10.0.0.5/internal",
+            "http://169.254.169.254/latest/meta-data",
+            "file:///etc/hosts"
+        ]
+        for target in intranetTargets {
+            let risk = classifier.evaluateRisk(tool: fetchTool, arguments: ["url": target])
+            assertTest(!risk.isAutoApproved, "本机/内网/保留地址升级逐次确认：\(target)")
+        }
+    }
+
+    // MARK: - 6. 敏感能力会话授权档
+
+    private static func testSensitiveCapabilitiesSessionGrantable() {
+        let toolNames = [
+            "read_clipboard", "write_clipboard", "list_running_apps", "open_app",
+            "read_file", "preview_file",
+            "get_env", "set_env", "list_env",
+            "geocode", "search_places", "plan_route", "my_location",
+            "launch_subagents", "send_message"
+        ]
+        for name in toolNames {
+            guard let tool = AIToolRegistry.shared.tool(named: name) else {
+                assertTest(false, "敏感工具已注册：\(name)")
+                continue
+            }
+            let risk = ToolRiskClassifier.shared.evaluateRisk(tool: tool, arguments: [:])
+            assertTest(!risk.isAutoApproved, "敏感能力不得静默执行：\(name)")
+            assertTest(risk.grantScope == .capability(toolName: name), "敏感能力归入能力级会话授权：\(name)")
+        }
+    }
+
+    // MARK: - 6.5 会话授权记忆：授权/拒绝/撤销/会话隔离
+
+    private static func testSessionGrantStore() {
+        let store = ToolPermissionGrantStore.shared
+        let sessionA = UUID()
+        let sessionB = UUID()
+        let scope = PermissionGrantScope.capability(toolName: "read_clipboard")
+
+        // 初始 undecided
+        assertTest(store.decision(for: scope, sessionID: sessionA) == .undecided, "初始无记忆为 undecided")
+        assertTest(store.decision(for: scope, sessionID: nil) == .undecided, "无会话上下文不记忆")
+
+        // 授权记忆 + 会话隔离
+        store.recordGrant(scope: scope, sessionID: sessionA)
+        assertTest(store.decision(for: scope, sessionID: sessionA) == .granted, "授权后同会话静默放行")
+        assertTest(store.decision(for: scope, sessionID: sessionB) == .undecided, "授权不串会话")
+
+        // 拒绝覆盖授权（互斥）
+        store.recordDenial(scope: scope, sessionID: sessionA)
+        assertTest(store.decision(for: scope, sessionID: sessionA) == .denied, "拒绝后同会话静默拒绝")
+
+        // 撤销拒绝 → 恢复询问
+        store.revokeDenial(scope: scope, sessionID: sessionA)
+        assertTest(store.decision(for: scope, sessionID: sessionA) == .undecided, "撤销拒绝后恢复询问")
+
+        // 目录作用域与能力作用域互不覆盖
+        let dirScope = PermissionGrantScope.directory(path: "/tmp/quickshow-grant-test")
+        store.recordGrant(scope: dirScope, sessionID: sessionA)
+        assertTest(store.decision(for: dirScope, sessionID: sessionA) == .granted, "目录授权独立记忆")
+        assertTest(store.decision(for: scope, sessionID: sessionA) == .undecided, "能力作用域不受目录授权影响")
+    }
+
+    // MARK: - 7. 默认拒绝与显式免审白名单
+
+    private static func testFailClosedAuthorizationPolicy() {
+        let undeclared = UndeclaredAuthorizationTool()
+        assertTest(
+            undeclared.authorizationPolicy == .requiresConfirmation,
+            "新工具未声明授权策略时默认需要确认"
+        )
+        assertTest(
+            ToolRiskClassifier.shared.evaluateRisk(tool: undeclared, arguments: [:]) == .requiresConfirmation,
+            "未知工具风险评估默认拒绝静默放行"
+        )
+        assertTest(
+            !undeclared.isParallelExecutionSafe(arguments: [:]),
+            "误标可并行的未授权工具不能进入免审并行批"
+        )
+
+        let expectedAutoApproved: Set<String> = [
+            "get_system_status", "get_quickshow_state", "show_map", "ask_user", "web_search"
+        ]
+        let actualAutoApproved = Set(AIToolRegistry.shared.allTools().compactMap { tool in
+            ToolRiskClassifier.shared.evaluateRisk(tool: tool, arguments: [:]).isAutoApproved
+                ? tool.name
+                : nil
+        })
+        assertTest(actualAutoApproved == expectedAutoApproved, "只有显式结构化安全工具可以免审")
+
+        let registry = AIToolRegistry.shared
+        assertTest(registry.tools(for: nil, mode: .multi).isEmpty, "多 Agent 缺失角色上下文时工具白名单默认拒绝")
+        let emptyRole = AIAgent(name: "空白角色", enabledTools: [])
+        assertTest(registry.tools(for: emptyRole, mode: .multi).isEmpty, "多 Agent 空白名单不会继承全局工具")
+        if let orchestrator = AIAgent.defaultAgents().first(where: { $0.id == "orchestrator" }) {
+            assertTest(
+                !registry.isToolAllowed("get_system_status", for: orchestrator, mode: .multi),
+                "多 Agent 执行入口拒绝角色白名单外的免审工具"
+            )
         } else {
-            assertTest(false, "未能正确推导工程目录作用域")
+            assertTest(false, "默认 Orchestrator 角色存在")
         }
-    }
-
-    // MARK: - 6. 规则引擎放行与记忆测试（逐命令单元匹配）
-
-    private static func testPolicyEngineRuleMatching() {
-        let engine = ToolPermissionPolicyEngine.shared
-        engine.resetRules()
-
-        let shellTool = RunShellTool()
-        let testCmd = "pnpm run test"
-        let risk = ToolRiskClassifier.shared.evaluateRisk(tool: shellTool, arguments: ["command": testCmd])
-
-        // 1. 未授权前：拦截
-        assertTest(!engine.isAllowed(tool: shellTool, arguments: ["command": testCmd], risk: risk), "初始状态未授权拦截")
-
-        // 2. 注入 pnpm 前缀规则
-        engine.recordRule(.shellPrefix(prefix: "pnpm"))
-
-        // 3. 授权后：同前缀命令全部放行
-        assertTest(engine.isAllowed(tool: shellTool, arguments: ["command": testCmd], risk: risk), "命中前缀规则放行：\(testCmd)")
-        assertTest(engine.isAllowed(tool: shellTool, arguments: ["command": "pnpm run build"], risk: risk), "同前缀其他命令自动放行：pnpm run build")
-
-        // 3.1 复合命令逐单元匹配：只读单元直通 + 变更单元命中前缀
-        let compoundCmd = "cd web && pnpm build"
-        let compoundRisk = ToolRiskClassifier.shared.evaluateRisk(tool: shellTool, arguments: ["command": compoundCmd])
-        assertTest(engine.isAllowed(tool: shellTool, arguments: ["command": compoundCmd], risk: compoundRisk), "复合命令命中前缀规则放行：\(compoundCmd)")
-
-        // 3.2 复合命令中未覆盖的执行词仍拦截
-        let uncoveredCmd = "cd web && npm test"
-        let uncoveredRisk = ToolRiskClassifier.shared.evaluateRisk(tool: shellTool, arguments: ["command": uncoveredCmd])
-        assertTest(!engine.isAllowed(tool: shellTool, arguments: ["command": uncoveredCmd], risk: uncoveredRisk), "未覆盖执行词的复合命令仍拦截：\(uncoveredCmd)")
-
-        // 4. 高危命令即便有前缀也绝不放行（硬门禁）
-        let hardCmd = "pnpm exec rm -rf /"
-        let hardRisk = ToolRiskClassifier.shared.evaluateRisk(tool: shellTool, arguments: ["command": hardCmd])
-        assertTest(!engine.isAllowed(tool: shellTool, arguments: ["command": hardCmd], risk: hardRisk), "破坏性命令即便命中前缀也绝不放行")
-
-        // 5. 重置规则
-        engine.resetRules()
-        assertTest(!engine.isAllowed(tool: shellTool, arguments: ["command": testCmd], risk: risk), "重置后规则失效")
-    }
-
-    // MARK: - 7. devCommands 信任作用域测试
-
-    private static func testPolicyEngineDevCommands() {
-        let engine = ToolPermissionPolicyEngine.shared
-        engine.resetRules()
-
-        let shellTool = RunShellTool()
-
-        func allowed(_ cmd: String) -> Bool {
-            let risk = ToolRiskClassifier.shared.evaluateRisk(tool: shellTool, arguments: ["command": cmd])
-            return engine.isAllowed(tool: shellTool, arguments: ["command": cmd], risk: risk)
-        }
-
-        // 1. 授予 devCommands 作用域
-        engine.recordRule(.devCommands)
-
-        // 2. 策展目录内命令：放行
-        assertTest(allowed("swift build"), "devCommands 放行：swift build")
-        assertTest(allowed("xcodebuild test -scheme QuickShow"), "devCommands 放行：xcodebuild test")
-        assertTest(allowed("pnpm run build"), "devCommands 放行：pnpm run build")
-        assertTest(allowed("cargo test"), "devCommands 放行：cargo test")
-        assertTest(allowed("cd web && swift test"), "devCommands 放行复合命令：cd web && swift test")
-
-        // 3. 目录外命令（install 等未策展子命令）仍拦截
-        assertTest(!allowed("pnpm install lodash"), "devCommands 不覆盖未策展子命令：pnpm install")
-        assertTest(!allowed("python deploy.py"), "devCommands 不覆盖非策展命令：python deploy.py")
-
-        engine.resetRules()
     }
 
     // MARK: - 8. 文件覆盖快照与撤销还原测试
@@ -345,7 +323,7 @@ enum ToolRiskTests {
             defer { try? FileManager.default.removeItem(atPath: tempPath) }
 
             // 1. 创建覆盖前快照
-            let token = manager.createSnapshot(path: tempPath)
+            let token = try manager.createSnapshot(path: tempPath)
             assertTest(manager.canUndo(token: token), "快照创建成功且处于可撤销状态")
             assertTest(!manager.isUndone(token: token), "初始状态未被撤销")
 
@@ -362,44 +340,183 @@ enum ToolRiskTests {
             // 4. 验证内容已还原
             let restoredContent = try String(contentsOfFile: tempPath, encoding: .utf8)
             assertTest(restoredContent == initialContent, "文件原始内容成功原子还原")
+
+            // 非 UTF-8 原文件必须按原始字节恢复，绝不能在撤销时误删。
+            let binaryPath = NSTemporaryDirectory() + "quickshow_undo_binary_\(UUID().uuidString).bin"
+            let originalBinary = Data([0x00, 0xFF, 0x10, 0x80])
+            try originalBinary.write(to: URL(fileURLWithPath: binaryPath), options: .atomic)
+            defer { try? FileManager.default.removeItem(atPath: binaryPath) }
+            let binaryToken = try manager.createSnapshot(path: binaryPath)
+            try Data("replacement".utf8).write(to: URL(fileURLWithPath: binaryPath), options: .atomic)
+            try manager.undo(token: binaryToken)
+            let restoredBinary = try Data(contentsOf: URL(fileURLWithPath: binaryPath))
+            assertTest(restoredBinary == originalBinary, "非 UTF-8 原文件按字节完整还原")
+
+            // 原先不存在的文件，撤销时只能删除本次新建文件。
+            let newFilePath = NSTemporaryDirectory() + "quickshow_undo_new_\(UUID().uuidString).txt"
+            let newFileToken = try manager.createSnapshot(path: newFilePath)
+            try modifiedContent.write(toFile: newFilePath, atomically: true, encoding: .utf8)
+            try manager.undo(token: newFileToken)
+            assertTest(!FileManager.default.fileExists(atPath: newFilePath), "撤销新建文件时删除本次产物")
+
+            // 已存在但不可读的文件必须拒绝创建快照，不能误当成“原先不存在”。
+            let unreadablePath = NSTemporaryDirectory() + "quickshow_undo_unreadable_\(UUID().uuidString).txt"
+            try initialContent.write(toFile: unreadablePath, atomically: true, encoding: .utf8)
+            defer {
+                chmod(unreadablePath, S_IRUSR | S_IWUSR)
+                try? FileManager.default.removeItem(atPath: unreadablePath)
+            }
+            chmod(unreadablePath, 0)
+            do {
+                _ = try manager.createSnapshot(path: unreadablePath)
+                assertTest(false, "不可读原文件不得创建可覆盖快照")
+            } catch {
+                assertTest(true, "不可读原文件会拒绝后续覆盖")
+            }
         } catch {
             assertTest(false, "撤销快照测试抛错：\(error.localizedDescription)")
         }
     }
 
-    // MARK: - 9. 旁路大模型守卫三档裁决解析测试
+    // MARK: - 10. 敏感信息展示脱敏
 
-    private static func testShadowGuardDecisionParsing() {
-        let guardrail = AIToolShadowGuard.shared
+    private static func testSensitiveTextRedaction() {
+        let secret = "test-secret-123456789"
+        let samples = [
+            "Authorization: Bearer \(secret)",
+            "{\"access_token\":\"\(secret)\"}",
+            "{\"nested\":[{\"CLIENT_SECRET\":\"\(secret)\"}]}",
+            "API_KEY=\(secret) curl https://example.com",
+            "OPENAI_API_KEY=\(secret) curl https://example.com",
+            "AWS_SECRET_ACCESS_KEY='\(secret)' command",
+            "curl --token \(secret) https://example.com",
+            "https://example.com/path?token=\(secret)&page=1"
+        ]
 
-        // 1. 标准 JSON 解析
-        assertTest(guardrail.parseVerdict(from: "{\"verdict\":\"readonly\"}") == .readonly, "标准 JSON 只读裁决成功")
-        assertTest(guardrail.parseVerdict(from: "{\"verdict\":\"low_risk\"}") == .lowRiskMutation, "标准 JSON 低危变更裁决成功")
-        assertTest(guardrail.parseVerdict(from: "{\"verdict\":\"needs_approval\",\"reason\":\"覆盖系统配置\"}") == .needsApproval, "标准 JSON 需审批裁决成功")
-
-        // 2. Markdown 代码块包裹
-        let mdJson = """
-        ```json
-        {
-            "verdict": "low_risk",
-            "reason": "项目内构建"
+        for sample in samples {
+            let redacted = SensitiveTextRedactor.redact(sample)
+            assertTest(!redacted.contains(secret), "敏感值不会出现在展示文本：\(sample.prefix(30))")
+            assertTest(redacted.contains("••••••"), "敏感值替换为统一遮蔽符")
         }
-        ```
-        """
-        assertTest(guardrail.parseVerdict(from: mdJson) == .lowRiskMutation, "Markdown 包裹 JSON 裁决解析成功")
 
-        // 3. 容错包含文本判定
-        let textWrapped = "审查结果如下：\n{\"verdict\": \"readonly\"}\n可放行"
-        assertTest(guardrail.parseVerdict(from: textWrapped) == .readonly, "带外围说明文字的 JSON 裁决解析成功")
+        let json = "{\"user\":\"alice\",\"authorization\":\"Bearer \(secret)\"}"
+        let redactedJSON = SensitiveTextRedactor.redact(json)
+        let remainsValidJSON = redactedJSON.data(using: .utf8)
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) } != nil
+        assertTest(remainsValidJSON, "JSON 脱敏后仍可解析")
+        assertTest(redactedJSON.contains("alice"), "非敏感字段保持不变")
 
-        let dangerText = "评估结果：该命令修改系统配置，不可自动放行\n{\"verdict\": \"needs_approval\"}"
-        assertTest(guardrail.parseVerdict(from: dangerText) == .needsApproval, "带外围说明文字的审批拦截成功")
+        let envArguments = "{\"key\":\"OPENAI_API_KEY\",\"value\":\"\(secret)\"}"
+        let storedEnvArguments = ToolRecordSanitizer.arguments(toolName: "set_env", json: envArguments)
+        assertTest(!storedEnvArguments.contains(secret), "环境变量 value 不进入会话参数记录")
 
-        // 4. 无法判定时按需审批兜底
-        assertTest(guardrail.parseVerdict(from: "我觉得没问题") == nil, "无法判定文本返回 nil（按需审批兜底）")
+        let envResult = "{\"ok\":true,\"data\":{\"key\":\"OPENAI_API_KEY\",\"value\":\"\(secret)\"}}"
+        let storedEnvResult = ToolRecordSanitizer.result(toolName: "get_env", json: envResult)
+        assertTest(!storedEnvResult.contains(secret), "环境变量读取结果不进入会话记录")
 
-        // 5. 免审批语义：readonly 与 low_risk 可放行，needsApproval 不可
-        assertTest(ShadowGuardVerdict.readonly.isAutoApprovable && ShadowGuardVerdict.lowRiskMutation.isAutoApprovable, "readonly 与 low_risk 均可免审放行")
-        assertTest(!ShadowGuardVerdict.needsApproval.isAutoApprovable, "needsApproval 不可免审放行")
+        let shellArguments = AIToolExecutor.encodeJSON([
+            "command": "OPENAI_API_KEY=\(secret) curl https://example.com"
+        ])
+        let storedShellArguments = ToolRecordSanitizer.arguments(toolName: "run_shell", json: shellArguments)
+        assertTest(!storedShellArguments.contains(secret), "Shell 命令原文不进入会话记录")
+        assertTest(storedShellArguments.contains("未写入会话记录"), "Shell 参数卡明确说明命令未持久化")
+
+        let shellResult = "{\"ok\":true,\"data\":\"\(secret)\"}"
+        let storedShellResult = ToolRecordSanitizer.result(toolName: "run_shell", json: shellResult)
+        assertTest(!storedShellResult.contains(secret), "Shell 原始输出不进入会话记录")
+        assertTest(storedShellResult.contains("未写入会话记录"), "Shell 工具卡明确说明结果未持久化")
+
+        let failedShellResult = "{\"ok\":false,\"error\":\"OPENAI_API_KEY=\(secret)\"}"
+        let storedFailedShellResult = ToolRecordSanitizer.result(toolName: "run_shell", json: failedShellResult)
+        assertTest(!storedFailedShellResult.contains(secret), "Shell 失败输出同样不进入会话记录")
+    }
+
+    // MARK: - 11. 普通用户操作影响说明
+
+    private static func testOrdinaryUserConfirmationPresentation() {
+        let command = "curl https://coarena.ai/api/upload -H 'Authorization: Bearer test-secret-123456789' -d @image.png"
+        let shellArguments = AIToolExecutor.encodeJSON(["command": command])
+        let shellRequest = ToolConfirmationRequest(
+            id: UUID(),
+            toolName: "run_shell",
+            actionIntent: "识别图片颜色",
+            argumentsJSON: shellArguments,
+            summary: command,
+            riskLevel: .requiresConfirmation,
+            sourceSessionID: nil,
+            sourceLabel: nil
+        )
+        let shellPresentation = ToolConfirmationPresentation.make(for: shellRequest)
+        assertTest(shellPresentation.primaryActionTitle == "仅执行这一次", "Shell 只提供单次执行")
+        assertTest(shellPresentation.impacts.contains(where: { $0.text.contains("coarena.ai") }), "外部接收方以域名展示")
+        assertTest(shellPresentation.impacts.contains(where: { $0.text.contains("凭证") }), "凭证使用以普通语言提示")
+        assertTest(shellPresentation.technicalDetailsTitle.contains("敏感信息已隐藏"), "技术详情明确提示已脱敏")
+
+        let writeArguments = AIToolExecutor.encodeJSON([
+            "path": "/tmp/quickshow-preview.txt",
+            "content": "preview"
+        ])
+        let writeRequest = ToolConfirmationRequest(
+            id: UUID(),
+            toolName: "write_file",
+            actionIntent: "整理文档",
+            argumentsJSON: writeArguments,
+            summary: writeArguments,
+            riskLevel: .requiresConfirmation,
+            sourceSessionID: nil,
+            sourceLabel: nil
+        )
+        let writePresentation = ToolConfirmationPresentation.make(for: writeRequest)
+        assertTest(writePresentation.primaryActionTitle == "应用修改", "文件写入以应用修改表达")
+        assertTest(writePresentation.impacts.contains(where: { $0.text.contains("撤销") }), "文件修改明确可撤销")
+    }
+
+    // MARK: - 12. 后台任务来源归属
+
+    private static func testBackgroundSourceAttribution() {
+        let currentID = UUID()
+        assertTest(
+            ChatInteractionCenter.sourceLabel(
+                sourceSessionID: currentID,
+                currentSessionID: currentID,
+                sessionTitle: "当前任务"
+            ) == nil,
+            "当前会话操作不显示冗余来源"
+        )
+        assertTest(
+            ChatInteractionCenter.sourceLabel(
+                sourceSessionID: currentID,
+                currentSessionID: UUID(),
+                sessionTitle: "当前任务"
+            )?.contains("后台任务") == true,
+            "请求挂起后切换会话会动态显示后台来源"
+        )
+
+        let secret = "source-secret-123456789"
+        let backgroundLabel = ChatInteractionCenter.sourceLabel(
+            sourceSessionID: UUID(),
+            currentSessionID: currentID,
+            sessionTitle: "Authorization: Bearer \(secret)"
+        )
+        assertTest(backgroundLabel?.contains("后台任务") == true, "后台会话操作明确标注来源")
+        assertTest(backgroundLabel?.contains(secret) == false, "后台来源标题先脱敏再展示")
+    }
+
+    /// 故意只标注 parallelSafe，不声明 authorizationPolicy，用于验证协议默认值始终 fail-closed。
+    private struct UndeclaredAuthorizationTool: AITool {
+        let name = "undeclared_authorization_test"
+        let displayName = "测试工具"
+        let category: ToolCategory = .system
+        let description = "测试默认授权策略"
+        let executionPolicy: ToolExecutionPolicy = .parallelSafe
+        let parametersSchema: [String: Any] = [
+            "type": "object",
+            "properties": [String: Any](),
+            "required": [String]()
+        ]
+
+        func execute(arguments: [String: Any]) async throws -> String {
+            "{\"ok\":true}"
+        }
     }
 }

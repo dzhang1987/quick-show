@@ -291,6 +291,7 @@ final class ShowMapTool: AITool {
     let name = "show_map"
     let displayName = String(localized: "展示地图")
     let category: ToolCategory = .map
+    let authorizationPolicy: ToolAuthorizationPolicy = .deterministicReadOnly
     /// 纯读展示，无网络与共享状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
     let description = "在对话中展示一张地图卡片，可标注标记点或绘制路线折线。center、markers、route 至少提供一项。"

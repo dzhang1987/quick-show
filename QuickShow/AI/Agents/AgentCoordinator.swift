@@ -178,6 +178,7 @@ final class AgentCoordinator {
                 var roundText = ""
                 var roundReasoning = ""
                 var completedCalls: [CompletedToolCall] = []
+                var streamedArgumentsByCallID: [String: String] = [:]
 
                 // 检查并消费注入的实时 Steering 指令
                 if let steerings = self.subagentSteeringQueues[childId], !steerings.isEmpty {
@@ -226,26 +227,20 @@ final class AgentCoordinator {
                                 }
                             }
                         case .toolCallArgumentsDelta(let callId, let delta):
-                            // 参数增量实时追加到占位卡：意图标题随流式渐次呈现
-                            var updatedArguments: String?
-                            ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
-                                var calls = msg.toolCalls ?? []
-                                if let index = calls.firstIndex(where: { $0.id == callId }) {
-                                    calls[index].arguments += delta
-                                    updatedArguments = calls[index].arguments
-                                    msg.toolCalls = calls
+                            // 原始参数分片只留在当前回合内存中，避免尚未闭合的凭证值进入会话持久化。
+                            streamedArgumentsByCallID[callId, default: ""] += delta
+                            let streamedArguments = streamedArgumentsByCallID[callId] ?? ""
+                            // 意图可解析时升级托盘动作文案；展示前统一脱敏。
+                            if let rawIntent = ToolIntentExtractor.extractIntent(from: streamedArguments, fallbackToolName: nil) {
+                                let intent = SensitiveTextRedactor.redact(rawIntent)
+                                if intent != lastReportedToolIntent {
+                                    lastReportedToolIntent = intent
+                                    AgentTaskRegistry.shared.updateTaskAction(
+                                        id: persistentTaskId,
+                                        action: "正在执行：\(intent)",
+                                        status: .toolExecuting
+                                    )
                                 }
-                            }
-                            // 意图可解析时升级托盘动作文案（工具名 → 动作意图；去重避免逐片重复上报）
-                            if let args = updatedArguments,
-                               let intent = ToolIntentExtractor.extractIntent(from: args, fallbackToolName: nil),
-                               intent != lastReportedToolIntent {
-                                lastReportedToolIntent = intent
-                                AgentTaskRegistry.shared.updateTaskAction(
-                                    id: persistentTaskId,
-                                    action: "正在执行：\(intent)",
-                                    status: .toolExecuting
-                                )
                             }
                         case .toolCalls(let calls):
                             completedCalls = calls
@@ -271,7 +266,14 @@ final class AgentCoordinator {
                     // 存在工具调用：
                     // 1. 将工具调用记录挂到当前子会话助手消息（使子会话 UI 实时呈现工具卡片）
                     let records = completedCalls.map {
-                        ToolCallRecord(id: $0.id, name: $0.name, arguments: $0.arguments, result: nil, status: .pending, thoughtSignature: $0.thoughtSignature)
+                        ToolCallRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            arguments: ToolRecordSanitizer.arguments(toolName: $0.name, json: $0.arguments),
+                            result: nil,
+                            status: .pending,
+                            thoughtSignature: $0.thoughtSignature
+                        )
                     }
                     ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
                         msg.content = roundText
@@ -312,7 +314,7 @@ final class AgentCoordinator {
                         ChatSessionStore.shared.updateMessage(id: currentAssistantId, in: childId) { msg in
                             guard var calls = msg.toolCalls, let idx = calls.firstIndex(where: { $0.id == call.id }) else { return }
                             calls[idx].status = result.status
-                            calls[idx].result = result.resultJSON
+                            calls[idx].result = ToolRecordSanitizer.result(toolName: result.name, json: result.resultJSON)
                             msg.toolCalls = calls
                         }
 

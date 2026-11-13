@@ -1,12 +1,6 @@
 import SwiftUI
 import AppKit
 
-// MARK: - 权限确认抽屉通知
-
-extension Notification.Name {
-    static let quickShowExecuteToolConfirmation = Notification.Name("quickShowExecuteToolConfirmation")
-}
-
 // MARK: - 权限确认抽屉内容视图
 
 /// 危险工具权限确认（纯粹 macOS 极客与原生质感）：
@@ -22,11 +16,12 @@ extension Notification.Name {
 /// 绝不把抽屉顶穿窗口（历史事故：标题与终端顶栏被推到窗外裁掉）。
 struct ToolConfirmationDrawerContent: View {
     let request: ToolConfirmationRequest
+    @ObservedObject private var sessionStore = ChatSessionStore.shared
     /// 整抽屉高度预算（窗口内容高度的 80%），由 AIChatDrawerPanel 统一注入
     let heightBudget: CGFloat
 
-    /// 是否勾选本会话记住规则
-    @State private var rememberRule: Bool = false
+    /// 技术细节默认折叠：普通用户只需理解操作影响，不必阅读 Shell/JSON。
+    @State private var showTechnicalDetails: Bool = false
     /// 参数/命令复制成功反馈状态
     @State private var hasCopied: Bool = false
     /// 复制按钮 hover 状态
@@ -35,6 +30,8 @@ struct ToolConfirmationDrawerContent: View {
     @State private var topChromeHeight: CGFloat = 0
     /// 底部固定区（记忆胶囊 + 操作按钮 + 下留白）实测高度
     @State private var bottomChromeHeight: CGFloat = 0
+    /// 技术详情折叠标题实测高度。
+    @State private var technicalChromeHeight: CGFloat = 0
     /// 终端卡顶栏实测高度（复制按钮所在行，恒固定不滚动）
     @State private var terminalToolbarHeight: CGFloat = 0
 
@@ -49,18 +46,33 @@ struct ToolConfirmationDrawerContent: View {
         return cmd
     }
 
-    /// 美化后的完整参数（JSON 格式化换行与缩进）。
-    private var prettyArguments: String { ToolJSONText.pretty(request.argumentsJSON) }
-
-    /// 显示参数文本：优先完整格式化参数，兜底摘要。
-    private var displayArguments: String {
-        let trimmed = prettyArguments.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? request.summary : trimmed
+    /// 面向普通用户的操作标题、影响说明与主按钮文案。
+    private var presentation: ToolConfirmationPresentation {
+        ToolConfirmationPresentation.make(for: request)
     }
 
-    /// 工具中文展示名。
-    private var displayName: String? {
-        AIToolRegistry.shared.tool(named: request.toolName)?.displayName
+    /// 随当前选中会话动态计算，避免请求挂起后切换会话导致来源标签失真。
+    private var displayedSourceLabel: String? {
+        ChatInteractionCenter.sourceLabel(
+            sourceSessionID: request.sourceSessionID,
+            currentSessionID: sessionStore.currentSessionId,
+            sessionTitle: request.sourceSessionID.flatMap { sessionStore.session(id: $0)?.title }
+        )
+    }
+
+    /// 技术详情只展示脱敏文本；真实参数仅保留在执行链路内。
+    private var displayShellCommand: String? {
+        shellCommand.map(SensitiveTextRedactor.redact)
+    }
+
+    private var prettyArguments: String {
+        SensitiveTextRedactor.redact(ToolJSONText.pretty(request.argumentsJSON))
+    }
+
+    /// 显示参数文本：优先完整格式化参数，兜底脱敏摘要。
+    private var displayArguments: String {
+        let trimmed = prettyArguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? SensitiveTextRedactor.redact(request.summary) : trimmed
     }
 
     var body: some View {
@@ -68,16 +80,13 @@ struct ToolConfirmationDrawerContent: View {
             // 固定区（顶部）：标题行 + 高危告警（恒可见，绝不随长命令滚出窗外）
             topChrome
 
-            // 正文区：终端卡 / 参数卡（顶栏固定，代码主体按预算滚动）
-            commandOrArgumentsBlock
+            // 技术实现默认折叠；普通用户只需理解上方影响说明。
+            technicalDetailsDisclosure
 
-            // 固定区（底部）：记忆放行规则 + 操作按钮（恒可见）
+            // 固定区（底部）：取消 / 单次执行或应用（恒可见）
             bottomChrome
         }
         .padding(.horizontal, Theme.Spacing.section)
-        .onReceive(NotificationCenter.default.publisher(for: .quickShowExecuteToolConfirmation)) { _ in
-            execute()
-        }
     }
 
     // MARK: - 高度预算
@@ -85,7 +94,7 @@ struct ToolConfirmationDrawerContent: View {
     /// 代码主体可用高度 = 整抽屉预算 − 头尾固定区 − 终端卡顶栏；
     /// 保底 bodyMinHeight：窗口被压到极小（固定区已吃掉大半预算）时仍留几行可读空间。
     private var bodyAvailableHeight: CGFloat {
-        let chrome = topChromeHeight + bottomChromeHeight + terminalToolbarHeight
+        let chrome = topChromeHeight + bottomChromeHeight + technicalChromeHeight + terminalToolbarHeight
         return max(AIChatDrawerMetrics.bodyMinHeight, heightBudget - chrome)
     }
 
@@ -101,24 +110,40 @@ struct ToolConfirmationDrawerContent: View {
                 destructiveAlertView(reason: reason)
                     .padding(.bottom, Theme.Spacing.lg)
             }
+
+            impactSummaryView
+                .padding(.bottom, Theme.Spacing.lg)
         }
         .padding(.top, Theme.Spacing.xxl)
         .measureDrawerHeight(into: $topChromeHeight)
     }
 
-    /// 底部固定区：记忆胶囊 + 操作按钮 + 下留白（实测高供预算扣减）。
-    /// 与卡片的呼吸缝沿用原节奏：破坏性操作（无胶囊行）= xxl，常规 = lg。
+    /// 底部固定区：授权范围提示 + 取消 / 单次 / 本会话允许 + 下留白（实测高供预算扣减）。
     private var bottomChrome: some View {
         VStack(alignment: .leading, spacing: 0) {
-            if !request.riskLevel.isDestructive {
-                rememberRuleToggle
-                    .padding(.bottom, Theme.Spacing.xxl)
+            if let scope = request.suggestedScope {
+                grantScopeHint(scope)
+                    .padding(.bottom, Theme.Spacing.md)
             }
             actionButtonsRow
         }
-        .padding(.top, request.riskLevel.isDestructive ? Theme.Spacing.xxl : Theme.Spacing.lg)
+        .padding(.top, Theme.Spacing.xxl)
         .padding(.bottom, Theme.Spacing.xl)
         .measureDrawerHeight(into: $bottomChromeHeight)
+    }
+
+    /// 会话授权范围提示：⌘⏎ /「本会话允许」作用的边界明示，授权不做黑箱。
+    private func grantScopeHint(_ scope: PermissionGrantScope) -> some View {
+        HStack(spacing: Theme.Spacing.sm) {
+            Image(systemName: "shield.lefthalf.filled")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(Theme.Colors.accent)
+            Text(String(localized: "会话授权范围：") + scope.displayTitle)
+                .font(Theme.Typography.text(Theme.Typography.caption, .medium))
+                .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
     }
 
     // MARK: - 标题行
@@ -130,25 +155,24 @@ struct ToolConfirmationDrawerContent: View {
                 .foregroundColor(headerIconColor)
                 .padding(.top, 2)
 
-            VStack(alignment: .leading, spacing: 3) {
-                // 方案 B：主标题直接呈现核心动作意图，大幅降低决策成本
-                Text(request.actionIntent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(presentation.title)
                     .font(Theme.Typography.text(Theme.Typography.callout, .semibold))
                     .foregroundColor(Theme.Colors.contentPrimary)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
 
-                // 辅助标识栏：标明具体的底层工具（如「终端 Shell (run_shell)」）
-                HStack(spacing: 4) {
-                    Text(displayName ?? request.toolName)
-                        .font(Theme.Typography.text(Theme.Typography.micro, .medium))
-                        .foregroundColor(Theme.Colors.contentTertiary)
+                Text(String(localized: "AI 说明：") + SensitiveTextRedactor.redact(request.actionIntent))
+                    .font(Theme.Typography.text(Theme.Typography.caption, .medium))
+                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                    if let toolName = displayName, toolName != request.toolName {
-                        Text("(\(request.toolName))")
-                            .font(Theme.Typography.mono(Theme.Typography.micro))
-                            .foregroundColor(Theme.Colors.contentTertiary.opacity(0.7))
-                    }
+                if let sourceLabel = displayedSourceLabel {
+                    Label(sourceLabel, systemImage: "arrow.triangle.branch")
+                        .font(Theme.Typography.text(Theme.Typography.caption, .semibold))
+                        .foregroundColor(Theme.Colors.accent)
+                        .lineLimit(1)
                 }
             }
 
@@ -219,7 +243,67 @@ struct ToolConfirmationDrawerContent: View {
         )
     }
 
-    // MARK: - 终端代码卡片（集成顶栏，彻底解决遮挡问题）
+    // MARK: - 操作影响与技术详情
+
+    private var impactSummaryView: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            ForEach(presentation.impacts) { impact in
+                HStack(alignment: .top, spacing: Theme.Spacing.md) {
+                    Image(systemName: impact.systemImage)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(request.riskLevel.isDestructive ? Color.red.opacity(0.85) : Theme.Colors.accent)
+                        .frame(width: 14, alignment: .center)
+                        .padding(.top, 1)
+                    Text(impact.text)
+                        .font(Theme.Typography.text(Theme.Typography.caption, .medium))
+                        .foregroundColor(Theme.Colors.contentSecondaryStrong)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .padding(.horizontal, Theme.Spacing.card)
+        .padding(.vertical, Theme.Spacing.lg)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .fill(Theme.Colors.surfaceButton)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .strokeBorder(Theme.Colors.cardStroke, lineWidth: 0.5)
+        )
+    }
+
+    private var technicalDetailsDisclosure: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.md) {
+            Button {
+                withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
+                    showTechnicalDetails.toggle()
+                }
+            } label: {
+                HStack(spacing: Theme.Spacing.sm) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(showTechnicalDetails ? 90 : 0))
+                    Text(presentation.technicalDetailsTitle)
+                        .font(Theme.Typography.text(Theme.Typography.caption, .medium))
+                    Spacer(minLength: 0)
+                }
+                .foregroundColor(Theme.Colors.contentTertiary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .measureDrawerHeight(into: $technicalChromeHeight)
+
+            if showTechnicalDetails {
+                commandOrArgumentsBlock
+                    .transition(.opacity)
+            }
+        }
+    }
+
+    // MARK: - 终端代码卡片
 
     /// 上方顶栏恒固定（复制按钮永远可达），下方代码主体按预算滚动。
     private var commandOrArgumentsBlock: some View {
@@ -235,7 +319,7 @@ struct ToolConfirmationDrawerContent: View {
 
             // 代码主体：自然高度未超预算紧凑包裹，超出锁在预算内滚动（绝无悬浮物遮挡代码）
             DrawerBodyArea(availableHeight: bodyAvailableHeight) { _ in
-                if let cmd = shellCommand {
+                if let cmd = displayShellCommand {
                     terminalCommandSection(cmd)
                 } else {
                     normalArgumentsSection
@@ -270,7 +354,7 @@ struct ToolConfirmationDrawerContent: View {
 
             // 专属顶栏复制操作（优雅融入，带 hover 与点击反馈，绝不遮挡代码）
             Button(action: {
-                let textToCopy = shellCommand ?? displayArguments
+                let textToCopy = displayShellCommand ?? displayArguments
                 copyText(textToCopy)
             }) {
                 HStack(spacing: 4) {
@@ -335,72 +419,30 @@ struct ToolConfirmationDrawerContent: View {
             .textSelection(.enabled)
     }
 
-    // MARK: - 记忆规则微胶囊条
-
-    private var rememberRuleToggle: some View {
-        let scopeTitle = request.suggestedScope?.displayTitle ?? String(localized: "记住此工具，本会话不再询问")
-        return Button(action: {
-            withAnimation(.easeOut(duration: Theme.Motion.contentFade)) {
-                rememberRule.toggle()
-            }
-        }) {
-            HStack(spacing: Theme.Spacing.sm) {
-                Image(systemName: rememberRule ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(rememberRule ? Theme.Colors.accent : Theme.Colors.contentTertiary)
-
-                Text(scopeTitle)
-                    .font(Theme.Typography.text(Theme.Typography.caption))
-                    .foregroundColor(rememberRule ? Theme.Colors.contentPrimary : Theme.Colors.contentSecondaryStrong)
-                    .lineLimit(1)
-
-                Spacer(minLength: 0)
-
-                HStack(spacing: 3) {
-                    Text("按")
-                        .font(Theme.Typography.text(Theme.Typography.micro))
-                        .foregroundColor(Theme.Colors.contentTertiary)
-                    HStack(spacing: 2) {
-                        Text("⌘")
-                            .font(Theme.Typography.mono(Theme.Typography.micro, .medium))
-                        Text("⏎")
-                            .font(Theme.Typography.mono(Theme.Typography.micro, .medium))
-                    }
-                    .foregroundColor(Theme.Colors.contentSecondaryStrong)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3, style: .continuous)
-                            .fill(Theme.Colors.surfaceKeyCap)
-                    )
-                    Text("直接放行")
-                        .font(Theme.Typography.text(Theme.Typography.micro))
-                        .foregroundColor(Theme.Colors.contentTertiary)
-                }
-            }
-            .padding(.horizontal, Theme.Spacing.card)
-            .padding(.vertical, Theme.Spacing.sm)
-            .background(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                    .fill(rememberRule ? Theme.Colors.accent.opacity(0.08) : Theme.Colors.surfaceButton)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.keyCap, style: .continuous)
-                    .strokeBorder(rememberRule ? Theme.Colors.accent.opacity(0.35) : Theme.Colors.cardStroke, lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-
     // MARK: - 按钮行（左退右进，紧凑轻盈）
 
     private var actionButtonsRow: some View {
         HStack(spacing: Theme.Spacing.lg) {
-            DrawerActionButton(title: String(localized: "拒绝"), shortcut: "esc", style: .secondary) {
+            DrawerActionButton(title: String(localized: "取消"), shortcut: "esc", style: .secondary) {
                 ChatInteractionCenter.shared.resolveConfirmation(.denied)
             }
             Spacer(minLength: 0)
-            DrawerActionButton(title: String(localized: "执行"), shortcut: "⏎", style: .primary) {
+            // 有界能力才提供会话授权；Shell / 高危永远只有单次与取消
+            if request.suggestedScope != nil, !request.riskLevel.isDestructive {
+                DrawerActionButton(
+                    title: String(localized: "本会话允许"),
+                    shortcut: "⌘⏎",
+                    style: .outlined
+                ) {
+                    ChatInteractionCenter.shared.resolveConfirmation(.grantSession)
+                }
+                .help(request.suggestedScope?.displayTitle ?? "")
+            }
+            DrawerActionButton(
+                title: presentation.primaryActionTitle,
+                shortcut: request.riskLevel.isDestructive ? nil : "⏎",
+                style: .primary
+            ) {
                 execute()
             }
         }
@@ -409,15 +451,7 @@ struct ToolConfirmationDrawerContent: View {
     // MARK: - 操作执行
 
     private func execute() {
-        if rememberRule && !request.riskLevel.isDestructive {
-            if let scope = request.suggestedScope {
-                ChatInteractionCenter.shared.resolveConfirmation(.allowSuggestedScope(scope))
-            } else {
-                ChatInteractionCenter.shared.resolveConfirmation(.alwaysAllowThisSession)
-            }
-        } else {
-            ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
-        }
+        ChatInteractionCenter.shared.resolveConfirmation(.executeOnce)
     }
 
     private func copyText(_ text: String) {

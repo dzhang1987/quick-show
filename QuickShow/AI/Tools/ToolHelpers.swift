@@ -83,12 +83,7 @@ enum ToolIntentExtractor {
 
         switch toolName {
         case "run_shell", "shell":
-            if let cmd = arguments?["command"] as? String, !cmd.isEmpty {
-                let firstLine = cmd.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .newlines).first ?? cmd
-                let cleaned = firstLine.count <= 60 ? firstLine : String(firstLine.prefix(60)) + "…"
-                return "执行命令: \(cleaned)"
-            }
-            return "执行终端 Shell 命令"
+            return "运行一项系统操作"
         case "write_file":
             if let path = arguments?["path"] as? String, !path.isEmpty {
                 let filename = URL(fileURLWithPath: path).lastPathComponent

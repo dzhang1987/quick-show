@@ -379,19 +379,18 @@ final class AIChatState: ObservableObject {
             .sink { [weak self] sessionId in
                 guard let self else { return }
                 // switchDraft 会更新 draftOwnerSessionId；先取旧值判定「是否真的换了会话」，
-                // 避免重复点击当前会话时误清空「总是允许」记忆（首次订阅重放也不算切换）。
+                // 避免重复点击当前会话时误清空安全审计缓存（首次订阅重放也不算切换）。
                 let sessionChanged = self.draftOwnerSessionId != sessionId
                 self.switchDraft(to: sessionId)
                 if let sessionId {
                     self.unreadSessionIds.remove(sessionId)
                 }
                 self.syncStreamingState(targetSessionId: .some(sessionId))
-                // 会话切换/新对话：危险工具「总是允许」记忆随会话失效（幂等，仅真实切换时清）。
+                // 会话切换/新对话：清理旧版模型风险审计缓存（幂等，仅真实切换时清）。
                 if sessionChanged {
                     self.editingMessageId = nil
                     self.cancelAbortConfirmation()
                     self.historyTracker.reset()
-                    ChatInteractionCenter.shared.resetSessionMemory()
                 }
             }
             .store(in: &cancellables)

@@ -31,22 +31,32 @@ struct ToolConfirmationRequest: Identifiable {
     let summary: String
     /// 评估得出的风险等级
     let riskLevel: ToolRiskLevel
-    /// 建议放行的规则作用域（如命令前缀 "git"、工作区目录）
-    let suggestedScope: PermissionScopeSuggestion?
+    /// 实际发起工具调用的会话；用于后台 Agent 归属展示与通知跳转。
+    let sourceSessionID: UUID?
+    /// 非当前会话时的人类可读来源。
+    let sourceLabel: String?
+    /// 会话授权作用域（仅 sessionGrantable 档非 nil）：抽屉据此呈现「本会话允许」与 ⌘⏎。
+    var suggestedScope: PermissionGrantScope? = nil
+    /// 抽屉发布时刻：键盘防误触窗口据此吞掉弹出瞬间的尾随回车。
+    var presentedAt: Date = Date()
 }
 
 /// 危险工具确认结果
 enum ToolConfirmationOutcome {
     case denied
+    /// 只允许当前这一次操作；不生成任何记忆。
     case executeOnce
-    case alwaysAllowThisSession
-    case allowSuggestedScope(PermissionScopeSuggestion)
+    /// 允许本次并对请求携带的 suggestedScope 记录会话级授权（可见可撤销）。
+    case grantSession
 }
 
 /// 用户提问请求（1..N 题）
 struct UserQuestionRequest: Identifiable {
     let id: UUID
     let questions: [UserQuestion]
+    /// 实际发起提问的会话；后台 Agent 提问时用于抽屉归属与通知跳转。
+    let sourceSessionID: UUID?
+    let sourceLabel: String?
 }
 
 /// 单道用户提问
@@ -122,8 +132,6 @@ final class ChatInteractionCenter: ObservableObject {
     private var confirmationContinuation: CheckedContinuation<ToolConfirmationOutcome, Never>?
     /// 用户提问的挂起 continuation；同一时刻至多一个
     private var questionContinuation: CheckedContinuation<UserQuestionResponse?, Never>?
-    /// 会话内「总是允许」记忆（key = toolName|argumentsJSON 去空白原文）。纯内存，随会话失效。
-    private var sessionAllowedKeys: Set<String> = []
 
     private init() {}
 
@@ -134,7 +142,8 @@ final class ChatInteractionCenter: ObservableObject {
         toolName: String,
         argumentsJSON: String,
         riskLevel: ToolRiskLevel? = nil,
-        suggestedScope: PermissionScopeSuggestion? = nil
+        sourceSessionID: UUID? = nil,
+        suggestedScope: PermissionGrantScope? = nil
     ) async -> ToolConfirmationOutcome {
         // 无 UI 兜底：默认拒绝，绝不弹任何 AppKit 弹窗
         guard uiActive else { return .denied }
@@ -144,10 +153,16 @@ final class ChatInteractionCenter: ObservableObject {
             return .denied
         }
 
-        let effectiveRisk = riskLevel ?? .scopedMutation(suggestedScope: .toolName(name: toolName))
-        let intent = ToolIntentExtractor.extractIntent(from: argumentsJSON, fallbackToolName: toolName)
+        let effectiveRisk = riskLevel ?? .requiresConfirmation
+        let rawIntent = ToolIntentExtractor.extractIntent(from: argumentsJSON, fallbackToolName: toolName)
             ?? ToolIntentExtractor.fallbackIntent(toolName: toolName)
             ?? toolName
+        let intent = SensitiveTextRedactor.redact(rawIntent)
+        let sourceLabel = Self.sourceLabel(
+            sourceSessionID: sourceSessionID,
+            currentSessionID: AIChatState.shared.store.currentSessionId,
+            sessionTitle: sourceSessionID.flatMap { AIChatState.shared.store.session(id: $0)?.title }
+        )
         let req = ToolConfirmationRequest(
             id: UUID(),
             toolName: toolName,
@@ -155,6 +170,8 @@ final class ChatInteractionCenter: ObservableObject {
             argumentsJSON: argumentsJSON,
             summary: Self.singleLineSummary(argumentsJSON),
             riskLevel: effectiveRisk,
+            sourceSessionID: sourceSessionID,
+            sourceLabel: sourceLabel,
             suggestedScope: suggestedScope
         )
         request = .toolConfirmation(req)
@@ -166,8 +183,14 @@ final class ChatInteractionCenter: ObservableObject {
     }
 
     /// 请求用户作答。UI 无观察者或用户取消时返回 nil。
-    func requestUserAnswers(_ questions: [UserQuestionSpec]) async -> UserQuestionResponse? {
-        await requestUserAnswersReturningQuestions(questions).response
+    func requestUserAnswers(
+        _ questions: [UserQuestionSpec],
+        sourceSessionID: UUID? = nil
+    ) async -> UserQuestionResponse? {
+        await requestUserAnswersReturningQuestions(
+            questions,
+            sourceSessionID: sourceSessionID
+        ).response
     }
 
     /// 内部（同模块 AskUserTool 专用）：与公开契约 `requestUserAnswers(_:)` 同源，
@@ -175,7 +198,8 @@ final class ChatInteractionCenter: ObservableObject {
     /// 逻辑层生成的 question/option UUID 索引，调用方需据此把 id 还原为可读 label；
     /// 公开方法委托至此，UI lane 仍只需公开契约。
     func requestUserAnswersReturningQuestions(
-        _ questions: [UserQuestionSpec]
+        _ questions: [UserQuestionSpec],
+        sourceSessionID: UUID? = nil
     ) async -> (questions: [UserQuestion], response: UserQuestionResponse?) {
         // 无 UI 兜底：直接返回空题面 + nil（视为用户取消）
         guard uiActive else { return ([], nil) }
@@ -197,7 +221,16 @@ final class ChatInteractionCenter: ObservableObject {
                 multiple: spec.multiple
             )
         }
-        let req = UserQuestionRequest(id: UUID(), questions: built)
+        let req = UserQuestionRequest(
+            id: UUID(),
+            questions: built,
+            sourceSessionID: sourceSessionID,
+            sourceLabel: Self.sourceLabel(
+                sourceSessionID: sourceSessionID,
+                currentSessionID: AIChatState.shared.store.currentSessionId,
+                sessionTitle: sourceSessionID.flatMap { AIChatState.shared.store.session(id: $0)?.title }
+            )
+        )
         request = .userQuestions(req)
         notifyIfInactive(for: .userQuestions(req))
         let response = await withCheckedContinuation { continuation in
@@ -270,32 +303,21 @@ final class ChatInteractionCenter: ObservableObject {
         // 仅在窗口不可见或非 key 激活状态时提醒
         guard !(manager.isPanelVisible && manager.isPanelKey) else { return }
 
-        let sessionId = AIChatState.shared.store.currentSessionId
+        let currentSessionID = AIChatState.shared.store.currentSessionId
         switch request {
         case .userQuestions(let req):
-            let title = String(localized: "QuickShow AI · 需要您回答")
-            let count = req.questions.count
-            let firstQ = req.questions.first?.question ?? ""
-            let body: String
-            if count > 1 {
-                body = String(format: String(localized: "AI 提出 %d 个问题待确认：\n%@"), count, firstQ)
-            } else {
-                body = String(format: String(localized: "AI 提问：\n%@"), firstQ)
-            }
             AICompletionNotifier.shared.notifyInteraction(
                 id: req.id,
-                title: title,
-                body: body,
-                sessionId: sessionId
+                title: String(localized: "QuickShow AI · 需要您回答"),
+                body: String(localized: "请在 QuickShow 中查看问题并作答。"),
+                sessionId: req.sourceSessionID ?? currentSessionID
             )
         case .toolConfirmation(let req):
-            let title = String(localized: "QuickShow AI · 操作授权确认")
-            let body = String(format: String(localized: "【%@】%@"), req.toolName, req.actionIntent)
             AICompletionNotifier.shared.notifyInteraction(
                 id: req.id,
-                title: title,
-                body: body,
-                sessionId: sessionId
+                title: String(localized: "QuickShow AI · 有操作等待确认"),
+                body: String(localized: "请在 QuickShow 中查看影响范围和详细信息。"),
+                sessionId: req.sourceSessionID ?? currentSessionID
             )
         }
     }
@@ -312,47 +334,27 @@ final class ChatInteractionCenter: ObservableObject {
         AICompletionNotifier.shared.cancelInteractionNotification(id: id)
     }
 
-    // MARK: - 会话内「总是允许」记忆与规则
-
-    /// 该工具+参数在本会话内是否已被规则或精确记忆允许（命中则跳过确认）。
-    func isSessionAllowed(tool: AITool, arguments: [String: Any], argumentsJSON: String) -> Bool {
-        let risk = ToolRiskClassifier.shared.evaluateRisk(tool: tool, arguments: arguments)
-        if risk.isAutoApproved {
-            return true
-        }
-        if ToolPermissionPolicyEngine.shared.isAllowed(tool: tool, arguments: arguments, risk: risk) {
-            return true
-        }
-        return isSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
-    }
-
-    /// 该工具+参数原文在本会话内是否已被允许（命中则跳过确认）。
-    func isSessionAllowed(toolName: String, argumentsJSON: String) -> Bool {
-        sessionAllowedKeys.contains(Self.sessionKey(toolName: toolName, argumentsJSON: argumentsJSON))
-    }
-
-    /// 记录本会话允许（同一命令原文 = 同一记忆）
-    func rememberSessionAllowed(toolName: String, argumentsJSON: String) {
-        sessionAllowedKeys.insert(Self.sessionKey(toolName: toolName, argumentsJSON: argumentsJSON))
-    }
-
-    /// 会话切换/新对话时调用，记忆随会话失效（幂等）
-    func resetSessionMemory() {
-        sessionAllowedKeys.removeAll()
-        ToolPermissionPolicyEngine.shared.resetRules()
-        AIToolShadowGuard.shared.resetSessionCache()
-    }
-
     // MARK: - 私有辅助
 
-    /// 记忆 key：toolName + "|" + 去首尾空白的参数原文（同一命令原文 = 同一记忆）
-    private static func sessionKey(toolName: String, argumentsJSON: String) -> String {
-        toolName + "|" + argumentsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// 仅当操作来自非当前会话时显示来源，避免用户把后台 Agent 的操作误认为当前对话发起。
+    static func sourceLabel(
+        sourceSessionID: UUID?,
+        currentSessionID: UUID?,
+        sessionTitle: String?
+    ) -> String? {
+        guard let sourceSessionID, sourceSessionID != currentSessionID else { return nil }
+        let title = SensitiveTextRedactor.redact(sessionTitle ?? "")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title != String(localized: "新会话") else {
+            return String(localized: "来自后台任务")
+        }
+        return String(localized: "来自后台任务：") + String(title.prefix(30))
     }
 
     /// 单行摘要：CRLF/LF/CR 统一替换为空格、去首尾空白、限 200 字（超出加省略号）。
     private static func singleLineSummary(_ text: String) -> String {
-        let single = text
+        let single = SensitiveTextRedactor.redact(text)
             .replacingOccurrences(of: "\r\n", with: " ")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")

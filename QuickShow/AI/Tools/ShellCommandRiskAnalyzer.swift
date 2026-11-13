@@ -75,9 +75,26 @@ enum ShellCommandRiskAnalyzer {
         if privilegeEscalationWords.contains(word) {
             return String(localized: "包含超级用户提权指令 (\(word))")
         }
-        // 递归删除
-        if word == "rm", hasShortFlag(flags, matchingAny: "rR") || flags.contains("--recursive") {
-            return String(localized: "包含递归强力删除文件指令 (rm -r)")
+        // 删除均不可逆：递归删除给出更强提示，普通 rm 也必须进入高危确认。
+        if word == "rm" {
+            if hasShortFlag(flags, matchingAny: "rR") || flags.contains("--recursive") {
+                return String(localized: "包含递归强力删除文件指令 (rm -r)")
+            }
+            return String(localized: "包含不可逆的文件删除指令 (rm)")
+        }
+
+        // 解释器脚本参数的真实语义无法由轻量词法器可靠展开，统一升级为高危确认。
+        let shellInterpreters: Set<String> = ["sh", "bash", "zsh"]
+        let codeInterpreters: Set<String> = ["python", "python3", "node", "deno", "ruby", "perl", "php"]
+        let containsOpaqueInterpreterScript = (shellInterpreters.contains(word) && flags.contains("-c"))
+            || (codeInterpreters.contains(word) && flags.contains(where: { $0 == "-c" || $0 == "-e" }))
+            || word == "eval"
+        if containsOpaqueInterpreterScript {
+            return String(localized: "包含无法静态验证的解释器脚本")
+        }
+
+        if word == "find", flags.contains(where: { findDestructiveFlags.contains($0) }) {
+            return String(localized: "包含批量删除或执行指令 (find)")
         }
         // 底层磁盘操作
         if word == "dd" {
@@ -231,6 +248,87 @@ enum ShellCommandRiskAnalyzer {
                 return true
             }
         }
+        return false
+    }
+
+    // MARK: - 分级授权判定（确定安全 / 明确需确认 / 灰区交模型）
+
+    /// 可确定性自动放行的只读命令：纯系统状态/元数据查询，不读取文件正文或凭证。
+    private static let autoSafeReadOnlyCommands: Set<String> = [
+        "pwd", "ls", "which", "whereis", "whoami", "uname", "date", "echo",
+        "wc", "stat", "file", "sw_vers", "system_profiler", "ps", "df", "du",
+        "uptime", "basename", "dirname", "arch", "hostname", "id", "readlink",
+        "realpath", "printf", "vm_stat", "ioreg", "netstat", "cd", "pushd",
+        "popd", "type", "man", "mdls", "lsof"
+    ]
+
+    /// 明确会读取敏感内容或凭证的命令（即使只读也必须用户确认）。
+    private static let sensitiveReadCommands: Set<String> = ["env", "printenv", "set", "export"]
+
+    /// 明确产生网络外发的命令词。
+    private static let outboundCommands: Set<String> = [
+        "curl", "wget", "ssh", "scp", "rsync", "nc", "ncat", "ftp", "telnet"
+    ]
+
+    /// 明确产生宿主副作用的命令词。
+    private static let mutatingCommands: Set<String> = [
+        "cp", "mv", "tee", "mkdir", "rmdir", "touch", "install",
+        "chmod", "chown", "ln", "source", "exec"
+    ]
+
+    private static let packageManagers: Set<String> = [
+        "npm", "pnpm", "yarn", "bun", "cargo", "brew", "pip", "pip3", "gem", "go"
+    ]
+    private static let packageMutatingSubcommands: Set<String> = [
+        "install", "add", "remove", "uninstall", "update", "upgrade", "get", "publish"
+    ]
+
+    /// 单元是否可确定性自动放行（纯只读、无敏感目标、无外发）。
+    static func isDeterministicSafeReadOnly(_ unit: ShellCommandUnit) -> Bool {
+        guard isUnitReadOnly(unit) else { return false }
+        let analysis = unit.forwardingAnalysis
+        let word = analysis.word
+        guard !word.isEmpty else { return false }
+        if sensitiveReadCommands.contains(word) { return false }
+
+        let remaining = analysis.remainingTokens
+        let flags = remaining.filter(\.isFlag).map(\.text)
+        let args = remaining.filter { !$0.isFlag }.map(\.text)
+        for arg in args where isSensitiveSystemPath(arg) { return false }
+
+        if autoSafeReadOnlyCommands.contains(word) { return true }
+        // isUnitReadOnly 已保证 git 为安全只读子命令且非删除/配置写入。
+        if word == "git" { return true }
+        // 只读形态的系统配置查询（sysctl 读 / pmset -g / defaults read）。
+        if ["sysctl", "pmset", "defaults"].contains(word) { return true }
+        if versionCheckCommands.contains(word) {
+            if flags.contains("-v") || flags.contains("--version") || args.contains("version") { return true }
+            if scriptRunners.contains(word),
+               args.contains(where: { ["list", "ls", "outdated", "view"].contains($0) }) { return true }
+            if word == "go", args.contains(where: { ["version", "doc", "env"].contains($0) }) { return true }
+        }
+        return false
+    }
+
+    /// 单元是否明确需要用户确认（已知副作用、外发、敏感读取）。
+    static func requiresUserConfirmation(_ unit: ShellCommandUnit) -> Bool {
+        if unit.hasFileWritingRedirection { return true }
+        let analysis = unit.forwardingAnalysis
+        let word = analysis.word
+        guard !word.isEmpty else { return false }
+        if sensitiveReadCommands.contains(word) { return true }
+        if outboundCommands.contains(word) { return true }
+        if mutatingCommands.contains(word) { return true }
+
+        let args = analysis.remainingTokens.filter { !$0.isFlag }.map(\.text)
+        for arg in args where isSensitiveSystemPath(arg) { return true }
+
+        // 非只读 git 子命令（commit/push/checkout/branch 创建等）→ 用户确认。
+        if word == "git" { return !isUnitReadOnly(unit) }
+        if packageManagers.contains(word), let sub = args.first,
+           packageMutatingSubcommands.contains(sub) { return true }
+        if word == "defaults", args.contains(where: { $0 == "write" || $0 == "delete" }) { return true }
+        if word == "sysctl" || word == "pmset" { return !isUnitReadOnly(unit) }
         return false
     }
 

@@ -38,11 +38,31 @@ final class AIToolExecutor {
         guard let tool = registry.tool(named: call.name) else {
             return makeFailure(call, message: "工具不存在：\(call.name)")
         }
-        // 单 Agent 模式隔离：不应被调用的多智能体协同内部调度工具直接拦截
-        if SettingsStore.currentExecutionMode == .single {
+        let executionMode = SettingsStore.currentExecutionMode
+        let sourceSessionID = ToolExecutionContext.currentSessionId
+
+        // schema 下发只影响模型可见性，不能充当安全边界；执行入口必须再次按真实来源会话复验角色白名单。
+        if executionMode == .single {
             let multiAgentInternalTools: Set<String> = ["launch_subagents", "send_message"]
             if multiAgentInternalTools.contains(call.name) {
                 return makeFailure(call, message: "单 Agent 模式下未启用多智能体协同调度工具：\(call.name)")
+            }
+        } else {
+            let allowed = await MainActor.run { () -> Bool in
+                guard let sourceSessionID,
+                      let session = ChatSessionStore.shared.session(id: sourceSessionID) else {
+                    return false
+                }
+                let agent: AIAgent?
+                if let agentID = session.agentId {
+                    agent = AIAgentStore.shared.agent(for: agentID)
+                } else {
+                    agent = AIAgentStore.shared.activeAgent
+                }
+                return registry.isToolAllowed(call.name, for: agent, mode: executionMode)
+            }
+            guard allowed else {
+                return makeFailure(call, message: "当前智能体未获授权使用工具：\(call.name)")
             }
         }
         // 启用校验：存在但被禁用同样失败
@@ -58,21 +78,21 @@ final class AIToolExecutor {
             return makeFailure(call, message: "参数解析失败：\(error.localizedDescription)")
         }
 
-        // 3) 动态风险评估与受控审批
+        // 3) 动态风险评估与分级授权（静默 / 会话授权 / 逐次 / 硬门禁）
         let risk = ToolRiskClassifier.shared.evaluateRisk(tool: tool, arguments: arguments)
         if !risk.isAutoApproved {
-            let confirmed = await confirmDangerousExecution(
+            let decision = await authorizeExecution(
                 tool: tool,
-                arguments: arguments,
                 argumentsJSON: call.argumentsJSON,
-                risk: risk
+                risk: risk,
+                sourceSessionID: sourceSessionID
             )
-            guard confirmed else {
+            if case .denied(let message) = decision {
                 return ToolExecutionResult(
                     callID: call.id,
                     name: call.name,
                     argumentsJSON: call.argumentsJSON,
-                    resultJSON: Self.encodeJSON(["ok": false, "error": "用户已拒绝执行该工具"]),
+                    resultJSON: Self.encodeJSON(["ok": false, "error": message]),
                     status: .denied
                 )
             }
@@ -151,65 +171,60 @@ final class AIToolExecutor {
         return dict
     }
 
-    // MARK: - 危险确认与动态放行
+    // MARK: - 分级授权裁决
 
-    /// 经输入坞抽屉请求危险工具确认（原 NSAlert 逻辑已整体移除）。
-    /// 流程：会话记忆或规则命中 → 直接放行；否则发布请求并挂起等待 UI 响应。
-    /// 返回 true = 允许执行，false = 拒绝。
+    /// 授权裁决：proceed = 允许本次执行；denied = 拒绝（附用户可读原因）。
+    private enum AuthorizationDecision {
+        case proceed
+        case denied(message: String)
+    }
+
+    /// 分级授权：
+    /// - sessionGrantable：先查会话授权记忆（granted → 静默放行；denied → 静默拒绝，不反复询问）；
+    ///   undecided → 抽屉问一次，「本会话允许」/ ⌘⏎ 记录授权，拒绝记录拒绝；
+    /// - requiresConfirmation / destructive：逐次抽屉，无记忆（Shell 无通配、高危硬门禁）。
+    /// 模型不能批准自己的操作：裁决只来自宿主确定性代码与用户确认。
     @MainActor
-    private func confirmDangerousExecution(
+    private func authorizeExecution(
         tool: AITool,
-        arguments: [String: Any],
         argumentsJSON: String,
-        risk: ToolRiskLevel
-    ) async -> Bool {
-        let center = ChatInteractionCenter.shared
+        risk: ToolRiskLevel,
+        sourceSessionID: UUID?
+    ) async -> AuthorizationDecision {
+        let grantStore = ToolPermissionGrantStore.shared
+        let sessionID = sourceSessionID ?? ChatSessionStore.shared.currentSessionId
 
-        // 1) 会话记忆或规则命中：直接放行，不再打扰用户
-        if center.isSessionAllowed(tool: tool, arguments: arguments, argumentsJSON: argumentsJSON) {
-            return true
-        }
-
-        // 2) 旁路智能安全守卫（AIToolShadowGuard）：
-        //    绝对破坏性操作强制一票否决；其余非破坏性的灰色命令进入后台大模型快速审查
-        if !risk.isDestructive {
-            if await AIToolShadowGuard.shared.auditForAutoApproval(tool: tool, arguments: arguments) {
-                // 审核通过：记录本会话免审记忆，直接放行
-                center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
-                return true
+        if let scope = risk.grantScope {
+            switch grantStore.decision(for: scope, sessionID: sessionID) {
+            case .granted:
+                return .proceed
+            case .denied:
+                return .denied(message: "用户已在本会话拒绝\(scope.displayTitle)，请改用其他方式完成任务，或提示用户在顶栏授权列表重新开启")
+            case .undecided:
+                break
             }
         }
 
-        // 3) 提取建议的作用域
-        let suggestedScope: PermissionScopeSuggestion?
-        if case .scopedMutation(let scope) = risk {
-            suggestedScope = scope
-        } else {
-            suggestedScope = nil
-        }
-
-        // 4) 发布抽屉请求并挂起
-        let outcome = await center.requestToolConfirmation(
+        let outcome = await ChatInteractionCenter.shared.requestToolConfirmation(
             toolName: tool.name,
             argumentsJSON: argumentsJSON,
             riskLevel: risk,
-            suggestedScope: suggestedScope
+            sourceSessionID: sourceSessionID,
+            suggestedScope: risk.grantScope
         )
         switch outcome {
         case .denied:
-            return false
-        case .executeOnce:
-            return true
-        case .alwaysAllowThisSession:
-            center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
-            if let suggestedScope {
-                ToolPermissionPolicyEngine.shared.recordScopeSuggestion(suggestedScope)
+            if let scope = risk.grantScope {
+                grantStore.recordDenial(scope: scope, sessionID: sessionID)
             }
-            return true
-        case .allowSuggestedScope(let scope):
-            ToolPermissionPolicyEngine.shared.recordScopeSuggestion(scope)
-            center.rememberSessionAllowed(toolName: tool.name, argumentsJSON: argumentsJSON)
-            return true
+            return .denied(message: "用户已拒绝执行该工具")
+        case .executeOnce:
+            return .proceed
+        case .grantSession:
+            if let scope = risk.grantScope {
+                grantStore.recordGrant(scope: scope, sessionID: sessionID)
+            }
+            return .proceed
         }
     }
 

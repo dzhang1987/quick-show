@@ -2,42 +2,39 @@ import Foundation
 
 // MARK: - 工具风险模型与能力作用域
 
-/// 建议授权的作用域类型（供 UI 呈现智能快捷记忆）
-enum PermissionScopeSuggestion: Equatable, Hashable, Sendable {
-    /// 建议放行特定命令前缀（如 "git", "pnpm", "swift", "cargo"）
-    case shellPrefix(prefix: String)
-    /// 建议放行特定工作区目录（如当前工程根目录）
-    case directoryPath(path: String)
-    /// 建议放行策展目录内的常见构建/测试/检查命令（swift build、pnpm test 等）
-    case devCommands
-    /// 常规工具级放行
-    case toolName(name: String)
+/// 会话授权作用域：用户对「有界能力」授予本会话放行的粒度。
+/// 授权只作用于有界表面（固定代码路径 / 目录边界 + 可撤销）；原始 Shell 永不进入本模型。
+enum PermissionGrantScope: Equatable, Hashable, Sendable {
+    /// 能力级：工具代码路径固定、影响可枚举（剪贴板 / 环境变量 / 位置 / 跨 Agent 发送等）
+    case capability(toolName: String)
+    /// 目录级：write_file 以目标目录为边界，每次写入有快照撤销收据
+    case directory(path: String)
 
-    /// 用户界面展示文案（如「本会话允许 "git *"」）
+    /// 抽屉与授权列表的人类可读描述
     var displayTitle: String {
         switch self {
-        case .shellPrefix(let prefix):
-            return String(localized: "允许 \"\(prefix) *\" 本会话放行")
-        case .directoryPath(let path):
+        case .capability(let toolName):
+            let name = AIToolRegistry.shared.tool(named: toolName)?.displayName ?? toolName
+            return String(localized: "使用「\(name)」")
+        case .directory(let path):
             let folderName = URL(fileURLWithPath: path).lastPathComponent
-            return String(localized: "允许目录 \"\(folderName)\" 本会话写入")
-        case .devCommands:
-            return String(localized: "本会话信任常见构建/测试命令")
-        case .toolName(let name):
-            return String(localized: "本会话总是允许 \"\(name)\"")
+            return String(localized: "写入目录「\(folderName)」")
         }
     }
 }
 
-/// 工具调用风险等级
+/// 工具调用风险等级（四档：授权粒度匹配影响有界性）
 enum ToolRiskLevel: Equatable, Sendable {
     /// 纯感知 / 只读操作：无副作用，100% 零审批自动放行
     case readOnly
 
-    /// 受控变更操作：在特定白名单目录或特定命令空间内的写入/执行，可被规则记忆放行
-    case scopedMutation(suggestedScope: PermissionScopeSuggestion)
+    /// 有界敏感能力：首次询问一次会话授权；授权与拒绝都记忆，可见可撤销。
+    case sessionGrantable(scope: PermissionGrantScope)
 
-    /// 破坏性 / 逃逸高危操作：系统级破坏、关键配置篡改、越界提权，强制硬门禁审批，不可被通配规则静默绕过
+    /// 无界执行（原始 Shell）：静态规则无法证明影响，必须逐次确认，无会话通配。
+    case requiresConfirmation
+
+    /// 破坏性 / 逃逸高危操作：系统级破坏、关键配置篡改、越界提权，强制硬门禁审批
     case destructive(reason: String)
 
     /// 是否可以直接免审执行
@@ -51,20 +48,12 @@ enum ToolRiskLevel: Equatable, Sendable {
         if case .destructive = self { return true }
         return false
     }
-}
 
-// MARK: - 权限授权规则
-
-/// 权限规则类型（会话级）
-enum PermissionRule: Hashable, Sendable {
-    /// 本会话允许特定工具全量执行
-    case tool(name: String)
-    /// 本会话允许特定 Shell 命令前缀（如 "git", "pnpm"；匹配经词法解析后的每个命令单元执行词）
-    case shellPrefix(prefix: String)
-    /// 本会话允许特定根目录下的写入操作
-    case directory(path: String)
-    /// 本会话信任策展目录内的常见构建/测试/检查命令
-    case devCommands
+    /// 会话授权作用域（仅 sessionGrantable 档非 nil）
+    var grantScope: PermissionGrantScope? {
+        if case .sessionGrantable(let scope) = self { return scope }
+        return nil
+    }
 }
 
 // MARK: - 风险评估器协议（OCP 开闭原则）
@@ -80,8 +69,8 @@ protocol ToolRiskEvaluator: Sendable {
 // MARK: - Shell 命令语义风险评估器
 
 /// 针对 run_shell 的语义风险评估策略。
-/// 基于 ShellCommandParser 的引号感知词法解析与 ShellCommandRiskAnalyzer 的结构化语义分析，
-/// 只读直通、破坏性硬门禁、受控变更作用域建议三者均以命令单元为单位判定。
+/// 基于 ShellCommandParser 的引号感知词法解析与 ShellCommandRiskAnalyzer 的结构化语义分析。
+/// 分析结果只用于高危升级和影响说明；所有非空原始 Shell 都必须由用户逐次确认。
 final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
     func canEvaluate(toolName: String) -> Bool {
         toolName == "run_shell"
@@ -94,12 +83,12 @@ final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
 
         let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            return .readOnly
+            return .requiresConfirmation
         }
 
         let units = ShellCommandParser.parseUnits(trimmed)
         guard !units.isEmpty else {
-            return .readOnly
+            return .requiresConfirmation
         }
 
         // 1. 破坏性硬门禁：任一命令单元命中，或未引用区域出现灾难字面量（$() 内嵌），整条拦截
@@ -112,21 +101,10 @@ final class ShellSemanticRiskEvaluator: ToolRiskEvaluator {
             return .destructive(reason: reason)
         }
 
-        // 2. 所有命令单元均为只读 → 免审直通
-        let unitReadonlyStates = units.map { ShellCommandRiskAnalyzer.isUnitReadOnly($0) }
-        if unitReadonlyStates.allSatisfy({ $0 }) {
-            return .readOnly
-        }
-
-        // 3. 受控变更：以首个非只读单元推导建议作用域
-        guard let mutatingUnit = zip(units, unitReadonlyStates).first(where: { !$0.1 })?.0 else {
-            return .scopedMutation(suggestedScope: .shellPrefix(prefix: "shell"))
-        }
-        if DevCommandCatalog.isTrusted(unit: mutatingUnit) {
-            return .scopedMutation(suggestedScope: .devCommands)
-        }
-        let word = mutatingUnit.forwardingAnalysis.word
-        return .scopedMutation(suggestedScope: .shellPrefix(prefix: word.isEmpty ? "shell" : word))
+        // 2. 原始 Shell 始终需要用户逐次确认。
+        // 即使表面上是 pwd/cat/git status，/bin/zsh -lc 仍可通过参数、变量展开、命令替换、
+        // 配置文件和解释器执行触达宿主环境。词法分析只用于高危升级与影响说明，不能作为授权依据。
+        return .requiresConfirmation
     }
 }
 
@@ -156,10 +134,57 @@ final class FileRiskEvaluator: ToolRiskEvaluator {
             }
         }
 
-        // 提取目录作为建议的作用域
-        let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
-        let directory = url.deletingLastPathComponent().path
-        return .scopedMutation(suggestedScope: .directoryPath(path: directory))
+        // 有界 + 可撤销：目录级会话授权（首次写入问一次，同目录后续静默 + 逐次撤销收据）
+        let directory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+            .deletingLastPathComponent().path
+        return .sessionGrantable(scope: .directory(path: directory))
+    }
+}
+
+// MARK: - Web 访问风险评估器
+
+/// 普通公开信息检索直接执行；只有明显携带凭证或访问本机/内网目标时才打断用户。
+final class WebAccessRiskEvaluator: ToolRiskEvaluator {
+    func canEvaluate(toolName: String) -> Bool {
+        toolName == "web_search" || toolName == "fetch_url"
+    }
+
+    func evaluateRisk(tool: AITool, arguments: [String: Any]) -> ToolRiskLevel {
+        if tool.name == "web_search" {
+            let query = arguments["query"] as? String ?? ""
+            return SensitiveTextRedactor.containsSensitiveValue(in: query)
+                ? .requiresConfirmation
+                : .readOnly
+        }
+
+        let rawURL = arguments["url"] as? String ?? ""
+        guard !SensitiveTextRedactor.containsSensitiveValue(in: rawURL),
+              PublicWebAccessPolicy.isPublicHTTPURL(rawURL) else {
+            return .requiresConfirmation
+        }
+        return .readOnly
+    }
+}
+
+// MARK: - 敏感能力风险评估器
+
+/// 这些工具会读取新的个人数据或改变宿主状态，但代码路径固定、影响有界：
+/// 归入会话授权档——首次询问一次，授权/拒绝均记忆，顶栏可见可撤销。
+final class SensitiveCapabilityRiskEvaluator: ToolRiskEvaluator {
+    private static let approvalRequiredTools: Set<String> = [
+        "read_clipboard", "write_clipboard", "list_running_apps", "open_app",
+        "read_file", "preview_file",
+        "get_env", "set_env", "list_env",
+        "geocode", "search_places", "plan_route", "my_location",
+        "launch_subagents", "send_message"
+    ]
+
+    func canEvaluate(toolName: String) -> Bool {
+        Self.approvalRequiredTools.contains(toolName)
+    }
+
+    func evaluateRisk(tool: AITool, arguments: [String: Any]) -> ToolRiskLevel {
+        .sessionGrantable(scope: .capability(toolName: tool.name))
     }
 }
 
@@ -172,10 +197,12 @@ final class DefaultToolRiskEvaluator: ToolRiskEvaluator {
     }
 
     func evaluateRisk(tool: AITool, arguments: [String: Any]) -> ToolRiskLevel {
-        if !tool.isDangerous {
+        switch tool.authorizationPolicy {
+        case .deterministicReadOnly:
             return .readOnly
+        case .requiresConfirmation:
+            return .requiresConfirmation
         }
-        return .scopedMutation(suggestedScope: .toolName(name: tool.name))
     }
 }
 
@@ -192,6 +219,8 @@ final class ToolRiskClassifier: @unchecked Sendable {
         self.evaluators = [
             ShellSemanticRiskEvaluator(),
             FileRiskEvaluator(),
+            WebAccessRiskEvaluator(),
+            SensitiveCapabilityRiskEvaluator(),
             DefaultToolRiskEvaluator()
         ]
     }
@@ -203,118 +232,7 @@ final class ToolRiskClassifier: @unchecked Sendable {
                 return evaluator.evaluateRisk(tool: tool, arguments: arguments)
             }
         }
-        return .readOnly
-    }
-}
-
-// MARK: - 会话权限规则引擎（ToolPermissionPolicyEngine）
-
-/// 管理会话临时放行规则并执行快速策略裁决。
-/// run_shell 的规则匹配基于词法解析后的命令单元：复合命令（含 cd/管道串联）逐单元判定，
-/// 每个非只读单元的执行词命中前缀规则、或命中 devCommands 策展目录，整条命令才放行。
-final class ToolPermissionPolicyEngine: @unchecked Sendable {
-    static let shared = ToolPermissionPolicyEngine()
-
-    private let lock = NSLock()
-    /// 当前活跃会话的放行规则集合（纯内存，随会话切换/新建清空）
-    private var sessionRules: Set<PermissionRule> = []
-
-    private init() {}
-
-    /// 检查指定工具与参数是否已被规则放行
-    func isAllowed(tool: AITool, arguments: [String: Any], risk: ToolRiskLevel) -> Bool {
-        // 1. 只读操作始终放行
-        if risk.isAutoApproved {
-            return true
-        }
-
-        // 2. 破坏性操作绝不通过通配规则跳过
-        if risk.isDestructive {
-            return false
-        }
-
-        lock.lock()
-        defer { lock.unlock() }
-
-        // 3. 检查常规工具全量规则
-        if sessionRules.contains(.tool(name: tool.name)) {
-            return true
-        }
-
-        // 4. Shell 命令：逐命令单元匹配（引号感知，复合命令不再只看首个 token）
-        if tool.name == "run_shell", let command = arguments["command"] as? String {
-            var prefixRules: Set<String> = []
-            for case .shellPrefix(let prefix) in sessionRules {
-                prefixRules.insert(prefix)
-            }
-            let trustsDevCommands = sessionRules.contains(.devCommands)
-
-            for unit in ShellCommandParser.parseUnits(command) {
-                if ShellCommandRiskAnalyzer.isUnitReadOnly(unit) { continue }
-                let word = unit.forwardingAnalysis.word
-                // 执行词为空的写语义单元（纯重定向）无法被任何规则覆盖
-                guard !word.isEmpty else { return false }
-                if prefixRules.contains(word) { continue }
-                if trustsDevCommands && DevCommandCatalog.isTrusted(unit: unit) { continue }
-                return false
-            }
-            return true
-        }
-
-        // 5. 检查目录作用域规则
-        if tool.name == "write_file", let path = arguments["path"] as? String {
-            let expanded = (path as NSString).expandingTildeInPath
-            for rule in sessionRules {
-                if case .directory(let dirPath) = rule {
-                    if expanded == dirPath || expanded.hasPrefix(dirPath + "/") {
-                        return true
-                    }
-                }
-            }
-        }
-
-        return false
-    }
-
-    /// 记录一条放行规则
-    func recordRule(_ rule: PermissionRule) {
-        lock.lock()
-        defer { lock.unlock() }
-        sessionRules.insert(rule)
-    }
-
-    /// 根据建议作用域一键记录放行规则
-    func recordScopeSuggestion(_ suggestion: PermissionScopeSuggestion) {
-        switch suggestion {
-        case .shellPrefix(let prefix):
-            recordRule(.shellPrefix(prefix: prefix))
-        case .directoryPath(let path):
-            recordRule(.directory(path: path))
-        case .devCommands:
-            recordRule(.devCommands)
-        case .toolName(let name):
-            recordRule(.tool(name: name))
-        }
-    }
-
-    /// 获取当前生效的规则列表（供 UI 展示）
-    func activeRules() -> [PermissionRule] {
-        lock.lock()
-        defer { lock.unlock() }
-        return Array(sessionRules)
-    }
-
-    /// 获取当前生效规则数量
-    var activeRulesCount: Int {
-        lock.lock()
-        defer { lock.unlock() }
-        return sessionRules.count
-    }
-
-    /// 清空会话规则
-    func resetRules() {
-        lock.lock()
-        defer { lock.unlock() }
-        sessionRules.removeAll()
+        // 防御性兜底：即使未来评估器链被重构或配置为空，也绝不静默放行未知工具。
+        return .requiresConfirmation
     }
 }

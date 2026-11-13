@@ -3,6 +3,45 @@ import Foundation
 // 说明：各工具除协议层 snake_case name 外，另提供中文 displayName 与 category，
 // 仅供设置页/卡片展示；发给模型的 name/schema 与执行链路完全不变。
 
+// MARK: - 公共 Web 地址策略
+
+/// 普通公开网页读取无需打断用户；本机、局域网和保留地址不属于“公共网页”。
+enum PublicWebAccessPolicy {
+    static func isPublicHTTPURL(_ rawValue: String) -> Bool {
+        guard let url = URL(string: rawValue),
+              let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let rawHost = url.host?.lowercased(),
+              !rawHost.isEmpty else {
+            return false
+        }
+
+        let host = rawHost.trimmingCharacters(in: CharacterSet(charactersIn: "[]."))
+        if host == "localhost"
+            || host.hasSuffix(".localhost")
+            || host.hasSuffix(".local")
+            || host.hasSuffix(".internal") {
+            return false
+        }
+
+        // 数字 IPv6 地址保守视为非公共地址；域名和明确的公共 IPv4 才静默读取。
+        if host.contains(":") { return false }
+        let octets = host.split(separator: ".").compactMap { Int($0) }
+        guard octets.count == 4 else { return true }
+        guard octets.allSatisfy({ (0...255).contains($0) }) else { return false }
+
+        let first = octets[0]
+        let second = octets[1]
+        if first == 0 || first == 10 || first == 127 || first >= 224 { return false }
+        if first == 100 && (64...127).contains(second) { return false }
+        if first == 169 && second == 254 { return false }
+        if first == 172 && (16...31).contains(second) { return false }
+        if first == 192 && second == 168 { return false }
+        if first == 198 && (18...19).contains(second) { return false }
+        return true
+    }
+}
+
 // MARK: - web_search（Tavily）
 
 /// 联网搜索：调用 Tavily Search API，返回直接答案与相关网页摘要
@@ -10,8 +49,17 @@ final class WebSearchTool: AITool {
     let name = "web_search"
     let displayName = String(localized: "网页搜索")
     let category: ToolCategory = .web
+    /// 普通公开信息检索属于任务本身，不要求用户反复批准。
+    let authorizationPolicy: ToolAuthorizationPolicy = .deterministicReadOnly
     /// 纯读联网搜索，无共享可变状态：并行安全。
     let executionPolicy: ToolExecutionPolicy = .parallelSafe
+
+    /// 参数级并行复验：携带凭证的搜索会被动态风险评估升级逐次确认，
+    /// 不得进入免审并行批（并行批契约：全程不触达审批抽屉）。
+    func isParallelExecutionSafe(arguments: [String: Any]) -> Bool {
+        let query = arguments["query"] as? String ?? ""
+        return !SensitiveTextRedactor.containsSensitiveValue(in: query)
+    }
     let description = "联网搜索互联网最新信息。输入查询语句，返回 Tavily 生成的直接答案与相关网页摘要列表（含标题、链接、正文片段）。"
 
     var parametersSchema: [String: Any] {
@@ -132,9 +180,14 @@ final class FetchURLTool: AITool {
     let name = "fetch_url"
     let displayName = String(localized: "抓取网页")
     let category: ToolCategory = .web
-    /// 纯读网页抓取，无共享可变状态：并行安全。
-    let executionPolicy: ToolExecutionPolicy = .parallelSafe
+    /// 公共网页读取无需打断；本机或内网地址由动态风险评估升级确认。
+    let authorizationPolicy: ToolAuthorizationPolicy = .deterministicReadOnly
     let description = "抓取指定网页并读取其内容，将 HTML 转换为纯文本返回。仅支持 text/html 与 text/plain。"
+
+    func isParallelExecutionSafe(arguments: [String: Any]) -> Bool {
+        guard let rawURL = arguments["url"] as? String else { return false }
+        return PublicWebAccessPolicy.isPublicHTTPURL(rawURL)
+    }
 
     var parametersSchema: [String: Any] {
         [

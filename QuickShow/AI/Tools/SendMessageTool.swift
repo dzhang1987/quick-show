@@ -7,6 +7,7 @@ final class SendMessageTool: AITool {
     let name = "send_message"
     let displayName = "智能体协作通信"
     let category: ToolCategory = .interaction
+    /// 会向其他模型发送内容，必须逐次确认。
     let description = """
     向另一个智能体（如视觉专家 observer、系统架构师 architect、全能工程师 engineer、快速探索者 explorer、或通用中枢 generalist）直接发送协作消息或提问，并获取该智能体的直接回应。支持全连接智能体间互通。
     """

@@ -1,249 +1,152 @@
-# QuickShow 智能工具权限治理体系架构设计方案
+# QuickShow AI 工具权限架构
 
-## 1. 概述与核心诉求
+## 1. 产品原则
 
-### 1.1 背景与现状痛点
-在桌面级 AI Agent（如 Antigravity、Claude Code、Cursor 等）的演进过程中，工具调用的权限管控往往陷入两个极端的**死板困境**：
-1. **模式化一刀切陷阱（All-or-Nothing Fallacy）**：
-   - 传统方案提供粗暴的全局 4 档开关（`Request Review` / `Default` / `Auto` / `Turbo`）；
-   - `Request Review`：对 `pwd`、`ls`、`git status`、`cat` 等最无害的只读感知也要频繁弹窗确认，引发**审查疲劳（Alert Fatigue）**，用户最终麻木连按回车；
-   - `Turbo`：系统彻底不设防（`Run all commands without restrictions`），一旦 Agent 误跑 `rm -rf`、覆盖未提交代码或修改系统根配置，毫无挽回机会；
-   - `Default`：用户根本不知道系统定义的“Sensitive（敏感）”边界在哪里，属于不可预测的黑盒；
-   - `Auto (Preview)`：让大模型自己判断是否执行，本质上是**让嫌疑人自审**，极易被 Prompt 注入或幻觉击穿。
-2. **机械僵化的精确哈希记忆（Exact String Matching）**：
-   - 目前 QuickShow 的 `rememberSessionAllowed` 仅按 `toolName + "|" + argumentsJSON` 完全字符串哈希记忆；
-   - 用户刚刚批准了 `git diff src/A.swift`，模型下一步跑 `git diff src/B.swift` 时又被拦截，哪怕点了一万次“总是允许”，由于参数变了一个字母就依然不断被打扰。
-3. **脱离上下文与空间边界（Lack of Scoping & Reversibility）**：
-   - 忽视了“在当前工作区写文件”与“在 `~/.zshrc` / `/System` 写文件”的巨大差异；
-   - 将所有安全全押在**事前审批**上，忽视了**事后追溯与回滚（Undo）**。
+权限系统有两个失败模式：执行了用户不会批准的操作；以及确认疲劳。后者同样是安全失败——
+当用户每任务被迫点击二十次「允许」，他不再阅读内容，确认沦为橡皮图章。
+因此目标不是「更多确认 = 更安全」，而是**决策次数最少化，且每次决策信息充分、成本足够低**。
 
-### 1.2 结合 QuickShow 定位的第一性原理
-QuickShow 的核心定位是：
-> **“专为全屏沉浸与极简工作流打造的 macOS 原生极速信息悬浮窗，零打断 · 即看即走 · 全键盘盲操 · 极致轻量。”**
+授权粒度匹配影响有界性，决策姿态匹配可逆性：
 
-在全屏沉浸的工作流中，权限体系的设计必须满足三大第一性准则：
-- **心流优先（Zero Flow-Breaking）**：只读与系统感知 100% 自动无感秒级放行，绝不打断键盘敲击节奏；
-- **精准防御（Deterministic Guardrails）**：宿主真实环境下，破坏性高危操作硬门禁守底，绝不盲目 Turbo 裸奔；
-- **有备无患（Reversibility over Bureaucracy）**：“事后能一秒撤销，事前就不必如临大敌”，引入轻量快照与撤销机制。
+- **授权粒度轴（问几次）**：看影响表面。结构化工具代码路径固定、影响可枚举 → 静默或会话级授权；
+  原始 Shell 经 `/bin/zsh -lc` 具备完整宿主能力、影响不可证明 → 逐次确认，无授权可覆盖。
+- **决策姿态轴（怎么问）**：看可逆性与最坏情况。可逆 → 常规确认/可授权；不可逆 → 刻意确认 + 硬门禁。
 
----
+危险命令检测是**升级信号，不是授权依据**：命中 `rm -rf` / `sudo` 等 → 升级硬门禁；
+未命中 ≠ 安全，仍逐次。旧版「看似只读 → 放行」的词法免审被否决：变量展开、命令替换、
+git hooks 使「看似」不可证明。
 
-## 2. 核心架构设计（SOLID & Strategy Architecture）
+## 2. 不变量
 
-```
-                    ┌────────────────────────────────────────┐
-                    │       AIToolExecutor (工具调度中枢)     │
-                    └───────────────────┬────────────────────┘
-                                        │ 1. 评估风险
-                                        ▼
-                    ┌────────────────────────────────────────┐
-                    │      ToolRiskClassifier (风险分类器)    │
-                    │   (开放策略链: Shell / File / Default)  │
-                    └───────────────────┬────────────────────┘
-                                        │ 产出: ToolRiskLevel
-                                        │ (.readOnly / .scopedMutation / .destructive)
-                                        ▼
-┌──────────────────┐ 命中规则 ┌────────────────────────────────────────┐
-│  Tier 0: 只读感知 ├─────────┤   ToolPermissionPolicyEngine (规则引擎) │
-│ (100% 免审直通)   │         │ (前缀通配 / 目录作用域 / 会话规则)      │
-└──────────────────┘         └───────────────────┬────────────────────┘
-                                                 │ 未授权 / 高危
-                                                 ▼
-┌────────────────────────────────────────┐ 未命中 ┌────────────────────────────────────────┐
-│   Tier 2: 破坏性硬门禁 (Hard Gate)     │◀───────┤   Tier 1: 受控变更 (Scoped Mutation)   │
-│   (强制弹窗拦截，不可通过前缀静默跳过)    │        │   (抽屉提供: ⏎ 单次 / ⌘⏎ 规则记忆)     │
-└────────────────────────────────────────┘        └───────────────────┬────────────────────┘
-                                                                      │ 执行成功
-                                                                      ▼
-                                                  ┌────────────────────────────────────────┐
-                                                  │   UndoSnapshotManager (撤销快照引擎)    │
-                                                  │   (写入前内存备份 -> 提供一键 Undo)    │
-                                                  └────────────────────────────────────────┘
+- 不存在模型自审后的自动执行；模型不能批准自己或另一模型发起的操作。
+- 原始 `run_shell` 无论表面上是否只读，都必须逐次确认并串行执行；不存在 Shell 前缀 / 目录 / 「开发命令」会话通配授权。
+- 破坏性操作每次确认 + 刻意点击（回车禁用），硬门禁不可被任何授权绕过。
+- 会话授权只作用于有界表面（`sessionGrantable`）：固定代码路径的能力，或目录边界 + 可撤销的写入。
+- 授权与拒绝都记忆、可见可撤销（顶栏盾牌徽标）；按发起会话隔离；纯内存，随 App 退出清空。
+- 审批界面、工具卡、通知与会话持久化不得保存或展示明文凭证。
+- 多 Agent 工具白名单必须在 schema 下发与真实执行入口双重校验；来源会话或角色缺失时默认拒绝。
+- 无 UI、并发确认、参数无效或风险不可判定时默认拒绝。
+
+## 3. 四档风险分类与执行链
+
+| 档 | 行为 | 覆盖 |
+|---|---|---|
+| `readOnly` | 静默免审 | 结构化只读探针；公开 web 检索/抓取 |
+| `sessionGrantable(scope)` | 首次问一次；授权/拒绝均记忆，可见可撤销 | 敏感能力（能力级）；write_file（目录级） |
+| `requiresConfirmation` | 逐次确认，⏎ 盲操，无记忆 | 原始 Shell；携带凭证的搜索；本机/内网抓取 |
+| `destructive(reason)` | 逐次 + 刻意点击，硬门禁 | 破坏性命令；敏感路径写入 |
+
+```text
+模型工具调用
+  → AIToolExecutor
+  → ToolRiskClassifier（确定性分类，策略链）
+      ├─ readOnly：执行
+      ├─ sessionGrantable：查会话授权记忆
+      │     ├─ granted：静默执行
+      │     ├─ denied：静默拒绝（模型改道）
+      │     └─ undecided：抽屉问一次 → executeOnce / grantSession / denied
+      ├─ requiresConfirmation：抽屉逐次 → executeOnce / denied
+      └─ destructive：抽屉硬门禁 → executeOnce / denied
+  → 工具执行
+  → 脱敏后的工具记录与可撤销收据
 ```
 
----
+`AIToolExecutor` 是唯一授权执行点。UI 只能返回 `denied` / `executeOnce` / `grantSession`
+（后者仅对携带 `suggestedScope` 的请求有效，作用域由宿主风险评估签发，模型不可指定）。
 
-## 3. 详细子系统设计
+## 4. 分类边界
 
-### 3.1 操作语义与多级风险系统（ToolRiskLevel）
+### 4.1 结构化只读（静默）
 
-彻底弃用单一布尔值 `tool.isDangerous`，引入强类型风险等级：
+只有宿主明确实现、无副作用、不读取新个人数据的结构化工具声明 `deterministicReadOnly`。
+Web 访问由 `WebAccessRiskEvaluator` 动态判定：公开 HTTP(S) 检索/抓取静默；
+查询携带凭证、或目标为本机/局域网/保留地址（SSRF 面）时升级 `requiresConfirmation`。
 
-```swift
-/// 工具调用风险等级
-enum ToolRiskLevel: Equatable {
-    /// 纯感知 / 只读操作：无副作用，100% 零审批自动放行
-    case readOnly
-    
-    /// 受控变更操作：在特定白名单目录或特定命令空间内的写入/执行，可被规则记忆放行
-    case scopedMutation(suggestedScope: PermissionScopeSuggestion)
-    
-    /// 破坏性 / 逃逸高危操作：系统级破坏、关键配置篡改、越界提权，强制硬门禁审批，不可被通配规则静默绕过
-    case destructive(reason: String)
-}
+### 4.2 有界敏感能力（会话授权）
 
-/// 建议授权的作用域类型（供 UI 呈现智能快捷记忆）
-enum PermissionScopeSuggestion: Equatable {
-    /// 建议放行命令前缀（如 "git", "pnpm", "cargo"）
-    case shellPrefix(prefix: String)
-    /// 建议放行工作区目录（如当前工程根目录）
-    case directoryPath(path: String)
-    /// 仅单次或常规工具放行
-    case toolName(name: String)
-}
+读取本地文件、剪贴板、环境变量、位置、打开应用、跨模型发送等：代码路径固定、影响可枚举，
+归入能力级会话授权。`write_file` 归入目录级会话授权：首次写入问一次，同目录后续静默，
+每次写入有快照撤销收据；新目录重新询问；敏感路径硬门禁。
+
+### 4.3 原始 Shell（逐次）
+
+解析器只用于识别破坏性升级与提取影响说明，不能签发自动权限。
+高频只读查询（git status / ls 等）的正确出口是**表面迁移**：新增固定 executable + 参数数组的
+结构化探针（可证明只读 → 静默），而不是重新开放 Shell 白名单或降低门禁。
+
+### 4.4 破坏性（硬门禁）
+
+敏感系统路径写入、灾难性命令：独立高危原因横幅，主按钮无回车键帽，普通回车只发提示音。
+
+## 5. 确认界面与键盘
+
+默认层只展示：用户问题标题、「AI 说明」（标识其不属于安全事实）、确定性影响摘要
+（本机操作、文件变化、外部域名、凭证使用、可撤销性）；Shell/JSON 折叠于「技术详情」，复制同样脱敏。
+
+按钮与键帽：
+
+- `sessionGrantable`：取消 esc ／ 本会话允许 ⌘⏎ ／ 主按钮 ⏎；底部明示「会话授权范围」。
+- `requiresConfirmation`：取消 esc ／ 主按钮 ⏎。
+- `destructive`：取消 esc ／ 主按钮（无键帽，必须点击）。
+
+键盘防误触是时序问题，不是废除键盘的理由：抽屉弹出后 0.5s 布防窗口内吞掉任何回车
+（精确消除「发送键尾随回车」误批准）；焦点在非空输入区时回车放行给输入框发送。
+
+拒绝记忆：拒绝后同作用域后续调用静默拒绝，模型收到拒绝结果自行改道，不反复打扰；
+顶栏授权列表可「恢复询问」。授权列表可逐条撤销，撤销后回到下次再问。
+
+系统通知只显示「有操作等待确认」，不包含工具名、路径或模型描述。
+
+## 6. 敏感信息处理
+
+`SensitiveTextRedactor` 在展示和持久化边界处理：
+
+- HTTP `Authorization`；
+- Token、API Key、Client Secret、密码、Cookie；
+- Shell 环境变量和敏感命令行参数；
+- URL 查询参数；
+- JWT；
+- 用户主目录绝对路径。
+
+执行器仍使用原始参数。工具卡和会话记录保存脱敏副本；当前回合发送给模型的 tool result 可使用执行结果，但不得把原始凭证落盘。
+
+流式工具参数在 JSON 尚未闭合时只保留在内存，流尾以完整脱敏参数写入会话，避免半截值绕过脱敏。
+
+## 7. 预览、应用与撤销
+
+目录级会话授权的安全网是「diff 可见 + 事后可撤销」，单项闭环：
+
+1. 模型生成目标路径和完整新内容；
+2. 首次写入经确认抽屉展示影响与技术预览（同目录后续静默）；
+3. 写入前创建快照（已有文件不可读时禁止覆盖）；
+4. 工具卡提供撤销入口（30 分钟后悔窗口，原子还原）。
+
+下一阶段将把同一任务内的多文件修改升级为聚合 `ChangeSet`：
+
+```text
+collecting → previewReady → awaitingConsent → applying → applied
+                                                ↘ failed
+                                                ↘ rolledBack
 ```
 
-### 3.2 风险评估策略（ToolRiskEvaluator - 严格遵循 OCP）
+聚合方案必须保证：预览后目标或内容发生变化时重新确认；应用失败时停止后续项并尽可能回滚；不可逆操作和外部写入仍独立确认，不混入批量应用。
 
-定义评估器协议，遵循开闭原则（OCP），新增工具或特殊命令时只需增加 Evaluator，无需在调用方堆砌 `if-else`：
+## 8. 回归门禁
 
-```swift
-protocol ToolRiskEvaluator {
-    /// 是否适用于当前工具调用
-    func canEvaluate(toolName: String) -> Bool
-    /// 计算风险等级
-    func evaluateRisk(tool: AITool, arguments: [String: Any]) -> ToolRiskLevel
-}
+独立权限测试入口：
+
+```bash
+QuickShow.app/Contents/MacOS/QuickShow --test-tool-risk
 ```
 
-#### 3.2.1 Shell 语义解析器（ShellSemanticRiskEvaluator）
-针对 `run_shell` 工具，通过对命令首词与子命令进行轻量语法分析，消除“将所有 shell 命令当成高危”的死板弊端：
+该入口使用真实进程退出码，不依赖 Release 下可能被优化的 `assert`。至少覆盖：
 
-1. **只读 Shell 启发式（降为 `.readOnly`，免审放行）**：
-   - 基础命令：`pwd`、`ls`、`which`、`echo`、`whoami`、`uname`、`date`、`cat`、`head`、`tail` 等；
-   - Git 只读子命令：`git status`、`git diff`、`git log`、`git branch`、`git show`、`git remote -v` 等；
-   - 依赖与状态只读：`pnpm list`、`npm list`、`cargo check`、`swift --version` 等。
-2. **破坏性高危 Shell 启发式（升为 `.destructive`，硬门禁拦截）**：
-   - 递归破坏：`rm -rf`、`rm -r`、`srm`；
-   - 提权与特权越界：`sudo`、`su`、`doas`；
-   - 磁盘与系统破坏：`mkfs`、`dd`、`fdisk`、`diskutil erase`；
-   - 破坏性版本回退与强推：`git reset --hard`、`git clean -fd`、`git push --force`、`git push -f`；
-   - 关键环境变量与安全篡改：修改 `/etc/`、`~/.zshrc`、`~/.bash_profile`、`launchctl` 等。
-3. **其余命令**：归为 `.scopedMutation`，提取首词（如 `git commit` 提取 `git`，`pnpm run build` 提取 `pnpm`）作为候选前缀建议。
-
-#### 3.2.2 文件写入解析器（FileRiskEvaluator）
-- 检查目标路径：
-  - 若目标落在工程白名单目录或临时缓存内：判定为 `.scopedMutation`，建议作用域为当前工作区目录；
-  - 若目标包含敏感隐藏路径（如 `.git/config`、`~/.ssh/`、`/etc/`）：升级为 `.destructive`。
-
----
-
-### 3.3 规则引擎与智能记忆（ToolPermissionPolicyEngine）
-
-彻底重构 `sessionAllowedKeys: Set<String>` 的单一哈希机制，支持结构化规则：
-
-```swift
-/// 权限授权规则
-enum PermissionRule: Hashable {
-    /// 本会话允许特定工具全量执行
-    case tool(name: String)
-    /// 本会话允许特定 Shell 命令前缀（如 "git *", "pnpm *"）
-    case shellPrefix(prefix: String)
-    /// 本会话允许特定根目录下的写入操作（如 "/Users/admin/Projects/quick-time"）
-    case directory(path: String)
-}
-
-final class ToolPermissionPolicyEngine {
-    static let shared = ToolPermissionPolicyEngine()
-    
-    /// 当前活跃会话的放行规则集合（纯内存，随会话切换/新建清空）
-    private var sessionRules: Set<PermissionRule> = []
-    
-    /// 评估是否允许执行
-    func evaluate(tool: AITool, arguments: [String: Any], risk: ToolRiskLevel) -> PolicyDecision {
-        switch risk {
-        case .readOnly:
-            // 只读一律免审直通
-            return .allow
-            
-        case .destructive(let reason):
-            // 破坏性操作强制硬门禁，即使匹配了前缀规则也不放行，必须人工显式确实验证
-            return .requireExplicitApproval(risk: risk, allowRuleScope: nil)
-            
-        case .scopedMutation(let suggestion):
-            // 检查是否已被规则放行
-            if isAllowedByRules(tool: tool, arguments: arguments) {
-                return .allow
-            }
-            // 未被规则覆盖：请求抽屉审批，并附带建议的记忆规则
-            return .requireExplicitApproval(risk: risk, allowRuleScope: suggestion)
-        }
-    }
-    
-    /// 记录放行规则
-    func recordRule(_ rule: PermissionRule) {
-        sessionRules.insert(rule)
-    }
-    
-    /// 重置规则（切会话或清空会话时）
-    func resetRules() {
-        sessionRules.removeAll()
-    }
-}
-```
-
----
-
-### 3.4 交互层与全键盘盲操协议（Keyboard-Centric UX）
-
-为贯彻 QuickShow “手不离主键盘区”的灵魂，输入坞抽屉的操作与快捷键进行深度优化：
-
-#### 抽屉三态按钮与快捷键绑定：
-| 按钮 / 动作 | 快捷键 | 行为语义与说明 |
-| :--- | :--- | :--- |
-| **拒绝 (Reject)** | **`ESC`** | 拒绝本次工具调用，返回 `denied` 给模型，安全收起抽屉。 |
-| **允许此前缀/目录并记忆** | **`⌘⏎` (Cmd+Enter)** | 智能提取前缀（例如 `允许 "pnpm *" 本会话放行` 或 `允许项目目录写入`），写入当前会话规则并立即执行。 |
-| **仅执行单次 (Run Once)** | **`⏎` (Enter)** | 仅放行当前这次调用，不记录前缀规则。 |
-
-#### 输入坞边缘极简安全胶囊（Security Badge）：
-- 在 `AIChatView` 输入栏左下/右下侧以极简微徽章展示：`🛡️ 2 项会话规则 (git*, pnpm*)`；
-- 点击微徽章可呼出极简气泡，一键查看已放行规则或点击清空还原。
-
----
-
-### 3.5 事后安全网：轻量快照与撤销引擎（UndoSnapshotManager）
-
-> **“有后悔药的放行，胜过一百次繁琐的事前弹窗。”**
-
-借鉴 Cursor 与 Windsurf 的 Checkpoint 思想，为文件写入工具配备无感备份：
-1. **执行前暂存（In-Memory Shadow Cache）**：
-   - 当 `write_file` 准备覆盖写入白名单文件时，`UndoSnapshotManager` 先读取目标文件的原始内容并保留在内存字典中（若文件原先不存在，则记录标记为新建）；
-   - 生成唯一的 `undoToken: UUID`，存入工具执行结果元数据。
-2. **消息流内渲染撤销微标**：
-   - 工具执行成功后，在对话界面的工具卡片右侧轻量浮现：`[已修改 · 撤销 / Undo]`；
-   - 点击该微标或按快捷键，立即用暂存内容原子覆写回目标文件，并在消息中更新状态为 `已还原`；
-   - 随会话关闭或超时（例如 30 分钟无操作）自动释放快照，保持内存极致轻量。
-
----
-
-## 4. 实施与重构路线（Implementation Roadmap）
-
-按照 SOLID 原则分阶段渐进式落地，每一步均做到可独立编译与回退：
-
-- **阶段 1：核心风险评估模型与 Shell 启发式（Foundation）**
-  - 新增 `ToolRiskLevel` 及 `ToolRiskEvaluator` 协议；
-  - 实现 `ShellSemanticRiskEvaluator`，拆分出只读安全命令与破坏性黑名单；
-  - 单测覆盖：覆盖 `git status`、`rm -rf`、`pnpm test` 等典型命令的定级。
-- **阶段 2：策略引擎与前缀/作用域记忆（Policy Engine）**
-  - 实现 `ToolPermissionPolicyEngine`，支持 `PermissionRule.shellPrefix` 与 `.directory`；
-  - 改造 `ChatInteractionCenter`，将其内部的精确哈希改为委托规则引擎。
-- **阶段 3：抽屉 UI 与键盘快捷键联动（UX Refinement）**
-  - 改造 `ToolConfirmationDrawerContent`，动态显示建议记忆的前缀；
-  - 支持 `⏎`（单次）、`⌘⏎`（记忆前缀）、`ESC`（拒绝）全键盘盲操；
-  - 接入输入坞安全状态微标（Security Badge）。
-- **阶段 4：写入快照与一键撤销（Undo Safety Net）**
-  - 实现 `UndoSnapshotManager`；
-  - `WriteFileTool` 接入前置快照捕获与结果 Token 回传；
-  - `AIChatMessageList` 原生卡片接入撤销交互。
-
----
-
-## 5. 预期成效评估
-
-| 评估维度 | 优化前现状 | 优化后体系 |
-| :--- | :--- | :--- |
-| **日常只读查询打扰率** | 100% 弹窗打断（`ls`, `git diff`, `pwd`） | **0% 打扰**，秒级静默无感执行 |
-| **多命令交互心流** | 每次参数微变都要重复审批 | **一次放行整个命令族**（`git *`, `pnpm *`） |
-| **系统安全性** | Turbo 模式下直接裸奔无防线 | **破坏性命令硬防线守护**，绝无意外删库可能 |
-| **操作容错率** | 写错即覆盖，不可逆 | **支持一键秒级 Undo 还原** |
-| **键盘沉浸感** | 频繁被迫用鼠标点击抽屉按钮 | **全键盘主键区盲操**（`⏎` / `⌘⏎` / `ESC`） |
+- 所有原始 Shell 都不自动执行；
+- 已知破坏性操作升级为高危；
+- 公开 web 检索静默；凭证查询与本机/内网抓取升级逐次；
+- 敏感能力归入会话授权档，不静默执行；
+- 会话授权记忆：授权/拒绝/撤销/会话隔离；
+- 不存在覆盖 Shell 的通配授权类型和执行路径；
+- 凭证在 JSON、Shell、Header 与 URL 中被脱敏；
+- 外部域名与可撤销性使用普通语言展示；
+- 文件快照可以真实还原。

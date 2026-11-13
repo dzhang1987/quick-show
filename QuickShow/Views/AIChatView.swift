@@ -7,7 +7,7 @@ import SwiftUI
 ///
 /// Wave 3 结构（2026-10 视觉质感专项）：
 /// - 左侧会话窄栏（⌘B 显隐，展开时窗口整体加宽，见 AIWindowManager.setSidebarVisible）
-/// - 消息列表铺满窗口主体：AI 回复以回合卡承载（纸面下沉，窗底纯玻璃与主浮窗同源）；落定助手消息下方常驻弱显示操作行（复制/重新生成）
+/// - 消息列表铺满窗口主体：AI 回复裸排印在连续玻璃上（无包裹卡，整窗半档轻纱托底；会话内富卡片保留各自卡壳）；落定助手消息下方常驻弱显示操作行（复制/重新生成）
 /// - 输入坞浮岛化：overlay 悬浮于消息列表之上；真穿透——滚动内容自然穿入玻璃坞
 ///   下方，坞体实时 blur 采样透出模糊内容（2026-10 再设计，恢复 blur-through）
 /// - 整窗方向性 rim light（顶亮侧弱底微）+ 输入坞双层阴影 + 激活态 accent rim（安静态零描边）
@@ -200,28 +200,32 @@ struct AIChatView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .clipped()
-        // 内容层底（2026-11 质感对齐·纸面下沉）：窗底回主浮窗同款纯玻璃
+        // 内容层底（2026-11 质感对齐·裸排玻璃）：窗底回主浮窗同款纯玻璃
         // （liquidPanelBackground：26+ 透明透真玻璃 / <26 ultraThinMaterial，两窗同一判断源），
-        // 对比度预算下沉到助手回合卡与侧栏自有底（见 AIChatMessageList / AIChatSidebarView）。
-        // 顶栏保留同色相轻纱：plateau 段承载大字/图标（3:1 档），带底软着陆到透明，
-        // 与下方玻璃无硬接缝、无独立「帽子」横带。子代理导航条（9~11pt 小字）出现时
-        // 顶带回纸面：小字按 4.5:1 需要纸面托底（渐变端点动画过渡）。
+        // AI 回复裸排印在连续玻璃上（DSH 会话框同构：无浮层包裹卡）；整窗一层半档轻纱
+        // （chatGlassTint，50% 背景映射）作小字可读性托底，玻璃光学特征与背景色流保留。
+        // 会话内富卡片（图片附件/文件预览/工具/表格/代码块）保留各自卡壳，不受影响。
+        // 顶栏同色相轻纱 plateau 承载大字/图标，带底软着陆透明无硬接缝；
+        // 子代理导航条（9~11pt 小字）出现时顶带回纸面托底 4.5:1（渐变端点动画过渡）。
         .background {
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        stops: [
-                            .init(color: isSubagentSession ? Theme.Colors.chatReadingSurface : Theme.Colors.chatReadingVeilTop, location: 0),
-                            .init(color: isSubagentSession ? Theme.Colors.chatReadingSurface : Theme.Colors.chatReadingVeilTop, location: Theme.Colors.chatVeilPlateau),
-                            .init(color: .clear, location: 1)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
+            ZStack(alignment: .top) {
+                Rectangle()
+                    .fill(Theme.Colors.chatGlassTint)
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            stops: [
+                                .init(color: isSubagentSession ? Theme.Colors.chatReadingSurface : Theme.Colors.chatReadingVeilTop, location: 0),
+                                .init(color: isSubagentSession ? Theme.Colors.chatReadingSurface : Theme.Colors.chatReadingVeilTop, location: Theme.Colors.chatVeilPlateau),
+                                .init(color: .clear, location: 1)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
                     )
-                )
-                .frame(height: Theme.Layout.chatTopBarHeight)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .animation(.easeInOut(duration: Theme.Motion.contentFade), value: isSubagentSession)
+                    .frame(height: Theme.Layout.chatTopBarHeight)
+            }
+            .animation(.easeInOut(duration: Theme.Motion.contentFade), value: isSubagentSession)
         }
         .liquidPanelBackground()
         // 窗口边缘 rim light（方向性内描边：顶 ~70% 白 → 侧 ~15% → 底 ~5%，另底缘 1pt 黑 8% 重边）
@@ -592,8 +596,8 @@ struct AIChatView: View {
                 .transition(.opacity.combined(with: .scale(scale: Theme.Motion.toastScale)))
             }
         }
-        // 全窗材质分层（质感对齐·纸面下沉）：窗底纯玻璃与主浮窗同源；阅读纸面下沉为
-        // 助手回合卡（内容层），输入坞 glass 是浮层语言；留白/空态透出玻璃，全窗同一材质家族。
+        // 全窗材质分层（质感对齐·裸排玻璃）：窗底纯玻璃与主浮窗同源 + 整窗半档轻纱托底；
+        // 回复裸排、富卡片各自卡壳，输入坞 glass 是浮层语言；全窗同一材质家族。
     }
 
     // MARK: - 顶部拖动条（移动窗口 + 图钉）
@@ -644,8 +648,11 @@ struct AIChatView: View {
                 }
             }
             .overlay(alignment: .trailing) {
-                pinButton
-                    .chatReadingColumn(alignment: .trailing)
+                HStack(spacing: Theme.Spacing.sm) {
+                    PermissionGrantBadge()
+                    pinButton
+                }
+                .chatReadingColumn(alignment: .trailing)
             }
             .frame(height: Theme.Layout.chatTopBarHeight)
             .frame(maxWidth: .infinity)
@@ -781,7 +788,7 @@ struct AIChatView: View {
         // 整体掉到窗口中部（冷启动全空常驻集合时偶现）。此处令列表容器永远占据
         // 顶栏以下全部剩余高度，顶栏恒定钉在顶部；已配置空会话保持中央留白。
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        // 光与纸·极光退守空态（质感对齐·纸面下沉）：有消息时回合卡承载阅读、
+        // 光与纸·极光退守空态（质感对齐·裸排玻璃）：有消息时裸排文字承载阅读、
         // 窗底回玻璃；仅空态在纯玻璃上渲染氛围光团，延续品牌时刻（零更新源零成本）。
         .background {
             if activeSessionMessagesEmpty {
